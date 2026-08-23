@@ -70,7 +70,7 @@ export interface MarlowLobsterProps {
   /** Explicit preset id, used by the picker to avoid a colour round-trip. */
   preset?: string;
   status?: LobsterStatus;
-  /** Office workstations use the compact, tail-tucked seated sprite. */
+  /** Office workstations use the composite seated-lobster-and-chair sprite. */
   pose?: "standing" | "seated";
   title?: string;
   className?: string;

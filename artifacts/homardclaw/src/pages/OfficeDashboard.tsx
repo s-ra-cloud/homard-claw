@@ -19,10 +19,10 @@ const officeArt = `${import.meta.env.BASE_URL}images/four-desk-office.png`;
 // Chair centres in the generated office scene. Agent sprites are layered on top
 // so every employee is rendered by the same canonical component as the roster.
 const DESK_SEATS = [
-  { left: 39.3, top: 37.5, label: "window desk" },
-  { left: 64.3, top: 37.4, label: "library desk" },
-  { left: 24.1, top: 67.0, label: "garden desk" },
-  { left: 76.3, top: 69.4, label: "filing desk" },
+  { left: 29.0, top: 43.0, label: "window desk" },
+  { left: 71.0, top: 43.0, label: "library desk" },
+  { left: 29.0, top: 72.0, label: "garden desk" },
+  { left: 71.0, top: 72.0, label: "filing desk" },
 ];
 
 export default function OfficeDashboard() {
@@ -114,7 +114,7 @@ export default function OfficeDashboard() {
                       title={`${agent.name} at the ${seat.label}`}
                     >
                       <MarlowLobster
-                        size={64}
+                        size={96}
                         pose="seated"
                         status={stopped ? "paused" : agent.status}
                         shellColor={agent.avatar.shellColor}

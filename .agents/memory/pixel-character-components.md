@@ -44,12 +44,14 @@ the raw string into the union type with `as`.
 
 # A chair needs a seated pose, not a translated standing sprite
 
-When an agent occupies furniture, use a dedicated pose with the tail curled onto the
-seat and the legs tucked under the torso. Positioning the normal full-body sprite over
-a chair reads as standing in front of it, even when its centre aligns perfectly.
+When an agent occupies furniture, use one composite sprite containing both the agent
+and the furniture, then leave that furniture out of the background artwork. The seated
+pose still needs its tail curled onto the cushion and its legs tucked under the torso.
 
-**Why:** The owner rejected the four-desk office placement after seeing the long tail
-and legs extend to the floor in front of the chair.
+**Why:** The owner rejected both a standing sprite over a chair and a separate seated
+sprite over a baked-in chair. Without foreground armrests and a shared silhouette, both
+read as an agent standing or floating in front of furniture.
 
-**How to apply:** Keep the same character and shell-pigment pipeline, but bake a
-separate seated sprite set and select it through the character component's pose API.
+**How to apply:** Keep the same character and shell-pigment pipeline, but bake the
+chair and seated lobster together as the alternate pose. Generate the room with clear
+chair-free workstation spaces, then place each composite through the pose API.

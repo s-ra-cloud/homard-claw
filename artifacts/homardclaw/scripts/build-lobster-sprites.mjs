@@ -6,6 +6,12 @@
  * onto a crisp pixel grid, and bake one recoloured sprite per stock shell.
  *
  * Run: node artifacts/homardclaw/scripts/build-lobster-sprites.mjs
+ *
+ * Alternate seated-chair pose:
+ * LOBSTER_SOURCE=../../../attached_assets/generated_images/lobster-in-office-chair-naked.png \
+ * LOBSTER_OUT_DIR=../public/images/lobsters-sitting \
+ * LOBSTER_WRITE_MANIFEST=0 LOBSTER_MATCH_MANIFEST=1 node \
+ * artifacts/homardclaw/scripts/build-lobster-sprites.mjs
  */
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { inflateSync, deflateSync } from "node:zlib";
