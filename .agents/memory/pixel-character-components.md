@@ -1,39 +1,43 @@
 ---
-name: Pixel character components
-description: How to author and ship hand-plotted pixel-art character components in this project without them looking blobby or tanking render performance.
+name: Pixel character sprites
+description: How to produce character sprites that match existing scene art in this project, and why hand-coded pixel components were abandoned.
 ---
 
-# Authoring pixel characters in code
+# Don't hand-plot a character that already exists in scene art
 
-Plot the silhouette as per-row column spans, then derive the outline automatically
-(any empty cell 4-adjacent to a filled cell becomes ink) and shade by span position
-(first columns light, last columns dark). Never hand-paint every pixel.
+When a character already appears in generated scene artwork, do not reimplement it as a
+hand-plotted SVG/canvas pixel component. Generate a standalone sprite of that same
+character instead and bake the variants you need.
 
-**Why:** the first attempt at HomardClaw's lobster used a 32x32 hand-plotted grid and
-read as a symmetrical blob — limbs merged into the body and the pincers were
-unreadable. Moving to 40x40 with span-defined anatomy and an auto-outline fixed the
-silhouette in one pass.
+**Why:** two rounds of hand-plotted pixel lobsters (32x32, then 40x40 with auto-outline
+and shading) were both rejected — coded pixel art lands somewhere between "flat" and
+"generic mascot" and never matches the painterly shading of generated scene art sitting
+next to it on the same screen. The generated sprite was accepted immediately.
 
-**How to apply:** appendages need a deliberate 1-2px empty gap where they should read
-as separate (a claw's pincer split, a leg's joint) — the auto-outline fills that gap
-with ink and does the visual separation for you. Verify at the real display size, not
-just large.
+**How to apply:** image generation here takes no reference image, so describe the
+character exhaustively from the scene art — palette, shading direction, outline colour,
+body proportions, and each appendage — and ask for a plain flat backdrop with no
+scenery. Generate a couple of poses at once and pick; a symmetrical front-facing pose
+reads better as a small avatar than the scene's three-quarter pose.
 
-# Ship it flattened
+# Bake sprite variants at build time
 
-Composite all layers (including alpha overlays) into a flat colour grid, then emit one
-rect per horizontal run and cache by variant key.
+Recolour variants belong in a build script that writes both the sprite PNGs and a JSON
+manifest the app imports, never in hand-copied colour constants.
 
-**Why:** one rect per pixel is ~1500 DOM nodes per character; a picker showing ten
-variants plus a roster of agents produces tens of thousands. Flattening drops it to
-~150 nodes per character with pixel-identical output.
+**Why:** the swatch colours shown in the UI must be the sprites' real average colour, or
+the picker lies about what the user is choosing. Copying script output into a TS array
+by hand desynchronises them the first time a variant is retuned.
 
-**How to apply:** blend `opacity` layers into the grid manually while compositing —
-once flattened there is no layering left to do at render time.
+**How to apply:** recolour by HSL hue rotation with per-variant saturation/lightness
+scaling, and skip near-neutral pixels so eye whites, pupils and glints survive. Leave
+one variant as an untouched pass-through so the house colour is byte-identical to the
+scene art. Downsample large renders onto a small grid with alpha-weighted box sampling
+plus a coverage threshold, otherwise the silhouette turns soft at avatar sizes.
 
-# Tolerate unknown data
+# Tolerate unknown persisted trait data
 
-Character traits stored as free-form strings in the database (accessory, pose) must be
-normalized at the component boundary against the known list, not cast with `as`.
-Legacy rows predate the current trait vocabulary and would otherwise render undefined
-colours.
+Character traits persisted as free-form strings (a hex shell colour, an accessory name)
+must be normalized at the component boundary — snap a hex to the nearest available
+sprite, and fall back to the house variant for unparseable or legacy values. Never cast
+the raw string into the union type with `as`.

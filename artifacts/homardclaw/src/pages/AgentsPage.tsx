@@ -89,7 +89,7 @@ export default function AgentsPage() {
         ) : !agents || agents.length === 0 ? (
           <PixelCard className="text-center p-12">
             <div className="flex justify-center mb-6 opacity-50">
-              <MarlowLobster size={112} status="idle" accessory="glasses" />
+              <MarlowLobster size={112} status="idle" preset="marlow" />
             </div>
             <h3 className="font-display text-lg uppercase mb-2">No Agents Recruited</h3>
             <p className="text-muted-foreground mb-6">The office is empty. Recruit an agent to begin processing tasks.</p>
@@ -112,7 +112,6 @@ export default function AgentsPage() {
                         size={56} 
                         status={agent.status} 
                         shellColor={agent.avatar.shellColor} 
-                        accessory={agent.avatar.accessory} 
                         title={`${agent.name}, ${agent.status}`}
                       />
                     </div>

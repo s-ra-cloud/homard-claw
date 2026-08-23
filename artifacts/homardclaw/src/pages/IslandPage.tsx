@@ -89,7 +89,6 @@ export default function IslandPage() {
                       size={64}
                       status="idle"
                       shellColor={agent.avatar.shellColor}
-                      accessory={agent.avatar.accessory}
                     />
                     <span className="island__nametag">{agent.name}</span>
                   </button>

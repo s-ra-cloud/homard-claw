@@ -1,0 +1,62 @@
+[
+  {
+    "id": "marlow",
+    "name": "Marlow",
+    "shellColor": "#b11c1e",
+    "blurb": "House crimson, straight off the office floor"
+  },
+  {
+    "id": "coral",
+    "name": "Coral",
+    "shellColor": "#ae6130",
+    "blurb": "Sunbleached reef"
+  },
+  {
+    "id": "pincher",
+    "name": "Pincher",
+    "shellColor": "#93141f",
+    "blurb": "Deep claret"
+  },
+  {
+    "id": "bisque",
+    "name": "Bisque",
+    "shellColor": "#a38948",
+    "blurb": "Butter shell"
+  },
+  {
+    "id": "shelly",
+    "name": "Shelly",
+    "shellColor": "#2d589b",
+    "blurb": "Deep current blue"
+  },
+  {
+    "id": "nori",
+    "name": "Nori",
+    "shellColor": "#348d6c",
+    "blurb": "Kelp green"
+  },
+  {
+    "id": "sable",
+    "name": "Sable",
+    "shellColor": "#6f3a8e",
+    "blurb": "Twilight urchin"
+  },
+  {
+    "id": "tidal",
+    "name": "Tidal",
+    "shellColor": "#436983",
+    "blurb": "Harbour steel"
+  },
+  {
+    "id": "saffron",
+    "name": "Saffron",
+    "shellColor": "#b79a25",
+    "blurb": "Lantern amber"
+  },
+  {
+    "id": "ember",
+    "name": "Ember",
+    "shellColor": "#844d19",
+    "blurb": "Banked coals"
+  }
+]
