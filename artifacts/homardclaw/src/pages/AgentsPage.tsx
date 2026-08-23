@@ -1,11 +1,11 @@
 import React from "react";
-import { useListAgents, usePauseAgent } from "@workspace/api-client-react";
+import { useListAgents, usePauseAgent, useRetireAgent } from "@workspace/api-client-react";
 import { Shell } from "@/components/layout/Shell";
 import { PixelCard } from "@/components/ui/pixel-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { LobsterAvatar } from "@/components/ui/lobster-avatar";
-import { Pause, Play, Plus, Server, Shield } from "lucide-react";
+import { Palmtree, Pause, Play, Plus, Server, Shield } from "lucide-react";
 import { Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -21,6 +21,26 @@ export default function AgentsPage() {
       }
     }
   });
+
+  const retireAgent = useRetireAgent({
+    mutation: {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: ["/api/agents"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/office/overview"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/island/agents"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+      }
+    }
+  });
+
+  const handleRetire = (agentId: string, name: string) => {
+    const confirmed = window.confirm(
+      `RETIRE ${name.toUpperCase()}? This is PERMANENT.\n\n${name} will be removed from active work forever and move to the Island. Any queued work will be paused. This cannot be undone.`
+    );
+    if (confirmed) {
+      retireAgent.mutate({ agentId });
+    }
+  };
 
   const handleTogglePause = (agentId: string, currentStatus: string) => {
     const isPaused = currentStatus === 'paused';
@@ -125,18 +145,29 @@ export default function AgentsPage() {
                   <div className="text-[10px] text-muted-foreground uppercase">
                     ID: {agent.id.slice(0, 8)}
                   </div>
-                  <Button 
-                    variant={agent.status === 'paused' ? 'primary' : 'outline'} 
-                    size="sm"
-                    onClick={() => handleTogglePause(agent.id, agent.status)}
-                    disabled={pauseAgent.isPending && pauseAgent.variables?.agentId === agent.id}
-                  >
-                    {agent.status === 'paused' ? (
-                      <><Play className="w-3 h-3 mr-1" /> Resume</>
-                    ) : (
-                      <><Pause className="w-3 h-3 mr-1" /> Pause</>
-                    )}
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button 
+                      variant={agent.status === 'paused' ? 'primary' : 'outline'} 
+                      size="sm"
+                      onClick={() => handleTogglePause(agent.id, agent.status)}
+                      disabled={pauseAgent.isPending && pauseAgent.variables?.agentId === agent.id}
+                    >
+                      {agent.status === 'paused' ? (
+                        <><Play className="w-3 h-3 mr-1" /> Resume</>
+                      ) : (
+                        <><Pause className="w-3 h-3 mr-1" /> Pause</>
+                      )}
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      title={`Retire ${agent.name} permanently to the Island`}
+                      onClick={() => handleRetire(agent.id, agent.name)}
+                      disabled={retireAgent.isPending && retireAgent.variables?.agentId === agent.id}
+                    >
+                      <Palmtree className="w-3 h-3 mr-1" /> Retire
+                    </Button>
+                  </div>
                 </div>
               </PixelCard>
             ))}

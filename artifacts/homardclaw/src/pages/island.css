@@ -1,0 +1,59 @@
+.island {
+  --ink: #2b2733;
+  --paper: #fff0cd;
+  --shell-dark: #a82e43;
+  min-height: 100%;
+  box-sizing: border-box;
+  padding: 18px;
+  color: var(--ink);
+  background: #9ab4af;
+  font-family: "Space Mono", monospace;
+  background-image: radial-gradient(#c4d9c6 1px, transparent 1px);
+  background-size: 9px 9px;
+}
+.island *, .island *::before, .island *::after { box-sizing: border-box; }
+
+.island__bar { max-width: 1240px; margin: 0 auto 12px; min-height: 46px; padding: 8px 12px; display: flex; align-items: center; gap: 14px; border: 3px solid var(--ink); background: var(--paper); box-shadow: 5px 5px 0 #546b72; }
+.island__brand { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 700; letter-spacing: -0.8px; }
+.island__brand b { color: var(--shell-dark); }
+.island__status { margin-left: auto; font-size: 11px; font-weight: 700; color: #447568; }
+
+.island__scene-wrap { max-width: 1240px; margin: auto; position: relative; }
+.island__caption { position: absolute; z-index: 5; top: 14px; left: 20px; color: #fff7df; font: 700 10px "Space Mono", monospace; letter-spacing: 0.8px; text-shadow: 2px 2px var(--ink); }
+.island__scene { position: relative; width: 100%; overflow: hidden; background: #7fb2b5; border: 4px solid var(--ink); box-shadow: 7px 7px 0 #546b72; }
+.island__scene > img { display: block; width: 100%; height: auto; image-rendering: pixelated; }
+
+.island__lobster { position: absolute; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px; background: transparent; border: 0; cursor: pointer; z-index: 3; animation: island-bob 2.4s steps(2) infinite; }
+.island__lobster:hover { filter: brightness(1.1); }
+.island__lobster:focus-visible { outline: 3px solid var(--paper); }
+.island__lobster.is-saluting { animation: island-hop 0.5s steps(2) 2; }
+.island__drink { position: absolute; top: -4px; right: -6px; font-size: 16px; text-shadow: 1px 1px var(--ink); }
+.island__nametag { background: var(--paper); border: 2px solid var(--ink); padding: 1px 5px; font: 700 9px "Space Mono", monospace; text-transform: uppercase; box-shadow: 2px 2px 0 rgba(43, 39, 51, 0.5); white-space: nowrap; }
+.island__bubble { position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); z-index: 6; background: var(--paper); border: 3px solid var(--ink); padding: 6px 9px; font: 700 10px "Space Mono", monospace; color: var(--ink); white-space: nowrap; box-shadow: 3px 3px 0 #546b72; animation: island-pop 0.18s steps(2); }
+.island__bubble::after { content: ""; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 6px solid transparent; border-top-color: var(--ink); }
+
+@keyframes island-bob { 50% { transform: translate(-50%, calc(-50% + 2px)); } }
+@keyframes island-hop { 50% { transform: translate(-50%, calc(-50% - 8px)); } }
+@keyframes island-pop { from { transform: translateX(-50%) scale(0.6); } }
+
+.island__empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 6px; padding: 24px; background: rgba(43, 39, 51, 0.35); }
+.island__empty h2 { margin: 0; color: #fff7df; font: 700 16px "Space Mono", monospace; text-shadow: 2px 2px var(--ink); text-transform: uppercase; }
+.island__empty p { margin: 0; max-width: 420px; color: #ffe9c9; font-size: 12px; font-weight: 700; text-shadow: 1px 1px var(--ink); }
+
+.island__roster { margin-top: 14px; display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.island__roster-card { border: 3px solid var(--ink); background: var(--paper); box-shadow: 4px 4px 0 #546b72; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.island__roster-card b { font-size: 13px; color: var(--shell-dark); }
+.island__roster-card span { font-size: 10px; font-weight: 700; text-transform: uppercase; color: #5b5364; }
+.island__roster-card .island__roster-date { color: #447568; }
+
+.island__state { min-height: 60vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; text-align: center; }
+.island__state h1, .island__state p { margin: 0; }
+.island__state p { text-transform: uppercase; font-weight: 700; font-size: 12px; }
+.island__wave { width: 46px; height: 18px; background: linear-gradient(#7fd1cf 50%, #4d9fa6 50%); border: 3px solid var(--ink); box-shadow: 4px 4px 0 #546b72; animation: island-bob2 1s steps(2) infinite; }
+@keyframes island-bob2 { 50% { transform: translateY(3px); } }
+
+@media (max-width: 560px) {
+  .island { padding: 10px; }
+  .island__bar { flex-wrap: wrap; gap: 8px; }
+  .island__nametag { font-size: 8px; }
+}

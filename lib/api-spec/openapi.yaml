@@ -89,6 +89,38 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Agent"
+  /agents/{agentId}/retire:
+    post:
+      operationId: retireAgent
+      tags: [office]
+      summary: Permanently retire an agent to the island
+      parameters:
+        - $ref: "#/components/parameters/AgentId"
+      responses:
+        "200":
+          description: Retired agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RetiredAgent"
+        "404":
+          description: Agent not found
+        "409":
+          description: Agent already retired
+  /island/agents:
+    get:
+      operationId: listRetiredAgents
+      tags: [office]
+      summary: List retired agents relaxing on the island
+      responses:
+        "200":
+          description: Retired agents
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RetiredAgent"
   /tasks:
     get:
       operationId: listTasks
@@ -220,6 +252,20 @@ components:
         securityPreset: { type: string, enum: [observer, assistant, operator] }
         avatar: { $ref: "#/components/schemas/AvatarConfig" }
         createdAt: { type: string, format: date-time }
+    RetiredAgent:
+      type: object
+      required: [id, name, title, mission, provider, securityPreset, avatar, createdAt, retiredAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        title: { type: string }
+        mission: { type: string }
+        provider: { type: string, enum: [claude_max, openrouter] }
+        model: { type: ["string", "null"] }
+        securityPreset: { type: string, enum: [observer, assistant, operator] }
+        avatar: { $ref: "#/components/schemas/AvatarConfig" }
+        createdAt: { type: string, format: date-time }
+        retiredAt: { type: string, format: date-time }
     AvatarConfig:
       type: object
       required: [shellColor, deskStyle, accessory]

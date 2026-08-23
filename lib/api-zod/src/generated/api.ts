@@ -139,6 +139,55 @@ export const PauseAgentResponse = zod.object({
 
 
 /**
+ * @summary Permanently retire an agent to the island
+ */
+export const RetireAgentParams = zod.object({
+  "agentId": zod.coerce.string()
+})
+
+export const RetireAgentResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "title": zod.string(),
+  "mission": zod.string(),
+  "provider": zod.enum(['claude_max', 'openrouter']),
+  "model": zod.string().nullish(),
+  "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
+  "avatar": zod.object({
+  "shellColor": zod.string(),
+  "deskStyle": zod.string(),
+  "accessory": zod.string(),
+  "expression": zod.string().optional()
+}),
+  "createdAt": zod.coerce.date(),
+  "retiredAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary List retired agents relaxing on the island
+ */
+export const ListRetiredAgentsResponseItem = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "title": zod.string(),
+  "mission": zod.string(),
+  "provider": zod.enum(['claude_max', 'openrouter']),
+  "model": zod.string().nullish(),
+  "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
+  "avatar": zod.object({
+  "shellColor": zod.string(),
+  "deskStyle": zod.string(),
+  "accessory": zod.string(),
+  "expression": zod.string().optional()
+}),
+  "createdAt": zod.coerce.date(),
+  "retiredAt": zod.coerce.date()
+})
+export const ListRetiredAgentsResponse = zod.array(ListRetiredAgentsResponseItem)
+
+
+/**
  * @summary List task runs
  */
 export const ListTasksResponseItem = zod.object({

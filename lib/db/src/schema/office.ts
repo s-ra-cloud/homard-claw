@@ -27,6 +27,8 @@ export const agentsTable = pgTable("agents", {
   securityPreset: text("security_preset").notNull(),
   avatar: jsonb("avatar").$type<AvatarConfig>().notNull(),
   paused: boolean("paused").notNull().default(false),
+  retired: boolean("retired").notNull().default(false),
+  retiredAt: timestamp("retired_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -76,6 +78,8 @@ export const systemStateTable = pgTable("system_state", {
 export const insertAgentSchema = createInsertSchema(agentsTable).omit({
   id: true,
   paused: true,
+  retired: true,
+  retiredAt: true,
   createdAt: true,
 });
 export const insertTaskSchema = createInsertSchema(tasksTable).omit({

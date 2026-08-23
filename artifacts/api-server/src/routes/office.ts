@@ -11,10 +11,13 @@ import {
   GetProvidersResponse,
   ListAgentsResponse,
   ListApprovalsResponse,
+  ListRetiredAgentsResponse,
   ListTasksResponse,
   PauseAgentBody,
   PauseAgentParams,
   PauseAgentResponse,
+  RetireAgentParams,
+  RetireAgentResponse,
   SetEmergencyStopBody,
   SetEmergencyStopResponse,
 } from "@workspace/api-zod";
@@ -86,7 +89,10 @@ function toAgent(agent: typeof agentsTable.$inferSelect) {
 router.get("/office/overview", async (_req, res): Promise<void> => {
   const [[agentCount], [activeCount], [approvalCount], [stop], events] =
     await Promise.all([
-      db.select({ count: sql<number>`count(*)::int` }).from(agentsTable),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(agentsTable)
+        .where(eq(agentsTable.retired, false)),
       db
         .select({ count: sql<number>`count(*)::int` })
         .from(tasksTable)
@@ -123,7 +129,11 @@ router.get("/office/overview", async (_req, res): Promise<void> => {
 });
 
 router.get("/agents", async (_req, res): Promise<void> => {
-  const agents = await db.select().from(agentsTable).orderBy(agentsTable.name);
+  const agents = await db
+    .select()
+    .from(agentsTable)
+    .where(eq(agentsTable.retired, false))
+    .orderBy(agentsTable.name);
   res.json(ListAgentsResponse.parse(agents.map(toAgent)));
 });
 
@@ -163,7 +173,12 @@ router.post("/agents/:agentId/pause", async (req, res): Promise<void> => {
       paused: body.data.paused,
       status: body.data.paused ? "paused" : "idle",
     })
-    .where(eq(agentsTable.id, params.data.agentId))
+    .where(
+      and(
+        eq(agentsTable.id, params.data.agentId),
+        eq(agentsTable.retired, false),
+      ),
+    )
     .returning();
   if (!agent) {
     res.status(404).json({ error: "Agent not found" });
@@ -174,6 +189,89 @@ router.post("/agents/:agentId/pause", async (req, res): Promise<void> => {
     summary: `${agent.name} was ${body.data.paused ? "paused" : "resumed"}.`,
   });
   res.json(PauseAgentResponse.parse(toAgent(agent)));
+});
+
+function toRetiredAgent(agent: typeof agentsTable.$inferSelect) {
+  return {
+    id: agent.id,
+    name: agent.name,
+    title: agent.title,
+    mission: agent.mission,
+    provider: agent.provider,
+    model: agent.model,
+    securityPreset: agent.securityPreset,
+    avatar: agent.avatar,
+    createdAt: agent.createdAt.toISOString(),
+    retiredAt: (agent.retiredAt ?? agent.createdAt).toISOString(),
+  };
+}
+
+router.post("/agents/:agentId/retire", async (req, res): Promise<void> => {
+  const params = RetireAgentParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: "Invalid retire request" });
+    return;
+  }
+  const outcome = await db.transaction(async (tx) => {
+    // Conditional update makes the transition atomic: only one concurrent
+    // request can flip retired from false to true.
+    const [agent] = await tx
+      .update(agentsTable)
+      .set({
+        retired: true,
+        retiredAt: new Date(),
+        paused: true,
+        status: "paused",
+      })
+      .where(
+        and(
+          eq(agentsTable.id, params.data.agentId),
+          eq(agentsTable.retired, false),
+        ),
+      )
+      .returning();
+    if (!agent) {
+      const [existing] = await tx
+        .select({ id: agentsTable.id })
+        .from(agentsTable)
+        .where(eq(agentsTable.id, params.data.agentId))
+        .limit(1);
+      if (existing) return { status: 409 as const };
+      return { status: 404 as const };
+    }
+    await tx
+      .update(tasksTable)
+      .set({ status: "paused" })
+      .where(
+        and(
+          eq(tasksTable.agentId, agent.id),
+          inArray(tasksTable.status, ["queued", "running", "waiting_approval"]),
+        ),
+      );
+    await tx.insert(auditEventsTable).values({
+      kind: "agent.retired",
+      summary: `${agent.name} retired to the island after honorable service.`,
+    });
+    return { status: 200 as const, agent };
+  });
+  if (outcome.status === 404) {
+    res.status(404).json({ error: "Agent not found" });
+    return;
+  }
+  if (outcome.status === 409) {
+    res.status(409).json({ error: "Agent is already retired" });
+    return;
+  }
+  res.json(RetireAgentResponse.parse(toRetiredAgent(outcome.agent)));
+});
+
+router.get("/island/agents", async (_req, res): Promise<void> => {
+  const agents = await db
+    .select()
+    .from(agentsTable)
+    .where(eq(agentsTable.retired, true))
+    .orderBy(desc(agentsTable.retiredAt));
+  res.json(ListRetiredAgentsResponse.parse(agents.map(toRetiredAgent)));
 });
 
 router.get("/tasks", async (_req, res): Promise<void> => {
@@ -206,49 +304,63 @@ router.post("/tasks", async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-  const [[agent], [stop]] = await Promise.all([
-    db
+  const outcome = await db.transaction(async (tx) => {
+    // Lock the agent row so a concurrent retirement cannot slip in between
+    // the check and the task insert.
+    const [agent] = await tx
       .select()
       .from(agentsTable)
       .where(eq(agentsTable.id, parsed.data.agentId))
-      .limit(1),
-    db
+      .limit(1)
+      .for("update");
+    if (!agent) return { status: 404 as const };
+    if (agent.retired) return { status: 409 as const };
+    const [stop] = await tx
       .select()
       .from(systemStateTable)
       .where(eq(systemStateTable.key, "emergency_stop"))
-      .limit(1),
-  ]);
-  if (!agent) {
+      .limit(1);
+    const provider = parsed.data.providerOverride ?? agent.provider;
+    const configured =
+      provider === "claude_max"
+        ? Boolean(process.env.CLAUDE_CODE_OAUTH_TOKEN)
+        : Boolean(process.env.OPENROUTER_API_KEY);
+    const status =
+      stop?.value === "true" || agent.paused || !configured
+        ? "paused"
+        : "queued";
+    const [task] = await tx
+      .insert(tasksTable)
+      .values({
+        agentId: agent.id,
+        objective: parsed.data.objective,
+        provider,
+        status,
+      })
+      .returning();
+    await tx.insert(auditEventsTable).values({
+      kind: "task.created",
+      summary: configured
+        ? `A task was queued for ${agent.name}.`
+        : `A task for ${agent.name} was paused because ${provider} is not configured.`,
+    });
+    return { status: 201 as const, task, agentName: agent.name };
+  });
+  if (outcome.status === 404) {
     res.status(404).json({ error: "Agent not found" });
     return;
   }
-  const provider = parsed.data.providerOverride ?? agent.provider;
-  const configured =
-    provider === "claude_max"
-      ? Boolean(process.env.CLAUDE_CODE_OAUTH_TOKEN)
-      : Boolean(process.env.OPENROUTER_API_KEY);
-  const status =
-    stop?.value === "true" || agent.paused || !configured ? "paused" : "queued";
-  const [task] = await db
-    .insert(tasksTable)
-    .values({
-      agentId: agent.id,
-      objective: parsed.data.objective,
-      provider,
-      status,
-    })
-    .returning();
-  await db.insert(auditEventsTable).values({
-    kind: "task.created",
-    summary: configured
-      ? `A task was queued for ${agent.name}.`
-      : `A task for ${agent.name} was paused because ${provider} is not configured.`,
-  });
+  if (outcome.status === 409) {
+    res
+      .status(409)
+      .json({ error: "This agent is retired and cannot take new work" });
+    return;
+  }
   res.status(201).json(
     CreateTaskResponse.parse({
-      ...task,
-      agentName: agent.name,
-      createdAt: task.createdAt.toISOString(),
+      ...outcome.task,
+      agentName: outcome.agentName,
+      createdAt: outcome.task.createdAt.toISOString(),
     }),
   );
 });

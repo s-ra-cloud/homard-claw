@@ -61,6 +61,37 @@ export interface Agent {
   createdAt: string;
 }
 
+export type RetiredAgentProvider = typeof RetiredAgentProvider[keyof typeof RetiredAgentProvider];
+
+
+export const RetiredAgentProvider = {
+  claude_max: 'claude_max',
+  openrouter: 'openrouter',
+} as const;
+
+export type RetiredAgentSecurityPreset = typeof RetiredAgentSecurityPreset[keyof typeof RetiredAgentSecurityPreset];
+
+
+export const RetiredAgentSecurityPreset = {
+  observer: 'observer',
+  assistant: 'assistant',
+  operator: 'operator',
+} as const;
+
+export interface RetiredAgent {
+  id: string;
+  name: string;
+  title: string;
+  mission: string;
+  provider: RetiredAgentProvider;
+  /** @nullable */
+  model?: string | null;
+  securityPreset: RetiredAgentSecurityPreset;
+  avatar: AvatarConfig;
+  createdAt: string;
+  retiredAt: string;
+}
+
 export type AgentInputProvider = typeof AgentInputProvider[keyof typeof AgentInputProvider];
 
 

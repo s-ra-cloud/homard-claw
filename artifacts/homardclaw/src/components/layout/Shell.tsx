@@ -1,7 +1,7 @@
 import React from "react";
 import { Link, useLocation } from "wouter";
 import { useUser, useClerk } from "@clerk/react";
-import { LogOut, Home, Users, CheckSquare, Settings, AlertTriangle, Activity } from "lucide-react";
+import { LogOut, Home, Users, CheckSquare, Settings, Activity, Palmtree } from "lucide-react";
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
@@ -14,6 +14,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     { href: "/tasks", label: "Tasks", icon: Activity },
     { href: "/approvals", label: "Approvals", icon: CheckSquare },
     { href: "/providers", label: "Providers", icon: Settings },
+    { href: "/island", label: "Island", icon: Palmtree },
   ];
 
   return (

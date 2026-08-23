@@ -30,6 +30,7 @@ import type {
   OfficeOverview,
   PauseInput,
   ProviderStatus,
+  RetiredAgent,
   Task,
   TaskInput
 } from './api.schemas';
@@ -435,6 +436,154 @@ export const usePauseAgent = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getPauseAgentMutationOptions(options));
     }
+
+export const getRetireAgentUrl = (agentId: string,) => {
+
+
+
+
+  return `/api/agents/${agentId}/retire`
+}
+
+/**
+ * @summary Permanently retire an agent to the island
+ */
+export const retireAgent = async (agentId: string, options?: Parameters<typeof customFetch>[1]): Promise<RetiredAgent> => {
+
+  return customFetch<RetiredAgent>(getRetireAgentUrl(agentId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRetireAgentMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retireAgent>>, TError,{agentId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof retireAgent>>, TError,{agentId: string}, TContext> => {
+
+const mutationKey = ['retireAgent'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof retireAgent>>, {agentId: string}> = (props) => {
+          const {agentId} = props ?? {};
+
+          return  retireAgent(agentId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RetireAgentMutationResult = NonNullable<Awaited<ReturnType<typeof retireAgent>>>
+
+    export type RetireAgentMutationError = ErrorType<void>
+
+    /**
+ * @summary Permanently retire an agent to the island
+ */
+export const useRetireAgent = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retireAgent>>, TError,{agentId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof retireAgent>>,
+        TError,
+        {agentId: string},
+        TContext
+      > => {
+      return useMutation(getRetireAgentMutationOptions(options));
+    }
+
+export const getListRetiredAgentsUrl = () => {
+
+
+
+
+  return `/api/island/agents`
+}
+
+/**
+ * @summary List retired agents relaxing on the island
+ */
+export const listRetiredAgents = async ( options?: Parameters<typeof customFetch>[1]): Promise<RetiredAgent[]> => {
+
+  return customFetch<RetiredAgent[]>(getListRetiredAgentsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListRetiredAgentsQueryKey = () => {
+    return [
+    `/api/island/agents`
+    ] as const;
+    }
+
+
+export const getListRetiredAgentsQueryOptions = <TData = Awaited<ReturnType<typeof listRetiredAgents>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listRetiredAgents>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListRetiredAgentsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listRetiredAgents>>> = ({ signal }) => listRetiredAgents({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listRetiredAgents>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListRetiredAgentsQueryResult = NonNullable<Awaited<ReturnType<typeof listRetiredAgents>>>
+export type ListRetiredAgentsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List retired agents relaxing on the island
+ */
+
+export function useListRetiredAgents<TData = Awaited<ReturnType<typeof listRetiredAgents>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listRetiredAgents>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListRetiredAgentsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getListTasksUrl = () => {
 
