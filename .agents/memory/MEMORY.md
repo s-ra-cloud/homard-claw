@@ -1,1 +1,2 @@
 - [HomardClaw art direction](homardclaw-art-direction.md) — Favor dense, cozy isometric pixel dioramas with one expressive lobster at a lived-in workstation.
+- [Pixel character components](pixel-character-components.md) — Plot pixel art from row spans with auto-outline, then flatten to run-length rects before shipping.

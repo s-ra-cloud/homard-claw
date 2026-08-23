@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { AlertTriangle, Palmtree } from "lucide-react";
 import { useListRetiredAgents } from "@workspace/api-client-react";
 import { Shell } from "@/components/layout/Shell";
-import { LobsterAvatar } from "@/components/ui/lobster-avatar";
+import { MarlowLobster } from "@/components/ui/marlow-lobster";
 import "./island.css";
 
 const beachArt = `${import.meta.env.BASE_URL}images/island-beach.png`;
@@ -85,7 +85,12 @@ export default function IslandPage() {
                   >
                     {saluting && <span className="island__bubble">{salute.text}</span>}
                     <span className="island__drink" aria-hidden="true">🍹</span>
-                    <LobsterAvatar size={56} status="idle" primaryColor={agent.avatar.shellColor} />
+                    <MarlowLobster
+                      size={64}
+                      status="idle"
+                      shellColor={agent.avatar.shellColor}
+                      accessory={agent.avatar.accessory}
+                    />
                     <span className="island__nametag">{agent.name}</span>
                   </button>
                 );

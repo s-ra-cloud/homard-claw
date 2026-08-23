@@ -6,7 +6,7 @@ import { useCreateAgent, AgentProvider, AgentSecurityPreset } from "@workspace/a
 import { Shell } from "@/components/layout/Shell";
 import { PixelCard } from "@/components/ui/pixel-card";
 import { Button } from "@/components/ui/button";
-import { LobsterAvatar } from "@/components/ui/lobster-avatar";
+import { LOBSTER_ACCESSORIES, LOBSTER_PRESETS, MarlowLobster } from "@/components/ui/marlow-lobster";
 import { useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -41,6 +41,7 @@ const agentSchema = z.object({
     AgentSecurityPreset.operator,
   ]),
   shellColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/, "Must be a valid hex color"),
+  accessory: z.enum(LOBSTER_ACCESSORIES as [string, ...string[]]),
 });
 
 type AgentFormValues = z.infer<typeof agentSchema>;
@@ -57,11 +58,13 @@ export default function NewAgentPage() {
       mission: "Analyze inputs and provide structured reports.",
       provider: AgentProvider.claude_max,
       securityPreset: AgentSecurityPreset.assistant,
-      shellColor: "#ff4500", // Default orange
+      shellColor: LOBSTER_PRESETS[0].shellColor,
+      accessory: LOBSTER_PRESETS[0].accessory,
     },
   });
 
   const shellColor = form.watch("shellColor");
+  const accessory = form.watch("accessory");
 
   const createAgent = useCreateAgent({
     mutation: {
@@ -84,7 +87,7 @@ export default function NewAgentPage() {
         avatar: {
           shellColor: data.shellColor,
           deskStyle: "standard",
-          accessory: "none"
+          accessory: data.accessory
         }
       }
     });
@@ -207,6 +210,40 @@ export default function NewAgentPage() {
                     />
                   </div>
 
+                  <FormItem>
+                    <FormLabel className="uppercase font-bold text-xs">Issued Shell</FormLabel>
+                    <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                      {LOBSTER_PRESETS.map((preset) => {
+                        const selected =
+                          preset.shellColor.toLowerCase() === shellColor.toLowerCase() &&
+                          preset.accessory === accessory;
+                        return (
+                          <button
+                            key={preset.id}
+                            type="button"
+                            title={`${preset.name} — ${preset.blurb}`}
+                            aria-pressed={selected}
+                            onClick={() => {
+                              form.setValue("shellColor", preset.shellColor, { shouldDirty: true });
+                              form.setValue("accessory", preset.accessory, { shouldDirty: true });
+                            }}
+                            className={`flex flex-col items-center gap-1 p-1 border-4 transition-colors ${
+                              selected
+                                ? "border-primary bg-primary/10"
+                                : "border-border bg-muted/30 hover:bg-muted"
+                            }`}
+                          >
+                            <MarlowLobster size={52} shellColor={preset.shellColor} accessory={preset.accessory} status="idle" />
+                            <span className="text-[9px] font-bold uppercase leading-none">{preset.name}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground uppercase font-bold pt-1">
+                      Ten standard issue shells. Fine-tune the pigment below.
+                    </p>
+                  </FormItem>
+
                   <FormField
                     control={form.control}
                     name="shellColor"
@@ -244,10 +281,11 @@ export default function NewAgentPage() {
           <div>
             <PixelCard title="Preview" className="sticky top-8">
               <div className="flex flex-col items-center justify-center p-8 bg-muted/30 border-4 border-border border-dashed mb-6">
-                <LobsterAvatar 
-                  size={120} 
+                <MarlowLobster 
+                  size={150} 
                   status="idle" 
-                  primaryColor={shellColor} 
+                  shellColor={shellColor} 
+                  accessory={accessory} 
                 />
               </div>
               <div className="space-y-4">

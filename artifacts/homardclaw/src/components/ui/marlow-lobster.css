@@ -1,0 +1,45 @@
+.marlow-lobster {
+  display: block;
+  image-rendering: pixelated;
+  transform-origin: 50% 100%;
+}
+.marlow-lobster--idle,
+.marlow-lobster--queued,
+.marlow-lobster--complete {
+  animation: marlow-breathe 3.2s steps(2, end) infinite;
+}
+.marlow-lobster--working {
+  animation: marlow-bob 0.7s steps(2, end) infinite;
+}
+.marlow-lobster--researching {
+  animation: marlow-lean 2.4s ease-in-out infinite;
+}
+.marlow-lobster--waiting {
+  animation: marlow-breathe 2s steps(2, end) infinite;
+  filter: saturate(0.85);
+}
+.marlow-lobster--paused {
+  filter: grayscale(0.6);
+  opacity: 0.85;
+}
+.marlow-lobster--error {
+  animation: marlow-shake 0.5s steps(2, end) infinite;
+}
+
+@keyframes marlow-breathe {
+  50% { transform: translateY(1%) scaleY(0.99); }
+}
+@keyframes marlow-bob {
+  50% { transform: translateY(-4%); }
+}
+@keyframes marlow-lean {
+  50% { transform: rotate(-2.5deg); }
+}
+@keyframes marlow-shake {
+  25% { transform: translateX(-2%); }
+  75% { transform: translateX(2%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marlow-lobster { animation: none !important; }
+}

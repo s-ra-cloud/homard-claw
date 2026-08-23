@@ -143,10 +143,11 @@ router.post("/agents", async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
+  // Defaults to the house "Marlow" shell used by the office art direction.
   const avatar = parsed.data.avatar ?? {
-    shellColor: "#ef5b45",
+    shellColor: "#d8452f",
     deskStyle: "oak",
-    accessory: "notebook",
+    accessory: "glasses",
     expression: "focused",
   };
   const [agent] = await db

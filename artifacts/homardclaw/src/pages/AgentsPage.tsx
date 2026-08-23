@@ -4,7 +4,7 @@ import { Shell } from "@/components/layout/Shell";
 import { PixelCard } from "@/components/ui/pixel-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { LobsterAvatar } from "@/components/ui/lobster-avatar";
+import { MarlowLobster } from "@/components/ui/marlow-lobster";
 import { Palmtree, Pause, Play, Plus, Server, Shield } from "lucide-react";
 import { Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
@@ -89,7 +89,7 @@ export default function AgentsPage() {
         ) : !agents || agents.length === 0 ? (
           <PixelCard className="text-center p-12">
             <div className="flex justify-center mb-6 opacity-50">
-              <LobsterAvatar size={96} status="idle" />
+              <MarlowLobster size={112} status="idle" accessory="glasses" />
             </div>
             <h3 className="font-display text-lg uppercase mb-2">No Agents Recruited</h3>
             <p className="text-muted-foreground mb-6">The office is empty. Recruit an agent to begin processing tasks.</p>
@@ -108,10 +108,12 @@ export default function AgentsPage() {
                 <div className="flex justify-between items-start mb-4">
                   <div className="flex items-center gap-4">
                     <div className="bg-muted p-2 border-2 border-border pixel-shadow">
-                      <LobsterAvatar 
-                        size={48} 
+                      <MarlowLobster 
+                        size={56} 
                         status={agent.status} 
-                        primaryColor={agent.avatar.shellColor} 
+                        shellColor={agent.avatar.shellColor} 
+                        accessory={agent.avatar.accessory} 
+                        title={`${agent.name}, ${agent.status}`}
                       />
                     </div>
                     <div>
