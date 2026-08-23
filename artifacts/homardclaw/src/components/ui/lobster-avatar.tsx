@@ -29,7 +29,7 @@ export function LobsterAvatar({
   // We use rects for crisp pixels to avoid anti-aliasing issues
   
   const renderPixel = (x: number, y: number, color: string) => {
-    return <rect x={x} y={y} width="1" height="1" fill={color} key={`${x}-${y}`} />;
+    return <rect x={x} y={y} width="1" height="1" fill={color} key={`${x}-${y}-${pixels.length}`} />;
   };
 
   const getEyes = () => {
