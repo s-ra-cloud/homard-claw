@@ -3,13 +3,15 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: HomardClaw private agent office API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: office
+    description: Agent office operations
 paths:
   /healthz:
     get:
@@ -24,7 +26,178 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /office/overview:
+    get:
+      operationId: getOfficeOverview
+      tags: [office]
+      summary: Get the live office overview
+      responses:
+        "200":
+          description: Office state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfficeOverview"
+  /agents:
+    get:
+      operationId: listAgents
+      tags: [office]
+      summary: List agent profiles
+      responses:
+        "200":
+          description: Agents
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Agent"
+    post:
+      operationId: createAgent
+      tags: [office]
+      summary: Create an agent profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentInput"
+      responses:
+        "201":
+          description: Created agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+  /agents/{agentId}/pause:
+    post:
+      operationId: pauseAgent
+      tags: [office]
+      summary: Pause or resume an agent
+      parameters:
+        - $ref: "#/components/parameters/AgentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PauseInput"
+      responses:
+        "200":
+          description: Updated agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+  /tasks:
+    get:
+      operationId: listTasks
+      tags: [office]
+      summary: List task runs
+      responses:
+        "200":
+          description: Tasks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Task"
+    post:
+      operationId: createTask
+      tags: [office]
+      summary: Queue a manual agent task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskInput"
+      responses:
+        "201":
+          description: Queued task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+  /emergency-stop:
+    post:
+      operationId: setEmergencyStop
+      tags: [office]
+      summary: Toggle the global emergency stop
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmergencyStopInput"
+      responses:
+        "200":
+          description: Updated emergency stop
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmergencyStop"
+  /approvals:
+    get:
+      operationId: listApprovals
+      tags: [office]
+      summary: List pending approvals
+      responses:
+        "200":
+          description: Approvals
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Approval"
+  /approvals/{approvalId}:
+    patch:
+      operationId: decideApproval
+      tags: [office]
+      summary: Approve or reject an approval request
+      parameters:
+        - $ref: "#/components/parameters/ApprovalId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApprovalDecision"
+      responses:
+        "200":
+          description: Updated approval
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Approval"
+  /providers:
+    get:
+      operationId: getProviders
+      tags: [office]
+      summary: Get configured provider health
+      responses:
+        "200":
+          description: Provider state
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProviderStatus"
 components:
+  parameters:
+    AgentId:
+      name: agentId
+      in: path
+      required: true
+      schema: { type: string }
+    ApprovalId:
+      name: approvalId
+      in: path
+      required: true
+      schema: { type: string }
   schemas:
     HealthStatus:
       type: object
@@ -33,4 +206,115 @@ components:
           type: string
       required:
         - status
+    Agent:
+      type: object
+      required: [id, name, title, mission, provider, status, securityPreset, avatar, createdAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        title: { type: string }
+        mission: { type: string }
+        provider: { type: string, enum: [claude_max, openrouter] }
+        model: { type: ["string", "null"] }
+        status: { type: string, enum: [idle, working, researching, waiting, paused, error, queued, complete] }
+        securityPreset: { type: string, enum: [observer, assistant, operator] }
+        avatar: { $ref: "#/components/schemas/AvatarConfig" }
+        createdAt: { type: string, format: date-time }
+    AvatarConfig:
+      type: object
+      required: [shellColor, deskStyle, accessory]
+      properties:
+        shellColor: { type: string }
+        deskStyle: { type: string }
+        accessory: { type: string }
+        expression: { type: string }
+    AgentInput:
+      type: object
+      required: [name, title, mission, provider, securityPreset]
+      properties:
+        name: { type: string, minLength: 2, maxLength: 60 }
+        title: { type: string, minLength: 2, maxLength: 80 }
+        mission: { type: string, minLength: 5, maxLength: 2000 }
+        provider: { type: string, enum: [claude_max, openrouter] }
+        model: { type: string, maxLength: 180 }
+        securityPreset: { type: string, enum: [observer, assistant, operator] }
+        avatar: { $ref: "#/components/schemas/AvatarConfig" }
+    PauseInput:
+      type: object
+      required: [paused]
+      properties:
+        paused: { type: boolean }
+    Task:
+      type: object
+      required: [id, agentId, agentName, objective, status, createdAt]
+      properties:
+        id: { type: string }
+        agentId: { type: string }
+        agentName: { type: string }
+        objective: { type: string }
+        status: { type: string, enum: [queued, running, waiting_approval, paused, completed, failed] }
+        provider: { type: string, enum: [claude_max, openrouter] }
+        createdAt: { type: string, format: date-time }
+    TaskInput:
+      type: object
+      required: [agentId, objective]
+      properties:
+        agentId: { type: string }
+        objective: { type: string, minLength: 3, maxLength: 5000 }
+        providerOverride: { type: string, enum: [claude_max, openrouter] }
+    Approval:
+      type: object
+      required: [id, agentName, action, status, createdAt, expiresAt]
+      properties:
+        id: { type: string }
+        agentName: { type: string }
+        action: { type: string }
+        details: { type: string }
+        status: { type: string, enum: [pending, approved, rejected, expired] }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+    ApprovalDecision:
+      type: object
+      required: [decision]
+      properties:
+        decision: { type: string, enum: [approved, rejected] }
+    ProviderStatus:
+      type: object
+      required: [provider, configured, healthy]
+      properties:
+        provider: { type: string, enum: [claude_max, openrouter] }
+        configured: { type: boolean }
+        healthy: { type: boolean }
+        message: { type: string }
+    EmergencyStop:
+      type: object
+      required: [active]
+      properties:
+        active: { type: boolean }
+    EmergencyStopInput:
+      type: object
+      required: [active]
+      properties:
+        active: { type: boolean }
+    OfficeOverview:
+      type: object
+      required: [agents, activeTasks, pendingApprovals, emergencyStop, monthlyCostCents, recentEvents]
+      properties:
+        agents: { type: number }
+        activeTasks: { type: number }
+        pendingApprovals: { type: number }
+        emergencyStop: { type: boolean }
+        monthlyCostCents: { type: number }
+        recentEvents:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEvent"
+    AuditEvent:
+      type: object
+      required: [id, kind, summary, createdAt]
+      properties:
+        id: { type: string }
+        kind: { type: string }
+        summary: { type: string }
+        createdAt: { type: string, format: date-time }
 

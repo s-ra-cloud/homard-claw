@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "HomardClaw"
+description = "A private, security-first personal multi-agent office that lets one owner manage AI agents, tasks, memories, approvals, costs, and automation from a living pixel-art lobster workspace."
+version = "1.0.0"
+id = "artifacts/homardclaw"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24085
+
+[services.development]
+run = "pnpm --filter @workspace/homardclaw run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/homardclaw", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/homardclaw/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24085"
+BASE_PATH = "/"
