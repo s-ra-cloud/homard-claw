@@ -41,3 +41,15 @@ Character traits persisted as free-form strings (a hex shell colour, an accessor
 must be normalized at the component boundary — snap a hex to the nearest available
 sprite, and fall back to the house variant for unparseable or legacy values. Never cast
 the raw string into the union type with `as`.
+
+# A chair needs a seated pose, not a translated standing sprite
+
+When an agent occupies furniture, use a dedicated pose with the tail curled onto the
+seat and the legs tucked under the torso. Positioning the normal full-body sprite over
+a chair reads as standing in front of it, even when its centre aligns perfectly.
+
+**Why:** The owner rejected the four-desk office placement after seeing the long tail
+and legs extend to the floor in front of the chair.
+
+**How to apply:** Keep the same character and shell-pigment pipeline, but bake a
+separate seated sprite set and select it through the character component's pose API.

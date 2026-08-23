@@ -13,8 +13,15 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const SOURCE = resolve(HERE, "../../../attached_assets/generated_images/lobster-sprite-b.png");
-const OUT_DIR = resolve(HERE, "../public/images/lobsters");
+const SOURCE = process.env.LOBSTER_SOURCE
+  ? resolve(HERE, process.env.LOBSTER_SOURCE)
+  : resolve(HERE, "../../../attached_assets/generated_images/lobster-sprite-b.png");
+const OUT_DIR = process.env.LOBSTER_OUT_DIR
+  ? resolve(HERE, process.env.LOBSTER_OUT_DIR)
+  : resolve(HERE, "../public/images/lobsters");
+const WRITE_MANIFEST = process.env.LOBSTER_WRITE_MANIFEST !== "0";
+const MATCH_MANIFEST = process.env.LOBSTER_MATCH_MANIFEST === "1";
+const MANIFEST_PATH = resolve(HERE, "../src/components/ui/lobster-presets.json");
 const GRID = 128; // final sprite resolution
 
 /* ----------------------------------------------------------- png decode */
@@ -320,6 +327,45 @@ function shellHex(img) {
   return `#${hex(r)}${hex(g)}${hex(b)}`;
 }
 
+function hexToHsl(hex) {
+  const value = Number.parseInt(hex.replace("#", ""), 16);
+  return rgbToHsl((value >> 16) & 255, (value >> 8) & 255, value & 255);
+}
+
+/**
+ * Alternate poses come from separate source art, but an agent's pigment must
+ * remain identical when its pose changes. Iteratively align saturated pixels
+ * to the canonical preset's representative shell colour.
+ */
+function matchShellColor(img, targetHex) {
+  let matched = img;
+  for (let pass = 0; pass < 4; pass++) {
+    const [fromHue, fromSat, fromLight] = hexToHsl(shellHex(matched));
+    const [toHue, toSat, toLight] = hexToHsl(targetHex);
+    const hueDelta = toHue - fromHue;
+    const satScale = fromSat > 0 ? toSat / fromSat : 1;
+    const lightScale = fromLight > 0 ? toLight / fromLight : 1;
+    const out = Buffer.from(matched.data);
+
+    for (let i = 0; i < matched.width * matched.height; i++) {
+      const d = i * 4;
+      if (out[d + 3] < 128) continue;
+      const [h, s, l] = rgbToHsl(out[d], out[d + 1], out[d + 2]);
+      if (s < 0.12) continue;
+      const [r, g, b] = hslToRgb(
+        h + hueDelta,
+        clamp(s * satScale, 0, 1),
+        clamp(l * lightScale, 0, 0.97),
+      );
+      out[d] = r;
+      out[d + 1] = g;
+      out[d + 2] = b;
+    }
+    matched = { ...matched, data: out };
+  }
+  return matched;
+}
+
 /** `hue: null` keeps the source pigment untouched. */
 const VARIANTS = [
   { id: "marlow",  name: "Marlow",  hue: null, sat: 1.0,  light: 1.0,  blurb: "House crimson, straight off the office floor" },
@@ -339,18 +385,50 @@ keyOutBackground(source);
 const sprite = downsample(source, boundingBox(source), GRID);
 const from = baseHue(sprite);
 mkdirSync(OUT_DIR, { recursive: true });
+const canonicalColors = MATCH_MANIFEST
+  ? new Map(
+      JSON.parse(readFileSync(MANIFEST_PATH, "utf8")).map((preset) => [
+        preset.id,
+        preset.shellColor,
+      ]),
+    )
+  : new Map();
 
 const manifest = VARIANTS.map((v) => {
-  const img = recolor(sprite, from, v);
+  let img = recolor(sprite, from, v);
+  const canonicalColor = canonicalColors.get(v.id);
+  if (canonicalColor) img = matchShellColor(img, canonicalColor);
   writeFileSync(resolve(OUT_DIR, `${v.id}.png`), encodePng(img));
   return { id: v.id, name: v.name, shellColor: shellHex(img), blurb: v.blurb };
 });
 
-// The app reads this manifest directly so swatches can never drift from sprites.
-writeFileSync(
-  resolve(HERE, "../src/components/ui/lobster-presets.json"),
-  `${JSON.stringify(manifest, null, 2)}\n`,
-);
+if (MATCH_MANIFEST) {
+  const channelDelta = (a, b) => {
+    const left = Number.parseInt(a.replace("#", ""), 16);
+    const right = Number.parseInt(b.replace("#", ""), 16);
+    return Math.max(
+      Math.abs(((left >> 16) & 255) - ((right >> 16) & 255)),
+      Math.abs(((left >> 8) & 255) - ((right >> 8) & 255)),
+      Math.abs((left & 255) - (right & 255)),
+    );
+  };
+  for (const preset of manifest) {
+    const target = canonicalColors.get(preset.id);
+    if (target && channelDelta(preset.shellColor, target) > 2) {
+      throw new Error(
+        `${preset.id} alternate pose colour ${preset.shellColor} drifted from ${target}`,
+      );
+    }
+  }
+}
+
+if (WRITE_MANIFEST) {
+  // The app reads this manifest directly so swatches can never drift from sprites.
+  writeFileSync(
+    resolve(HERE, "../src/components/ui/lobster-presets.json"),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+  );
+}
 
 console.log(`base hue ${from.toFixed(1)}deg -> ${manifest.length} sprites in ${OUT_DIR}`);
 console.log(manifest.map((m) => `${m.id} ${m.shellColor}`).join("\n"));

@@ -70,6 +70,8 @@ export interface MarlowLobsterProps {
   /** Explicit preset id, used by the picker to avoid a colour round-trip. */
   preset?: string;
   status?: LobsterStatus;
+  /** Office workstations use the compact, tail-tucked seated sprite. */
+  pose?: "standing" | "seated";
   title?: string;
   className?: string;
 }
@@ -79,12 +81,14 @@ export function MarlowLobster({
   shellColor,
   preset,
   status = "idle",
+  pose = "standing",
   title,
   className = "",
 }: MarlowLobsterProps) {
   const chosen =
     LOBSTER_PRESETS.find((p) => p.id === preset) ?? presetForShellColor(shellColor);
-  const src = `${import.meta.env.BASE_URL}images/lobsters/${chosen.id}.png`;
+  const spriteFolder = pose === "seated" ? "lobsters-sitting" : "lobsters";
+  const src = `${import.meta.env.BASE_URL}images/${spriteFolder}/${chosen.id}.png`;
 
   return (
     <img
@@ -94,7 +98,7 @@ export function MarlowLobster({
       alt={title ?? ""}
       aria-hidden={title ? undefined : true}
       draggable={false}
-      className={`marlow-lobster marlow-lobster--${status} ${className}`}
+      className={`marlow-lobster marlow-lobster--${pose} marlow-lobster--${status} ${className}`}
     />
   );
 }
