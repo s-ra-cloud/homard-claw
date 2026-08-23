@@ -63,6 +63,29 @@ export function presetForShellColor(shellColor: string | null | undefined): Lobs
   return best;
 }
 
+/**
+ * Every non-standing pose is a composite sprite that includes the office
+ * chair, so the room artwork itself stays furniture-free where agents sit.
+ */
+export type LobsterPose =
+  | "standing"
+  | "seated"
+  | "working"
+  | "idle-coffee"
+  | "idle-music"
+  | "idle-reading"
+  | "idle-stretch";
+
+const POSE_FOLDERS: Record<LobsterPose, string> = {
+  standing: "lobsters",
+  seated: "lobsters-sitting",
+  working: "lobsters-working",
+  "idle-coffee": "lobsters-idle-coffee",
+  "idle-music": "lobsters-idle-music",
+  "idle-reading": "lobsters-idle-reading",
+  "idle-stretch": "lobsters-idle-stretch",
+};
+
 export interface MarlowLobsterProps {
   size?: number;
   /** Hex shell colour from the agent's avatar; snapped to the nearest sprite. */
@@ -70,8 +93,8 @@ export interface MarlowLobsterProps {
   /** Explicit preset id, used by the picker to avoid a colour round-trip. */
   preset?: string;
   status?: LobsterStatus;
-  /** Office workstations use the composite seated-lobster-and-chair sprite. */
-  pose?: "standing" | "seated";
+  /** Office workstations use the composite lobster-and-chair sprites. */
+  pose?: LobsterPose;
   title?: string;
   className?: string;
 }
@@ -87,8 +110,7 @@ export function MarlowLobster({
 }: MarlowLobsterProps) {
   const chosen =
     LOBSTER_PRESETS.find((p) => p.id === preset) ?? presetForShellColor(shellColor);
-  const spriteFolder = pose === "seated" ? "lobsters-sitting" : "lobsters";
-  const src = `${import.meta.env.BASE_URL}images/${spriteFolder}/${chosen.id}.png`;
+  const src = `${import.meta.env.BASE_URL}images/${POSE_FOLDERS[pose]}/${chosen.id}.png`;
 
   return (
     <img
@@ -98,7 +120,7 @@ export function MarlowLobster({
       alt={title ?? ""}
       aria-hidden={title ? undefined : true}
       draggable={false}
-      className={`marlow-lobster marlow-lobster--${pose} marlow-lobster--${status} ${className}`}
+      className={`marlow-lobster marlow-lobster--${status} marlow-lobster--pose-${pose} ${className}`}
     />
   );
 }

@@ -10,7 +10,7 @@ import {
   ApprovalDecisionDecision,
 } from "@workspace/api-client-react";
 import { Shell } from "@/components/layout/Shell";
-import { MarlowLobster } from "@/components/ui/marlow-lobster";
+import { MarlowLobster, type LobsterPose } from "@/components/ui/marlow-lobster";
 import { useQueryClient } from "@tanstack/react-query";
 import "./office-dashboard.css";
 
@@ -25,6 +25,34 @@ const DESK_SEATS = [
   { left: 71.0, top: 72.0, label: "filing desk" },
 ];
 
+/** Breaks an agent can take between tasks. */
+const IDLE_ACTIVITIES = [
+  "idle-coffee",
+  "idle-music",
+  "idle-reading",
+  "idle-stretch",
+] as const satisfies readonly LobsterPose[];
+
+type IdleActivity = (typeof IDLE_ACTIVITIES)[number];
+
+/** Statuses where the agent turns to face its desk. */
+const AT_DESK_STATUSES = new Set(["working", "researching"]);
+
+function randomIdleActivity(): IdleActivity {
+  return IDLE_ACTIVITIES[Math.floor(Math.random() * IDLE_ACTIVITIES.length)];
+}
+
+function poseForAgent(
+  status: string,
+  activity: IdleActivity | undefined,
+): LobsterPose {
+  if (AT_DESK_STATUSES.has(status)) return "working";
+  // An idle agent briefly renders plain-seated until the transition effect
+  // assigns its activity; picking here instead would reshuffle every render.
+  if (status === "idle" && activity) return activity;
+  return "seated";
+}
+
 export default function OfficeDashboard() {
   const { data: overview, isLoading, isError } = useGetOfficeOverview();
   const {
@@ -34,6 +62,43 @@ export default function OfficeDashboard() {
   } = useListAgents();
   const { data: approvals } = useListApprovals();
   const queryClient = useQueryClient();
+
+  // One break activity per idle period: assigned when an agent is first seen
+  // idle (or returns to idle after work), kept across refetches, and cleared
+  // as soon as the agent leaves idle so its next break reshuffles.
+  const [idleActivities, setIdleActivities] = React.useState<
+    Record<string, IdleActivity>
+  >({});
+
+  React.useEffect(() => {
+    if (!agents) return;
+    setIdleActivities((prev) => {
+      let next = prev;
+      const ensureCopy = () => {
+        if (next === prev) next = { ...prev };
+      };
+      const seen = new Set<string>();
+      for (const agent of agents) {
+        seen.add(agent.id);
+        if (agent.status === "idle") {
+          if (!(agent.id in next)) {
+            ensureCopy();
+            next[agent.id] = randomIdleActivity();
+          }
+        } else if (agent.id in next) {
+          ensureCopy();
+          delete next[agent.id];
+        }
+      }
+      for (const id of Object.keys(next)) {
+        if (!seen.has(id)) {
+          ensureCopy();
+          delete next[id];
+        }
+      }
+      return next;
+    });
+  }, [agents]);
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["/api/office/overview"] });
@@ -115,10 +180,14 @@ export default function OfficeDashboard() {
                     >
                       <MarlowLobster
                         size={96}
-                        pose="seated"
+                        pose={
+                          stopped
+                            ? "seated"
+                            : poseForAgent(agent.status, idleActivities[agent.id])
+                        }
                         status={stopped ? "paused" : agent.status}
                         shellColor={agent.avatar.shellColor}
-                        title={`${agent.name}, working at the ${seat.label}`}
+                        title={`${agent.name} at the ${seat.label}`}
                       />
                       <span className="room-agent__name">{agent.name}</span>
                     </div>

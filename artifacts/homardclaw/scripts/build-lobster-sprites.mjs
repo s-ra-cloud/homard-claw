@@ -7,9 +7,16 @@
  *
  * Run: node artifacts/homardclaw/scripts/build-lobster-sprites.mjs
  *
- * Alternate seated-chair pose:
- * LOBSTER_SOURCE=../../../attached_assets/generated_images/lobster-in-office-chair-naked.png \
- * LOBSTER_OUT_DIR=../public/images/lobsters-sitting \
+ * Alternate chair poses (repeat per source/out-dir pair):
+ * - lobster-in-office-chair-naked.png  -> lobsters-sitting
+ * - lobster-chair-working-source.png   -> lobsters-working
+ * - lobster-chair-coffee-source.png    -> lobsters-idle-coffee
+ * - lobster-chair-music-source.png     -> lobsters-idle-music
+ * - lobster-chair-reading-source.png   -> lobsters-idle-reading
+ * - lobster-chair-stretch-source.png   -> lobsters-idle-stretch
+ *
+ * LOBSTER_SOURCE=../../../attached_assets/generated_images/<source>.png \
+ * LOBSTER_OUT_DIR=../public/images/<out-dir> \
  * LOBSTER_WRITE_MANIFEST=0 LOBSTER_MATCH_MANIFEST=1 node \
  * artifacts/homardclaw/scripts/build-lobster-sprites.mjs
  */

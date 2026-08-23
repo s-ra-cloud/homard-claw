@@ -26,6 +26,23 @@
   animation: marlow-shake 0.5s steps(2, end) infinite;
 }
 
+/*
+ * Idle-activity poses come after the status rules so, at equal specificity,
+ * the break animation wins over the generic idle breathing.
+ */
+.marlow-lobster--pose-idle-coffee {
+  animation: marlow-sip 3.4s steps(2, end) infinite;
+}
+.marlow-lobster--pose-idle-music {
+  animation: marlow-groove 1.4s steps(2, end) infinite;
+}
+.marlow-lobster--pose-idle-reading {
+  animation: marlow-page 4.2s steps(2, end) infinite;
+}
+.marlow-lobster--pose-idle-stretch {
+  animation: marlow-stretch 2.6s steps(2, end) infinite;
+}
+
 @keyframes marlow-breathe {
   50% { transform: translateY(1%) scaleY(0.99); }
 }
@@ -38,6 +55,20 @@
 @keyframes marlow-shake {
   25% { transform: translateX(-2%); }
   75% { transform: translateX(2%); }
+}
+@keyframes marlow-sip {
+  35% { transform: rotate(-2deg) translateY(-1.5%); }
+  55% { transform: rotate(-2deg) translateY(-1.5%); }
+}
+@keyframes marlow-groove {
+  50% { transform: rotate(2.5deg) translateY(-1.5%); }
+}
+@keyframes marlow-page {
+  40% { transform: translateY(1%) rotate(-1deg); }
+  80% { transform: translateY(1%) rotate(1deg); }
+}
+@keyframes marlow-stretch {
+  50% { transform: scaleY(1.04) translateY(-2%); }
 }
 
 @media (prefers-reduced-motion: reduce) {
