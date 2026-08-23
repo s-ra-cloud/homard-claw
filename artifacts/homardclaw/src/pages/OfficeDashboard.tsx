@@ -3,19 +3,35 @@ import { Link } from "wouter";
 import { AlertTriangle, ShieldCheck } from "lucide-react";
 import {
   useGetOfficeOverview,
+  useListAgents,
   useListApprovals,
   useDecideApproval,
   useSetEmergencyStop,
   ApprovalDecisionDecision,
 } from "@workspace/api-client-react";
 import { Shell } from "@/components/layout/Shell";
+import { MarlowLobster } from "@/components/ui/marlow-lobster";
 import { useQueryClient } from "@tanstack/react-query";
 import "./office-dashboard.css";
 
-const officeArt = `${import.meta.env.BASE_URL}images/isometric-office.png`;
+const officeArt = `${import.meta.env.BASE_URL}images/four-desk-office.png`;
+
+// Chair centres in the generated office scene. Agent sprites are layered on top
+// so every employee is rendered by the same canonical component as the roster.
+const DESK_SEATS = [
+  { left: 39.3, top: 37.5, label: "window desk" },
+  { left: 64.3, top: 37.4, label: "library desk" },
+  { left: 24.1, top: 67.0, label: "garden desk" },
+  { left: 76.3, top: 69.4, label: "filing desk" },
+];
 
 export default function OfficeDashboard() {
   const { data: overview, isLoading, isError } = useGetOfficeOverview();
+  const {
+    data: agents,
+    isLoading: agentsLoading,
+    isError: agentsError,
+  } = useListAgents();
   const { data: approvals } = useListApprovals();
   const queryClient = useQueryClient();
 
@@ -37,7 +53,7 @@ export default function OfficeDashboard() {
     if (window.confirm(prompt)) setEmergencyStop.mutate({ data: { active: nextState } });
   };
 
-  if (isLoading) {
+  if (isLoading || agentsLoading) {
     return (
       <Shell>
         <section className="iso-office iso-office--state" aria-live="polite">
@@ -48,7 +64,7 @@ export default function OfficeDashboard() {
     );
   }
 
-  if (isError || !overview) {
+  if (isError || agentsError || !overview) {
     return (
       <Shell>
         <section className="iso-office iso-office--state">
@@ -69,7 +85,7 @@ export default function OfficeDashboard() {
       <section className="iso-office">
         <header className="iso-office__bar">
           <div className="iso-office__brand">
-            <b>HOMARD</b>CLAW / desk 01
+            <b>HOMARD</b>CLAW / four-desk office
           </div>
           <div className={`iso-office__status ${stopped ? "is-halted" : ""}`}>
             <i className="signal" /> {stopped ? "office paused — all agents held" : "systems warm & working"}
@@ -83,10 +99,31 @@ export default function OfficeDashboard() {
         )}
 
         <main className="iso-office__layout">
-          <section className={`room-wrap ${stopped ? "is-paused" : ""}`} aria-label="Marlow's live isometric office">
-            <div className="room-caption">LIVE VIEW / MARLOW'S DESK{stopped ? " / PAUSED" : ""}</div>
+          <section className={`room-wrap ${stopped ? "is-paused" : ""}`} aria-label="Live four-desk isometric office">
+            <div className="room-caption">LIVE VIEW / FOUR-DESK OFFICE{stopped ? " / PAUSED" : ""}</div>
             <div className="room-art">
-              <img src={officeArt} alt="Isometric pixel-art HomardClaw office with Marlow the lobster working at a cozy desk" />
+              <div className="room-scene">
+                <img src={officeArt} alt="Isometric pixel-art HomardClaw office with four desks and chairs" />
+                {(agents ?? []).slice(0, DESK_SEATS.length).map((agent, index) => {
+                  const seat = DESK_SEATS[index];
+                  return (
+                    <div
+                      key={agent.id}
+                      className="room-agent"
+                      style={{ left: `${seat.left}%`, top: `${seat.top}%` }}
+                      title={`${agent.name} at the ${seat.label}`}
+                    >
+                      <MarlowLobster
+                        size={52}
+                        status={stopped ? "paused" : agent.status}
+                        shellColor={agent.avatar.shellColor}
+                        title={`${agent.name}, working at the ${seat.label}`}
+                      />
+                      <span className="room-agent__name">{agent.name}</span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </section>
 

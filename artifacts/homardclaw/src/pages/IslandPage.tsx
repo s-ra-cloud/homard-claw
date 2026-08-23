@@ -10,13 +10,13 @@ const beachArt = `${import.meta.env.BASE_URL}images/island-beach.png`;
 // Fixed relaxing spots on the beach artwork (percent coordinates).
 const BEACH_SPOTS = [
   { left: 47, top: 54 },  // lounger under the red & white umbrella
-  { left: 72, top: 50 },  // lounger under the blue & white umbrella
-  { left: 28, top: 69 },  // lounger under the teal umbrella
-  { left: 64, top: 74 },  // lounger under the yellow umbrella
+  { left: 72, top: 52 },  // lounger under the blue & white umbrella
+  { left: 28, top: 67 },  // lounger under the teal umbrella
+  { left: 64, top: 75 },  // lounger under the yellow umbrella
   { left: 61, top: 29 },  // hammock between the palms
-  { left: 44, top: 69 },  // beach towels
-  { left: 26, top: 40 },  // tiki bar stools
-  { left: 84, top: 74 },  // by the sandcastle
+  { left: 18.5, top: 41 }, // left tiki bar stool
+  { left: 28, top: 39 },  // middle tiki bar stool
+  { left: 35, top: 36 },  // right tiki bar stool
 ];
 
 const SALUTES = [
