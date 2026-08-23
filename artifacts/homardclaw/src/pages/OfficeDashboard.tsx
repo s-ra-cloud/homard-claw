@@ -1,88 +1,32 @@
 import React from "react";
 import { Link } from "wouter";
-import { AlertTriangle, Check, Clock, Pause, Play, ShieldCheck } from "lucide-react";
-import { useGetOfficeOverview, useListAgents, useSetEmergencyStop, type Agent } from "@workspace/api-client-react";
+import { AlertTriangle, ShieldCheck } from "lucide-react";
+import {
+  useGetOfficeOverview,
+  useListApprovals,
+  useDecideApproval,
+  useSetEmergencyStop,
+  ApprovalDecisionDecision,
+} from "@workspace/api-client-react";
 import { Shell } from "@/components/layout/Shell";
 import { useQueryClient } from "@tanstack/react-query";
 import "./office-dashboard.css";
-import "./office-lobsters.css";
 
-type OfficeAgent = Agent;
-
-const deskColors = ["#4a7d91", "#8068a6", "#3e7885", "#6e9b7d"];
-const shellShadows = ["#a83243", "#b44748", "#8e3148", "#a75050"];
-const shellLights = ["#ff8f69", "#ffb26c", "#eb7880", "#ffc38b"];
-
-function statusLabel(status: OfficeAgent["status"]) {
-  return status === "researching" ? "scanning" : status.replace("_", " ");
-}
-
-function OfficeLobster({ agent, index }: { agent: OfficeAgent; index: number }) {
-  const accessory = agent.avatar.accessory.toLowerCase();
-  const style = {
-    "--shell": agent.avatar.shellColor,
-    "--shell-dark": shellShadows[index % shellShadows.length],
-    "--shell-light": shellLights[index % shellLights.length],
-    "--shell-shadow": shellShadows[index % shellShadows.length],
-    "--outfit": deskColors[index % deskColors.length],
-  } as React.CSSProperties;
-
-  return (
-    <div className="office-lobster" style={style} aria-hidden="true">
-      <span className="lobster-antenna lobster-antenna--left" />
-      <span className="lobster-antenna lobster-antenna--right" />
-      <span className="lobster-claw lobster-claw--left" />
-      <span className="lobster-claw lobster-claw--right" />
-      <span className="lobster-body" />
-      <span className="lobster-eye lobster-eye--left" />
-      <span className="lobster-eye lobster-eye--right" />
-      <span className="lobster-mouth" />
-      <span className="lobster-outfit" />
-      <span className="lobster-tail" />
-      {accessory.includes("glass") && <span className="lobster-glasses" />}
-      {accessory.includes("head") && <span className="lobster-headset" />}
-      {accessory.includes("visor") && <span className="lobster-visor" />}
-    </div>
-  );
-}
-
-function AgentStation({ agent, index, stopped }: { agent?: OfficeAgent; index: number; stopped: boolean }) {
-  if (!agent) {
-    return (
-      <article className="agent-station agent-station--empty">
-        <div className="state-pill idle">open desk</div>
-        <div className="monitor monitor--sleep" aria-hidden="true"><div className="code-lines"><i /><i /></div></div>
-        <div className="empty-chair" aria-hidden="true" />
-        <div className="desk"><div className="desk-name">AVAILABLE<br /><small>recruiting bay</small></div></div>
-      </article>
-    );
-  }
-
-  const effectiveStatus = stopped ? "paused" : agent.status;
-  return (
-    <article className={`agent-station is-${effectiveStatus}`}>
-      <div className={`state-pill ${effectiveStatus}`}>{stopped ? "paused" : statusLabel(agent.status)}</div>
-      <div className="monitor" aria-hidden="true"><div className="code-lines"><i /><i /><i /></div></div>
-      <div role="img" aria-label={`${agent.name}, ${agent.title}, ${effectiveStatus}`}>
-        <OfficeLobster agent={agent} index={index} />
-      </div>
-      <div className="desk"><div className="desk-name">{agent.name}<br /><small>{agent.title}</small></div></div>
-    </article>
-  );
-}
+const officeArt = `${import.meta.env.BASE_URL}images/isometric-office.png`;
 
 export default function OfficeDashboard() {
   const { data: overview, isLoading, isError } = useGetOfficeOverview();
-  const { data: agents } = useListAgents();
+  const { data: approvals } = useListApprovals();
   const queryClient = useQueryClient();
-  const setEmergencyStop = useSetEmergencyStop({
-    mutation: {
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: ["/api/office/overview"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/agents"] });
-      },
-    },
-  });
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ["/api/office/overview"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/agents"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/approvals"] });
+  };
+
+  const setEmergencyStop = useSetEmergencyStop({ mutation: { onSuccess: invalidate } });
+  const decideApproval = useDecideApproval({ mutation: { onSuccess: invalidate } });
 
   const handleEmergencyStop = () => {
     if (!overview) return;
@@ -93,42 +37,129 @@ export default function OfficeDashboard() {
     if (window.confirm(prompt)) setEmergencyStop.mutate({ data: { active: nextState } });
   };
 
-  if (isLoading) return <Shell><section className="snes-office snes-office--state" aria-live="polite"><div className="brand-claw" aria-hidden="true" /><p>Booting office core...</p></section></Shell>;
-  if (isError || !overview) return <Shell><section className="snes-office snes-office--state"><AlertTriangle size={42} /><h1>System error</h1><p>Failed to connect to the office mainframe. Please try again.</p></section></Shell>;
+  if (isLoading) {
+    return (
+      <Shell>
+        <section className="iso-office iso-office--state" aria-live="polite">
+          <div className="iso-claw" aria-hidden="true" />
+          <p>Warming up the office...</p>
+        </section>
+      </Shell>
+    );
+  }
+
+  if (isError || !overview) {
+    return (
+      <Shell>
+        <section className="iso-office iso-office--state">
+          <AlertTriangle size={40} />
+          <h1>System error</h1>
+          <p>Failed to reach the office mainframe. Please try again.</p>
+        </section>
+      </Shell>
+    );
+  }
 
   const stopped = overview.emergencyStop;
-  const stations = Array.from({ length: 4 }, (_, index) => agents?.[index]);
+  const nextApproval = approvals?.find((a) => a.status === "pending");
+  const justDecided = decideApproval.isSuccess ? decideApproval.variables : undefined;
+
   return (
     <Shell>
-      <section className="snes-office">
-        <header className="snes-office__topbar">
-          <div className="snes-office__brand"><div className="brand-claw" aria-hidden="true" /><div className="brand-name">HOMARDCLAW<small>private agent office</small></div></div>
-          <div className="snes-office__title">Control room · floor 01</div>
-          <div className="system-lamp"><i className="lamp-dot" /> {stopped ? "Office paused" : "Systems steady"}</div>
-          <button className={`emergency ${stopped ? "is-halted" : ""}`} onClick={handleEmergencyStop} disabled={setEmergencyStop.isPending}>
-            {stopped ? <Play size={14} /> : <Pause size={14} />} {setEmergencyStop.isPending ? "Updating..." : stopped ? "Resume office" : "Emergency stop"}
-          </button>
+      <section className="iso-office">
+        <header className="iso-office__bar">
+          <div className="iso-office__brand">
+            <b>HOMARD</b>CLAW / desk 01
+          </div>
+          <div className={`iso-office__status ${stopped ? "is-halted" : ""}`}>
+            <i className="signal" /> {stopped ? "office paused — all agents held" : "systems warm & working"}
+          </div>
         </header>
-        <main className="snes-office__content">
-          <div className="office-heading"><div><h1>Good afternoon, Director.</h1><p>Your command room is warm, lit, and ready for work.</p></div><div className={`status-ribbon ${stopped ? "halted" : ""}`}>{stopped ? "Global halt active" : `${overview.agents} agents rostered`}</div></div>
-          {stopped && <div className="halt-banner"><AlertTriangle size={16} /> Emergency stop holds every agent until you resume office operations.</div>}
-          <section className="command-room" aria-label="Live illustrated agent office">
-            <div className="room-backdrop" aria-hidden="true"><div className="window"><i className="sun-disc" /></div><div className="clock-face" /><div className="wall-art" /><div className="lamp one" /><div className="lamp two" /></div>
-            <div className="room-label">Live office view</div>
-            <div className="agent-stage">{stations.map((agent, index) => <AgentStation key={agent?.id ?? `empty-station-${index}`} agent={agent} index={index} stopped={stopped} />)}</div>
-          </section>
-          <section className="metrics" aria-label="Office summary">
-            <Link className="metric" href="/agents"><b>{String(overview.agents).padStart(2, "0")}</b><span>Agents rostered</span></Link>
-            <Link className="metric" href="/tasks"><b>{String(overview.activeTasks).padStart(2, "0")}</b><span>Tasks in motion</span></Link>
-            <Link className="metric" href="/approvals"><b>{String(overview.pendingApprovals).padStart(2, "0")}</b><span>Approvals waiting</span></Link>
-            <div className="metric"><b>${(overview.monthlyCostCents / 100).toFixed(2)}</b><span>Monthly compute</span></div>
-          </section>
-          <section className="activity-grid">
-            <div className="panel"><div className="panel-header">Office ticker <span>recent activity</span></div>
-              {overview.recentEvents.length === 0 ? <div className="panel-empty">No recent activity detected.</div> : overview.recentEvents.map((event) => <div className="task" key={event.id}><div className="task-mark"><Clock size={13} /></div><div className="task-copy"><b>{event.kind}</b><p>{event.summary}</p></div><time className="task-time" dateTime={event.createdAt}>{new Date(event.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></div>)}
+
+        {stopped && (
+          <div className="iso-office__halt" role="status">
+            <AlertTriangle size={14} /> Emergency stop holds every agent until you resume office operations.
+          </div>
+        )}
+
+        <main className="iso-office__layout">
+          <section className={`room-wrap ${stopped ? "is-paused" : ""}`} aria-label="Marlow's live isometric office">
+            <div className="room-caption">LIVE VIEW / MARLOW'S DESK{stopped ? " / PAUSED" : ""}</div>
+            <div className="room-art">
+              <img src={officeArt} alt="Isometric pixel-art HomardClaw office with Marlow the lobster working at a cozy desk" />
             </div>
-            <aside className="panel"><div className="panel-header">Permission desk <span>{overview.pendingApprovals} pending</span></div><div className="approval"><div className="alert-title"><span className="alert-icon">!</span> Approval queue</div><p>{overview.pendingApprovals > 0 ? "Review pending agent requests before work can continue." : "No permission requests are waiting for your review."}</p><Link className="approve" href="/approvals"><ShieldCheck size={12} /> review approvals</Link><Link className="reject" href="/tasks"><Check size={12} /> task queue</Link></div></aside>
           </section>
+
+          <aside className="side-panel">
+            <section className="quiet-card rail-control">
+              <h2>Safety control</h2>
+              <button
+                className={`iso-office__stop ${stopped ? "is-paused" : ""}`}
+                onClick={handleEmergencyStop}
+                disabled={setEmergencyStop.isPending}
+              >
+                {setEmergencyStop.isPending ? "UPDATING..." : stopped ? "RESUME OFFICE" : "EMERGENCY STOP"}
+              </button>
+            </section>
+
+            <section className="quiet-card">
+              <h2>Office pulse</h2>
+              <div className="summary">
+                <Link href="/agents"><b>{String(overview.agents).padStart(2, "0")}</b>agents</Link>
+                <Link href="/tasks"><b>{String(overview.activeTasks).padStart(2, "0")}</b>tasks</Link>
+                <Link href="/approvals"><b>{String(overview.pendingApprovals).padStart(2, "0")}</b>reviews</Link>
+              </div>
+            </section>
+
+            <section className="quiet-card">
+              <h2>Systems</h2>
+              <div className="system-row">
+                <i className={`signal ${stopped ? "is-halted" : ""}`} /> Agent runtime <span>{stopped ? "paused" : "steady"}</span>
+              </div>
+              <div className="system-row">
+                <i className="signal" /> Approval queue <span>{overview.pendingApprovals > 0 ? `${overview.pendingApprovals} waiting` : "clear"}</span>
+              </div>
+              <div className="system-row">
+                <i className="signal" /> Monthly compute <span>${(overview.monthlyCostCents / 100).toFixed(2)}</span>
+              </div>
+            </section>
+
+            <section className="quiet-card approval">
+              <h2>One thing needs you</h2>
+              {nextApproval ? (
+                <>
+                  <p>
+                    <b>{nextApproval.agentName}</b> wants to {nextApproval.action}
+                    {nextApproval.details ? ` — ${nextApproval.details}` : ""}
+                  </p>
+                  <div className="approval-actions">
+                    <button
+                      onClick={() => decideApproval.mutate({ approvalId: nextApproval.id, data: { decision: ApprovalDecisionDecision.approved } })}
+                      disabled={decideApproval.isPending}
+                    >
+                      APPROVE
+                    </button>
+                    <button
+                      className="hold"
+                      onClick={() => decideApproval.mutate({ approvalId: nextApproval.id, data: { decision: ApprovalDecisionDecision.rejected } })}
+                      disabled={decideApproval.isPending}
+                    >
+                      HOLD
+                    </button>
+                  </div>
+                </>
+              ) : justDecided ? (
+                <div className="approved">
+                  {justDecided.data.decision === "approved" ? "CLEARED — the agent has the go-ahead." : "HELD — the request was declined."}
+                </div>
+              ) : (
+                <p className="approval-empty">Nothing is waiting on your review.</p>
+              )}
+              <Link className="approval-link" href="/approvals">
+                <ShieldCheck size={12} /> full approval desk
+              </Link>
+            </section>
+          </aside>
         </main>
       </section>
     </Shell>
