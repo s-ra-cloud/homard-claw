@@ -1,0 +1,1 @@
+- [HomardClaw art direction](homardclaw-art-direction.md) — Favor colorful, expressive SNES-era office scenes and recognizable lobster characters over sparse 8-bit terminal styling.

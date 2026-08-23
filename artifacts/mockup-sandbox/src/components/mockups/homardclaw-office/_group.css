@@ -1,0 +1,132 @@
+@import url("https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap");
+
+@theme inline {
+  --font-sans: var(--app-font-sans);
+  --font-display: var(--app-font-display);
+  --font-mono: var(--app-font-mono);
+  --radius-sm: var(--radius);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius);
+  --radius-xl: var(--radius);
+}
+
+:root {
+  --background: 224 40% 8%;
+  --foreground: 180 20% 90%;
+  --card: 224 40% 11%;
+  --card-foreground: 180 20% 90%;
+  --card-border: 224 40% 18%;
+  --popover: 224 40% 11%;
+  --popover-foreground: 180 20% 90%;
+  --popover-border: 224 40% 18%;
+  --primary: 13 90% 55%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 224 40% 18%;
+  --secondary-foreground: 180 20% 90%;
+  --muted: 224 40% 15%;
+  --muted-foreground: 224 20% 60%;
+  --accent: 180 100% 40%;
+  --accent-foreground: 224 40% 8%;
+  --destructive: 350 80% 50%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 224 40% 20%;
+  --input: 224 40% 18%;
+  --ring: 13 90% 55%;
+  --app-font-sans: "Space Mono", monospace;
+  --app-font-display: "Press Start 2P", cursive;
+  --app-font-mono: "Space Mono", monospace;
+  --radius: 0px;
+}
+
+.dark {
+  --background: 224 40% 8%;
+  --foreground: 180 20% 90%;
+  --card: 224 40% 11%;
+  --card-foreground: 180 20% 90%;
+  --card-border: 224 40% 18%;
+  --popover: 224 40% 11%;
+  --popover-foreground: 180 20% 90%;
+  --popover-border: 224 40% 18%;
+  --primary: 13 90% 55%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 224 40% 18%;
+  --secondary-foreground: 180 20% 90%;
+  --muted: 224 40% 15%;
+  --muted-foreground: 224 20% 60%;
+  --accent: 180 100% 40%;
+  --accent-foreground: 224 40% 8%;
+  --destructive: 350 80% 50%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 224 40% 20%;
+  --input: 224 40% 18%;
+  --ring: 13 90% 55%;
+}
+
+body {
+  font-family: var(--app-font-sans);
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+.pixel-panel {
+  box-shadow:
+    4px 0 0 0 hsl(var(--border)),
+    -4px 0 0 0 hsl(var(--border)),
+    0 -4px 0 0 hsl(var(--border)),
+    0 4px 0 0 hsl(var(--border)),
+    4px 4px 0 0 hsl(var(--background)),
+    -4px -4px 0 0 hsl(var(--background)),
+    4px -4px 0 0 hsl(var(--background)),
+    -4px 4px 0 0 hsl(var(--background));
+  margin: 4px;
+}
+
+.pixel-panel-primary {
+  box-shadow:
+    4px 0 0 0 hsl(var(--primary)),
+    -4px 0 0 0 hsl(var(--primary)),
+    0 -4px 0 0 hsl(var(--primary)),
+    0 4px 0 0 hsl(var(--primary)),
+    4px 4px 0 0 hsl(var(--background)),
+    -4px -4px 0 0 hsl(var(--background)),
+    4px -4px 0 0 hsl(var(--background)),
+    -4px 4px 0 0 hsl(var(--background));
+  margin: 4px;
+}
+
+.pixel-panel-accent {
+  box-shadow:
+    4px 0 0 0 hsl(var(--accent)),
+    -4px 0 0 0 hsl(var(--accent)),
+    0 -4px 0 0 hsl(var(--accent)),
+    0 4px 0 0 hsl(var(--accent)),
+    4px 4px 0 0 hsl(var(--background)),
+    -4px -4px 0 0 hsl(var(--background)),
+    4px -4px 0 0 hsl(var(--background)),
+    -4px 4px 0 0 hsl(var(--background));
+  margin: 4px;
+}
+
+.pixel-shadow {
+  box-shadow: 4px 4px 0 0 hsl(var(--border));
+}
+
+.pixel-shadow-primary {
+  box-shadow: 4px 4px 0 0 hsl(var(--primary));
+}
+
+.pixel-shadow-accent {
+  box-shadow: 4px 4px 0 0 hsl(var(--accent));
+}
+
+.scanlines {
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0),
+    rgba(255, 255, 255, 0) 50%,
+    rgba(0, 0, 0, 0.1) 50%,
+    rgba(0, 0, 0, 0.1)
+  );
+  background-size: 100% 4px;
+  pointer-events: none;
+}
