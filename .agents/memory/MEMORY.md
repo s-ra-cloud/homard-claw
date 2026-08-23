@@ -1,1 +1,1 @@
-- [HomardClaw art direction](homardclaw-art-direction.md) — Favor colorful, expressive SNES-era office scenes and recognizable lobster characters over sparse 8-bit terminal styling.
+- [HomardClaw art direction](homardclaw-art-direction.md) — Favor dense, cozy isometric pixel dioramas with one expressive lobster at a lived-in workstation.
