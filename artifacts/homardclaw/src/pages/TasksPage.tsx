@@ -85,10 +85,10 @@ export default function TasksPage() {
 
   return (
     <Shell>
-      <div className="p-8 max-w-7xl mx-auto space-y-8">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6 sm:space-y-8">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b-4 border-border pb-6">
           <div>
-            <h1 className="font-display text-2xl text-foreground uppercase mb-2">Task Queue</h1>
+            <h1 className="font-display text-lg sm:text-2xl text-foreground uppercase mb-2">Task Queue</h1>
             <p className="text-muted-foreground text-sm">Monitor and dispatch jobs to the workforce.</p>
           </div>
           
@@ -179,7 +179,7 @@ export default function TasksPage() {
             ))}
           </div>
         ) : !tasks || tasks.length === 0 ? (
-          <PixelCard className="text-center p-12">
+          <PixelCard className="text-center p-6 sm:p-12">
             <div className="flex justify-center mb-6 opacity-50">
               <Activity className="w-16 h-16 text-muted-foreground" />
             </div>

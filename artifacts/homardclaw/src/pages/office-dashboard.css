@@ -86,7 +86,14 @@
   .iso-office { padding: 10px; }
   .iso-office__bar { gap: 8px; flex-wrap: wrap; }
   .iso-office__brand { font-size: 11px; }
+  .iso-office__status { margin-left: 0; font-size: 10px; }
   .side-panel { grid-template-columns: 1fr; }
   .side-panel .approval { grid-column: auto; }
   .quiet-card { box-shadow: 3px 3px 0 #546b72; }
+  .room-art { border-width: 3px; box-shadow: 4px 4px 0 #546b72; }
+  .room-caption { top: 8px; left: 10px; font-size: 8px; }
+  .summary b { font-size: 15px; }
+  .approval-actions { display: flex; gap: 6px; }
+  .approval-actions button { flex: 1; margin-right: 0; padding: 9px 6px; }
+  .iso-office--state { padding: 1.5rem; }
 }

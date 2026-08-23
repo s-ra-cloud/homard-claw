@@ -64,10 +64,10 @@ export default function AgentsPage() {
 
   return (
     <Shell>
-      <div className="p-8 max-w-7xl mx-auto space-y-8">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6 sm:space-y-8">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b-4 border-border pb-6">
           <div>
-            <h1 className="font-display text-2xl text-foreground uppercase mb-2">Agent Roster</h1>
+            <h1 className="font-display text-lg sm:text-2xl text-foreground uppercase mb-2">Agent Roster</h1>
             <p className="text-muted-foreground text-sm">Manage your autonomous workforce.</p>
           </div>
           <Link href="/agents/new">
@@ -87,7 +87,7 @@ export default function AgentsPage() {
             ))}
           </div>
         ) : !agents || agents.length === 0 ? (
-          <PixelCard className="text-center p-12">
+          <PixelCard className="text-center p-6 sm:p-12">
             <div className="flex justify-center mb-6 opacity-50">
               <MarlowLobster size={112} status="idle" preset="marlow" />
             </div>
@@ -142,11 +142,11 @@ export default function AgentsPage() {
                   </div>
                 </div>
 
-                <div className="mt-6 pt-4 border-t-4 border-border flex justify-between items-center">
+                <div className="mt-6 pt-4 border-t-4 border-border flex flex-wrap justify-between items-center gap-3">
                   <div className="text-[10px] text-muted-foreground uppercase">
                     ID: {agent.id.slice(0, 8)}
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 ml-auto">
                     <Button 
                       variant={agent.status === 'paused' ? 'primary' : 'outline'} 
                       size="sm"

@@ -1,40 +1,133 @@
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useUser, useClerk } from "@clerk/react";
-import { LogOut, Home, Users, CheckSquare, Settings, Activity, Palmtree } from "lucide-react";
+import { LogOut, Home, Users, CheckSquare, Settings, Activity, Palmtree, Menu, X } from "lucide-react";
+
+const navItems = [
+  { href: "/office", label: "Office", icon: Home },
+  { href: "/agents", label: "Agents", icon: Users },
+  { href: "/tasks", label: "Tasks", icon: Activity },
+  { href: "/approvals", label: "Approvals", icon: CheckSquare },
+  { href: "/providers", label: "Providers", icon: Settings },
+  { href: "/island", label: "Island", icon: Palmtree },
+];
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const { user } = useUser();
   const { signOut } = useClerk();
+  const [navOpen, setNavOpen] = useState(false);
+  const navRef = useRef<HTMLElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
 
-  const navItems = [
-    { href: "/office", label: "Office", icon: Home },
-    { href: "/agents", label: "Agents", icon: Users },
-    { href: "/tasks", label: "Tasks", icon: Activity },
-    { href: "/approvals", label: "Approvals", icon: CheckSquare },
-    { href: "/providers", label: "Providers", icon: Settings },
-    { href: "/island", label: "Island", icon: Palmtree },
-  ];
+  // The drawer is route-scoped: navigating away always closes it.
+  useEffect(() => {
+    setNavOpen(false);
+  }, [location]);
+
+  // Growing past the lg breakpoint turns the drawer back into the permanent
+  // sidebar, so a stale "open" flag must not survive into desktop.
+  useEffect(() => {
+    const desktop = window.matchMedia("(min-width: 1024px)");
+    const onChange = (event: MediaQueryListEvent) => {
+      if (event.matches) setNavOpen(false);
+    };
+    desktop.addEventListener("change", onChange);
+    return () => desktop.removeEventListener("change", onChange);
+  }, []);
+
+  // While open the drawer behaves as a modal: focus moves in, stays trapped,
+  // the rest of the page is inert, and focus returns to the trigger on close.
+  useEffect(() => {
+    if (!navOpen) return;
+
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    closeButtonRef.current?.focus();
+
+    const content = contentRef.current;
+    content?.setAttribute("inert", "");
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setNavOpen(false);
+        return;
+      }
+      if (event.key !== "Tab" || !navRef.current) return;
+
+      const focusables = navRef.current.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+
+      if (event.shiftKey && (active === first || !navRef.current.contains(active))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      content?.removeAttribute("inert");
+      previouslyFocused?.focus?.();
+    };
+  }, [navOpen]);
+
+  const currentPage = navItems.find(
+    (item) => location === item.href || location.startsWith(item.href + "/"),
+  );
 
   return (
     <div className="flex h-[100dvh] w-full overflow-hidden bg-background relative">
       {/* Scanline overlay for that CRT monitor feel */}
       <div className="absolute inset-0 scanlines z-50 pointer-events-none opacity-50 mix-blend-overlay"></div>
 
-      {/* Sidebar */}
-      <aside className="w-64 flex flex-col border-r-4 border-border bg-card pixel-shadow z-10 shrink-0">
-        <div className="p-6 border-b-4 border-border bg-muted/30">
+      {/* Dims the page behind the mobile drawer */}
+      {navOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-background/80 lg:hidden"
+          onClick={() => setNavOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Sidebar — permanent from lg up, off-canvas drawer below it */}
+      <aside
+        id="main-nav"
+        ref={navRef}
+        aria-label="Main navigation"
+        {...(navOpen ? { role: "dialog" as const, "aria-modal": true } : {})}
+        className={`fixed inset-y-0 left-0 z-40 w-[min(17rem,85vw)] flex flex-col border-r-4 border-border bg-card pixel-shadow transition-transform duration-200 ease-out lg:static lg:z-10 lg:w-64 lg:shrink-0 lg:translate-x-0 ${
+          navOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+        <div className="p-4 sm:p-6 border-b-4 border-border bg-muted/30">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-primary pixel-shadow flex items-center justify-center shrink-0">
               <span className="font-display text-white text-xs">HC</span>
             </div>
             <h1 className="font-display text-sm text-primary uppercase tracking-tighter">HomardClaw</h1>
+            <button
+              type="button"
+              ref={closeButtonRef}
+              onClick={() => setNavOpen(false)}
+              className="ml-auto p-1 text-muted-foreground hover:text-foreground lg:hidden"
+              aria-label="Close menu"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
           <div className="mt-2 text-[10px] text-muted-foreground uppercase">Control Room v1.0</div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 py-6 space-y-2">
+        <nav className="flex-1 overflow-y-auto p-4 py-6 space-y-2">
           {navItems.map((item) => {
             const isActive = location === item.href || location.startsWith(item.href + "/");
             return (
@@ -52,12 +145,18 @@ export function Shell({ children }: { children: React.ReactNode }) {
               </Link>
             );
           })}
-        </div>
+        </nav>
 
         <div className="p-4 border-t-4 border-border bg-muted/30">
           <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 bg-secondary pixel-shadow border-2 border-border overflow-hidden flex items-center justify-center">
-              <img src={user?.imageUrl} alt="Avatar" className="w-full h-full object-cover" style={{ imageRendering: "pixelated" }} />
+            <div className="w-10 h-10 bg-secondary pixel-shadow border-2 border-border overflow-hidden flex items-center justify-center shrink-0">
+              {user?.imageUrl ? (
+                <img src={user.imageUrl} alt="" className="w-full h-full object-cover" style={{ imageRendering: "pixelated" }} />
+              ) : (
+                <span className="font-display text-[10px] text-secondary-foreground uppercase">
+                  {(user?.firstName ?? "D").slice(0, 1)}
+                </span>
+              )}
             </div>
             <div className="overflow-hidden">
               <div className="text-xs font-bold truncate text-accent">{user?.firstName || "Director"}</div>
@@ -74,10 +173,31 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
 
-      {/* Main Content */}
-      <main className="flex-1 overflow-y-auto bg-background relative z-0">
-        {children}
-      </main>
+      <div className="flex-1 flex flex-col min-w-0" ref={contentRef}>
+        {/* Mobile top bar */}
+        <header className="lg:hidden flex items-center gap-3 h-14 shrink-0 px-3 border-b-4 border-border bg-card z-20">
+          <button
+            type="button"
+            onClick={() => setNavOpen(true)}
+            className="flex items-center justify-center w-10 h-10 border-2 border-border bg-muted/40 text-foreground pixel-shadow"
+            aria-label="Open menu"
+            aria-expanded={navOpen}
+            aria-controls="main-nav"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+          <div className="w-8 h-8 bg-primary pixel-shadow flex items-center justify-center shrink-0">
+            <span className="font-display text-white text-xs">HC</span>
+          </div>
+          <span className="font-display text-xs text-primary uppercase tracking-tighter truncate">
+            {currentPage?.label ?? "HomardClaw"}
+          </span>
+        </header>
+
+        <main className="flex-1 overflow-y-auto overflow-x-hidden bg-background relative z-0">
+          {children}
+        </main>
+      </div>
     </div>
   );
 }

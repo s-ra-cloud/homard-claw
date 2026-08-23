@@ -92,24 +92,24 @@ export default function NewAgentPage() {
 
   return (
     <Shell>
-      <div className="p-8 max-w-4xl mx-auto space-y-8">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto space-y-6 sm:space-y-8">
         <div className="flex items-center gap-4 border-b-4 border-border pb-6">
           <Button variant="ghost" size="icon" onClick={() => setLocation("/agents")}>
             <ArrowLeft className="w-5 h-5" />
           </Button>
           <div>
-            <h1 className="font-display text-2xl text-foreground uppercase mb-1">Recruit Agent</h1>
+            <h1 className="font-display text-lg sm:text-2xl text-foreground uppercase mb-1">Recruit Agent</h1>
             <p className="text-muted-foreground text-sm">Configure a new autonomous worker for the office.</p>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
           <div className="lg:col-span-2">
             <PixelCard title="Configuration">
               <Form {...form}>
                 <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
                   
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <FormField
                       control={form.control}
                       name="name"
@@ -160,7 +160,7 @@ export default function NewAgentPage() {
                     )}
                   />
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <FormField
                       control={form.control}
                       name="provider"

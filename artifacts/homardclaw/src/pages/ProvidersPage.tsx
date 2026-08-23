@@ -10,10 +10,10 @@ export default function ProvidersPage() {
 
   return (
     <Shell>
-      <div className="p-8 max-w-5xl mx-auto space-y-8">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-5xl mx-auto space-y-6 sm:space-y-8">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b-4 border-border pb-6">
           <div>
-            <h1 className="font-display text-2xl text-foreground uppercase mb-2">Network Infrastructure</h1>
+            <h1 className="font-display text-lg sm:text-2xl text-foreground uppercase mb-2">Network Infrastructure</h1>
             <p className="text-muted-foreground text-sm">LLM Provider connection status and configuration.</p>
           </div>
         </div>
@@ -27,7 +27,7 @@ export default function ProvidersPage() {
             ))}
           </div>
         ) : !providers || providers.length === 0 ? (
-          <PixelCard className="text-center p-12" variant="destructive">
+          <PixelCard className="text-center p-6 sm:p-12" variant="destructive">
             <Network className="w-12 h-12 text-destructive mx-auto mb-4" />
             <h3 className="font-display text-lg uppercase mb-2">Network Disconnected</h3>
             <p className="text-muted-foreground">Unable to fetch provider status from the mainframe.</p>
