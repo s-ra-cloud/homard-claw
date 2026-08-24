@@ -197,13 +197,40 @@ async function proxyJson(
   }
 }
 
+/**
+ * Context threaded into every executor. `actionId` is the durable action
+ * row id; write executors derive their idempotency marker from it so an
+ * ambiguous outcome (crash mid-call) can later be verified against the
+ * provider instead of guessed at.
+ */
+export type ExecutionContext = { actionId: string | null };
+
 /* ------------------------------ Gmail ---------------------------------- */
 
-function rfc822(to: string, subject: string, body: string): string {
-  return Buffer.from(
-    `To: ${to}\r\nSubject: ${subject}\r\nContent-Type: text/plain; charset="UTF-8"\r\n\r\n${body}`,
-    "utf8",
-  ).toString("base64url");
+/**
+ * Deterministic RFC-822 Message-ID for an action row. Gmail preserves a
+ * caller-supplied Message-ID on send, and `rfc822msgid:` search finds it
+ * exactly — which turns "did that email actually go out?" into a lookup.
+ */
+function gmailMessageId(actionId: string): string {
+  return `homardclaw-action-${actionId}@agents.homardclaw`;
+}
+
+function rfc822(
+  to: string,
+  subject: string,
+  body: string,
+  messageId?: string,
+): string {
+  const headers = [
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    ...(messageId ? [`Message-ID: <${messageId}>`] : []),
+    `Content-Type: text/plain; charset="UTF-8"`,
+  ];
+  return Buffer.from(`${headers.join("\r\n")}\r\n\r\n${body}`, "utf8").toString(
+    "base64url",
+  );
 }
 
 type GmailHeaders = { name?: string; value?: string }[];
@@ -303,11 +330,19 @@ async function gmailCreateDraft(params: Record<string, unknown>): Promise<Execut
   };
 }
 
-async function gmailSendEmail(params: Record<string, unknown>): Promise<ExecutionOutcome> {
+async function gmailSendEmail(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
   const result = await proxyJson("gmail", "/gmail/v1/users/me/messages/send", {
     method: "POST",
     body: {
-      raw: rfc822(String(params.to), String(params.subject), String(params.body)),
+      raw: rfc822(
+        String(params.to),
+        String(params.subject),
+        String(params.body),
+        ctx.actionId ? gmailMessageId(ctx.actionId) : undefined,
+      ),
     },
   });
   if (!result.ok) return result.outcome;
@@ -375,10 +410,24 @@ async function driveReadFile(params: Record<string, unknown>): Promise<Execution
   };
 }
 
-async function driveCreateFile(params: Record<string, unknown>): Promise<ExecutionOutcome> {
+/** Drive appProperties key carrying the creating action's row id. */
+const DRIVE_ACTION_KEY = "homardclawActionId";
+
+async function driveCreateFile(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
   const created = await proxyJson("google_drive", "/drive/v3/files", {
     method: "POST",
-    body: { name: String(params.name), mimeType: "text/plain" },
+    body: {
+      name: String(params.name),
+      mimeType: "text/plain",
+      // The action id rides along as an app property so a crashed run can
+      // later ask Drive "does a file created by action X exist?" exactly.
+      ...(ctx.actionId
+        ? { appProperties: { [DRIVE_ACTION_KEY]: ctx.actionId } }
+        : {}),
+    },
   });
   if (!created.ok) return created.outcome;
   const file = created.data as { id?: string } | null;
@@ -461,7 +510,30 @@ async function githubListIssues(params: Record<string, unknown>): Promise<Execut
   };
 }
 
-async function githubCreateIssue(params: Record<string, unknown>): Promise<ExecutionOutcome> {
+/**
+ * Idempotency marker embedded in GitHub issue/comment bodies. An HTML
+ * comment never renders in the GitHub UI, but it survives in the raw body,
+ * so a recovery pass can list recent items and find exactly the one this
+ * action row created — or prove it never landed.
+ */
+function githubMarker(actionId: string): string {
+  return `<!-- homardclaw-action:${actionId} -->`;
+}
+
+function withGithubMarker(body: string, actionId: string | null): string {
+  if (!actionId) return body;
+  const marker = githubMarker(actionId);
+  return body ? `${body}\n\n${marker}` : marker;
+}
+
+async function githubCreateIssue(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const body = withGithubMarker(
+    params.body ? String(params.body) : "",
+    ctx.actionId,
+  );
   const result = await proxyJson(
     "github",
     `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/issues`,
@@ -469,7 +541,7 @@ async function githubCreateIssue(params: Record<string, unknown>): Promise<Execu
       method: "POST",
       body: {
         title: String(params.title),
-        ...(params.body ? { body: String(params.body) } : {}),
+        ...(body ? { body } : {}),
       },
     },
   );
@@ -481,12 +553,18 @@ async function githubCreateIssue(params: Record<string, unknown>): Promise<Execu
   };
 }
 
-async function githubCommentOnIssue(params: Record<string, unknown>): Promise<ExecutionOutcome> {
+async function githubCommentOnIssue(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
   const issueNumber = Math.trunc(Number(params.issueNumber));
   const result = await proxyJson(
     "github",
     `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/issues/${issueNumber}/comments`,
-    { method: "POST", body: { body: String(params.body) } },
+    {
+      method: "POST",
+      body: { body: withGithubMarker(String(params.body), ctx.actionId) },
+    },
   );
   if (!result.ok) return result.outcome;
   const comment = result.data as { html_url?: string } | null;
@@ -496,7 +574,13 @@ async function githubCommentOnIssue(params: Record<string, unknown>): Promise<Ex
   };
 }
 
-const EXECUTORS: Record<string, (params: Record<string, unknown>) => Promise<ExecutionOutcome>> = {
+const EXECUTORS: Record<
+  string,
+  (
+    params: Record<string, unknown>,
+    ctx: ExecutionContext,
+  ) => Promise<ExecutionOutcome>
+> = {
   "gmail.search": gmailSearch,
   "gmail.read_thread": gmailReadThread,
   "gmail.create_draft": gmailCreateDraft,
@@ -511,22 +595,265 @@ const EXECUTORS: Record<string, (params: Record<string, unknown>) => Promise<Exe
   "github.comment_on_issue": githubCommentOnIssue,
 };
 
-/** Run one validated, authorized operation against its connector. */
+/**
+ * Run one validated, authorized operation against its connector. Pass the
+ * action row id whenever one exists: write executors derive an idempotency
+ * marker from it, which is what makes crash recovery verifiable.
+ */
 export async function executeOperation(
   op: AppOperation,
   params: Record<string, unknown>,
+  ctx: ExecutionContext = { actionId: null },
 ): Promise<ExecutionOutcome> {
   const executor = EXECUTORS[op.name];
   if (!executor) {
     return { ok: false, kind: "failed", message: `No executor for ${op.name}.` };
   }
   try {
-    return await executor(params);
+    return await executor(params, ctx);
   } catch (error) {
     return {
       ok: false,
       kind: "failed",
       message: error instanceof Error ? error.message : "Unexpected app error",
+    };
+  }
+}
+
+/* --------------------- Crash-recovery verification ---------------------- */
+
+/**
+ * The answer to "did that interrupted write actually happen?", obtained by
+ * reading the provider — never by guessing.
+ *
+ * - "executed": the write provably landed; settle the row as done.
+ * - "not_executed": the provider provably has no trace; a retry is safe.
+ * - "unknown": the read itself failed or could not be conclusive; the row
+ *   must be settled as unknown-outcome, exactly as before this existed.
+ */
+export type VerificationResult =
+  | { kind: "executed"; summary: string }
+  | { kind: "not_executed" }
+  | { kind: "unknown"; message: string };
+
+/** Message of a failed outcome (verifier reads only ever fail this way). */
+function failureMessage(outcome: ExecutionOutcome): string {
+  return outcome.ok ? "Unexpected verifier state" : outcome.message;
+}
+
+async function verifyGmailSend(
+  params: Record<string, unknown>,
+  actionId: string,
+): Promise<VerificationResult> {
+  // rfc822msgid: is an exact-match lookup on the Message-ID the send call
+  // embedded, so this cannot false-positive on a similar email.
+  const q = encodeURIComponent(`rfc822msgid:${gmailMessageId(actionId)}`);
+  const result = await proxyJson(
+    "gmail",
+    `/gmail/v1/users/me/messages?q=${q}&maxResults=1&includeSpamTrash=true`,
+  );
+  if (!result.ok) {
+    return { kind: "unknown", message: failureMessage(result.outcome) };
+  }
+  const messages =
+    (result.data as { messages?: { id: string }[] } | null)?.messages ?? [];
+  if (messages.length === 0) return { kind: "not_executed" };
+  return {
+    kind: "executed",
+    summary: `Email sent (id ${messages[0].id}) to ${params.to}: "${params.subject}". Confirmed in the mailbox after an interrupted run.`,
+  };
+}
+
+async function verifyGithubCreateIssue(
+  params: Record<string, unknown>,
+  actionId: string,
+): Promise<VerificationResult> {
+  const result = await proxyJson(
+    "github",
+    `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/issues?state=all&sort=created&direction=desc&per_page=100`,
+  );
+  if (!result.ok) {
+    return { kind: "unknown", message: failureMessage(result.outcome) };
+  }
+  const issues =
+    (result.data as
+      | { number: number; html_url?: string; body?: string | null }[]
+      | null) ?? [];
+  const marker = githubMarker(actionId);
+  const match = issues.find((issue) => issue.body?.includes(marker));
+  if (match) {
+    return {
+      kind: "executed",
+      summary: `Opened issue #${match.number} in ${params.owner}/${params.repo}: ${match.html_url ?? ""} (confirmed after an interrupted run)`,
+    };
+  }
+  // A full first page means older issues were not scanned; the marker could
+  // hide beyond it, so absence here is not proof of absence.
+  if (issues.length >= 100) {
+    return {
+      kind: "unknown",
+      message:
+        "Too many recent issues to conclusively verify whether the interrupted creation landed.",
+    };
+  }
+  return { kind: "not_executed" };
+}
+
+async function verifyGithubComment(
+  params: Record<string, unknown>,
+  actionId: string,
+): Promise<VerificationResult> {
+  const issueNumber = Math.trunc(Number(params.issueNumber));
+  const result = await proxyJson(
+    "github",
+    `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/issues/${issueNumber}/comments?per_page=100`,
+  );
+  if (!result.ok) {
+    return { kind: "unknown", message: failureMessage(result.outcome) };
+  }
+  const comments =
+    (result.data as { html_url?: string; body?: string | null }[] | null) ?? [];
+  const marker = githubMarker(actionId);
+  const match = comments.find((comment) => comment.body?.includes(marker));
+  if (match) {
+    return {
+      kind: "executed",
+      summary: `Commented on ${params.owner}/${params.repo}#${issueNumber}: ${match.html_url ?? ""} (confirmed after an interrupted run)`,
+    };
+  }
+  if (comments.length >= 100) {
+    return {
+      kind: "unknown",
+      message:
+        "Too many comments on the issue to conclusively verify whether the interrupted comment landed.",
+    };
+  }
+  return { kind: "not_executed" };
+}
+
+async function verifyDriveCreateFile(
+  params: Record<string, unknown>,
+  actionId: string,
+): Promise<VerificationResult> {
+  const q = encodeURIComponent(
+    `appProperties has { key='${DRIVE_ACTION_KEY}' and value='${actionId}' } and trashed = false`,
+  );
+  const result = await proxyJson(
+    "google_drive",
+    `/drive/v3/files?q=${q}&pageSize=1&fields=${encodeURIComponent("files(id,name,size)")}`,
+  );
+  if (!result.ok) {
+    return { kind: "unknown", message: failureMessage(result.outcome) };
+  }
+  const files =
+    (result.data as
+      | { files?: { id: string; name: string; size?: string }[] }
+      | null)?.files ?? [];
+  if (files.length === 0) return { kind: "not_executed" };
+  const file = files[0];
+  // Creation is two calls (create metadata, then upload content), so the
+  // file can exist with the upload missing. The media PATCH is idempotent
+  // for this exact fileId, so completing it here is safe — never a dupe.
+  const content = String(params.content ?? "");
+  const expectedBytes = Buffer.byteLength(content, "utf8");
+  const actualBytes = Number(file.size ?? 0);
+  if (expectedBytes > 0 && actualBytes !== expectedBytes) {
+    const uploaded = await proxyJson(
+      "google_drive",
+      `/upload/drive/v3/files/${encodeURIComponent(file.id)}?uploadType=media`,
+      {
+        method: "PATCH",
+        body: content,
+        headers: { "Content-Type": "text/plain; charset=UTF-8" },
+      },
+    );
+    if (!uploaded.ok) {
+      return {
+        kind: "unknown",
+        message: `The file exists but its content upload was interrupted, and re-uploading failed: ${failureMessage(uploaded.outcome)}`,
+      };
+    }
+    return {
+      kind: "executed",
+      summary: `Created Drive file "${file.name}" (fileId ${file.id}). An interrupted run had left it without content; the content upload was completed during recovery.`,
+    };
+  }
+  return {
+    kind: "executed",
+    summary: `Created Drive file "${file.name}" (fileId ${file.id}). Confirmed complete after an interrupted run.`,
+  };
+}
+
+/**
+ * How trustworthy a verifier's "absent" answer is. GitHub's REST list
+ * endpoints are read-after-write consistent, so absence there is proof.
+ * Gmail search and Drive queries are eventually consistent indexes: absence
+ * shortly after the interrupted call proves nothing, so callers must only
+ * trust "not_executed" from them once the attempt is comfortably old.
+ */
+export type VerifierConsistency = "strong" | "eventual";
+
+const VERIFIERS: Record<
+  string,
+  {
+    consistency: VerifierConsistency;
+    verify: (
+      params: Record<string, unknown>,
+      actionId: string,
+    ) => Promise<VerificationResult>;
+  }
+> = {
+  "gmail.send_email": { consistency: "eventual", verify: verifyGmailSend },
+  "github.create_issue": {
+    consistency: "strong",
+    verify: verifyGithubCreateIssue,
+  },
+  "github.comment_on_issue": {
+    consistency: "strong",
+    verify: verifyGithubComment,
+  },
+  "google_drive.create_file": {
+    consistency: "eventual",
+    verify: verifyDriveCreateFile,
+  },
+};
+
+/** Whether an operation's outcome can be verified against the provider. */
+export function hasOutcomeVerifier(operation: string): boolean {
+  return operation in VERIFIERS;
+}
+
+/** The consistency class of an operation's verifier, if it has one. */
+export function verifierConsistency(
+  operation: string,
+): VerifierConsistency | null {
+  return VERIFIERS[operation]?.consistency ?? null;
+}
+
+/**
+ * Ask the provider whether an interrupted write actually happened, using
+ * the idempotency marker derived from the action row id. Any thrown error
+ * degrades to "unknown" — a verification failure must never be mistaken
+ * for "it did not run".
+ */
+export async function verifyOperationOutcome(
+  operation: string,
+  params: Record<string, unknown>,
+  actionId: string,
+): Promise<VerificationResult> {
+  const verifier = VERIFIERS[operation];
+  if (!verifier) {
+    return {
+      kind: "unknown",
+      message: `No outcome verification exists for ${operation}.`,
+    };
+  }
+  try {
+    return await verifier.verify(params, actionId);
+  } catch (error) {
+    return {
+      kind: "unknown",
+      message: error instanceof Error ? error.message : "Verification failed",
     };
   }
 }

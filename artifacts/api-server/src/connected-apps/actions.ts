@@ -7,7 +7,13 @@ import {
 import { and, asc, desc, eq } from "drizzle-orm";
 import { recordAudit } from "../audit";
 import { APP_CATALOG, findOperation, type ConnectedAppId } from "./catalog";
-import { executeOperation, type ExecutionOutcome } from "./connections";
+import {
+  executeOperation,
+  hasOutcomeVerifier,
+  verifierConsistency,
+  verifyOperationOutcome,
+  type ExecutionOutcome,
+} from "./connections";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type DbLike = Tx | typeof db;
@@ -100,11 +106,12 @@ export async function runAllowedAction(input: {
       targetSummary: input.targetSummary,
       status: "executing",
       decidedAt: new Date(),
+      executingAt: new Date(),
     })
     .returning();
   const op = findOperation(input.operation);
   const outcome: ExecutionOutcome = op
-    ? await executeOperation(op, input.params)
+    ? await executeOperation(op, input.params, { actionId: pending.id })
     : { ok: false, kind: "failed", message: "Unknown operation." };
   const action = await finalizeAction(pending.id, input.agentName, outcome);
   return { action, outcome };
@@ -120,7 +127,7 @@ export async function claimApprovedAction(
 ): Promise<AppActionRecord | null> {
   const [claimed] = await db
     .update(appActionsTable)
-    .set({ status: "executing" })
+    .set({ status: "executing", executingAt: new Date() })
     .where(
       and(
         eq(appActionsTable.id, actionId),
@@ -157,17 +164,37 @@ export async function denyClaimedAction(
 }
 
 /**
- * Finalize actions stranded in "executing" by a crashed attempt. Only the
+ * How each stranded "executing" row was resolved:
+ * - "confirmed": the provider proved the write landed; settled as executed.
+ * - "requeued": the provider proved it never landed and the row carries an
+ *   owner approval, so it was moved back to "approved" for a safe re-run.
+ * - "not_executed": provably never landed, but there is no approval to
+ *   re-run under (read/draft path); settled as failed so the agent can
+ *   request it again.
+ * - "unknown": verification was impossible or inconclusive; settled as
+ *   unknown-outcome and never retried — the pre-verification behavior.
+ */
+export type ReconciledAction = {
+  action: AppActionRecord;
+  resolution: "confirmed" | "requeued" | "not_executed" | "unknown";
+};
+/**
+ * Resolve actions stranded in "executing" by a crashed attempt. Only the
  * single worker that owns the task attempt may call this, and only before
  * it starts new actions: any "executing" row it did not just create belongs
- * to a dead run whose connector call may or may not have gone through. The
- * outcome is recorded as unknown rather than silently retried — retrying an
- * external write on ambiguity is how an email gets sent twice.
+ * to a dead run whose connector call may or may not have gone through.
+ *
+ * Every write executor embeds an idempotency marker derived from the action
+ * row id, so ambiguity is settled by ASKING the provider: a verification
+ * read either confirms the write (settled as executed), proves its absence
+ * (safe to re-run), or fails — in which case the outcome is recorded as
+ * unknown rather than retried, because retrying an external write on
+ * ambiguity is how an email gets sent twice.
  */
 export async function reconcileStaleExecutingActions(
   taskId: string,
   agentName: string,
-): Promise<AppActionRecord[]> {
+): Promise<ReconciledAction[]> {
   const stale = await db
     .select()
     .from(appActionsTable)
@@ -177,20 +204,111 @@ export async function reconcileStaleExecutingActions(
         eq(appActionsTable.status, "executing"),
       ),
     );
-  const settled: AppActionRecord[] = [];
+  const resolved: ReconciledAction[] = [];
   for (const action of stale) {
-    settled.push(
-      await finalizeAction(action.id, agentName, {
-        ok: false,
-        kind: "failed",
-        message:
-          "The outcome is unknown — a previous run was interrupted mid-execution. Verify in the external app before requesting it again.",
-      }),
-    );
+    resolved.push(await reconcileOneStaleAction(action, agentName));
   }
-  return settled;
+  return resolved;
 }
 
+/**
+ * How old an interrupted attempt must be before an eventually consistent
+ * provider index (Gmail search, Drive query) saying "nothing there" is
+ * believed. Younger absences settle as unknown: the write may simply not
+ * be indexed yet, and re-sending on a stale index is a duplicate.
+ */
+const EVENTUAL_ABSENCE_TRUST_AFTER_MS = 3 * 60 * 1000;
+
+async function reconcileOneStaleAction(
+  action: AppActionRecord,
+  agentName: string,
+): Promise<ReconciledAction> {
+  const settleUnknown = async (detail?: string): Promise<ReconciledAction> => ({
+    action: await finalizeAction(action.id, agentName, {
+      ok: false,
+      kind: "failed",
+      message: `The outcome is unknown — a previous run was interrupted mid-execution${detail ? ` and could not be verified (${detail})` : ""}. Verify in the external app before requesting it again.`,
+    }),
+    resolution: "unknown",
+  });
+
+  if (!hasOutcomeVerifier(action.operation)) return settleUnknown();
+
+  const verdict = await verifyOperationOutcome(
+    action.operation,
+    action.params ?? {},
+    action.id,
+  );
+  if (verdict.kind === "unknown") return settleUnknown(verdict.message);
+  if (verdict.kind === "executed") {
+    return {
+      action: await finalizeAction(action.id, agentName, {
+        ok: true,
+        summary: verdict.summary,
+      }),
+      resolution: "confirmed",
+    };
+  }
+  // The provider reported no trace of the write. For eventually consistent
+  // indexes, absence only counts as proof once the interrupted attempt is
+  // old enough to have been indexed; a fresh absence stays ambiguous.
+  if (verifierConsistency(action.operation) === "eventual") {
+    const startedAt =
+      action.executingAt ?? action.decidedAt ?? action.createdAt;
+    if (Date.now() - startedAt.getTime() < EVENTUAL_ABSENCE_TRUST_AFTER_MS) {
+      return settleUnknown(
+        "the interrupted attempt is too recent for the provider's search index to be conclusive",
+      );
+    }
+  }
+  // Provably never landed. If the owner approved it, hand it back to the
+  // normal approved-action path: the worker re-checks authorization, then
+  // claims and runs it exactly once with the SAME action id (and therefore
+  // the same idempotency marker). Without an approval there is nothing to
+  // re-run under, so record the verified non-delivery instead.
+  // recoveryRequeuedAt is the durable single-retry fence: a row that was
+  // already re-queued once is never re-queued again, however many crashes
+  // follow — the second ambiguity settles as unknown.
+  if (action.approvalId) {
+    if (action.recoveryRequeuedAt) {
+      return settleUnknown(
+        "it was already retried once after an earlier crash; it will not be retried again",
+      );
+    }
+    const requeued = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(appActionsTable)
+        .set({ status: "approved", recoveryRequeuedAt: new Date() })
+        .where(
+          and(
+            eq(appActionsTable.id, action.id),
+            eq(appActionsTable.status, "executing"),
+          ),
+        )
+        .returning();
+      if (row) {
+        await recordAudit(
+          "app_action.requeued",
+          `An interrupted action by ${agentName} (${action.operation}: ${action.targetSummary}) was verified as never delivered and re-queued for a safe retry.`,
+          tx,
+        );
+      }
+      return row ?? null;
+    });
+    if (requeued) return { action: requeued, resolution: "requeued" };
+    // Someone else already moved the row; report it as-is without settling.
+    return settleUnknown("the row was concurrently modified");
+  }
+  return {
+    action: await finalizeAction(action.id, agentName, {
+      ok: false,
+      kind: "failed",
+      message:
+        "A previous run was interrupted, and verification confirmed the action never went through. It was not retried automatically — request it again if still needed.",
+    }),
+    resolution: "not_executed",
+  };
+}
 /** Execute a claimed (status "executing") action and finalize its row. */
 export async function executeClaimedAction(
   action: AppActionRecord,
@@ -198,7 +316,7 @@ export async function executeClaimedAction(
 ): Promise<{ action: AppActionRecord; outcome: ExecutionOutcome }> {
   const op = findOperation(action.operation);
   const outcome: ExecutionOutcome = op
-    ? await executeOperation(op, action.params ?? {})
+    ? await executeOperation(op, action.params ?? {}, { actionId: action.id })
     : { ok: false, kind: "failed", message: "Unknown operation." };
   const finalized = await finalizeAction(action.id, agentName, outcome);
   return { action: finalized, outcome };

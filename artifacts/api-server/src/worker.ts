@@ -618,16 +618,42 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
   // one process ever moves a row approved → executing, so an approved email
   // cannot be sent twice however many workers race on the retry.
   try {
-    // Any action still "executing" belongs to a crashed attempt: its
-    // connector call may or may not have happened, so it is settled as
-    // unknown-outcome rather than silently retried.
+    // Any action still "executing" belongs to a crashed attempt. Each one
+    // is verified against the provider via its idempotency marker: a write
+    // that provably landed is settled as done, one that provably never
+    // landed is re-queued (if approved) for a safe retry, and only when
+    // verification is impossible is the outcome recorded as unknown.
     const stranded = await reconcileStaleExecutingActions(task.id, agent.name);
-    for (const action of stranded) {
-      await addTaskLog(
-        task.id,
-        "warn",
-        `A previous run was interrupted mid-action (${action.targetSummary}); its outcome is unknown and it was not retried.`,
-      );
+    for (const { action, resolution } of stranded) {
+      switch (resolution) {
+        case "confirmed":
+          await addTaskLog(
+            task.id,
+            "info",
+            `A previous run was interrupted mid-action, but the write was confirmed with the provider: ${action.targetSummary}.`,
+          );
+          break;
+        case "requeued":
+          await addTaskLog(
+            task.id,
+            "info",
+            `A previous run was interrupted before the action went through (${action.targetSummary}); it was verified as not delivered and will be retried safely.`,
+          );
+          break;
+        case "not_executed":
+          await addTaskLog(
+            task.id,
+            "warn",
+            `A previous run was interrupted and the action provably never went through (${action.targetSummary}); it was not retried automatically.`,
+          );
+          break;
+        default:
+          await addTaskLog(
+            task.id,
+            "warn",
+            `A previous run was interrupted mid-action (${action.targetSummary}); its outcome is unknown and it was not retried.`,
+          );
+      }
     }
     const approvedActions = (await listTaskActions(task.id)).filter(
       (action) => action.status === "approved",

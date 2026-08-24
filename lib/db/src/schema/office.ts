@@ -651,6 +651,20 @@ export const appActionsTable = pgTable(
     resultSummary: text("result_summary"),
     errorMessage: text("error_message"),
     decidedAt: timestamp("decided_at", { withTimezone: true }),
+    /**
+     * When the row last entered "executing" (claim or direct insert). Crash
+     * recovery uses it to judge whether a provider's eventually-consistent
+     * search has had time to index the interrupted write.
+     */
+    executingAt: timestamp("executing_at", { withTimezone: true }),
+    /**
+     * Set the one time crash recovery re-queues a verified-absent approved
+     * write. A second crash on the same row settles as unknown instead of
+     * re-queueing again — the durable single-retry fence.
+     */
+    recoveryRequeuedAt: timestamp("recovery_requeued_at", {
+      withTimezone: true,
+    }),
     executedAt: timestamp("executed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
