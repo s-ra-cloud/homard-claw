@@ -173,6 +173,32 @@ export interface AgentPermissionOverrides {
   maxSubtasksPerTask?: number | null;
 }
 
+export type AppGrantApp = typeof AppGrantApp[keyof typeof AppGrantApp];
+
+
+export const AppGrantApp = {
+  gmail: 'gmail',
+  google_drive: 'google_drive',
+  github: 'github',
+} as const;
+
+export type AppGrantAccessLevel = typeof AppGrantAccessLevel[keyof typeof AppGrantAccessLevel];
+
+
+export const AppGrantAccessLevel = {
+  read: 'read',
+  draft: 'draft',
+  write: 'write',
+} as const;
+
+/**
+ * Explicit permission for one agent to use one connected app. "read" only looks, "draft" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), "write" may take externally visible actions — those always pass through the approval desk before running.
+ */
+export interface AppGrant {
+  app: AppGrantApp;
+  accessLevel: AppGrantAccessLevel;
+}
+
 export interface AvatarConfig {
   shellColor: string;
   deskStyle: string;
@@ -211,6 +237,7 @@ export interface Agent {
   autonomy: AgentAutonomy;
   permissions: AgentPermissions;
   permissionOverrides?: AgentPermissionOverrides | null;
+  appGrants: AppGrant[];
   avatar: AvatarConfig;
   archived: boolean;
   /** @nullable */
@@ -526,6 +553,7 @@ export interface AgentInput {
   securityPreset: AgentInputSecurityPreset;
   autonomy?: AgentInputAutonomy;
   permissionOverrides?: AgentPermissionOverrides | null;
+  appGrants?: AppGrant[];
   avatar?: AvatarConfig;
 }
 
@@ -633,7 +661,48 @@ export interface AgentUpdate {
   securityPreset?: AgentUpdateSecurityPreset;
   autonomy?: AgentUpdateAutonomy;
   permissionOverrides?: AgentPermissionOverrides | null;
+  appGrants?: AppGrant[];
   avatar?: AvatarConfig;
+}
+
+export type ConnectedAppApp = typeof ConnectedAppApp[keyof typeof ConnectedAppApp];
+
+
+export const ConnectedAppApp = {
+  gmail: 'gmail',
+  google_drive: 'google_drive',
+  github: 'github',
+} as const;
+
+/**
+ * Live connection state of the workspace owner's account: "unavailable" means the connector service itself could not be reached, not that the account is disconnected.
+ */
+export type ConnectedAppStatus = typeof ConnectedAppStatus[keyof typeof ConnectedAppStatus];
+
+
+export const ConnectedAppStatus = {
+  connected: 'connected',
+  not_connected: 'not_connected',
+  unavailable: 'unavailable',
+} as const;
+
+export interface ConnectedApp {
+  app: ConnectedAppApp;
+  displayName: string;
+  enabled: boolean;
+  /** Live connection state of the workspace owner's account: "unavailable" means the connector service itself could not be reached, not that the account is disconnected. */
+  status: ConnectedAppStatus;
+  /** @nullable */
+  statusDetail: string | null;
+  grantedAgents: number;
+}
+
+export interface ConnectedAppList {
+  apps: ConnectedApp[];
+}
+
+export interface ConnectedAppUpdate {
+  enabled: boolean;
 }
 
 export interface ArchiveInput {

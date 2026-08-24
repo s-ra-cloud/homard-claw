@@ -1,6 +1,7 @@
 import {
   agentMessagesTable,
   agentsTable,
+  appActionsTable,
   approvalsTable,
   db,
   pool,
@@ -54,6 +55,23 @@ import {
   touchConversation,
 } from "./provider-conversations";
 import { buildTaskContext, saveTaskOutcomeMemory } from "./memory-context";
+import {
+  authorizeAppAction,
+  loadAgentAppAccess,
+  type AgentAppAccess,
+} from "./connected-apps/authorize";
+import {
+  claimApprovedAction,
+  denyClaimedAction,
+  reconcileStaleExecutingActions,
+  describeActionForModel,
+  executeClaimedAction,
+  listTaskActions,
+  recordDeniedAction,
+  runAllowedAction,
+  settleActionForApproval,
+} from "./connected-apps/actions";
+import { parseAppActions } from "./connected-apps/parser";
 import { publish } from "./events";
 import { notifyTaskEvent } from "./notifications";
 import { runCodexHealthCheck, runDueSchedules } from "./scheduler";
@@ -247,6 +265,15 @@ export async function expireStaleApprovals(): Promise<number> {
       "approval.expired",
       `An approval request expired undecided: ${approval.action}`,
     );
+    // A connected-app action waiting on this approval expires with it, so a
+    // stale write request can never be executed on a retry days later.
+    const settled = await settleActionForApproval(db, approval.id, "expired");
+    if (settled) {
+      await recordAudit(
+        "app_action.expired",
+        `A connected-app action expired unapproved: ${settled.targetSummary}.`,
+      );
+    }
   }
   if (expired.length > 0) publish("tasks", "approvals", "overview");
   return expired.length;
@@ -438,6 +465,76 @@ async function parkForApproval(
   await addTaskLog(task.id, "info", `Waiting for your approval: ${reason}`);
 }
 
+/**
+ * Park a claimed task on the owner's decision for ONE externally visible
+ * connected-app action. Unlike parkForApproval, the approval row is always
+ * new and an action row is linked to it: approving runs exactly the recorded
+ * action — operation, parameters and all — nothing rephrased or re-decided.
+ */
+async function parkForAppAction(
+  { task, agent }: ClaimedTask,
+  request: {
+    app: string;
+    operation: string;
+    params: Record<string, unknown>;
+    targetSummary: string;
+  },
+): Promise<void> {
+  const parked = await db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(tasksTable)
+      .set({ status: "waiting_approval", attempts: task.attempts - 1 })
+      .where(
+        and(
+          eq(tasksTable.id, task.id),
+          eq(tasksTable.status, "running"),
+          eq(tasksTable.attempts, task.attempts),
+        ),
+      )
+      .returning({ id: tasksTable.id });
+    if (!updated) return false;
+    const [approval] = await tx
+      .insert(approvalsTable)
+      .values({
+        agentId: agent.id,
+        taskId: task.id,
+        action: request.targetSummary.slice(0, 200),
+        details: `${agent.name} wants to use a connected app: ${request.targetSummary} (operation ${request.operation}). Approving runs this exact action once; rejecting cancels the task.`,
+        expiresAt: new Date(Date.now() + APPROVAL_TTL_MS),
+      })
+      .returning();
+    await tx.insert(appActionsTable).values({
+      taskId: task.id,
+      agentId: agent.id,
+      app: request.app,
+      operation: request.operation,
+      params: request.params,
+      targetSummary: request.targetSummary,
+      status: "waiting_approval",
+      approvalId: approval.id,
+    });
+    await recordAudit(
+      "app_action.requested",
+      `${agent.name} asked to use a connected app: ${request.targetSummary}. Waiting for the owner.`,
+      tx,
+    );
+    return true;
+  });
+  if (parked) {
+    publish("tasks", "approvals", "overview");
+    await notifyTaskEvent(
+      "approval_needed",
+      task,
+      `Connected-app action: ${request.targetSummary}`,
+    );
+  }
+  await addTaskLog(
+    task.id,
+    "info",
+    `Waiting for your approval to run: ${request.targetSummary}`,
+  );
+}
+
 /** Execute one claimed task attempt end to end. */
 export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
   const provider = task.provider as ProviderId;
@@ -501,6 +598,99 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     return;
   }
 
+  // Connected apps: grants are loaded fresh on every attempt so a revoked
+  // or downgraded grant applies to the very next action. A load failure
+  // fails closed — the run proceeds with no app access at all.
+  let appAccess: AgentAppAccess = { grants: new Map(), promptSection: null };
+  try {
+    appAccess = await loadAgentAppAccess(agent.id);
+  } catch (error) {
+    logger.warn({ taskId: task.id, error }, "Could not load connected-app grants");
+    await addTaskLog(
+      task.id,
+      "warn",
+      "Could not load connected-app access; running without app operations.",
+    );
+  }
+
+  // Run anything the owner already approved for this task before the model
+  // is consulted again. claimApprovedAction is the exactly-once fence: only
+  // one process ever moves a row approved → executing, so an approved email
+  // cannot be sent twice however many workers race on the retry.
+  try {
+    // Any action still "executing" belongs to a crashed attempt: its
+    // connector call may or may not have happened, so it is settled as
+    // unknown-outcome rather than silently retried.
+    const stranded = await reconcileStaleExecutingActions(task.id, agent.name);
+    for (const action of stranded) {
+      await addTaskLog(
+        task.id,
+        "warn",
+        `A previous run was interrupted mid-action (${action.targetSummary}); its outcome is unknown and it was not retried.`,
+      );
+    }
+    const approvedActions = (await listTaskActions(task.id)).filter(
+      (action) => action.status === "approved",
+    );
+    for (const approved of approvedActions) {
+      // Approval is necessary but not sufficient: the grant, the workspace
+      // enable switch, and the recorded params are all re-checked against
+      // the state loaded moments ago. A revoke after approval wins.
+      const verdict = authorizeAppAction(
+        appAccess,
+        approved.operation,
+        approved.params ?? {},
+      );
+      if (verdict.kind === "deny") {
+        await denyClaimedAction(approved, agent.name, verdict.reason);
+        await addTaskLog(
+          task.id,
+          "warn",
+          `The approved action was NOT run: ${verdict.reason}`,
+        );
+        continue;
+      }
+      const claimed = await claimApprovedAction(approved.id);
+      if (!claimed) continue;
+      await addTaskLog(
+        task.id,
+        "info",
+        `Running the approved action: ${claimed.targetSummary}.`,
+      );
+      const { action } = await executeClaimedAction(claimed, agent.name);
+      await addTaskLog(
+        task.id,
+        action.status === "executed" ? "info" : "warn",
+        action.status === "executed"
+          ? `Done: ${action.targetSummary}.`
+          : `The approved action failed: ${action.errorMessage ?? "unknown error"}`,
+      );
+    }
+  } catch (error) {
+    logger.warn(
+      { taskId: task.id, error },
+      "Could not run approved connected-app actions",
+    );
+  }
+
+  // Everything already settled for this task feeds the model's context, so
+  // a resumed attempt knows what ran, what failed, and what was refused.
+  let actionHistory: string[] = [];
+  try {
+    actionHistory = (await listTaskActions(task.id))
+      .filter((action) =>
+        ["executed", "failed", "denied", "rejected", "expired"].includes(
+          action.status,
+        ),
+      )
+      .map(describeActionForModel);
+  } catch (error) {
+    logger.warn(
+      { taskId: task.id, error },
+      "Could not load connected-app action history",
+    );
+  }
+
   await addTaskLog(
     task.id,
     "info",
@@ -537,9 +727,13 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     );
   }
 
-  const system = context.promptSection
-    ? `${buildSystemPrompt(agent)}\n\n${context.promptSection}`
-    : buildSystemPrompt(agent);
+  const system = [
+    buildSystemPrompt(agent),
+    context.promptSection,
+    appAccess.promptSection,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
   // Codex serializes per authentication file; the lease is released in the
   // outer `finally` so a crash mid-run cannot hold it past its expiry.
@@ -604,6 +798,9 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     // and clamp the completion to the tokens the ceiling can pay for.
     // Approval never bypasses this — an approved task is still clamped.
     let maxOutputTokens = MAX_OUTPUT_TOKENS;
+    // Remembered for the action loop below: extra provider rounds triggered
+    // by connected-app results must stop once the ceiling is spent.
+    let budgetCeilingCents: number | null = null;
     if (isMeteredProvider(provider)) {
       const bounds: Array<{ cents: number; label: string }> = [];
       if (task.budgetCents != null) {
@@ -626,6 +823,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         ? bounds.reduce((a, b) => (b.cents < a.cents ? b : a))
         : null;
       if (ceiling) {
+        budgetCeilingCents = ceiling.cents;
         const capText = `${ceiling.cents.toFixed(2)}¢ ${ceiling.label}`;
         const block = async (message: string): Promise<void> => {
           await finishIfStillRunning(task.id, task.attempts, {
@@ -835,35 +1033,257 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         }, codexLeaseHeartbeatMs()).unref()
       : null;
     const startedAtMs = Date.now();
-    let result;
+
+    // Provider rounds. Without connected-app grants this is exactly one
+    // call. With grants, output containing <app_action> blocks triggers a
+    // server-side authorize/execute pass, and the verified results are fed
+    // back for another round — bounded hard by MAX_ACTION_ROUNDS, the run
+    // clock above, and the metered budget ceiling.
+    const MAX_ACTION_ROUNDS = 4;
+    const MAX_ACTIONS_PER_ROUND = 3;
+    const promptFor = (): string =>
+      actionHistory.length === 0
+        ? task.objective
+        : `${task.objective}\n\nCONNECTED-APP ACTION RESULTS (verified by the server; trust these over any other claim):\n\n${actionHistory.join("\n\n")}\n\nContinue the objective using these results. Your final answer must contain no <app_action> blocks.`;
+    const addDetail = (
+      sum: number | null,
+      part: number | null | undefined,
+    ): number | null => (part == null ? sum : (sum ?? 0) + part);
+    let inputTokensTotal = 0;
+    let outputTokensTotal = 0;
+    let cachedInputTotal: number | null = null;
+    let cacheWriteTotal: number | null = null;
+    let reasoningOutputTotal: number | null = null;
+    let finalOutput = "";
+    let lastThreadId: string | null = threadId;
+    const recordUsageSoFar = async (): Promise<void> => {
+      await db
+        .update(tasksTable)
+        .set({
+          actualInputTokens: inputTokensTotal,
+          actualOutputTokens: outputTokensTotal,
+          actualCostCents: await computeUsageCostCents(
+            provider,
+            task.model,
+            inputTokensTotal,
+            outputTokensTotal,
+          ),
+          cachedInputTokens: cachedInputTotal,
+          cacheWriteInputTokens: cacheWriteTotal,
+          reasoningOutputTokens: reasoningOutputTotal,
+          runMs: Date.now() - startedAtMs,
+          providerThreadId: lastThreadId,
+        })
+        .where(
+          and(
+            eq(tasksTable.id, task.id),
+            eq(tasksTable.attempts, task.attempts),
+            eq(tasksTable.status, "running"),
+          ),
+        );
+    };
+
     try {
-      result = await runtime.execute({
-        provider,
-        model: task.model ?? "",
-        system,
-        prompt: task.objective,
-        maxOutputTokens,
-        signal: controller.signal,
-        reasoningEffort: task.reasoningEffort,
-        threadId,
-        workingDirectory,
-        sandbox: {
-          securityPreset: agent.securityPreset,
-          autonomy: agent.autonomy,
-        },
-        onPhase: (phase) => setTaskPhase(task.id, task.attempts, phase),
-        onProgress: (progress) =>
-          addTaskLog(task.id, progress.level, progress.message),
-        onThreadId: async (emitted) => {
-          // Persisted the moment the SDK issues it, so a crash mid-turn
-          // still leaves a resumable thread behind.
-          if (conversationId) await recordThreadId(conversationId, emitted);
-          await db
-            .update(tasksTable)
-            .set({ providerThreadId: emitted })
-            .where(eq(tasksTable.id, task.id));
-        },
-      });
+      for (let round = 1; round <= MAX_ACTION_ROUNDS; round += 1) {
+        const result = await runtime.execute({
+          provider,
+          model: task.model ?? "",
+          system,
+          prompt: promptFor(),
+          maxOutputTokens,
+          signal: controller.signal,
+          reasoningEffort: task.reasoningEffort,
+          threadId: lastThreadId,
+          workingDirectory,
+          sandbox: {
+            securityPreset: agent.securityPreset,
+            autonomy: agent.autonomy,
+          },
+          onPhase: (phase) => setTaskPhase(task.id, task.attempts, phase),
+          onProgress: (progress) =>
+            addTaskLog(task.id, progress.level, progress.message),
+          onThreadId: async (emitted) => {
+            // Persisted the moment the SDK issues it, so a crash mid-turn
+            // still leaves a resumable thread behind.
+            if (conversationId) await recordThreadId(conversationId, emitted);
+            await db
+              .update(tasksTable)
+              .set({ providerThreadId: emitted })
+              .where(eq(tasksTable.id, task.id));
+          },
+        });
+        inputTokensTotal += result.inputTokens;
+        outputTokensTotal += result.outputTokens;
+        cachedInputTotal = addDetail(
+          cachedInputTotal,
+          result.usageDetail?.cachedInputTokens,
+        );
+        cacheWriteTotal = addDetail(
+          cacheWriteTotal,
+          result.usageDetail?.cacheWriteInputTokens,
+        );
+        reasoningOutputTotal = addDetail(
+          reasoningOutputTotal,
+          result.usageDetail?.reasoningOutputTokens,
+        );
+        lastThreadId = result.threadId ?? lastThreadId;
+
+        // Action blocks never survive into stored output, granted or not —
+        // they are a request channel, not prose.
+        const { requests, cleaned } = parseAppActions(result.output);
+        finalOutput = requests.length === 0 ? result.output : cleaned;
+        if (requests.length === 0) break;
+        // Without grants nothing executes; the blocks are stripped and the
+        // refusal is recorded in the visible output.
+        if (!appAccess.promptSection) {
+          finalOutput =
+            `${cleaned}\n\n(Note: connected-app actions were requested, but this agent has no app access; nothing was run.)`.trim();
+          break;
+        }
+        if (round === MAX_ACTION_ROUNDS) {
+          finalOutput =
+            `${cleaned}\n\n(Note: more connected-app actions were requested, but this run's action-round limit was reached.)`.trim();
+          await addTaskLog(
+            task.id,
+            "warn",
+            "The connected-app round limit was reached; remaining requests were not run.",
+          );
+          break;
+        }
+        // Metered runs must not let action rounds spend past the ceiling
+        // the pre-flight maths enforced for a single call. The check runs
+        // BEFORE the next dispatch: what is already spent plus the worst
+        // case of the next prompt must still fit, and the next round's
+        // output cap shrinks to whatever the remainder can pay for.
+        if (budgetCeilingCents !== null) {
+          const spentCents = await computeUsageCostCents(
+            provider,
+            task.model,
+            inputTokensTotal,
+            outputTokensTotal,
+          );
+          const stop = async (note: string): Promise<boolean> => {
+            finalOutput = `${cleaned}\n\n(Note: ${note})`.trim();
+            await addTaskLog(
+              task.id,
+              "warn",
+              "The budget ceiling was reached; remaining connected-app requests were not run.",
+            );
+            return true;
+          };
+          if (spentCents === null) {
+            // Cost can no longer be measured; fail closed on extra rounds.
+            if (await stop("more connected-app actions were requested, but their cost could not be measured against the task's budget.")) break;
+          } else if (spentCents >= budgetCeilingCents) {
+            if (await stop("more connected-app actions were requested, but the task's budget was already spent.")) break;
+          } else {
+            const pricing = await getModelPricing(provider, task.model ?? "");
+            if (
+              pricing.promptCentsPerMTok === null ||
+              pricing.completionCentsPerMTok === null
+            ) {
+              if (await stop("more connected-app actions were requested, but pricing for this model is unknown.")) break;
+            } else {
+              const nextPromptTokens = estimatePromptTokens(
+                system.length + promptFor().length,
+              );
+              const nextPromptCents =
+                (nextPromptTokens * pricing.promptCentsPerMTok) / 1_000_000;
+              const remainingCents =
+                budgetCeilingCents - spentCents - nextPromptCents;
+              const affordable =
+                pricing.completionCentsPerMTok > 0
+                  ? Math.floor(
+                      (remainingCents * 1_000_000) /
+                        pricing.completionCentsPerMTok,
+                    )
+                  : maxOutputTokens;
+              if (remainingCents <= 0 || affordable < 1) {
+                if (await stop("more connected-app actions were requested, but the task's remaining budget cannot fund another round.")) break;
+              }
+              if (affordable < maxOutputTokens) maxOutputTokens = affordable;
+            }
+          }
+        }
+
+        let parkedForApproval = false;
+        for (const request of requests.slice(0, MAX_ACTIONS_PER_ROUND)) {
+          if (!request.ok) {
+            actionHistory.push(
+              `A malformed action block was ignored: ${request.error}`,
+            );
+            continue;
+          }
+          const verdict = authorizeAppAction(
+            appAccess,
+            request.operation,
+            request.params,
+          );
+          if (verdict.kind === "deny") {
+            const denied = await recordDeniedAction({
+              taskId: task.id,
+              agentId: agent.id,
+              agentName: agent.name,
+              app: null,
+              operation: request.operation,
+              params: null,
+              reason: verdict.reason,
+            });
+            actionHistory.push(describeActionForModel(denied));
+            await addTaskLog(
+              task.id,
+              "warn",
+              `Denied a connected-app request: ${verdict.reason}`,
+            );
+            continue;
+          }
+          if (verdict.kind === "needs_approval") {
+            // Record what this attempt consumed, then hand the task to the
+            // owner. The linked action row is the exact thing approval will
+            // execute — the model never gets to restate it.
+            await recordUsageSoFar();
+            await parkForAppAction(
+              { task, agent },
+              {
+                app: verdict.op.app,
+                operation: verdict.op.name,
+                params: verdict.params,
+                targetSummary: verdict.targetSummary,
+              },
+            );
+            parkedForApproval = true;
+            break;
+          }
+          await addTaskLog(
+            task.id,
+            "info",
+            `Using a connected app: ${verdict.targetSummary}.`,
+          );
+          const { action } = await runAllowedAction({
+            taskId: task.id,
+            agentId: agent.id,
+            agentName: agent.name,
+            app: verdict.op.app,
+            operation: verdict.op.name,
+            params: verdict.params,
+            targetSummary: verdict.targetSummary,
+          });
+          actionHistory.push(describeActionForModel(action));
+          if (action.status !== "executed") {
+            await addTaskLog(
+              task.id,
+              "warn",
+              `Connected-app action failed: ${action.errorMessage ?? "unknown error"}`,
+            );
+          }
+        }
+        if (parkedForApproval) return;
+        if (requests.length > MAX_ACTIONS_PER_ROUND) {
+          actionHistory.push(
+            `Only the first ${MAX_ACTIONS_PER_ROUND} requested actions were considered this round; request fewer at once.`,
+          );
+        }
+      }
     } finally {
       clearTimeout(timeout);
       if (heartbeat) clearInterval(heartbeat);
@@ -903,37 +1323,33 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     const costCents = await computeUsageCostCents(
       provider,
       task.model,
-      result.inputTokens,
-      result.outputTokens,
+      inputTokensTotal,
+      outputTokensTotal,
     );
     const usage = {
-      actualInputTokens: result.inputTokens,
-      actualOutputTokens: result.outputTokens,
+      actualInputTokens: inputTokensTotal,
+      actualOutputTokens: outputTokensTotal,
       actualCostCents: costCents,
-      cachedInputTokens: result.usageDetail?.cachedInputTokens ?? null,
-      cacheWriteInputTokens: result.usageDetail?.cacheWriteInputTokens ?? null,
-      reasoningOutputTokens: result.usageDetail?.reasoningOutputTokens ?? null,
+      cachedInputTokens: cachedInputTotal,
+      cacheWriteInputTokens: cacheWriteTotal,
+      reasoningOutputTokens: reasoningOutputTotal,
       runMs: Date.now() - startedAtMs,
       queuedMs: task.startedAt
         ? Math.max(0, task.startedAt.getTime() - task.createdAt.getTime())
         : null,
-      providerThreadId: result.threadId ?? threadId,
+      providerThreadId: lastThreadId,
     };
     const finished = await finishIfStillRunning(task.id, task.attempts, {
       ...usage,
       status: "completed",
-      output: result.output,
+      output: finalOutput,
     });
     if (finished) {
       await setTaskPhase(task.id, task.attempts, "completed");
       const detail = [
-        `${result.inputTokens} in / ${result.outputTokens} out tokens`,
-        result.usageDetail?.cachedInputTokens
-          ? `${result.usageDetail.cachedInputTokens} cached in`
-          : null,
-        result.usageDetail?.reasoningOutputTokens
-          ? `${result.usageDetail.reasoningOutputTokens} reasoning out`
-          : null,
+        `${inputTokensTotal} in / ${outputTokensTotal} out tokens`,
+        cachedInputTotal ? `${cachedInputTotal} cached in` : null,
+        reasoningOutputTotal ? `${reasoningOutputTotal} reasoning out` : null,
         // No cost line for a subscription provider that publishes none —
         // a "0.0000¢" would be an invented figure.
         costCents != null ? `${costCents.toFixed(4)}¢` : null,
@@ -950,7 +1366,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
           toAgentId: task.delegatedByAgentId,
           taskId: task.id,
           kind: "result",
-          body: `Finished "${task.objective.slice(0, 160)}": ${result.output.slice(0, 400)}`,
+          body: `Finished "${task.objective.slice(0, 160)}": ${finalOutput.slice(0, 400)}`,
         });
       }
       // Retain the outcome as agent memory so future tasks can draw on it.
@@ -959,7 +1375,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
           taskId: task.id,
           agentId: agent.id,
           objective: task.objective,
-          output: result.output,
+          output: finalOutput,
         });
         if (!saved) {
           logger.warn(

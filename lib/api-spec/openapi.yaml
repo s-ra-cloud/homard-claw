@@ -1161,6 +1161,43 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/UsageReport"
+  /connected-apps:
+    get:
+      operationId: listConnectedApps
+      tags: [office]
+      summary: Workspace connected-app inventory with connection status and grant counts
+      responses:
+        "200":
+          description: Connected app inventory
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectedAppList"
+  /connected-apps/{app}:
+    patch:
+      operationId: updateConnectedApp
+      tags: [office]
+      summary: Enable or disable a connected app for every agent at once
+      parameters:
+        - name: app
+          in: path
+          required: true
+          schema: { type: string, enum: [gmail, google_drive, github] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConnectedAppUpdate"
+      responses:
+        "200":
+          description: Updated connected app
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectedApp"
+        "404":
+          description: Unknown app
 components:
   parameters:
     AgentId:
@@ -1203,7 +1240,7 @@ components:
         - status
     Agent:
       type: object
-      required: [id, name, title, mission, provider, status, securityPreset, autonomy, permissions, avatar, archived, createdAt]
+      required: [id, name, title, mission, provider, status, securityPreset, autonomy, permissions, appGrants, avatar, archived, createdAt]
       properties:
         id: { type: string }
         name: { type: string }
@@ -1230,6 +1267,9 @@ components:
           oneOf:
             - $ref: "#/components/schemas/AgentPermissionOverrides"
             - type: "null"
+        appGrants:
+          type: array
+          items: { $ref: "#/components/schemas/AppGrant" }
         avatar: { $ref: "#/components/schemas/AvatarConfig" }
         archived: { type: boolean }
         archivedAt: { type: ["string", "null"] }
@@ -1338,6 +1378,9 @@ components:
           oneOf:
             - $ref: "#/components/schemas/AgentPermissionOverrides"
             - type: "null"
+        appGrants:
+          type: array
+          items: { $ref: "#/components/schemas/AppGrant" }
         avatar: { $ref: "#/components/schemas/AvatarConfig" }
     AgentUpdate:
       type: object
@@ -1362,7 +1405,50 @@ components:
           oneOf:
             - $ref: "#/components/schemas/AgentPermissionOverrides"
             - type: "null"
+        appGrants:
+          type: array
+          items: { $ref: "#/components/schemas/AppGrant" }
         avatar: { $ref: "#/components/schemas/AvatarConfig" }
+    AppGrant:
+      type: object
+      description: >-
+        Explicit permission for one agent to use one connected app. "read"
+        only looks, "draft" may prepare content nobody outside the workspace
+        account sees (email drafts, new Drive files), "write" may take
+        externally visible actions — those always pass through the approval
+        desk before running.
+      required: [app, accessLevel]
+      properties:
+        app: { type: string, enum: [gmail, google_drive, github] }
+        accessLevel: { type: string, enum: [read, draft, write] }
+    ConnectedApp:
+      type: object
+      required: [app, displayName, enabled, status, statusDetail, grantedAgents]
+      properties:
+        app: { type: string, enum: [gmail, google_drive, github] }
+        displayName: { type: string }
+        enabled: { type: boolean }
+        status:
+          type: string
+          enum: [connected, not_connected, unavailable]
+          description: >-
+            Live connection state of the workspace owner's account:
+            "unavailable" means the connector service itself could not be
+            reached, not that the account is disconnected.
+        statusDetail: { type: ["string", "null"] }
+        grantedAgents: { type: number }
+    ConnectedAppList:
+      type: object
+      required: [apps]
+      properties:
+        apps:
+          type: array
+          items: { $ref: "#/components/schemas/ConnectedApp" }
+    ConnectedAppUpdate:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
     ArchiveInput:
       type: object
       required: [archived]

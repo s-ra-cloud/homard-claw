@@ -61,6 +61,7 @@ import {
   UpdateProviderSettingsResponse,
 } from "@workspace/api-zod";
 import {
+  agentAppGrantsTable,
   agentsTable,
   approvalsTable,
   auditEventsTable,
@@ -69,6 +70,8 @@ import {
   taskLogsTable,
   tasksTable,
   teamsTable,
+  type AppAccessLevel,
+  type ConnectedAppId,
 } from "@workspace/db";
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import {
@@ -113,6 +116,8 @@ import {
   queueHealth,
 } from "../runtime";
 import { abortRunningTask, getWorkerStatus } from "../worker";
+import { settleActionForApproval } from "../connected-apps/actions";
+import connectedAppsRouter from "./connected-apps";
 import eventsRouter from "./events";
 import memoryRouter from "./memory";
 import notificationsRouter from "./notifications";
@@ -258,6 +263,7 @@ router.use(schedulesRouter);
 router.use(notificationsRouter);
 router.use(reportsRouter);
 router.use(eventsRouter);
+router.use(connectedAppsRouter);
 
 router.get("/runtime/health", async (_req: Request, res: Response) => {
   const [runtimes, queue, stop] = await Promise.all([
@@ -286,8 +292,51 @@ router.get("/runtime/health", async (_req: Request, res: Response) => {
   );
 });
 
-function toAgent(agent: typeof agentsTable.$inferSelect) {
+type AppGrantJson = { app: ConnectedAppId; accessLevel: AppAccessLevel };
+
+/** Last entry wins when a payload repeats an app; order is normalized. */
+function dedupeGrants(
+  grants: readonly AppGrantJson[],
+): AppGrantJson[] {
+  const byApp = new Map<ConnectedAppId, AppAccessLevel>();
+  for (const grant of grants) byApp.set(grant.app, grant.accessLevel);
+  return [...byApp.entries()]
+    .map(([app, accessLevel]) => ({ app, accessLevel }))
+    .sort((a, b) => a.app.localeCompare(b.app));
+}
+
+function grantAuditSuffix(grants: readonly AppGrantJson[]): string {
+  if (grants.length === 0) return "";
+  return ` Connected apps granted: ${grants.map((g) => `${g.app} (${g.accessLevel})`).join(", ")}.`;
+}
+
+/** Connected-app grants for a set of agents, grouped by agent id. */
+async function grantsByAgent(
+  agentIds: string[],
+): Promise<Map<string, AppGrantJson[]>> {
+  const map = new Map<string, AppGrantJson[]>();
+  if (agentIds.length === 0) return map;
+  const rows = await db
+    .select()
+    .from(agentAppGrantsTable)
+    .where(inArray(agentAppGrantsTable.agentId, agentIds));
+  for (const row of rows) {
+    const list = map.get(row.agentId) ?? [];
+    list.push({
+      app: row.app as ConnectedAppId,
+      accessLevel: row.accessLevel as AppAccessLevel,
+    });
+    map.set(row.agentId, list);
+  }
+  return map;
+}
+
+function toAgent(
+  agent: typeof agentsTable.$inferSelect,
+  appGrants: AppGrantJson[] = [],
+) {
   return {
+    appGrants,
     id: agent.id,
     name: agent.name,
     title: agent.title,
@@ -424,7 +473,12 @@ router.get("/agents", async (_req, res): Promise<void> => {
     .from(agentsTable)
     .where(eq(agentsTable.retired, false))
     .orderBy(agentsTable.name);
-  res.json(ListAgentsResponse.parse(agents.map(toAgent)));
+  const grants = await grantsByAgent(agents.map((agent) => agent.id));
+  res.json(
+    ListAgentsResponse.parse(
+      agents.map((agent) => toAgent(agent, grants.get(agent.id) ?? [])),
+    ),
+  );
 });
 
 router.post("/agents", async (req, res): Promise<void> => {
@@ -446,16 +500,35 @@ router.post("/agents", async (req, res): Promise<void> => {
       .json({ error: `An agent named "${parsed.data.name}" already exists` });
     return;
   }
+  // Grants ride along on the create payload but live in their own table;
+  // they must never be spread into the agents insert.
+  const { appGrants, ...agentFields } = parsed.data;
   try {
-    const [agent] = await db
-      .insert(agentsTable)
-      .values({ ...parsed.data, avatar, status: "idle" })
-      .returning();
-    await recordAudit(
-      "agent.created",
-      `${agent.name} joined the office as ${agent.title}.`,
-    );
-    res.status(201).json(CreateAgentResponse.parse(toAgent(agent)));
+    const outcome = await db.transaction(async (tx) => {
+      const [agent] = await tx
+        .insert(agentsTable)
+        .values({ ...agentFields, avatar, status: "idle" })
+        .returning();
+      const grants = dedupeGrants(appGrants ?? []);
+      if (grants.length > 0) {
+        await tx.insert(agentAppGrantsTable).values(
+          grants.map((grant) => ({
+            agentId: agent.id,
+            app: grant.app,
+            accessLevel: grant.accessLevel,
+          })),
+        );
+      }
+      await recordAudit(
+        "agent.created",
+        `${agent.name} joined the office as ${agent.title}.${grantAuditSuffix(grants)}`,
+        tx,
+      );
+      return { agent, grants };
+    });
+    res
+      .status(201)
+      .json(CreateAgentResponse.parse(toAgent(outcome.agent, outcome.grants)));
   } catch (error) {
     if (isUniqueViolation(error)) {
       res
@@ -488,9 +561,10 @@ router.get("/agents/:agentId", async (req, res): Promise<void> => {
     .where(eq(tasksTable.agentId, agent.id))
     .orderBy(desc(tasksTable.createdAt))
     .limit(50);
+  const agentGrants = await grantsByAgent([agent.id]);
   res.json(
     GetAgentResponse.parse({
-      agent: toAgent(agent),
+      agent: toAgent(agent, agentGrants.get(agent.id) ?? []),
       tasks: tasks.map((task) => ({
         ...task,
         agentName: agent.name,
@@ -507,10 +581,11 @@ router.patch("/agents/:agentId", async (req, res): Promise<void> => {
     res.status(400).json({ error: "Invalid update request" });
     return;
   }
+  const { appGrants, ...fieldUpdates } = body.data;
   const updates = Object.fromEntries(
-    Object.entries(body.data).filter(([, value]) => value !== undefined),
+    Object.entries(fieldUpdates).filter(([, value]) => value !== undefined),
   );
-  if (Object.keys(updates).length === 0) {
+  if (Object.keys(updates).length === 0 && appGrants === undefined) {
     res.status(400).json({ error: "No fields to update" });
     return;
   }
@@ -530,17 +605,52 @@ router.patch("/agents/:agentId", async (req, res): Promise<void> => {
       ) {
         return { status: 409 as const, retired: false, name: updates.name };
       }
-      const [agent] = await tx
-        .update(agentsTable)
-        .set(updates)
-        .where(eq(agentsTable.id, existing.id))
-        .returning();
+      let agent = existing;
+      if (Object.keys(updates).length > 0) {
+        [agent] = await tx
+          .update(agentsTable)
+          .set(updates)
+          .where(eq(agentsTable.id, existing.id))
+          .returning();
+      }
+      // Grants are replaced wholesale when supplied: the payload is the
+      // complete, owner-approved set, so anything absent is a revocation
+      // that takes effect on the agent's very next action.
+      let grants: AppGrantJson[];
+      if (appGrants !== undefined) {
+        grants = dedupeGrants(appGrants);
+        await tx
+          .delete(agentAppGrantsTable)
+          .where(eq(agentAppGrantsTable.agentId, existing.id));
+        if (grants.length > 0) {
+          await tx.insert(agentAppGrantsTable).values(
+            grants.map((grant) => ({
+              agentId: existing.id,
+              app: grant.app,
+              accessLevel: grant.accessLevel,
+            })),
+          );
+        }
+      } else {
+        grants = (await tx
+          .select()
+          .from(agentAppGrantsTable)
+          .where(eq(agentAppGrantsTable.agentId, existing.id))
+        ).map((row) => ({
+          app: row.app as ConnectedAppId,
+          accessLevel: row.accessLevel as AppAccessLevel,
+        }));
+      }
       await recordAudit(
-      "agent.updated",
-      `${agent.name}'s profile was updated.`,
-      tx,
-    );
-      return { status: 200 as const, agent };
+        "agent.updated",
+        `${agent.name}'s profile was updated.${
+          appGrants !== undefined
+            ? ` Connected apps set to: ${grants.length > 0 ? grants.map((g) => `${g.app} (${g.accessLevel})`).join(", ") : "none"}.`
+            : ""
+        }`,
+        tx,
+      );
+      return { status: 200 as const, agent, grants };
     });
     if (outcome.status === 404) {
       res.status(404).json({ error: "Agent not found" });
@@ -554,7 +664,7 @@ router.patch("/agents/:agentId", async (req, res): Promise<void> => {
       });
       return;
     }
-    res.json(UpdateAgentResponse.parse(toAgent(outcome.agent)));
+    res.json(UpdateAgentResponse.parse(toAgent(outcome.agent, outcome.grants)));
   } catch (error) {
     if (isUniqueViolation(error)) {
       res.status(409).json({ error: "That agent name is already in use" });
@@ -601,9 +711,11 @@ async function duplicateAgentOnce(agentId: string) {
         status: "idle",
       })
       .returning();
+    // Deliberately NOT copied: connected-app grants. External account access
+    // is granted per agent by the owner, never inherited through duplication.
     await recordAudit(
       "agent.duplicated",
-      `${agent.name} was recruited as a copy of ${source.name}.`,
+      `${agent.name} was recruited as a copy of ${source.name}. Connected-app access was not copied.`,
       tx,
     );
     return { status: 201 as const, agent };
@@ -728,7 +840,12 @@ router.post("/agents/:agentId/archive", async (req, res): Promise<void> => {
     res.status(409).json({ error: "Retired agents cannot be archived" });
     return;
   }
-  res.json(SetAgentArchivedResponse.parse(toAgent(outcome.agent)));
+  const archivedGrants = await grantsByAgent([outcome.agent.id]);
+  res.json(
+    SetAgentArchivedResponse.parse(
+      toAgent(outcome.agent, archivedGrants.get(outcome.agent.id) ?? []),
+    ),
+  );
 });
 
 router.delete("/agents/:agentId", async (req, res): Promise<void> => {
@@ -830,7 +947,10 @@ router.post("/agents/:agentId/pause", async (req, res): Promise<void> => {
       body.data.paused ? "agent.paused" : "agent.resumed",
       `${agent.name} was ${body.data.paused ? "paused" : "resumed"}.`,
     );
-  res.json(PauseAgentResponse.parse(toAgent(agent)));
+  const pausedGrants = await grantsByAgent([agent.id]);
+  res.json(
+    PauseAgentResponse.parse(toAgent(agent, pausedGrants.get(agent.id) ?? [])),
+  );
 });
 
 function toRetiredAgent(agent: typeof agentsTable.$inferSelect) {
@@ -1457,9 +1577,21 @@ router.patch("/approvals/:approvalId", async (req, res): Promise<void> => {
         }
       }
     }
+    // A connected-app action tied to this approval follows the decision in
+    // the same transaction: approved actions become claimable exactly once
+    // by the worker, rejected ones are settled and can never run.
+    const settledAction = await settleActionForApproval(
+      tx,
+      approval.id,
+      body.data.decision === "approved" ? "approved" : "rejected",
+    );
     await recordAudit(
       `approval.${body.data.decision}`,
-      `${approval.action} was ${body.data.decision} by the owner.`,
+      `${approval.action} was ${body.data.decision} by the owner.${
+        settledAction
+          ? ` Linked connected-app action (${settledAction.targetSummary}) is now ${settledAction.status}.`
+          : ""
+      }`,
       tx,
     );
     return { approval, agentName: agent?.name ?? "Unknown agent", taskObjective };

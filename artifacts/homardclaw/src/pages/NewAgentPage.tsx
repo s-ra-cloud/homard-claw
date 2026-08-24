@@ -15,6 +15,7 @@ import {
   AgentFormFields,
   AgentPreviewCard,
   agentFormSchema,
+  appGrantsPayload,
   permissionOverridesPayload,
   type AgentFormValues,
 } from "@/components/agent-form";
@@ -46,6 +47,7 @@ export default function NewAgentPage() {
       maxTasksPerDay: "",
       approvalThresholdCents: "",
       shellColor: LOBSTER_PRESETS[0].shellColor,
+      appGrants: {},
     },
   });
 
@@ -94,6 +96,9 @@ export default function NewAgentPage() {
         autonomy: data.autonomy,
         ...(permissionOverridesPayload(data)
           ? { permissionOverrides: permissionOverridesPayload(data) }
+          : {}),
+        ...(appGrantsPayload(data).length > 0
+          ? { appGrants: appGrantsPayload(data) }
           : {}),
         avatar: {
           shellColor: data.shellColor,

@@ -15,6 +15,8 @@ import {
   AgentFormFields,
   AgentPreviewCard,
   agentFormSchema,
+  appGrantsFormValue,
+  appGrantsPayload,
   emptyAgentFormValues,
   type AgentFormValues,
   permissionOverridesPayload,
@@ -84,6 +86,7 @@ export default function EditAgentPage() {
               ? String(agent.permissionOverrides.approvalThresholdCents)
               : "",
           shellColor: agent.avatar.shellColor,
+          appGrants: appGrantsFormValue(agent.appGrants),
         }
       : undefined,
   });
@@ -135,6 +138,9 @@ export default function EditAgentPage() {
         securityPreset: data.securityPreset,
         autonomy: data.autonomy,
         permissionOverrides: permissionOverridesPayload(data),
+        // Always sent: the payload is the complete grant set, so clearing
+        // every app back to "No Access" revokes everything.
+        appGrants: appGrantsPayload(data),
         avatar: {
           ...agent.avatar,
           shellColor: data.shellColor,

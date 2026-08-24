@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useUser, useClerk } from "@clerk/react";
-import { LogOut, Home, Users, CheckSquare, Settings, Activity, Palmtree, Menu, X, Brain, Network, Phone, CalendarClock, Bell, BarChart3, Maximize2 } from "lucide-react";
+import { LogOut, Home, Users, CheckSquare, Settings, Activity, Palmtree, Menu, X, Brain, Network, Phone, CalendarClock, Bell, BarChart3, Maximize2, Plug } from "lucide-react";
 import { useListNotifications } from "@workspace/api-client-react";
 import { useLiveUpdates } from "@/lib/useLiveUpdates";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -18,6 +18,7 @@ const navItems = [
   { href: "/approvals", label: "Approvals", icon: CheckSquare },
   { href: "/reports", label: "Reports", icon: BarChart3 },
   { href: "/providers", label: "Providers", icon: Settings },
+  { href: "/connected-apps", label: "Apps", icon: Plug },
   { href: "/island", label: "Island", icon: Palmtree },
 ];
 

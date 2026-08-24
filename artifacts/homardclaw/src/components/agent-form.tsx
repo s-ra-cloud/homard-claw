@@ -6,6 +6,7 @@ import {
   AgentSecurityPreset,
   useGetProviderSettings,
   useGetProviders,
+  useListConnectedApps,
   useListProviderModels,
 } from "@workspace/api-client-react";
 import { LOBSTER_PRESETS, MarlowLobster } from "@/components/ui/marlow-lobster";
@@ -102,6 +103,11 @@ export const agentFormSchema = z.object({
   maxTasksPerDay: limitField,
   approvalThresholdCents: limitField,
   shellColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/, "Must be a valid hex color"),
+  /**
+   * Connected-app access, keyed by app id. "none" means no grant row is
+   * sent — access to the owner's external accounts is always opt-in.
+   */
+  appGrants: z.record(z.string(), z.enum(["none", "read", "draft", "write"])),
 });
 
 export type AgentFormValues = z.infer<typeof agentFormSchema>;
@@ -134,7 +140,34 @@ export const emptyAgentFormValues: AgentFormValues = {
   maxTasksPerDay: "",
   approvalThresholdCents: "",
   shellColor: LOBSTER_PRESETS[0].shellColor,
+  appGrants: {},
 };
+
+/** Convert the form's app→level map into the API's grant list. */
+export function appGrantsPayload(
+  data: AgentFormValues,
+): { app: "gmail" | "google_drive" | "github"; accessLevel: "read" | "draft" | "write" }[] {
+  return Object.entries(data.appGrants)
+    .filter(
+      (entry): entry is [string, "read" | "draft" | "write"] =>
+        entry[1] !== "none",
+    )
+    .map(([app, accessLevel]) => ({
+      app: app as "gmail" | "google_drive" | "github",
+      accessLevel,
+    }));
+}
+
+/** Convert an agent's grant list into the form's app→level map. */
+export function appGrantsFormValue(
+  grants: readonly { app: string; accessLevel: string }[] | undefined,
+): AgentFormValues["appGrants"] {
+  const value: AgentFormValues["appGrants"] = {};
+  for (const grant of grants ?? []) {
+    value[grant.app] = grant.accessLevel as "read" | "draft" | "write";
+  }
+  return value;
+}
 
 /**
  * Custom limits typed into the form, or null when every field is blank
@@ -431,6 +464,8 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
 
       <CustomLimitsFields form={form} />
 
+      <ConnectedAppsFields form={form} />
+
       <FormField
         control={form.control}
         name="shellColor"
@@ -514,6 +549,83 @@ function CustomLimitsFields({ form }: { form: UseFormReturn<AgentFormValues> }) 
                 <FormMessage className={messageClass} />
               </FormItem>
             )}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const ACCESS_LEVEL_OPTIONS = [
+  { value: "none", label: "No Access", blurb: "Cannot touch this app at all." },
+  { value: "read", label: "Read", blurb: "Search and read data only." },
+  { value: "draft", label: "Draft", blurb: "Read, plus prepare drafts nobody outside sees." },
+  { value: "write", label: "Write (Approval)", blurb: "Full access; visible changes still wait for your approval." },
+] as const;
+
+/**
+ * Per-app access grants against the owner's connected accounts. Everything
+ * defaults to "No Access" — grants are explicit, never inherited — and the
+ * live connection status is shown so a grant to a disconnected app is
+ * visibly pointless rather than silently broken.
+ */
+function ConnectedAppsFields({ form }: { form: UseFormReturn<AgentFormValues> }) {
+  const { data: connectedApps } = useListConnectedApps();
+  const apps = connectedApps?.apps ?? [];
+  if (apps.length === 0) return null;
+  return (
+    <div className="border-4 border-border bg-muted/20 p-4 space-y-3">
+      <div>
+        <div className="uppercase font-bold text-xs">Connected Apps</div>
+        <p className="text-[10px] text-muted-foreground uppercase font-bold">
+          What this agent may do with your connected accounts. Default: nothing.
+        </p>
+      </div>
+      <div className="space-y-2">
+        {apps.map((app) => (
+          <FormField
+            key={app.app}
+            control={form.control}
+            name={`appGrants.${app.app}` as const}
+            render={({ field }) => {
+              const level = field.value ?? "none";
+              return (
+                <FormItem className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 border-2 border-border/50 bg-background/50 p-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold uppercase text-xs">{app.displayName}</span>
+                      {!app.enabled ? (
+                        <Badge variant="destructive">Disabled</Badge>
+                      ) : app.status === "connected" ? (
+                        <Badge variant="success">Connected</Badge>
+                      ) : app.status === "not_connected" ? (
+                        <Badge variant="warning">Not Connected</Badge>
+                      ) : (
+                        <Badge variant="outline">Status Unknown</Badge>
+                      )}
+                    </div>
+                    <p className="text-[9px] text-muted-foreground uppercase font-bold mt-1">
+                      {ACCESS_LEVEL_OPTIONS.find((o) => o.value === level)?.blurb}
+                    </p>
+                  </div>
+                  <Select onValueChange={field.onChange} value={level}>
+                    <FormControl>
+                      <SelectTrigger className={`${selectTriggerClass} sm:w-44`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent className={selectContentClass}>
+                      {ACCESS_LEVEL_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value} className={selectItemClass}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage className={messageClass} />
+                </FormItem>
+              );
+            }}
           />
         ))}
       </div>

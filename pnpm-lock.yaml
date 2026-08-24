@@ -182,6 +182,9 @@ importers:
       '@openai/codex-sdk':
         specifier: ^0.149.0
         version: 0.149.0
+      '@replit/connectors-sdk':
+        specifier: ^0.4.1
+        version: 0.4.1
       '@workspace/api-zod':
         specifier: workspace:*
         version: link:../../lib/api-zod

@@ -12,6 +12,7 @@ import type { AgentPermissions } from './agentPermissions';
 import type { AgentProvider } from './agentProvider';
 import type { AgentSecurityPreset } from './agentSecurityPreset';
 import type { AgentStatus } from './agentStatus';
+import type { AppGrant } from './appGrant';
 import type { AvatarConfig } from './avatarConfig';
 
 export interface Agent {
@@ -45,6 +46,7 @@ export interface Agent {
   autonomy: AgentAutonomy;
   permissions: AgentPermissions;
   permissionOverrides?: AgentPermissionOverrides | null;
+  appGrants: AppGrant[];
   avatar: AvatarConfig;
   archived: boolean;
   /** @nullable */

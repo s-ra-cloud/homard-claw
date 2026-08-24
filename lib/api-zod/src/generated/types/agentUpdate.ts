@@ -10,6 +10,7 @@ import type { AgentUpdateAutonomy } from './agentUpdateAutonomy';
 import type { AgentUpdateCodexReasoning } from './agentUpdateCodexReasoning';
 import type { AgentUpdateProvider } from './agentUpdateProvider';
 import type { AgentUpdateSecurityPreset } from './agentUpdateSecurityPreset';
+import type { AppGrant } from './appGrant';
 import type { AvatarConfig } from './avatarConfig';
 
 export interface AgentUpdate {
@@ -70,5 +71,6 @@ export interface AgentUpdate {
   securityPreset?: AgentUpdateSecurityPreset;
   autonomy?: AgentUpdateAutonomy;
   permissionOverrides?: AgentPermissionOverrides | null;
+  appGrants?: AppGrant[];
   avatar?: AvatarConfig;
 }

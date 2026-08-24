@@ -572,6 +572,93 @@ export const agentKnowledgeTable = pgTable(
   (table) => [primaryKey({ columns: [table.agentId, table.fileId] })],
 );
 
+/**
+ * External applications agents can be granted access to. The catalog is
+ * deliberately closed: every app here maps to a Replit-managed connector the
+ * workspace owner connects once, and the server refuses anything else.
+ */
+export const CONNECTED_APP_IDS = ["gmail", "google_drive", "github"] as const;
+export type ConnectedAppId = (typeof CONNECTED_APP_IDS)[number];
+
+/**
+ * Ordered access levels: read < draft < write. "draft" covers preparing
+ * content that stays invisible outside the workspace account (email drafts,
+ * new Drive files); "write" is anything another human could see.
+ */
+export const APP_ACCESS_LEVELS = ["read", "draft", "write"] as const;
+export type AppAccessLevel = (typeof APP_ACCESS_LEVELS)[number];
+
+/**
+ * Which external apps an agent may touch, and how deeply. No row means no
+ * access — grants are explicit per agent and per app, never inherited.
+ */
+export const agentAppGrantsTable = pgTable(
+  "agent_app_grants",
+  {
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => agentsTable.id, { onDelete: "cascade" }),
+    app: text("app").notNull(),
+    accessLevel: text("access_level").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.agentId, table.app] })],
+);
+
+/**
+ * Workspace-level switch per app. A missing row means enabled: the switch
+ * exists so the owner can cut every agent off from an app at once without
+ * touching individual grants.
+ */
+export const connectedAppSettingsTable = pgTable("connected_app_settings", {
+  app: text("app").primaryKey(),
+  enabled: boolean("enabled").notNull().default(true),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/**
+ * Durable record of every connected-app action an agent requested. The status
+ * column doubles as the exactly-once fence for externally visible writes:
+ * waiting_approval → approved → executing → executed/failed, with the
+ * approved→executing transition done via a guarded UPDATE so a write can
+ * never run twice. Read/draft actions jump straight to executed/denied.
+ */
+export const appActionsTable = pgTable(
+  "app_actions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasksTable.id, { onDelete: "cascade" }),
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => agentsTable.id, { onDelete: "cascade" }),
+    app: text("app").notNull(),
+    operation: text("operation").notNull(),
+    params: jsonb("params").$type<Record<string, unknown>>(),
+    /** Human-readable "what/where" shown on approvals and in the audit log. */
+    targetSummary: text("target_summary").notNull(),
+    // denied | executed | failed | waiting_approval | approved | executing |
+    // rejected | expired
+    status: text("status").notNull(),
+    approvalId: uuid("approval_id").references(() => approvalsTable.id, {
+      onDelete: "set null",
+    }),
+    resultSummary: text("result_summary"),
+    errorMessage: text("error_message"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    executedAt: timestamp("executed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("app_actions_task_idx").on(table.taskId)],
+);
+
 export const insertAgentSchema = createInsertSchema(agentsTable).omit({
   id: true,
   paused: true,
@@ -613,6 +700,10 @@ export type ProviderConversationRecord =
   typeof providerConversationsTable.$inferSelect;
 export type ProviderLeaseRecord = typeof providerLeasesTable.$inferSelect;
 export type KnowledgeFileRecord = typeof knowledgeFilesTable.$inferSelect;
+export type AgentAppGrantRecord = typeof agentAppGrantsTable.$inferSelect;
+export type ConnectedAppSettingRecord =
+  typeof connectedAppSettingsTable.$inferSelect;
+export type AppActionRecord = typeof appActionsTable.$inferSelect;
 export type InsertAgent = z.infer<typeof insertAgentSchema>;
 export type InsertTask = z.infer<typeof insertTaskSchema>;
 export type InsertApproval = z.infer<typeof insertApprovalSchema>;

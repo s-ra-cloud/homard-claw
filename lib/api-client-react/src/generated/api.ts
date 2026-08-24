@@ -35,6 +35,9 @@ import type {
   CodexBootstrapResult,
   CodexConnectionTest,
   CodexCredentialInput,
+  ConnectedApp,
+  ConnectedAppList,
+  ConnectedAppUpdate,
   ConverseInput,
   ConverseResponse,
   DelegationInput,
@@ -4923,4 +4926,153 @@ export function useGetUsageReport<TData = Awaited<ReturnType<typeof getUsageRepo
 
 
 
+
+export const getListConnectedAppsUrl = () => {
+
+
+
+
+  return `/api/connected-apps`
+}
+
+/**
+ * @summary Workspace connected-app inventory with connection status and grant counts
+ */
+export const listConnectedApps = async ( options?: Parameters<typeof customFetch>[1]): Promise<ConnectedAppList> => {
+
+  return customFetch<ConnectedAppList>(getListConnectedAppsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListConnectedAppsQueryKey = () => {
+    return [
+    `/api/connected-apps`
+    ] as const;
+    }
+
+
+export const getListConnectedAppsQueryOptions = <TData = Awaited<ReturnType<typeof listConnectedApps>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listConnectedApps>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListConnectedAppsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listConnectedApps>>> = ({ signal }) => listConnectedApps({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listConnectedApps>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListConnectedAppsQueryResult = NonNullable<Awaited<ReturnType<typeof listConnectedApps>>>
+export type ListConnectedAppsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Workspace connected-app inventory with connection status and grant counts
+ */
+
+export function useListConnectedApps<TData = Awaited<ReturnType<typeof listConnectedApps>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listConnectedApps>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListConnectedAppsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateConnectedAppUrl = (app: 'gmail' | 'google_drive' | 'github',) => {
+
+
+
+
+  return `/api/connected-apps/${app}`
+}
+
+/**
+ * @summary Enable or disable a connected app for every agent at once
+ */
+export const updateConnectedApp = async (app: 'gmail' | 'google_drive' | 'github',
+    connectedAppUpdate: ConnectedAppUpdate, options?: Parameters<typeof customFetch>[1]): Promise<ConnectedApp> => {
+
+  return customFetch<ConnectedApp>(getUpdateConnectedAppUrl(app),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(connectedAppUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdateConnectedAppMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateConnectedApp>>, TError,{app: 'gmail' | 'google_drive' | 'github';data: BodyType<ConnectedAppUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateConnectedApp>>, TError,{app: 'gmail' | 'google_drive' | 'github';data: BodyType<ConnectedAppUpdate>}, TContext> => {
+
+const mutationKey = ['updateConnectedApp'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateConnectedApp>>, {app: 'gmail' | 'google_drive' | 'github';data: BodyType<ConnectedAppUpdate>}> = (props) => {
+          const {app,data} = props ?? {};
+
+          return  updateConnectedApp(app,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateConnectedAppMutationResult = NonNullable<Awaited<ReturnType<typeof updateConnectedApp>>>
+    export type UpdateConnectedAppMutationBody = BodyType<ConnectedAppUpdate>
+    export type UpdateConnectedAppMutationError = ErrorType<void>
+
+    /**
+ * @summary Enable or disable a connected app for every agent at once
+ */
+export const useUpdateConnectedApp = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateConnectedApp>>, TError,{app: 'gmail' | 'google_drive' | 'github';data: BodyType<ConnectedAppUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateConnectedApp>>,
+        TError,
+        {app: 'gmail' | 'google_drive' | 'github';data: BodyType<ConnectedAppUpdate>},
+        TContext
+      > => {
+      return useMutation(getUpdateConnectedAppMutationOptions(options));
+    }
 

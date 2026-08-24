@@ -118,6 +118,10 @@ export const ListAgentsResponseItem = zod.object({
   "maxDelegationDepth": zod.number().min(listAgentsResponsePermissionOverridesOneMaxDelegationDepthMin).nullish(),
   "maxSubtasksPerTask": zod.number().min(listAgentsResponsePermissionOverridesOneMaxSubtasksPerTaskMin).nullish()
 }).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
+  "appGrants": zod.array(zod.object({
+  "app": zod.enum(['gmail', 'google_drive', 'github']),
+  "accessLevel": zod.enum(['read', 'draft', 'write'])
+}).describe('Explicit permission for one agent to use one connected app. \"read\" only looks, \"draft\" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), \"write\" may take externally visible actions — those always pass through the approval desk before running.')),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),
@@ -204,6 +208,10 @@ export const CreateAgentBody = zod.object({
   "maxDelegationDepth": zod.number().min(createAgentBodyPermissionOverridesOneMaxDelegationDepthMin).nullish(),
   "maxSubtasksPerTask": zod.number().min(createAgentBodyPermissionOverridesOneMaxSubtasksPerTaskMin).nullish()
 }).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
+  "appGrants": zod.array(zod.object({
+  "app": zod.enum(['gmail', 'google_drive', 'github']),
+  "accessLevel": zod.enum(['read', 'draft', 'write'])
+}).describe('Explicit permission for one agent to use one connected app. \"read\" only looks, \"draft\" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), \"write\" may take externally visible actions — those always pass through the approval desk before running.')).optional(),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),
@@ -291,6 +299,10 @@ export const CreateAgentResponse = zod.object({
   "maxDelegationDepth": zod.number().min(createAgentResponsePermissionOverridesOneMaxDelegationDepthMin).nullish(),
   "maxSubtasksPerTask": zod.number().min(createAgentResponsePermissionOverridesOneMaxSubtasksPerTaskMin).nullish()
 }).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
+  "appGrants": zod.array(zod.object({
+  "app": zod.enum(['gmail', 'google_drive', 'github']),
+  "accessLevel": zod.enum(['read', 'draft', 'write'])
+}).describe('Explicit permission for one agent to use one connected app. \"read\" only looks, \"draft\" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), \"write\" may take externally visible actions — those always pass through the approval desk before running.')),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),
@@ -390,6 +402,10 @@ export const GetAgentResponse = zod.object({
   "maxDelegationDepth": zod.number().min(getAgentResponseAgentPermissionOverridesOneMaxDelegationDepthMin).nullish(),
   "maxSubtasksPerTask": zod.number().min(getAgentResponseAgentPermissionOverridesOneMaxSubtasksPerTaskMin).nullish()
 }).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
+  "appGrants": zod.array(zod.object({
+  "app": zod.enum(['gmail', 'google_drive', 'github']),
+  "accessLevel": zod.enum(['read', 'draft', 'write'])
+}).describe('Explicit permission for one agent to use one connected app. \"read\" only looks, \"draft\" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), \"write\" may take externally visible actions — those always pass through the approval desk before running.')),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),
@@ -533,6 +549,10 @@ export const UpdateAgentBody = zod.object({
   "maxDelegationDepth": zod.number().min(updateAgentBodyPermissionOverridesOneMaxDelegationDepthMin).nullish(),
   "maxSubtasksPerTask": zod.number().min(updateAgentBodyPermissionOverridesOneMaxSubtasksPerTaskMin).nullish()
 }).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
+  "appGrants": zod.array(zod.object({
+  "app": zod.enum(['gmail', 'google_drive', 'github']),
+  "accessLevel": zod.enum(['read', 'draft', 'write'])
+}).describe('Explicit permission for one agent to use one connected app. \"read\" only looks, \"draft\" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), \"write\" may take externally visible actions — those always pass through the approval desk before running.')).optional(),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),
@@ -620,6 +640,10 @@ export const UpdateAgentResponse = zod.object({
   "maxDelegationDepth": zod.number().min(updateAgentResponsePermissionOverridesOneMaxDelegationDepthMin).nullish(),
   "maxSubtasksPerTask": zod.number().min(updateAgentResponsePermissionOverridesOneMaxSubtasksPerTaskMin).nullish()
 }).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
+  "appGrants": zod.array(zod.object({
+  "app": zod.enum(['gmail', 'google_drive', 'github']),
+  "accessLevel": zod.enum(['read', 'draft', 'write'])
+}).describe('Explicit permission for one agent to use one connected app. \"read\" only looks, \"draft\" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), \"write\" may take externally visible actions — those always pass through the approval desk before running.')),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),
@@ -728,6 +752,10 @@ export const DuplicateAgentResponse = zod.object({
   "maxDelegationDepth": zod.number().min(duplicateAgentResponsePermissionOverridesOneMaxDelegationDepthMin).nullish(),
   "maxSubtasksPerTask": zod.number().min(duplicateAgentResponsePermissionOverridesOneMaxSubtasksPerTaskMin).nullish()
 }).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
+  "appGrants": zod.array(zod.object({
+  "app": zod.enum(['gmail', 'google_drive', 'github']),
+  "accessLevel": zod.enum(['read', 'draft', 'write'])
+}).describe('Explicit permission for one agent to use one connected app. \"read\" only looks, \"draft\" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), \"write\" may take externally visible actions — those always pass through the approval desk before running.')),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),
@@ -830,6 +858,10 @@ export const SetAgentArchivedResponse = zod.object({
   "maxDelegationDepth": zod.number().min(setAgentArchivedResponsePermissionOverridesOneMaxDelegationDepthMin).nullish(),
   "maxSubtasksPerTask": zod.number().min(setAgentArchivedResponsePermissionOverridesOneMaxSubtasksPerTaskMin).nullish()
 }).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
+  "appGrants": zod.array(zod.object({
+  "app": zod.enum(['gmail', 'google_drive', 'github']),
+  "accessLevel": zod.enum(['read', 'draft', 'write'])
+}).describe('Explicit permission for one agent to use one connected app. \"read\" only looks, \"draft\" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), \"write\" may take externally visible actions — those always pass through the approval desk before running.')),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),
@@ -932,6 +964,10 @@ export const PauseAgentResponse = zod.object({
   "maxDelegationDepth": zod.number().min(pauseAgentResponsePermissionOverridesOneMaxDelegationDepthMin).nullish(),
   "maxSubtasksPerTask": zod.number().min(pauseAgentResponsePermissionOverridesOneMaxSubtasksPerTaskMin).nullish()
 }).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
+  "appGrants": zod.array(zod.object({
+  "app": zod.enum(['gmail', 'google_drive', 'github']),
+  "accessLevel": zod.enum(['read', 'draft', 'write'])
+}).describe('Explicit permission for one agent to use one connected app. \"read\" only looks, \"draft\" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), \"write\" may take externally visible actions — those always pass through the approval desk before running.')),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),
@@ -2649,6 +2685,42 @@ export const GetUsageReportResponse = zod.object({
   "errorMessage": zod.string().nullish(),
   "createdAt": zod.coerce.date()
 }))
+})
+
+
+/**
+ * @summary Workspace connected-app inventory with connection status and grant counts
+ */
+export const ListConnectedAppsResponse = zod.object({
+  "apps": zod.array(zod.object({
+  "app": zod.enum(['gmail', 'google_drive', 'github']),
+  "displayName": zod.string(),
+  "enabled": zod.boolean(),
+  "status": zod.enum(['connected', 'not_connected', 'unavailable']).describe('Live connection state of the workspace owner\'s account: \"unavailable\" means the connector service itself could not be reached, not that the account is disconnected.'),
+  "statusDetail": zod.string().nullable(),
+  "grantedAgents": zod.number()
+}))
+})
+
+
+/**
+ * @summary Enable or disable a connected app for every agent at once
+ */
+export const UpdateConnectedAppParams = zod.object({
+  "app": zod.enum(['gmail', 'google_drive', 'github'])
+})
+
+export const UpdateConnectedAppBody = zod.object({
+  "enabled": zod.boolean()
+})
+
+export const UpdateConnectedAppResponse = zod.object({
+  "app": zod.enum(['gmail', 'google_drive', 'github']),
+  "displayName": zod.string(),
+  "enabled": zod.boolean(),
+  "status": zod.enum(['connected', 'not_connected', 'unavailable']).describe('Live connection state of the workspace owner\'s account: \"unavailable\" means the connector service itself could not be reached, not that the account is disconnected.'),
+  "statusDetail": zod.string().nullable(),
+  "grantedAgents": zod.number()
 })
 
 

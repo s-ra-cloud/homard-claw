@@ -10,6 +10,7 @@ import type { AgentInputCodexReasoning } from './agentInputCodexReasoning';
 import type { AgentInputProvider } from './agentInputProvider';
 import type { AgentInputSecurityPreset } from './agentInputSecurityPreset';
 import type { AgentPermissionOverrides } from './agentPermissionOverrides';
+import type { AppGrant } from './appGrant';
 import type { AvatarConfig } from './avatarConfig';
 
 export interface AgentInput {
@@ -52,5 +53,6 @@ export interface AgentInput {
   securityPreset: AgentInputSecurityPreset;
   autonomy?: AgentInputAutonomy;
   permissionOverrides?: AgentPermissionOverrides | null;
+  appGrants?: AppGrant[];
   avatar?: AvatarConfig;
 }

@@ -26,6 +26,7 @@ import TeamsPage from '@/pages/TeamsPage';
 import TalkPage from '@/pages/TalkPage';
 import ApprovalsPage from '@/pages/ApprovalsPage';
 import ProvidersPage from '@/pages/ProvidersPage';
+import ConnectedAppsPage from '@/pages/ConnectedAppsPage';
 import IslandPage from '@/pages/IslandPage';
 import MemoryPage from '@/pages/MemoryPage';
 import SchedulesPage from '@/pages/SchedulesPage';
@@ -236,6 +237,10 @@ function ClerkProviderWithRoutes() {
 
             <Route path="/providers">
               <ProtectedRoute component={ProvidersPage} />
+            </Route>
+
+            <Route path="/connected-apps">
+              <ProtectedRoute component={ConnectedAppsPage} />
             </Route>
 
             <Route path="/schedules">
