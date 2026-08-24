@@ -4,6 +4,7 @@ import { useUser, useClerk } from "@clerk/react";
 import { LogOut, Home, Users, CheckSquare, Settings, Activity, Palmtree, Menu, X, Brain, Network, Phone, CalendarClock, Bell, BarChart3, Maximize2 } from "lucide-react";
 import { useListNotifications } from "@workspace/api-client-react";
 import { useLiveUpdates } from "@/lib/useLiveUpdates";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 const navItems = [
   { href: "/office", label: "Office", icon: Home },
@@ -41,6 +42,12 @@ export function Shell({ children, immersive = false, onEnterImmersive }: ShellPr
     { query: { queryKey: ["/api/notifications", "badge"], refetchInterval: 60_000 } },
   );
   const unread = notificationData?.unread ?? 0;
+  // The office diorama is a wide isometric scene: on a phone it is neither
+  // listed nor routable, so the menu drops it entirely.
+  const isPhone = useIsMobile();
+  const visibleNavItems = isPhone
+    ? navItems.filter((item) => item.href !== "/office")
+    : navItems;
   const [navOpen, setNavOpen] = useState(false);
   const navRef = useRef<HTMLElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -110,7 +117,7 @@ export function Shell({ children, immersive = false, onEnterImmersive }: ShellPr
     };
   }, [navOpen]);
 
-  const currentPage = navItems.find(
+  const currentPage = visibleNavItems.find(
     (item) => location === item.href || location.startsWith(item.href + "/"),
   );
 
@@ -119,23 +126,15 @@ export function Shell({ children, immersive = false, onEnterImmersive }: ShellPr
       {/* Scanline overlay for that CRT monitor feel */}
       <div className="absolute inset-0 scanlines z-50 pointer-events-none opacity-50 mix-blend-overlay"></div>
 
-      {/* Dims the page behind the mobile drawer */}
-      {navOpen && (
-        <div
-          className="fixed inset-0 z-30 bg-background/80 lg:hidden"
-          onClick={() => setNavOpen(false)}
-          aria-hidden="true"
-        />
-      )}
-
-      {/* Sidebar — hidden in immersive mode; permanent from lg up otherwise */}
+      {/* Sidebar — a full-screen menu below lg, permanent from lg up;
+          hidden entirely in immersive mode */}
       <aside
         id="main-nav"
         ref={navRef}
         aria-label="Main navigation"
         aria-hidden={immersive || undefined}
         {...(navOpen ? { role: "dialog" as const, "aria-modal": true } : {})}
-        className={`fixed inset-y-0 left-0 z-40 w-[min(17rem,85vw)] flex flex-col border-r-4 border-border bg-card pixel-shadow transition-transform duration-200 ease-out lg:static lg:z-10 lg:w-64 lg:shrink-0 lg:translate-x-0 ${
+        className={`fixed inset-0 z-40 w-full flex flex-col border-border bg-card transition-transform duration-200 ease-out lg:static lg:z-10 lg:w-64 lg:shrink-0 lg:translate-x-0 lg:border-r-4 lg:pixel-shadow ${
           immersive ? "hidden" : navOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
@@ -149,7 +148,7 @@ export function Shell({ children, immersive = false, onEnterImmersive }: ShellPr
               type="button"
               ref={closeButtonRef}
               onClick={() => setNavOpen(false)}
-              className="ml-auto p-1 text-muted-foreground hover:text-foreground lg:hidden"
+              className="ml-auto flex items-center justify-center w-10 h-10 border-2 border-border bg-background/40 text-foreground pixel-shadow lg:hidden"
               aria-label="Close menu"
             >
               <X className="w-5 h-5" />
@@ -158,20 +157,20 @@ export function Shell({ children, immersive = false, onEnterImmersive }: ShellPr
           <div className="mt-2 text-[10px] text-muted-foreground uppercase">Control Room v1.0</div>
         </div>
 
-        <nav className="flex-1 overflow-y-auto p-4 py-6 space-y-2">
-          {navItems.map((item) => {
+        <nav className="flex-1 overflow-y-auto p-4 py-6 grid grid-cols-2 gap-3 content-start sm:grid-cols-3 lg:flex lg:flex-col lg:gap-2">
+          {visibleNavItems.map((item) => {
             const isActive = location === item.href || location.startsWith(item.href + "/");
             return (
-              <Link key={item.href} href={item.href} className="block">
+              <Link key={item.href} href={item.href} className="block h-full">
                 <div
-                  className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors ${
+                  className={`flex h-full items-center gap-3 px-4 py-4 cursor-pointer transition-colors lg:py-3 ${
                     isActive
                       ? "bg-primary text-primary-foreground pixel-shadow"
                       : "text-foreground hover:bg-muted pixel-shadow"
                   }`}
                 >
                   <item.icon className="w-4 h-4 shrink-0" />
-                  <span className="font-bold text-sm tracking-wide uppercase">{item.label}</span>
+                  <span className="font-bold text-sm tracking-wide uppercase truncate">{item.label}</span>
                   {item.href === "/inbox" && unread > 0 && (
                     <span
                       className={`ml-auto min-w-[1.25rem] px-1 py-0.5 text-center text-[10px] font-bold leading-none ${
@@ -196,7 +195,7 @@ export function Shell({ children, immersive = false, onEnterImmersive }: ShellPr
                 setNavOpen(false);
                 onEnterImmersive();
               }}
-              className="w-full flex items-center gap-3 px-4 py-3 text-foreground hover:bg-muted pixel-shadow transition-colors"
+              className="w-full h-full flex items-center gap-3 px-4 py-4 text-foreground hover:bg-muted pixel-shadow transition-colors lg:py-3"
               aria-label="Enter fullscreen office view"
               title="Opens the immersive office scene — press Escape to exit"
             >

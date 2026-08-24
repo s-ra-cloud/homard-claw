@@ -31,6 +31,7 @@ import MemoryPage from '@/pages/MemoryPage';
 import SchedulesPage from '@/pages/SchedulesPage';
 import NotificationsPage from '@/pages/NotificationsPage';
 import ReportsPage from '@/pages/ReportsPage';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 const clerkPubKey = publishableKeyFromHost(
   window.location.hostname,
@@ -143,17 +144,29 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
   );
 }
 
+/**
+ * Signed-in landing: a phone opens on Talk (the office diorama only reads on
+ * a wide screen), anything larger still opens on the office.
+ */
 function HomeRedirect() {
+  const isPhone = useIsMobile();
   return (
     <>
       <Show when="signed-in">
-        <Redirect to="/office" />
+        <Redirect to={isPhone ? "/talk" : "/office"} />
       </Show>
       <Show when="signed-out">
         <PublicWelcome />
       </Show>
     </>
   );
+}
+
+/** The office scene is desktop-only; a phone asking for it lands on Talk. */
+function OfficeRoute() {
+  const isPhone = useIsMobile();
+  if (isPhone) return <Redirect to="/talk" />;
+  return <ProtectedRoute component={OfficeDashboard} />;
 }
 
 function ClerkProviderWithRoutes() {
@@ -178,7 +191,7 @@ function ClerkProviderWithRoutes() {
             <Route path="/sign-up/*?" component={SignUpPage} />
 
             <Route path="/office">
-              <ProtectedRoute component={OfficeDashboard} />
+              <OfficeRoute />
             </Route>
 
             <Route path="/agents">
@@ -202,6 +215,10 @@ function ClerkProviderWithRoutes() {
             </Route>
 
             <Route path="/talk">
+              <ProtectedRoute component={TalkPage} />
+            </Route>
+
+            <Route path="/talk/:agentId">
               <ProtectedRoute component={TalkPage} />
             </Route>
 

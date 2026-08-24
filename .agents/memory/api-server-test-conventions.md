@@ -16,6 +16,14 @@ The api-server uses vitest + supertest suites (e.g. src/routes/office.lifecycle.
 - Manual vite builds of the web app need PORT and BASE_PATH env vars (workflows provide them; shell builds must pass e.g. PORT=5000 BASE_PATH=/).
 - The package-management install tool fails at the pnpm workspace root (ERR_PNPM_ADDING_TO_ROOT); install per-package with `pnpm --filter <pkg> add`.
 
+## Browser e2e against the web app
+
+The same owner gate applies to the UI: a Playwright/testing subagent that signs in as a freshly created Clerk user gets 403 on every `/api` call and sees an empty app. Read the current `owner_clerk_id` from `system_state` and tell the tester to impersonate exactly that Clerk identity (look its email up through the Clerk backend API with `CLERK_SECRET_KEY`).
+
+**Why:** the owner gate is permanent and first-come; a test identity must never claim or replace it.
+
+Also give the tester a *conversable* agent: retired agents still exist in `agents` but are filtered out of Talk and other rosters, so picking one looks like a missing-contact bug.
+
 ## Testing the persistent task worker
 
 The dev API server runs a live queue worker (advisory-lock singleton) against the same Postgres the tests use, so tests must never leave claimable `queued` rows or call unscoped claim functions — they would steal or mutate real work.
