@@ -30,7 +30,7 @@ export interface AgentPermissionOverrides {
      * @nullable
      */
   approvalThresholdCents?: number | null;
-  allowedProviders?: ('claude_max' | 'openrouter')[] | null;
+  allowedProviders?: ('claude_max' | 'codex_chatgpt' | 'openrouter')[] | null;
   /**
      * @minimum 0
      * @nullable

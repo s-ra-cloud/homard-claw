@@ -5,9 +5,12 @@
  * HomardClaw private agent office API
  * OpenAPI spec version: 0.1.0
  */
+import type { TaskFallbackFromProvider } from './taskFallbackFromProvider';
 import type { TaskFile } from './taskFile';
 import type { TaskPriority } from './taskPriority';
 import type { TaskProvider } from './taskProvider';
+import type { TaskProviderPhase } from './taskProviderPhase';
+import type { TaskReasoningEffort } from './taskReasoningEffort';
 import type { TaskSource } from './taskSource';
 import type { TaskStatus } from './taskStatus';
 
@@ -24,6 +27,17 @@ export interface Task {
   /** @nullable */
   model?: string | null;
   /** @nullable */
+  reasoningEffort?: TaskReasoningEffort;
+  /**
+     * Coarse execution phase shown while a task runs; `status` stays authoritative.
+     * @nullable
+     */
+  providerPhase?: TaskProviderPhase;
+  /** @nullable */
+  providerThreadId?: string | null;
+  /** @nullable */
+  conversationId?: string | null;
+  /** @nullable */
   estimatedTokens?: number | null;
   /** @nullable */
   estimatedCostCents?: number | null;
@@ -31,8 +45,27 @@ export interface Task {
   actualInputTokens?: number | null;
   /** @nullable */
   actualOutputTokens?: number | null;
-  /** @nullable */
+  /**
+     * Null when the provider publishes no per-token price — for subscription allowances this is "not applicable", never a $0.00 charge.
+     * @nullable
+     */
   actualCostCents?: number | null;
+  /** @nullable */
+  cachedInputTokens?: number | null;
+  /** @nullable */
+  cacheWriteInputTokens?: number | null;
+  /** @nullable */
+  reasoningOutputTokens?: number | null;
+  /** @nullable */
+  queuedMs?: number | null;
+  /** @nullable */
+  runMs?: number | null;
+  /** @nullable */
+  fallbackFromProvider?: TaskFallbackFromProvider;
+  /** @nullable */
+  fallbackReason?: string | null;
+  /** @nullable */
+  paidFallbackApprovedAt?: Date | null;
   /** @nullable */
   output?: string | null;
   files: TaskFile[];

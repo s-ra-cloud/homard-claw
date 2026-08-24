@@ -11,5 +11,6 @@ export type ProviderSettingsInputDefaultProvider = typeof ProviderSettingsInputD
 
 export const ProviderSettingsInputDefaultProvider = {
   claude_max: 'claude_max',
+  codex_chatgpt: 'codex_chatgpt',
   openrouter: 'openrouter',
 } as const;

@@ -96,6 +96,11 @@ async function buildAll() {
       "wrangler",
       "zeromq",
       "zeromq-prebuilt",
+      // The Codex SDK spawns a platform-specific native CLI binary that it
+      // resolves from its own package directory, so bundling it would break
+      // that lookup. Both must ship as real node_modules in production.
+      "@openai/codex-sdk",
+      "@openai/codex",
       "playwright",
       "puppeteer",
       "puppeteer-core",

@@ -15,6 +15,12 @@ const SECRET_ENV_KEYS = [
   "CLERK_SECRET_KEY",
   "SESSION_SECRET",
   "DATABASE_URL",
+  // Codex: the bootstrap blob is a whole auth.json (refresh token, id
+  // token, account id), and the API keys must never be echoed either —
+  // even though Codex is only ever run in ChatGPT-auth mode here.
+  "CODEX_AUTH_JSON",
+  "CODEX_API_KEY",
+  "OPENAI_API_KEY",
 ] as const;
 
 /** Whole-match redaction: no capture groups allowed here. */

@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { AgentAutonomy } from './agentAutonomy';
+import type { AgentCodexReasoning } from './agentCodexReasoning';
 import type { AgentPermissionOverrides } from './agentPermissionOverrides';
 import type { AgentPermissions } from './agentPermissions';
 import type { AgentProvider } from './agentProvider';
@@ -30,6 +31,13 @@ export interface Agent {
   provider: AgentProvider;
   /** @nullable */
   model?: string | null;
+  /**
+     * Preferred Codex model for this agent; falls back to the workspace default.
+     * @nullable
+     */
+  codexModel?: string | null;
+  /** @nullable */
+  codexReasoning?: AgentCodexReasoning;
   /** @nullable */
   voiceStyle?: string | null;
   status: AgentStatus;

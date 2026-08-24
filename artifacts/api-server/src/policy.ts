@@ -8,6 +8,12 @@ import {
   type AgentPermissions,
 } from "@workspace/db";
 import { and, count, eq, gte, ne, sum } from "drizzle-orm";
+import {
+  getProviderSettings,
+  isMeteredProvider,
+  providerLabel,
+  type ProviderId,
+} from "./providers";
 
 /**
  * Server-side action policy. The worker evaluates every claimed task
@@ -163,7 +169,10 @@ export async function evaluateTaskPolicy(
 ): Promise<PolicyDecision> {
   const perms = effectivePermissions(agent);
   const provider = task.provider;
-  const metered = provider !== "claude_max";
+  // Subscription providers (Claude Code, Codex via ChatGPT Plus) draw on a
+  // plan allowance rather than billing per token, so the cost-based rules
+  // below simply do not apply to them.
+  const metered = isMeteredProvider(provider);
   const costBound = task.estimatedCostCents ?? task.budgetCents;
 
   if (
@@ -172,7 +181,7 @@ export async function evaluateTaskPolicy(
   ) {
     return {
       kind: "deny",
-      reason: `${agent.name} is not permitted to use the ${provider} provider.`,
+      reason: `${agent.name} is not permitted to use the ${providerLabel(provider)} provider.`,
     };
   }
 
@@ -367,4 +376,86 @@ export async function evaluateDelegation({
   }
 
   return { kind: "allow", teamId: team.id, depth };
+}
+
+// ---------------------------------------------------------------------------
+// Provider fallback
+// ---------------------------------------------------------------------------
+
+export type FallbackDecision =
+  | { kind: "allow"; provider: ProviderId; reason: string }
+  | { kind: "stop"; reason: string; candidates: ProviderId[] };
+
+/**
+ * Decide whether a stopped task may continue on a different provider.
+ *
+ * A fallback is never silent and never automatic-by-default:
+ *
+ * - Falling back onto another SUBSCRIPTION provider costs no money, but it
+ *   still only happens when the owner put that provider in the configured
+ *   fallback order.
+ * - Falling back onto a METERED provider spends real money, so it requires
+ *   either an explicit per-task approval the owner just gave, or a standing
+ *   consent policy whose spend limit the task's own cost bound fits inside.
+ *   The limit is re-checked here at fallback time, not only when the policy
+ *   was saved.
+ *
+ * When nothing qualifies the task stops with the candidate list, so the
+ * owner can wait, cancel, or authorize a paid run themselves.
+ */
+export async function evaluateFallback(input: {
+  fromProvider: ProviderId;
+  /** Cents the fallback run could cost, when knowable. */
+  costBoundCents: number | null;
+  /** True when the owner explicitly approved a paid fallback for this task. */
+  paidFallbackApproved: boolean;
+  /** Providers currently able to accept the work. */
+  healthyProviders: ProviderId[];
+}): Promise<FallbackDecision> {
+  const settings = await getProviderSettings();
+  const candidates = settings.fallbackOrder.filter(
+    (provider) =>
+      provider !== input.fromProvider && input.healthyProviders.includes(provider),
+  );
+  if (candidates.length === 0) {
+    return {
+      kind: "stop",
+      reason:
+        "No fallback provider is configured and available, so the task is stopped instead of being rerouted.",
+      candidates: [],
+    };
+  }
+
+  for (const provider of candidates) {
+    if (!isMeteredProvider(provider)) {
+      return {
+        kind: "allow",
+        provider,
+        reason: `Continuing on ${providerLabel(provider)}, the next configured fallback; it is subscription-backed, so no purchased usage is involved.`,
+      };
+    }
+    if (input.paidFallbackApproved) {
+      return {
+        kind: "allow",
+        provider,
+        reason: `You approved a paid fallback for this task, so it continues on ${providerLabel(provider)}.`,
+      };
+    }
+    if (!settings.paidFallbackConsent) continue;
+    if (settings.paidFallbackLimitCents === null) continue;
+    if (input.costBoundCents === null) continue;
+    if (input.costBoundCents > settings.paidFallbackLimitCents) continue;
+    return {
+      kind: "allow",
+      provider,
+      reason: `Your standing paid-fallback policy allows up to ${centsLabel(settings.paidFallbackLimitCents)} per task, and this run is bounded at ${centsLabel(input.costBoundCents)}, so it continues on ${providerLabel(provider)}.`,
+    };
+  }
+
+  return {
+    kind: "stop",
+    reason:
+      "The only available fallbacks are paid providers, and no per-task approval or standing consent-and-limit policy covers this run. The task is stopped so you can wait, cancel, or authorize a paid run.",
+    candidates,
+  };
 }

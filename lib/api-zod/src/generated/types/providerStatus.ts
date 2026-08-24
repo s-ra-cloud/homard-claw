@@ -5,11 +5,28 @@
  * HomardClaw private agent office API
  * OpenAPI spec version: 0.1.0
  */
+import type { ProviderStatusAuthMode } from './providerStatusAuthMode';
+import type { ProviderStatusBilling } from './providerStatusBilling';
 import type { ProviderStatusProvider } from './providerStatusProvider';
 
 export interface ProviderStatus {
   provider: ProviderStatusProvider;
+  label: string;
+  billing: ProviderStatusBilling;
+  /** False when a server-side feature flag hides this provider. */
+  enabled: boolean;
   configured: boolean;
   healthy: boolean;
   message?: string;
+  /**
+     * Codex only. Only "chatgpt" draws on the ChatGPT Codex allowance; "api_key" means the stored credential bills OpenAI's API instead.
+     * @nullable
+     */
+  authMode: ProviderStatusAuthMode;
+  /** Confirmed from stored credentials, never assumed from the provider id. */
+  usesSubscriptionAllowance: boolean;
+  /** Whether the remaining plan allowance can be reported at all. */
+  allowanceBalanceKnown: boolean;
+  /** Reasoning effort levels this provider accepts, from server configuration. Empty when it has no such control. */
+  reasoningLevels: string[];
 }

@@ -5,7 +5,9 @@
  * HomardClaw private agent office API
  * OpenAPI spec version: 0.1.0
  */
+import type { ProviderSettingsInputCodexReasoning } from './providerSettingsInputCodexReasoning';
 import type { ProviderSettingsInputDefaultProvider } from './providerSettingsInputDefaultProvider';
+import type { ProviderSettingsInputFallbackOrderItem } from './providerSettingsInputFallbackOrderItem';
 
 export interface ProviderSettingsInput {
   defaultProvider?: ProviderSettingsInputDefaultProvider;
@@ -19,4 +21,18 @@ export interface ProviderSettingsInput {
      * @nullable
      */
   openrouterModel?: string | null;
+  /**
+     * @maxLength 200
+     * @nullable
+     */
+  codexModel?: string | null;
+  /** @nullable */
+  codexReasoning?: ProviderSettingsInputCodexReasoning;
+  fallbackOrder?: ProviderSettingsInputFallbackOrderItem[];
+  paidFallbackConsent?: boolean;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  paidFallbackLimitCents?: number | null;
 }

@@ -10,11 +10,14 @@ import { recordAudit } from "./audit";
 import { publish } from "./events";
 import { notifyTaskEvent } from "./notifications";
 import {
+  RoutingError,
   estimateTask,
   isConfigured,
+  providerLabel,
   resolveRouting,
   type ProviderId,
 } from "./providers";
+import { latestConversation } from "./provider-conversations";
 
 /** Prompt-relevant agent configuration used for token estimation. */
 export function agentPromptContext(agent: {
@@ -42,6 +45,10 @@ export type DispatchInput = {
   budgetCents?: number | null;
   providerOverride?: ProviderId;
   modelOverride?: string;
+  /** Codex reasoning effort override; ignored by other providers. */
+  reasoningOverride?: string;
+  /** Continue the agent's existing provider thread instead of a new one. */
+  continueConversation?: boolean;
   /** Set when a durable schedule launched this task. */
   scheduleId?: string | null;
 };
@@ -49,6 +56,8 @@ export type DispatchInput = {
 export type DispatchOutcome =
   | { status: 404 }
   | { status: 409 }
+  /** The requested provider/model/reasoning combination is not allowed. */
+  | { status: 422; message: string }
   | { status: 425 } // routing went stale twice; caller should surface a retry
   | { status: 201; task: typeof tasksTable.$inferSelect; agentName: string };
 
@@ -76,16 +85,32 @@ export async function dispatchTask(input: DispatchInput): Promise<DispatchOutcom
       outcome = { status: 409 };
       break;
     }
-    const routing = await resolveRouting(
-      preview,
-      input.providerOverride,
-      input.modelOverride,
-    );
+    let routing;
+    try {
+      routing = await resolveRouting(
+        preview,
+        input.providerOverride,
+        input.modelOverride,
+        input.reasoningOverride,
+      );
+    } catch (error) {
+      if (error instanceof RoutingError) {
+        outcome = { status: 422, message: error.message };
+        break;
+      }
+      throw error;
+    }
     const estimate = await estimateTask(
       agentPromptContext(preview),
       input.objective,
       routing,
     );
+    // Thread continuity is opt-in. When asked for, the task is pinned to
+    // the agent's most recent resumable conversation on this provider; the
+    // worker creates a fresh one when this is null.
+    const conversationId = input.continueConversation
+      ? ((await latestConversation(preview.id, routing.provider))?.id ?? null)
+      : null;
     outcome = await db.transaction(async (tx): Promise<DispatchOutcome> => {
       const [agent] = await tx
         .select()
@@ -117,7 +142,7 @@ export async function dispatchTask(input: DispatchInput): Promise<DispatchOutcom
           : !configured
             ? {
                 errorKind: "not_configured",
-                errorMessage: `${routing.provider === "claude_max" ? "Claude" : "OpenRouter"} is not configured; add the credential and retry.`,
+                errorMessage: `${providerLabel(routing.provider)} is not configured; add the credential and retry.`,
               }
             : null;
       const [task] = await tx
@@ -129,6 +154,8 @@ export async function dispatchTask(input: DispatchInput): Promise<DispatchOutcom
           budgetCents: input.budgetCents ?? null,
           provider: routing.provider,
           model: routing.model,
+          reasoningEffort: routing.reasoningEffort,
+          conversationId,
           estimatedTokens: estimate.estimatedTokens,
           estimatedCostCents: estimate.costKnown
             ? estimate.estimatedCostCents

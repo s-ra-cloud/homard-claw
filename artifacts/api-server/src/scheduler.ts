@@ -12,6 +12,12 @@ import { publish } from "./events";
 import { notifyScheduleIssue } from "./notifications";
 import { computeNextRunAt } from "./recurrence";
 import { logger } from "./lib/logger";
+import {
+  codexFeatureEnabled,
+  codexHealthCheckMinutes,
+  codexHomePath,
+} from "./codex/config";
+import { codexRuntimeState } from "./codex/runtime";
 import { addTaskLog } from "./worker";
 import type { ProviderId } from "./providers";
 
@@ -270,4 +276,50 @@ export async function runDueSchedules(
   }
   if (fired > 0) publish("schedules");
   return fired;
+}
+
+/**
+ * Low-frequency Codex credential health check.
+ *
+ * This runs from the worker tick (so only the singleton lease holder does
+ * it) and only when Codex is switched on *and* backed by a persistent
+ * private runtime — on ephemeral storage there is no credential worth
+ * watching, and the noise would be constant. It is purely local: it reads
+ * `auth.json`'s metadata, never contacts OpenAI, and so cannot spend any
+ * of the owner's allowance.
+ *
+ * Its only job is to notice a session that has stopped refreshing before
+ * a task does, and say so once per transition rather than every tick.
+ */
+let lastCodexHealthAt = 0;
+let lastCodexHealthy: boolean | null = null;
+
+/** Test hook: forget the throttle and the last reported state. */
+export function resetCodexHealthCheck(): void {
+  lastCodexHealthAt = 0;
+  lastCodexHealthy = null;
+}
+
+export async function runCodexHealthCheck(now = Date.now()): Promise<boolean> {
+  if (!codexFeatureEnabled()) return false;
+  // No durable private home means nothing durable to check.
+  if (codexHomePath() === null) return false;
+  const intervalMs = codexHealthCheckMinutes() * 60_000;
+  if (now - lastCodexHealthAt < intervalMs) return false;
+  lastCodexHealthAt = now;
+
+  const state = await codexRuntimeState();
+  const healthy = state.ready;
+  if (healthy === lastCodexHealthy) return true;
+  lastCodexHealthy = healthy;
+  if (healthy) {
+    logger.info({ provider: "codex_chatgpt" }, "Codex credential is healthy");
+  } else {
+    // `detail` is already owner-facing and redacted at the source.
+    logger.warn(
+      { provider: "codex_chatgpt", detail: state.detail },
+      "Codex credential needs attention",
+    );
+  }
+  return true;
 }

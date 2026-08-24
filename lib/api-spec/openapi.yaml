@@ -675,6 +675,30 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProviderSettings"
+  /providers/codex/test:
+    post:
+      operationId: testCodexConnection
+      tags: [office]
+      summary: Check Codex readiness locally without contacting OpenAI
+      responses:
+        "200":
+          description: Connection check result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CodexConnectionTest"
+  /providers/codex/bootstrap:
+    post:
+      operationId: bootstrapCodex
+      tags: [office]
+      summary: Seed the private CODEX_HOME from CODEX_AUTH_JSON if it is empty
+      responses:
+        "200":
+          description: Bootstrap result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CodexBootstrapResult"
   /providers/{provider}/models:
     get:
       operationId: listProviderModels
@@ -684,7 +708,7 @@ paths:
         - name: provider
           in: path
           required: true
-          schema: { type: string, enum: [claude_max, openrouter] }
+          schema: { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
       responses:
         "200":
           description: Provider model catalog
@@ -744,6 +768,30 @@ paths:
           description: Task not found
         "409":
           description: Task is not in a retryable state
+  /tasks/{taskId}/fallback:
+    post:
+      operationId: decideTaskFallback
+      tags: [office]
+      summary: Decide what a task stopped by a provider outage or exhausted allowance should do
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskFallbackInput"
+      responses:
+        "200":
+          description: Updated task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "404":
+          description: Task not found
+        "409":
+          description: Task is not stopped, or no fallback provider is available
   /tasks/estimate:
     post:
       operationId: estimateTask
@@ -1134,8 +1182,14 @@ components:
         personality: { type: ["string", "null"] }
         goals: { type: ["string", "null"] }
         instructions: { type: ["string", "null"] }
-        provider: { type: ["string", "null"], enum: [claude_max, openrouter, null] }
+        provider: { type: ["string", "null"], enum: [claude_max, codex_chatgpt, openrouter, null] }
         model: { type: ["string", "null"] }
+        codexModel:
+          type: ["string", "null"]
+          description: Preferred Codex model for this agent; falls back to the workspace default.
+        codexReasoning:
+          type: ["string", "null"]
+          enum: [minimal, low, medium, high, xhigh, max, ultra, null]
         voiceStyle: { type: ["string", "null"] }
         status: { type: string, enum: [idle, working, researching, waiting, paused, error, queued, complete] }
         securityPreset: { type: string, enum: [observer, assistant, operator] }
@@ -1173,7 +1227,7 @@ components:
         allowedProviders:
           oneOf:
             - type: array
-              items: { type: string, enum: [claude_max, openrouter] }
+              items: { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
             - type: "null"
         maxRunSeconds: { type: [number, "null"], minimum: 0 }
         maxOutputTokens: { type: [number, "null"], minimum: 0 }
@@ -1191,7 +1245,7 @@ components:
         allowedProviders:
           oneOf:
             - type: array
-              items: { type: string, enum: [claude_max, openrouter] }
+              items: { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
             - type: "null"
         maxRunSeconds: { type: [number, "null"], minimum: 0 }
         maxOutputTokens: { type: [number, "null"], minimum: 0 }
@@ -1215,7 +1269,7 @@ components:
         name: { type: string }
         title: { type: string }
         mission: { type: string }
-        provider: { type: ["string", "null"], enum: [claude_max, openrouter, null] }
+        provider: { type: ["string", "null"], enum: [claude_max, codex_chatgpt, openrouter, null] }
         model: { type: ["string", "null"] }
         securityPreset: { type: string, enum: [observer, assistant, operator] }
         avatar: { $ref: "#/components/schemas/AvatarConfig" }
@@ -1240,8 +1294,12 @@ components:
         personality: { type: string, maxLength: 2000 }
         goals: { type: string, maxLength: 4000 }
         instructions: { type: string, maxLength: 4000 }
-        provider: { type: ["string", "null"], enum: [claude_max, openrouter, null] }
+        provider: { type: ["string", "null"], enum: [claude_max, codex_chatgpt, openrouter, null] }
         model: { type: string, maxLength: 180 }
+        codexModel: { type: ["string", "null"], maxLength: 200 }
+        codexReasoning:
+          type: ["string", "null"]
+          enum: [minimal, low, medium, high, xhigh, max, ultra, null]
         voiceStyle: { type: string, maxLength: 60 }
         securityPreset: { type: string, enum: [observer, assistant, operator] }
         autonomy: { type: string, enum: [supervised, limited, autonomous] }
@@ -1260,8 +1318,12 @@ components:
         personality: { type: ["string", "null"], maxLength: 2000 }
         goals: { type: ["string", "null"], maxLength: 4000 }
         instructions: { type: ["string", "null"], maxLength: 4000 }
-        provider: { type: ["string", "null"], enum: [claude_max, openrouter, null] }
+        provider: { type: ["string", "null"], enum: [claude_max, codex_chatgpt, openrouter, null] }
         model: { type: ["string", "null"], maxLength: 180 }
+        codexModel: { type: ["string", "null"], maxLength: 200 }
+        codexReasoning:
+          type: ["string", "null"]
+          enum: [minimal, low, medium, high, xhigh, max, ultra, null]
         voiceStyle: { type: ["string", "null"], maxLength: 60 }
         securityPreset: { type: string, enum: [observer, assistant, operator] }
         autonomy: { type: string, enum: [supervised, limited, autonomous] }
@@ -1291,13 +1353,49 @@ components:
         status: { type: string, enum: [queued, running, waiting_approval, blocked, completed, failed, cancelled] }
         priority: { type: string, enum: [low, normal, high] }
         budgetCents: { type: [number, "null"] }
-        provider: { type: string, enum: [claude_max, openrouter] }
+        provider: { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
         model: { type: [string, "null"] }
+        reasoningEffort:
+          type: ["string", "null"]
+          enum: [minimal, low, medium, high, xhigh, max, ultra, null]
+        providerPhase:
+          type: ["string", "null"]
+          enum:
+            [
+              queued,
+              starting,
+              running,
+              waiting_approval,
+              completed,
+              rate_limited,
+              auth_required,
+              failed,
+              cancelled,
+              null,
+            ]
+          description: Coarse execution phase shown while a task runs; `status` stays authoritative.
+        providerThreadId: { type: [string, "null"] }
+        conversationId: { type: [string, "null"] }
         estimatedTokens: { type: [number, "null"] }
         estimatedCostCents: { type: [number, "null"] }
         actualInputTokens: { type: [number, "null"] }
         actualOutputTokens: { type: [number, "null"] }
-        actualCostCents: { type: [number, "null"] }
+        actualCostCents:
+          type: [number, "null"]
+          description: >-
+            Null when the provider publishes no per-token price — for
+            subscription allowances this is "not applicable", never a $0.00
+            charge.
+        cachedInputTokens: { type: [number, "null"] }
+        cacheWriteInputTokens: { type: [number, "null"] }
+        reasoningOutputTokens: { type: [number, "null"] }
+        queuedMs: { type: [number, "null"] }
+        runMs: { type: [number, "null"] }
+        fallbackFromProvider:
+          type: ["string", "null"]
+          enum: [claude_max, codex_chatgpt, openrouter, null]
+        fallbackReason: { type: [string, "null"] }
+        paidFallbackApprovedAt: { type: [string, "null"], format: date-time }
         output: { type: [string, "null"] }
         files:
           type: array
@@ -1547,28 +1645,58 @@ components:
         objective: { type: string, minLength: 3, maxLength: 5000 }
         priority: { type: string, enum: [low, normal, high] }
         budgetCents: { type: number, minimum: 0.01, maximum: 1000000 }
-        providerOverride: { type: string, enum: [claude_max, openrouter] }
+        providerOverride: { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
         modelOverride: { type: string, maxLength: 200 }
+        reasoningOverride:
+          type: string
+          enum: [minimal, low, medium, high, xhigh, max, ultra]
+        continueConversation:
+          type: boolean
+          description: Continue the agent's most recent provider thread instead of starting a new one.
     TaskEstimateInput:
       type: object
       required: [agentId, objective]
       properties:
         agentId: { type: string }
         objective: { type: string, minLength: 3, maxLength: 5000 }
-        providerOverride: { type: string, enum: [claude_max, openrouter] }
+        providerOverride: { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
         modelOverride: { type: string, maxLength: 200 }
     TaskEstimate:
       type: object
-      required: [provider, model, estimatedInputTokens, estimatedOutputTokens, estimatedTokens, estimatedCostCents, costKnown]
+      required:
+        [
+          provider,
+          model,
+          billing,
+          estimatedInputTokens,
+          estimatedOutputTokens,
+          estimatedTokens,
+          estimatedCostCents,
+          costKnown,
+        ]
       properties:
-        provider: { type: string, enum: [claude_max, openrouter] }
+        provider: { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
         model: { type: string }
+        billing: { type: string, enum: [subscription, metered] }
         estimatedInputTokens: { type: number }
         estimatedOutputTokens: { type: number }
         estimatedTokens: { type: number }
         estimatedCostCents: { type: number }
-        costKnown: { type: boolean }
+        costKnown:
+          type: boolean
+          description: False when no price can be computed; the UI must not present the amount as a real figure.
         note: { type: [string, "null"] }
+    TaskFallbackInput:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [wait, cancel, approve_paid_fallback]
+          description: >-
+            "wait" requeues the task on its current provider, "cancel" stops
+            it, and "approve_paid_fallback" is the owner's explicit,
+            per-task authorization to continue on a metered provider.
     TaskUsageInput:
       type: object
       required: [inputTokens, outputTokens]
@@ -1597,25 +1725,116 @@ components:
         decision: { type: string, enum: [approved, rejected] }
     ProviderStatus:
       type: object
-      required: [provider, configured, healthy]
+      required:
+        [
+          provider,
+          label,
+          billing,
+          enabled,
+          configured,
+          healthy,
+          authMode,
+          usesSubscriptionAllowance,
+          allowanceBalanceKnown,
+          reasoningLevels,
+        ]
       properties:
-        provider: { type: string, enum: [claude_max, openrouter] }
+        provider: { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
+        label: { type: string }
+        billing: { type: string, enum: [subscription, metered] }
+        enabled:
+          type: boolean
+          description: False when a server-side feature flag hides this provider.
         configured: { type: boolean }
         healthy: { type: boolean }
         message: { type: string }
+        authMode:
+          type: ["string", "null"]
+          enum: [chatgpt, api_key, unknown, null]
+          description: >-
+            Codex only. Only "chatgpt" draws on the ChatGPT Codex allowance;
+            "api_key" means the stored credential bills OpenAI's API instead.
+        usesSubscriptionAllowance:
+          type: boolean
+          description: Confirmed from stored credentials, never assumed from the provider id.
+        allowanceBalanceKnown:
+          type: boolean
+          description: Whether the remaining plan allowance can be reported at all.
+        reasoningLevels:
+          type: array
+          description: Reasoning effort levels this provider accepts, from server configuration. Empty when it has no such control.
+          items: { type: string }
+    CodexConnectionCheck:
+      type: object
+      required: [name, ok, detail]
+      properties:
+        name: { type: string }
+        ok: { type: boolean }
+        detail: { type: string }
+    CodexConnectionTest:
+      type: object
+      description: >-
+        Result of a local-only Codex readiness check. No request is made to
+        OpenAI, so running it never consumes the ChatGPT allowance.
+      required: [ok, checks]
+      properties:
+        ok: { type: boolean }
+        checks:
+          type: array
+          items:
+            $ref: "#/components/schemas/CodexConnectionCheck"
+    CodexBootstrapResult:
+      type: object
+      required: [action, detail]
+      properties:
+        action:
+          type: string
+          enum: [created, preserved, skipped, unavailable]
+        detail: { type: string }
     ProviderSettings:
       type: object
-      required: [defaultProvider, claudeModel, openrouterModel]
+      required:
+        [
+          defaultProvider,
+          claudeModel,
+          openrouterModel,
+          codexModel,
+          codexReasoning,
+          fallbackOrder,
+          paidFallbackConsent,
+          paidFallbackLimitCents,
+        ]
       properties:
-        defaultProvider: { type: string, enum: [claude_max, openrouter] }
+        defaultProvider: { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
         claudeModel: { type: [string, "null"] }
         openrouterModel: { type: [string, "null"] }
+        codexModel: { type: [string, "null"] }
+        codexReasoning:
+          type: ["string", "null"]
+          enum: [minimal, low, medium, high, xhigh, max, ultra, null]
+        fallbackOrder:
+          type: array
+          description: Providers to try, in order, when the primary one stops. Empty means never fall back.
+          items: { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
+        paidFallbackConsent:
+          type: boolean
+          description: Standing authorization to fall back onto a metered provider without per-task approval.
+        paidFallbackLimitCents: { type: [number, "null"] }
     ProviderSettingsInput:
       type: object
       properties:
-        defaultProvider: { type: string, enum: [claude_max, openrouter] }
+        defaultProvider: { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
         claudeModel: { type: [string, "null"], maxLength: 200 }
         openrouterModel: { type: [string, "null"], maxLength: 200 }
+        codexModel: { type: [string, "null"], maxLength: 200 }
+        codexReasoning:
+          type: ["string", "null"]
+          enum: [minimal, low, medium, high, xhigh, max, ultra, null]
+        fallbackOrder:
+          type: array
+          items: { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
+        paidFallbackConsent: { type: boolean }
+        paidFallbackLimitCents: { type: [number, "null"], minimum: 0 }
     ProviderModel:
       type: object
       required: [id, name]
@@ -1629,7 +1848,7 @@ components:
       type: object
       required: [provider, available, models]
       properties:
-        provider: { type: string, enum: [claude_max, openrouter] }
+        provider: { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
         available: { type: boolean }
         message: { type: [string, "null"] }
         models:
@@ -1773,7 +1992,7 @@ components:
         agentId: { type: string }
         objective: { type: string, minLength: 3, maxLength: 5000 }
         priority: { type: string, enum: [low, normal, high] }
-        providerOverride: { type: string, enum: [claude_max, openrouter] }
+        providerOverride: { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
         modelOverride: { type: string, maxLength: 200 }
         budgetCents: { type: number, minimum: 0.01, maximum: 1000000 }
         cadence: { type: string, enum: [once, daily, weekly, monthly] }

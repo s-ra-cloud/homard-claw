@@ -5,6 +5,7 @@ import {
   AgentProvider,
   AgentSecurityPreset,
   useGetProviderSettings,
+  useGetProviders,
   useListProviderModels,
 } from "@workspace/api-client-react";
 import { LOBSTER_PRESETS, MarlowLobster } from "@/components/ui/marlow-lobster";
@@ -82,9 +83,13 @@ export const agentFormSchema = z.object({
   provider: z.enum([
     "workspace_default",
     AgentProvider.claude_max,
+    AgentProvider.codex_chatgpt,
     AgentProvider.openrouter,
   ]),
   model: z.string().max(180),
+  /** Codex-only preferences; ignored unless the agent runs on Codex. */
+  codexModel: z.string().max(200),
+  codexReasoning: z.string().max(20),
   voiceStyle: z.string().max(60),
   securityPreset: z.enum([
     AgentSecurityPreset.observer,
@@ -134,6 +139,10 @@ const selectItemClass =
 const messageClass = "text-[10px] uppercase font-bold text-destructive";
 
 export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues> }) {
+  const { data: providers } = useGetProviders();
+  const codexEnabled = Boolean(
+    providers?.find((p) => p.provider === AgentProvider.codex_chatgpt)?.enabled,
+  );
   return (
     <>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -287,7 +296,14 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
                 </FormControl>
                 <SelectContent className={selectContentClass}>
                   <SelectItem value="workspace_default" className={selectItemClass}>Workspace Default</SelectItem>
-                  <SelectItem value={AgentProvider.claude_max} className={selectItemClass}>Claude Max</SelectItem>
+                  <SelectItem value={AgentProvider.claude_max} className={selectItemClass}>Claude Code</SelectItem>
+                  {/* Codex appears only while the server flag is on; an
+                      agent already saved on Codex keeps its value either way. */}
+                  {codexEnabled || field.value === AgentProvider.codex_chatgpt ? (
+                    <SelectItem value={AgentProvider.codex_chatgpt} className={selectItemClass}>
+                      Codex via ChatGPT Plus
+                    </SelectItem>
+                  ) : null}
                   <SelectItem value={AgentProvider.openrouter} className={selectItemClass}>OpenRouter</SelectItem>
                 </SelectContent>
               </Select>
@@ -298,6 +314,8 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
 
         <ModelField form={form} />
       </div>
+
+      <CodexPreferenceFields form={form} />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <FormField
@@ -472,6 +490,119 @@ function CustomLimitsFields({ form }: { form: UseFormReturn<AgentFormValues> }) 
 }
 
 const DEFAULT_MODEL_SENTINEL = "__workspace_default__";
+
+/**
+ * Codex-specific model and reasoning preferences. Both lists come from the
+ * server (catalog endpoint and provider status), so the form can never
+ * offer a combination the server would reject. The whole block stays
+ * hidden until the agent is actually pointed at Codex.
+ */
+function CodexPreferenceFields({ form }: { form: UseFormReturn<AgentFormValues> }) {
+  const providerChoice = form.watch("provider");
+  const { data: settings } = useGetProviderSettings();
+  const { data: providers } = useGetProviders();
+  const effective =
+    providerChoice === "workspace_default"
+      ? settings?.defaultProvider
+      : providerChoice;
+  const status = providers?.find(
+    (p) => p.provider === AgentProvider.codex_chatgpt,
+  );
+  const { data: catalog } = useListProviderModels(AgentProvider.codex_chatgpt, {
+    query: {
+      queryKey: [`/api/providers/${AgentProvider.codex_chatgpt}/models`],
+      enabled: effective === AgentProvider.codex_chatgpt,
+    },
+  });
+
+  if (effective !== AgentProvider.codex_chatgpt) return null;
+  if (status && !status.enabled) {
+    return (
+      <div className="border-4 border-border border-dashed p-3 text-[10px] uppercase font-bold text-muted-foreground">
+        Codex is switched off on the server. This agent will not be able to run
+        until it is re-enabled.
+      </div>
+    );
+  }
+
+  const levels = status?.reasoningLevels ?? [];
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 border-4 border-border p-3">
+      <FormField
+        control={form.control}
+        name="codexModel"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel className="uppercase font-bold text-xs">Codex Model</FormLabel>
+            <Select
+              onValueChange={(val) =>
+                field.onChange(val === DEFAULT_MODEL_SENTINEL ? "" : val)
+              }
+              value={field.value || DEFAULT_MODEL_SENTINEL}
+            >
+              <FormControl>
+                <SelectTrigger className={selectTriggerClass}>
+                  <SelectValue placeholder="Workspace default" />
+                </SelectTrigger>
+              </FormControl>
+              <SelectContent className={selectContentClass}>
+                <SelectItem value={DEFAULT_MODEL_SENTINEL} className={selectItemClass}>
+                  Workspace Default
+                </SelectItem>
+                {(catalog?.models ?? []).map((model) => (
+                  <SelectItem key={model.id} value={model.id} className={selectItemClass}>
+                    {model.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <FormDescription className="text-[10px] uppercase">
+              Runs on the owner's ChatGPT Codex allowance.
+            </FormDescription>
+            <FormMessage className={messageClass} />
+          </FormItem>
+        )}
+      />
+
+      <FormField
+        control={form.control}
+        name="codexReasoning"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel className="uppercase font-bold text-xs">Reasoning Effort</FormLabel>
+            <Select
+              onValueChange={(val) =>
+                field.onChange(val === DEFAULT_MODEL_SENTINEL ? "" : val)
+              }
+              value={field.value || DEFAULT_MODEL_SENTINEL}
+            >
+              <FormControl>
+                <SelectTrigger className={selectTriggerClass}>
+                  <SelectValue placeholder="Workspace default" />
+                </SelectTrigger>
+              </FormControl>
+              <SelectContent className={selectContentClass}>
+                <SelectItem value={DEFAULT_MODEL_SENTINEL} className={selectItemClass}>
+                  Workspace Default
+                </SelectItem>
+                {levels.map((level) => (
+                  <SelectItem key={level} value={level} className={selectItemClass}>
+                    {level}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <FormDescription className="text-[10px] uppercase">
+              Higher effort spends more of the allowance per task.
+            </FormDescription>
+            <FormMessage className={messageClass} />
+          </FormItem>
+        )}
+      />
+    </div>
+  );
+}
 
 /**
  * Model preference picker. Uses the live provider catalog when it is

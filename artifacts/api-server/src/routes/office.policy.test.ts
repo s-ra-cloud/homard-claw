@@ -254,7 +254,8 @@ describe("policy denials", () => {
     const task = await insertTask(agent.id, { estimatedCostCents: 1 });
     const denied = await evaluateTaskPolicy(agentRow, task);
     expect(denied.kind).toBe("deny");
-    expect((denied as { reason: string }).reason).toContain("openrouter");
+    // The denial names the provider the way the owner sees it, not by id.
+    expect((denied as { reason: string }).reason).toContain("OpenRouter");
 
     // Same task on an allowed provider, but another run already started
     // today: the daily count denies.

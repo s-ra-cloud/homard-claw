@@ -12,10 +12,15 @@ import { and, asc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { recordAudit } from "./audit";
 import {
   effectivePermissions,
+  evaluateFallback,
   evaluateTaskPolicy,
   meteredSpendTodayCents,
 } from "./policy";
-import { MAX_OUTPUT_TOKENS, ProviderCallError } from "./execution";
+import {
+  MAX_OUTPUT_TOKENS,
+  ProviderCallError,
+  type ProviderPhase,
+} from "./execution";
 import {
   DEFAULT_RUNTIME,
   RuntimeUnavailableError,
@@ -23,16 +28,35 @@ import {
   isRuntimeId,
 } from "./runtime";
 import {
+  availableProviderIds,
   computeUsageCostCents,
   estimatePromptTokens,
   getModelPricing,
-  isConfigured,
+  isMeteredProvider,
+  providerLabel,
+  providerReadiness,
+  resolveRouting,
   type ProviderId,
 } from "./providers";
+import {
+  acquireProviderLease,
+  codexLeaseKey,
+  releaseOwnStaleLeases,
+  releaseProviderLease,
+  renewProviderLease,
+} from "./provider-leases";
+import { codexAuthFingerprint } from "./codex/runtime";
+import { codexLeaseHeartbeatMs, codexLeaseTtlMs } from "./codex/config";
+import {
+  getConversation,
+  recordThreadId,
+  resolveConversation,
+  touchConversation,
+} from "./provider-conversations";
 import { buildTaskContext, saveTaskOutcomeMemory } from "./memory-context";
 import { publish } from "./events";
 import { notifyTaskEvent } from "./notifications";
-import { runDueSchedules } from "./scheduler";
+import { runCodexHealthCheck, runDueSchedules } from "./scheduler";
 import { logger } from "./lib/logger";
 
 /**
@@ -43,6 +67,7 @@ import { logger } from "./lib/logger";
  */
 
 const MAX_ATTEMPTS = 3;
+
 /** Base delay for retryable provider failures; multiplied by the attempt. */
 const RETRY_BACKOFF_MS = 30_000;
 const CALL_TIMEOUT_MS = 180_000;
@@ -51,6 +76,26 @@ const APPROVAL_TTL_MS = 24 * 60 * 60 * 1000;
 
 const inFlight = new Map<string, AbortController>();
 
+/**
+ * Record the coarse execution phase shown in the office while a task runs.
+ * Purely cosmetic: `status` remains the durable lifecycle, so a phase write
+ * that loses the attempts fence is simply skipped rather than retried.
+ */
+export async function setTaskPhase(
+  taskId: string,
+  attempts: number,
+  phase: ProviderPhase,
+): Promise<void> {
+  try {
+    await db
+      .update(tasksTable)
+      .set({ providerPhase: phase })
+      .where(and(eq(tasksTable.id, taskId), eq(tasksTable.attempts, attempts)));
+    publish("tasks");
+  } catch (error) {
+    logger.warn({ taskId, phase, error }, "Could not record task phase");
+  }
+}
 export async function addTaskLog(
   taskId: string,
   level: "info" | "warn" | "error",
@@ -117,16 +162,37 @@ export async function recoverInterruptedTasks(): Promise<number> {
     logger.info({ count: migrated.length }, "Migrated legacy paused tasks");
   }
 
+  // Provider leases this process took before it restarted are ours to
+  // clear; leaving them would stall the queue until their TTL ran out.
+  // Another live instance's leases are untouched and expire on their own.
+  const releasedLeases = await releaseOwnStaleLeases();
+  if (releasedLeases > 0) {
+    logger.info({ count: releasedLeases }, "Released own stale provider leases");
+  }
+
   const recovered = await db
     .update(tasksTable)
-    .set({ status: "queued", notBefore: null, startedAt: null })
+    // Interrupted work is requeued, never marked completed: the phase goes
+    // back to "queued" so nothing shows a run still in progress, and any
+    // persisted provider thread id is kept so the turn can resume.
+    .set({
+      status: "queued",
+      providerPhase: "queued",
+      notBefore: null,
+      startedAt: null,
+    })
     .where(eq(tasksTable.status, "running"))
-    .returning({ id: tasksTable.id });
+    .returning({
+      id: tasksTable.id,
+      threadId: tasksTable.providerThreadId,
+    });
   for (const task of recovered) {
     await addTaskLog(
       task.id,
       "warn",
-      "Server restarted while this task was running; requeued automatically.",
+      task.threadId
+        ? "Server restarted while this task was running; requeued and its provider thread will be resumed."
+        : "Server restarted while this task was running; requeued automatically.",
     );
   }
   if (recovered.length > 0) {
@@ -475,15 +541,58 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     ? `${buildSystemPrompt(agent)}\n\n${context.promptSection}`
     : buildSystemPrompt(agent);
 
+  // Codex serializes per authentication file; the lease is released in the
+  // outer `finally` so a crash mid-run cannot hold it past its expiry.
+  let heldLeaseKey: string | null = null;
+  // Set when the heartbeat below is refused: the credential is no longer
+  // provably ours, so this attempt may not report an outcome for it.
+  let leaseLost = false;
+
+  /**
+   * Hand the attempt back and requeue. Used from both the error path and
+   * the success path: a call that returned normally is no more entitled to
+   * report an outcome than one that threw, if the credential changed hands
+   * while it was running.
+   */
+  const requeueAfterLeaseLoss = async (): Promise<void> => {
+    await db
+      .update(tasksTable)
+      .set({
+        status: "queued",
+        providerPhase: "queued",
+        notBefore: new Date(Date.now() + 2_000),
+        // Losing the race is not a failed attempt; the retry budget stands.
+        attempts: task.attempts - 1,
+      })
+      .where(
+        and(
+          eq(tasksTable.id, task.id),
+          eq(tasksTable.status, "running"),
+          eq(tasksTable.attempts, task.attempts),
+        ),
+      );
+    await addTaskLog(
+      task.id,
+      "warn",
+      "Lost the Codex session lease mid-run, so the task was returned to the queue instead of being reported as finished.",
+    );
+    publish("tasks");
+  };
+
   try {
-    if (!isConfigured(provider)) {
-      const message = `${provider === "claude_max" ? "Claude" : "OpenRouter"} is not configured; add the credential and retry.`;
+    // Authoritative readiness, re-checked immediately before dispatch: a
+    // ChatGPT session that expired while the task sat in the queue must
+    // fail closed here rather than be attempted.
+    const readiness = await providerReadiness(provider);
+    if (!readiness.ready) {
+      await setTaskPhase(task.id, task.attempts, "auth_required");
       await finishIfStillRunning(task.id, task.attempts, {
         status: "blocked",
         errorKind: "not_configured",
-        errorMessage: message,
+        errorMessage: readiness.message,
       });
-      await addTaskLog(task.id, "error", message);
+      await addTaskLog(task.id, "error", readiness.message);
+      await offerFallback(task, agent, provider, readiness.message);
       return;
     }
 
@@ -495,7 +604,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     // and clamp the completion to the tokens the ceiling can pay for.
     // Approval never bypasses this — an approved task is still clamped.
     let maxOutputTokens = MAX_OUTPUT_TOKENS;
-    if (provider !== "claude_max") {
+    if (isMeteredProvider(provider)) {
       const bounds: Array<{ cents: number; label: string }> = [];
       if (task.budgetCents != null) {
         bounds.push({ cents: task.budgetCents, label: "task budget" });
@@ -615,9 +724,116 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
       return;
     }
 
+    // Codex: one authentication file, one run at a time. The lease is
+    // durable, so this holds across processes and survives a restart; a
+    // task that cannot get it goes back on the queue rather than racing.
+    let conversationId: string | null = task.conversationId;
+    let workingDirectory: string | null = null;
+    let threadId: string | null = null;
+    if (provider === "codex_chatgpt") {
+      // Readiness above already proved a private CODEX_HOME exists, so a
+      // missing fingerprint here would be a contradiction; fail closed.
+      const fingerprint = codexAuthFingerprint();
+      if (!fingerprint) {
+        throw new ProviderCallError(
+          "not_configured",
+          "Codex has no private credential storage configured, so the run was refused.",
+        );
+      }
+      const key = codexLeaseKey(fingerprint);
+      const lease = await acquireProviderLease(key, task.id, codexLeaseTtlMs());
+      if (!lease.acquired) {
+        const waitMs = Math.max(
+          2_000,
+          lease.expiresAt.getTime() - Date.now() + 1_000,
+        );
+        await db
+          .update(tasksTable)
+          .set({
+            status: "queued",
+            providerPhase: "queued",
+            notBefore: new Date(Date.now() + waitMs),
+            // The attempt is handed back: waiting in line is not a failure,
+            // so it must not consume the task's retry budget.
+            attempts: task.attempts - 1,
+          })
+          .where(
+            and(
+              eq(tasksTable.id, task.id),
+              eq(tasksTable.status, "running"),
+              eq(tasksTable.attempts, task.attempts),
+            ),
+          );
+        await addTaskLog(
+          task.id,
+          "info",
+          "Another Codex task is using the ChatGPT session; queued behind it.",
+        );
+        publish("tasks");
+        return;
+      }
+      heldLeaseKey = key;
+
+      const conversation = await resolveConversation(
+        agent.id,
+        provider,
+        conversationId ? "continue" : "new",
+      );
+      const chosen = conversationId
+        ? ((await getConversation(conversationId)) ?? conversation)
+        : conversation;
+      conversationId = chosen.id;
+      workingDirectory = chosen.workspacePath;
+      threadId = chosen.threadId;
+      if (task.conversationId !== conversationId) {
+        await db
+          .update(tasksTable)
+          .set({ conversationId })
+          .where(eq(tasksTable.id, task.id));
+      }
+      await addTaskLog(
+        task.id,
+        "info",
+        threadId
+          ? "Resuming the agent's existing Codex thread in its private workspace."
+          : "Starting a new Codex thread in a private workspace for this agent.",
+      );
+    }
+
     const controller = new AbortController();
     inFlight.set(task.id, controller);
     const timeout = setTimeout(() => controller.abort("timeout"), runLimitMs);
+    // A provider lease expires on a wall clock, but a call can outlive any
+    // TTL we would be willing to configure. Without a heartbeat the lease
+    // lapses mid-run and a second process takes the same credential —
+    // exactly the concurrency the lease exists to prevent. Renew while the
+    // call is in flight, and abort the moment a renewal is refused.
+    const heartbeat = heldLeaseKey
+      ? setInterval(() => {
+          const key = heldLeaseKey;
+          if (!key) return;
+          void renewProviderLease(key, task.id, codexLeaseTtlMs()).then(
+            (held) => {
+              if (held) return;
+              // Someone else owns the row now. Stop spending against a
+              // credential another run may already be using, and do not
+              // release a lease that is no longer ours.
+              leaseLost = true;
+              heldLeaseKey = null;
+              controller.abort("provider_lease_lost");
+            },
+            (error: unknown) => {
+              // A transient database error is not proof of loss; let the
+              // next beat decide rather than killing a healthy run.
+              logger.warn(
+                { taskId: task.id, error },
+                "Could not renew the Codex credential lease",
+              );
+            },
+          );
+        }, codexLeaseHeartbeatMs()).unref()
+      : null;
+    const startedAtMs = Date.now();
     let result;
     try {
       result = await runtime.execute({
@@ -627,11 +843,61 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         prompt: task.objective,
         maxOutputTokens,
         signal: controller.signal,
+        reasoningEffort: task.reasoningEffort,
+        threadId,
+        workingDirectory,
+        sandbox: {
+          securityPreset: agent.securityPreset,
+          autonomy: agent.autonomy,
+        },
+        onPhase: (phase) => setTaskPhase(task.id, task.attempts, phase),
+        onProgress: (progress) =>
+          addTaskLog(task.id, progress.level, progress.message),
+        onThreadId: async (emitted) => {
+          // Persisted the moment the SDK issues it, so a crash mid-turn
+          // still leaves a resumable thread behind.
+          if (conversationId) await recordThreadId(conversationId, emitted);
+          await db
+            .update(tasksTable)
+            .set({ providerThreadId: emitted })
+            .where(eq(tasksTable.id, task.id));
+        },
       });
     } finally {
       clearTimeout(timeout);
+      if (heartbeat) clearInterval(heartbeat);
       inFlight.delete(task.id);
     }
+    // The call returned — but did this attempt still hold the credential
+    // when it did? The heartbeat cannot answer that: it fires on a timer,
+    // and the window between the SDK resolving and the first write below is
+    // not covered by any beat. So confirm ownership once, explicitly, and
+    // treat "cannot confirm" as "lost". Anything else risks reporting a
+    // result for a credential another run has already taken over.
+    if (heldLeaseKey !== null || leaseLost) {
+      let stillOurs = false;
+      if (!leaseLost && heldLeaseKey !== null) {
+        try {
+          stillOurs = await renewProviderLease(
+            heldLeaseKey,
+            task.id,
+            codexLeaseTtlMs(),
+          );
+        } catch (error) {
+          logger.warn(
+            { taskId: task.id, error },
+            "Could not confirm the Codex credential lease before recording a result",
+          );
+        }
+      }
+      if (!stillOurs) {
+        leaseLost = true;
+        heldLeaseKey = null;
+        await requeueAfterLeaseLoss();
+        return;
+      }
+    }
+    if (conversationId) await touchConversation(conversationId);
 
     const costCents = await computeUsageCostCents(
       provider,
@@ -643,6 +909,14 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
       actualInputTokens: result.inputTokens,
       actualOutputTokens: result.outputTokens,
       actualCostCents: costCents,
+      cachedInputTokens: result.usageDetail?.cachedInputTokens ?? null,
+      cacheWriteInputTokens: result.usageDetail?.cacheWriteInputTokens ?? null,
+      reasoningOutputTokens: result.usageDetail?.reasoningOutputTokens ?? null,
+      runMs: Date.now() - startedAtMs,
+      queuedMs: task.startedAt
+        ? Math.max(0, task.startedAt.getTime() - task.createdAt.getTime())
+        : null,
+      providerThreadId: result.threadId ?? threadId,
     };
     const finished = await finishIfStillRunning(task.id, task.attempts, {
       ...usage,
@@ -650,11 +924,22 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
       output: result.output,
     });
     if (finished) {
-      await addTaskLog(
-        task.id,
-        "info",
-        `Completed: ${result.inputTokens} in / ${result.outputTokens} out tokens${costCents != null ? `, ${costCents.toFixed(4)}¢` : ""}.`,
-      );
+      await setTaskPhase(task.id, task.attempts, "completed");
+      const detail = [
+        `${result.inputTokens} in / ${result.outputTokens} out tokens`,
+        result.usageDetail?.cachedInputTokens
+          ? `${result.usageDetail.cachedInputTokens} cached in`
+          : null,
+        result.usageDetail?.reasoningOutputTokens
+          ? `${result.usageDetail.reasoningOutputTokens} reasoning out`
+          : null,
+        // No cost line for a subscription provider that publishes none —
+        // a "0.0000¢" would be an invented figure.
+        costCents != null ? `${costCents.toFixed(4)}¢` : null,
+      ]
+        .filter((part) => part !== null)
+        .join(", ");
+      await addTaskLog(task.id, "info", `Completed: ${detail}.`);
       await recordAudit("task.completed", `${agent.name} completed a task.`);
       // Delegated work reports back to whoever handed it over, so the
       // lead's thread shows the outcome without polling the task tree.
@@ -695,6 +980,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         .where(
           and(eq(tasksTable.id, task.id), eq(tasksTable.attempts, task.attempts)),
         );
+      await setTaskPhase(task.id, task.attempts, "cancelled");
       await addTaskLog(
         task.id,
         "warn",
@@ -702,6 +988,10 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
       );
     }
   } catch (error) {
+    if (leaseLost) {
+      await requeueAfterLeaseLoss();
+      return;
+    }
     // A missing runtime is a configuration problem, not a flaky call: block
     // the task instead of burning retries against something not installed.
     if (error instanceof RuntimeUnavailableError) {
@@ -722,12 +1012,22 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
           );
 
     if (callError.kind === "cancelled") {
+      await setTaskPhase(task.id, task.attempts, "cancelled");
       await addTaskLog(task.id, "warn", "Provider call aborted by cancellation.");
       return;
     }
+    if (callError.kind === "rate_limit") {
+      await setTaskPhase(task.id, task.attempts, "rate_limited");
+    } else if (callError.kind === "auth") {
+      await setTaskPhase(task.id, task.attempts, "auth_required");
+    } else {
+      await setTaskPhase(task.id, task.attempts, "failed");
+    }
     // Rate limits and transient provider outages (5xx, dropped connections)
-    // get another attempt under the same ceiling; auth failures, policy
-    // blocks, and timeouts fall through to a terminal failure.
+    // get another attempt under the same ceiling; auth failures, allowance
+    // exhaustion, policy blocks, and timeouts fall through to a terminal
+    // failure — allowance deliberately so, since retrying cannot conjure
+    // more of a subscription quota and a fallback needs consent instead.
     if (callError.retryable && task.attempts < maxAttempts) {
       const backoffMs = RETRY_BACKOFF_MS * task.attempts;
       await db
@@ -765,11 +1065,94 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         `A task for ${agent.name} failed: ${callError.kind}.`,
       );
     }
+    // Authentication and allowance failures are exactly the cases where a
+    // fallback is tempting; it only ever happens with the owner's consent.
+    if (callError.kind === "auth" || callError.kind === "allowance") {
+      await offerFallback(task, agent, provider, callError.message);
+    }
   } finally {
+    if (heldLeaseKey) await releaseProviderLease(heldLeaseKey, task.id);
     await settleAgentStatus(agent.id);
   }
 }
 
+/**
+ * A provider stopped and the task cannot continue on it. Consult the
+ * fallback policy and either reroute — recording where and why — or leave
+ * the task stopped with the owner's options spelled out.
+ *
+ * Nothing here reroutes silently: an allowed fallback is announced in the
+ * task log and the audit chain before the retry is queued.
+ */
+async function offerFallback(
+  task: ClaimedTask["task"],
+  agent: ClaimedTask["agent"],
+  fromProvider: ProviderId,
+  reason: string,
+): Promise<void> {
+  const healthy: ProviderId[] = [];
+  for (const candidate of availableProviderIds()) {
+    if (candidate === fromProvider) continue;
+    const readiness = await providerReadiness(candidate);
+    if (readiness.ready) healthy.push(candidate);
+  }
+  const decision = await evaluateFallback({
+    fromProvider,
+    costBoundCents: task.estimatedCostCents ?? task.budgetCents,
+    paidFallbackApproved: task.paidFallbackApprovedAt !== null,
+    healthyProviders: healthy,
+  });
+  if (decision.kind === "stop") {
+    await addTaskLog(
+      task.id,
+      "warn",
+      `${providerLabel(fromProvider)} stopped and no automatic fallback applies. ${decision.reason}`,
+    );
+    return;
+  }
+  const routing = await resolveRouting({
+    provider: decision.provider,
+    model: null,
+    codexModel: agent.codexModel,
+    codexReasoning: agent.codexReasoning,
+  });
+  const moved = await db
+    .update(tasksTable)
+    .set({
+      status: "queued",
+      providerPhase: "queued",
+      provider: routing.provider,
+      model: routing.model,
+      reasoningEffort: routing.reasoningEffort,
+      fallbackFromProvider: fromProvider,
+      fallbackReason: reason,
+      notBefore: new Date(),
+      errorKind: null,
+      errorMessage: null,
+      // A fallback is a fresh start on a different provider, not another
+      // attempt at the failed one; the thread does not carry across.
+      providerThreadId: null,
+      conversationId: null,
+    })
+    .where(
+      and(
+        eq(tasksTable.id, task.id),
+        inArray(tasksTable.status, ["failed", "blocked"]),
+      ),
+    )
+    .returning({ id: tasksTable.id });
+  if (moved.length === 0) return;
+  await addTaskLog(
+    task.id,
+    "warn",
+    `Switched from ${providerLabel(fromProvider)} to ${providerLabel(routing.provider)}. ${decision.reason}`,
+  );
+  await recordAudit(
+    "task.fallback",
+    `A task for ${agent.name} moved from ${providerLabel(fromProvider)} to ${providerLabel(routing.provider)}: ${decision.reason}`,
+  );
+  publish("tasks");
+}
 /** Claim-and-run one task; returns whether anything was claimed. */
 export async function workOnce(): Promise<boolean> {
   const claimed = await claimNextTask();
@@ -872,6 +1255,9 @@ export function startWorker(intervalMs = POLL_INTERVAL_MS): void {
       // Fire durable schedules before draining, so a task launched by a
       // just-due schedule runs in the same tick.
       await runDueSchedules();
+      // Local, throttled, and self-disabling when Codex is off or has no
+      // durable private home.
+      await runCodexHealthCheck();
       // Drain the queue: keep claiming until nothing is runnable.
       while (await workOnce()) {
         /* claimed and ran one task */

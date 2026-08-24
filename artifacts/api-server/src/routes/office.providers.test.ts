@@ -111,17 +111,39 @@ afterAll(async () => {
 });
 
 describe("provider status and settings", () => {
-  it("reports both providers with explicit availability messages", async () => {
+  it("reports every provider with explicit availability messages", async () => {
     const res = await request(app).get("/api/providers");
     expect(res.status).toBe(200);
-    expect(res.body).toHaveLength(2);
+    expect(res.body).toHaveLength(3);
     for (const status of res.body) {
-      expect(["claude_max", "openrouter"]).toContain(status.provider);
+      expect(["claude_max", "codex_chatgpt", "openrouter"]).toContain(
+        status.provider,
+      );
       expect(typeof status.configured).toBe("boolean");
       expect(typeof status.healthy).toBe("boolean");
+      expect(status.label.length).toBeGreaterThan(0);
+      expect(["subscription", "metered"]).toContain(status.billing);
       expect(status.message.length).toBeGreaterThan(0);
       // No secret material ever appears in status payloads.
       expect(JSON.stringify(status)).not.toMatch(/sk-|Bearer|token=/i);
+    }
+  });
+
+  it("labels providers for the owner and classifies how each one bills", async () => {
+    const res = await request(app).get("/api/providers");
+    const byId = Object.fromEntries(
+      res.body.map((s: { provider: string }) => [s.provider, s]),
+    );
+    expect(byId.claude_max.label).toBe("Claude Code");
+    expect(byId.codex_chatgpt.label).toBe("Codex via ChatGPT Plus");
+    expect(byId.openrouter.label).toBe("OpenRouter");
+    // Only OpenRouter is billed per token; the other two run off a plan.
+    expect(byId.claude_max.billing).toBe("subscription");
+    expect(byId.codex_chatgpt.billing).toBe("subscription");
+    expect(byId.openrouter.billing).toBe("metered");
+    // Nobody can report a remaining plan allowance, so nobody claims to.
+    for (const status of res.body) {
+      expect(status.allowanceBalanceKnown).toBe(false);
     }
   });
 

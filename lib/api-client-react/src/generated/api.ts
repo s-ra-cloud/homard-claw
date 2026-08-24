@@ -32,6 +32,8 @@ import type {
   AuditVerification,
   ClearMemoriesParams,
   ClearMemoriesResult,
+  CodexBootstrapResult,
+  CodexConnectionTest,
   ConverseInput,
   ConverseResponse,
   DelegationInput,
@@ -67,6 +69,7 @@ import type {
   TaskDetail,
   TaskEstimate,
   TaskEstimateInput,
+  TaskFallbackInput,
   TaskInput,
   TaskTree,
   TaskUsageInput,
@@ -2858,7 +2861,149 @@ export const useUpdateProviderSettings = <TError = ErrorType<unknown>,
       return useMutation(getUpdateProviderSettingsMutationOptions(options));
     }
 
-export const getListProviderModelsUrl = (provider: 'claude_max' | 'openrouter',) => {
+export const getTestCodexConnectionUrl = () => {
+
+
+
+
+  return `/api/providers/codex/test`
+}
+
+/**
+ * @summary Check Codex readiness locally without contacting OpenAI
+ */
+export const testCodexConnection = async ( options?: Parameters<typeof customFetch>[1]): Promise<CodexConnectionTest> => {
+
+  return customFetch<CodexConnectionTest>(getTestCodexConnectionUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getTestCodexConnectionMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof testCodexConnection>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof testCodexConnection>>, TError,void, TContext> => {
+
+const mutationKey = ['testCodexConnection'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof testCodexConnection>>, void> = () => {
+
+
+          return  testCodexConnection(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type TestCodexConnectionMutationResult = NonNullable<Awaited<ReturnType<typeof testCodexConnection>>>
+
+    export type TestCodexConnectionMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Check Codex readiness locally without contacting OpenAI
+ */
+export const useTestCodexConnection = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof testCodexConnection>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof testCodexConnection>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getTestCodexConnectionMutationOptions(options));
+    }
+
+export const getBootstrapCodexUrl = () => {
+
+
+
+
+  return `/api/providers/codex/bootstrap`
+}
+
+/**
+ * @summary Seed the private CODEX_HOME from CODEX_AUTH_JSON if it is empty
+ */
+export const bootstrapCodex = async ( options?: Parameters<typeof customFetch>[1]): Promise<CodexBootstrapResult> => {
+
+  return customFetch<CodexBootstrapResult>(getBootstrapCodexUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getBootstrapCodexMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof bootstrapCodex>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof bootstrapCodex>>, TError,void, TContext> => {
+
+const mutationKey = ['bootstrapCodex'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof bootstrapCodex>>, void> = () => {
+
+
+          return  bootstrapCodex(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type BootstrapCodexMutationResult = NonNullable<Awaited<ReturnType<typeof bootstrapCodex>>>
+
+    export type BootstrapCodexMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Seed the private CODEX_HOME from CODEX_AUTH_JSON if it is empty
+ */
+export const useBootstrapCodex = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof bootstrapCodex>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof bootstrapCodex>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getBootstrapCodexMutationOptions(options));
+    }
+
+export const getListProviderModelsUrl = (provider: 'claude_max' | 'codex_chatgpt' | 'openrouter',) => {
 
 
 
@@ -2869,7 +3014,7 @@ export const getListProviderModelsUrl = (provider: 'claude_max' | 'openrouter',)
 /**
  * @summary List models available for a provider
  */
-export const listProviderModels = async (provider: 'claude_max' | 'openrouter', options?: Parameters<typeof customFetch>[1]): Promise<ProviderModels> => {
+export const listProviderModels = async (provider: 'claude_max' | 'codex_chatgpt' | 'openrouter', options?: Parameters<typeof customFetch>[1]): Promise<ProviderModels> => {
 
   return customFetch<ProviderModels>(getListProviderModelsUrl(provider),
   {
@@ -2884,14 +3029,14 @@ export const listProviderModels = async (provider: 'claude_max' | 'openrouter', 
 
 
 
-export const getListProviderModelsQueryKey = (provider: 'claude_max' | 'openrouter',) => {
+export const getListProviderModelsQueryKey = (provider: 'claude_max' | 'codex_chatgpt' | 'openrouter',) => {
     return [
     `/api/providers/${provider}/models`
     ] as const;
     }
 
 
-export const getListProviderModelsQueryOptions = <TData = Awaited<ReturnType<typeof listProviderModels>>, TError = ErrorType<unknown>>(provider: 'claude_max' | 'openrouter', options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listProviderModels>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getListProviderModelsQueryOptions = <TData = Awaited<ReturnType<typeof listProviderModels>>, TError = ErrorType<unknown>>(provider: 'claude_max' | 'codex_chatgpt' | 'openrouter', options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listProviderModels>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -2918,7 +3063,7 @@ export type ListProviderModelsQueryError = ErrorType<unknown>
  */
 
 export function useListProviderModels<TData = Awaited<ReturnType<typeof listProviderModels>>, TError = ErrorType<unknown>>(
- provider: 'claude_max' | 'openrouter', options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listProviderModels>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+ provider: 'claude_max' | 'codex_chatgpt' | 'openrouter', options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listProviderModels>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
@@ -3152,6 +3297,78 @@ export const useRetryTask = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getRetryTaskMutationOptions(options));
+    }
+
+export const getDecideTaskFallbackUrl = (taskId: string,) => {
+
+
+
+
+  return `/api/tasks/${taskId}/fallback`
+}
+
+/**
+ * @summary Decide what a task stopped by a provider outage or exhausted allowance should do
+ */
+export const decideTaskFallback = async (taskId: string,
+    taskFallbackInput: TaskFallbackInput, options?: Parameters<typeof customFetch>[1]): Promise<Task> => {
+
+  return customFetch<Task>(getDecideTaskFallbackUrl(taskId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(taskFallbackInput)
+  }
+);}
+
+
+
+
+
+export const getDecideTaskFallbackMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof decideTaskFallback>>, TError,{taskId: string;data: BodyType<TaskFallbackInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof decideTaskFallback>>, TError,{taskId: string;data: BodyType<TaskFallbackInput>}, TContext> => {
+
+const mutationKey = ['decideTaskFallback'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof decideTaskFallback>>, {taskId: string;data: BodyType<TaskFallbackInput>}> = (props) => {
+          const {taskId,data} = props ?? {};
+
+          return  decideTaskFallback(taskId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DecideTaskFallbackMutationResult = NonNullable<Awaited<ReturnType<typeof decideTaskFallback>>>
+    export type DecideTaskFallbackMutationBody = BodyType<TaskFallbackInput>
+    export type DecideTaskFallbackMutationError = ErrorType<void>
+
+    /**
+ * @summary Decide what a task stopped by a provider outage or exhausted allowance should do
+ */
+export const useDecideTaskFallback = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof decideTaskFallback>>, TError,{taskId: string;data: BodyType<TaskFallbackInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof decideTaskFallback>>,
+        TError,
+        {taskId: string;data: BodyType<TaskFallbackInput>},
+        TContext
+      > => {
+      return useMutation(getDecideTaskFallbackMutationOptions(options));
     }
 
 export const getEstimateTaskUrl = () => {

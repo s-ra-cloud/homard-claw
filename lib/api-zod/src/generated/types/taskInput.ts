@@ -7,6 +7,7 @@
  */
 import type { TaskInputPriority } from './taskInputPriority';
 import type { TaskInputProviderOverride } from './taskInputProviderOverride';
+import type { TaskInputReasoningOverride } from './taskInputReasoningOverride';
 
 export interface TaskInput {
   agentId: string;
@@ -24,4 +25,7 @@ export interface TaskInput {
   providerOverride?: TaskInputProviderOverride;
   /** @maxLength 200 */
   modelOverride?: string;
+  reasoningOverride?: TaskInputReasoningOverride;
+  /** Continue the agent's most recent provider thread instead of starting a new one. */
+  continueConversation?: boolean;
 }

@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { AgentInputAutonomy } from './agentInputAutonomy';
+import type { AgentInputCodexReasoning } from './agentInputCodexReasoning';
 import type { AgentInputProvider } from './agentInputProvider';
 import type { AgentInputSecurityPreset } from './agentInputSecurityPreset';
 import type { AgentPermissionOverrides } from './agentPermissionOverrides';
@@ -39,6 +40,13 @@ export interface AgentInput {
   provider?: AgentInputProvider;
   /** @maxLength 180 */
   model?: string;
+  /**
+     * @maxLength 200
+     * @nullable
+     */
+  codexModel?: string | null;
+  /** @nullable */
+  codexReasoning?: AgentInputCodexReasoning;
   /** @maxLength 60 */
   voiceStyle?: string;
   securityPreset: AgentInputSecurityPreset;

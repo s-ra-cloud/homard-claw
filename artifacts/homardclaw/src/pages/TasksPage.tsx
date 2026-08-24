@@ -5,6 +5,7 @@ import {
   useListAgents,
   useListProviderModels,
   useGetProviderSettings,
+  useGetProviders,
   useEstimateTask,
   useGetTask,
   useGetTaskTree,
@@ -13,9 +14,12 @@ import {
   useDelegateTask,
   useCancelTask,
   useRetryTask,
+  useDecideTaskFallback,
+  TaskFallbackInputAction,
   TaskStatus,
   TaskInputPriority,
   TaskInputProviderOverride,
+  type TaskInputReasoningOverride,
   type Task,
   type TaskEstimate,
   type TaskLog,
@@ -158,7 +162,7 @@ function ModelOverrideSelect({
   value,
   onChange,
 }: {
-  provider: "claude_max" | "openrouter";
+  provider: TaskInputProviderOverride;
   value: string;
   onChange: (value: string) => void;
 }) {
@@ -443,7 +447,15 @@ function TaskDetailDialog({
             <div className="flex flex-wrap items-center gap-2">
               <TaskStatusBadge status={task.status} />
               <Badge variant="outline">{task.priority} priority</Badge>
-              {task.provider && <Badge variant="outline">{task.provider}</Badge>}
+              {task.provider && (
+                <Badge variant="outline" data-testid="badge-task-provider">
+                  {providerLabel(task.provider)}
+                </Badge>
+              )}
+              {task.reasoningEffort && (
+                <Badge variant="outline">{task.reasoningEffort} reasoning</Badge>
+              )}
+              <TaskPhaseBadge task={task} />
               {task.budgetCents != null && (
                 <Badge variant="outline">Budget {formatCents(task.budgetCents)}</Badge>
               )}
@@ -469,6 +481,10 @@ function TaskDetailDialog({
                 <p className="font-mono text-xs">{task.errorMessage}</p>
               </div>
             )}
+
+            <TaskFallbackPanel task={task} />
+
+            <TaskUsageDetail task={task} />
 
             {task.contextSources && task.contextSources.length > 0 && (
               <div>
@@ -598,6 +614,190 @@ function TaskActions({ task }: { task: Task }) {
   );
 }
 
+
+/** Owner-facing provider names; never show the persisted id. */
+const PROVIDER_LABELS: Record<string, string> = {
+  claude_max: "Claude Code",
+  codex_chatgpt: "Codex via ChatGPT Plus",
+  openrouter: "OpenRouter",
+};
+
+function providerLabel(provider: string | undefined | null): string {
+  if (!provider) return "The provider";
+  return PROVIDER_LABELS[provider] ?? provider;
+}
+
+const PHASE_LABELS: Record<string, string> = {
+  queued: "Queued",
+  starting: "Starting",
+  running: "Running",
+  waiting_approval: "Waiting for approval",
+  completed: "Completed",
+  rate_limited: "Rate limited",
+  auth_required: "Sign-in required",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
+
+/**
+ * Provider-side phase. It is deliberately separate from `status`: a task can
+ * be queued in HomardClaw while its provider slot is rate limited, and the
+ * owner needs to see which of the two is holding things up.
+ */
+function TaskPhaseBadge({ task }: { task: Task }) {
+  if (!task.providerPhase) return null;
+  const phase = task.providerPhase;
+  const variant =
+    phase === "rate_limited" || phase === "auth_required"
+      ? "warning"
+      : phase === "failed"
+        ? "destructive"
+        : phase === "running"
+          ? "success"
+          : "outline";
+  return (
+    <Badge variant={variant} data-testid="badge-task-phase">
+      {PHASE_LABELS[phase] ?? phase}
+    </Badge>
+  );
+}
+
+/**
+ * Choices offered when a task stopped because its provider could not
+ * continue. Nothing reroutes silently — moving onto a paid provider is an
+ * explicit press here, and the server re-checks the spend policy anyway.
+ */
+function TaskFallbackPanel({ task }: { task: Task }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const decide = useDecideTaskFallback({
+    mutation: {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+        queryClient.invalidateQueries({ queryKey: [`/api/tasks/${task.id}`] });
+        queryClient.invalidateQueries({ queryKey: ["/api/office/overview"] });
+      },
+      onError: (error) =>
+        toast({
+          variant: "destructive",
+          title: "Could not apply that choice",
+          description: error.message,
+        }),
+    },
+  });
+
+  const stopped = task.errorKind === "allowance" || task.errorKind === "rate_limited";
+  if (!stopped || !RETRYABLE.includes(task.status)) return null;
+
+  const send = (action: TaskFallbackInputAction) =>
+    decide.mutate({ taskId: task.id, data: { action } });
+
+  return (
+    <div className="border-4 border-warning/60 bg-warning/10 p-3 space-y-3" data-testid="panel-task-fallback">
+      <div className="text-[10px] font-bold uppercase">
+        {task.errorKind === "allowance"
+          ? `${providerLabel(task.provider)} has no allowance left for now.`
+          : `${providerLabel(task.provider)} is rate limited.`}
+      </div>
+      <p className="text-xs font-mono">
+        This task is stopped and will not move to another provider on its own.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={decide.isPending}
+          onClick={() => send(TaskFallbackInputAction.wait)}
+          data-testid="button-fallback-wait"
+        >
+          WAIT AND RETRY
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={decide.isPending}
+          onClick={() => send(TaskFallbackInputAction.approve_paid_fallback)}
+          data-testid="button-fallback-approve-paid"
+        >
+          USE A PAID PROVIDER
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={decide.isPending}
+          onClick={() => send(TaskFallbackInputAction.cancel)}
+          data-testid="button-fallback-cancel"
+        >
+          CANCEL TASK
+        </Button>
+      </div>
+      {task.paidFallbackApprovedAt ? (
+        <p className="text-[10px] uppercase font-bold">
+          Paid fallback already authorized for this task.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Everything the provider actually reported. Cost is shown only when a real
+ * figure exists — a subscription run reports "covered by plan", never $0.00.
+ */
+function TaskUsageDetail({ task }: { task: Task }) {
+  const rows: { label: string; value: string }[] = [];
+  const push = (label: string, value: number | null | undefined, suffix = "") => {
+    if (value == null) return;
+    rows.push({ label, value: `${formatTokens(value)}${suffix}` });
+  };
+  push("Input tokens", task.actualInputTokens);
+  push("Cached input", task.cachedInputTokens);
+  push("Cache writes", task.cacheWriteInputTokens);
+  push("Output tokens", task.actualOutputTokens);
+  push("Reasoning tokens", task.reasoningOutputTokens);
+  if (task.queuedMs != null) {
+    rows.push({ label: "Queued for", value: `${(task.queuedMs / 1000).toFixed(1)}s` });
+  }
+  if (task.runMs != null) {
+    rows.push({ label: "Ran for", value: `${(task.runMs / 1000).toFixed(1)}s` });
+  }
+  rows.push({
+    label: "Cost",
+    value:
+      task.actualCostCents != null
+        ? formatCents(task.actualCostCents)
+        : "Covered by plan — no per-token price published",
+  });
+  if (task.providerThreadId) {
+    rows.push({ label: "Provider thread", value: task.providerThreadId });
+  }
+  if (task.fallbackFromProvider) {
+    rows.push({
+      label: "Fell back from",
+      value: `${providerLabel(task.fallbackFromProvider)}${
+        task.fallbackReason ? ` — ${task.fallbackReason}` : ""
+      }`,
+    });
+  }
+  if (rows.length <= 1) return null;
+
+  return (
+    <div data-testid="section-task-usage">
+      <div className="text-[10px] font-bold uppercase text-muted-foreground mb-1">
+        Provider Usage
+      </div>
+      <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 bg-muted/30 border-2 border-border/50 p-3">
+        {rows.map((row) => (
+          <div key={row.label} className="flex justify-between gap-2 text-[11px] font-mono">
+            <dt className="uppercase font-bold text-muted-foreground shrink-0">{row.label}</dt>
+            <dd className="truncate text-right" title={row.value}>{row.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
 function TaskStatusBadge({ status }: { status: TaskStatus }) {
   switch (status) {
     case 'queued': return <Badge variant="outline">Queued</Badge>;
@@ -657,6 +857,8 @@ export default function TasksPage() {
     budgetDollars: "",
     providerOverride: "" as TaskInputProviderOverride | "",
     modelOverride: "",
+    reasoningOverride: "",
+    continueConversation: false,
   });
 
   const selectedAgent = useMemo(
@@ -665,11 +867,16 @@ export default function TasksPage() {
   );
   const { data: providerSettings } = useGetProviderSettings();
   // Override → agent preference → workspace default, mirroring the server.
-  const effectiveProvider: "claude_max" | "openrouter" =
+  const { data: providerStatuses } = useGetProviders();
+  const codexStatus = providerStatuses?.find(
+    (p) => p.provider === TaskInputProviderOverride.codex_chatgpt,
+  );
+  // Override -> agent preference -> workspace default, mirroring the server.
+  const effectiveProvider: TaskInputProviderOverride =
     (newTask.providerOverride ||
-      (selectedAgent?.provider as "claude_max" | "openrouter" | null | undefined)) ??
+      (selectedAgent?.provider as TaskInputProviderOverride | null | undefined)) ??
     providerSettings?.defaultProvider ??
-    "claude_max";
+    TaskInputProviderOverride.claude_max;
 
   const createTask = useCreateTask({
     mutation: {
@@ -684,10 +891,18 @@ export default function TasksPage() {
           budgetDollars: "",
           providerOverride: "",
           modelOverride: "",
+          reasoningOverride: "",
+          continueConversation: false,
         });
       }
     }
   });
+
+  // Codex is the only provider with a per-task reasoning dial and a
+  // resumable thread, so these controls appear only when it is in play.
+  const codexSelected =
+    Boolean(codexStatus?.enabled) &&
+    effectiveProvider === TaskInputProviderOverride.codex_chatgpt;
 
   const budgetCents = newTask.budgetDollars.trim()
     ? Math.round(Number(newTask.budgetDollars) * 10000) / 100
@@ -707,7 +922,15 @@ export default function TasksPage() {
         priority: newTask.priority,
         ...(budgetCents != null && !budgetInvalid ? { budgetCents } : {}),
         ...(newTask.providerOverride ? { providerOverride: newTask.providerOverride } : {}),
-        ...(newTask.modelOverride ? { modelOverride: newTask.modelOverride } : {})
+        ...(newTask.modelOverride ? { modelOverride: newTask.modelOverride } : {}),
+        // Codex-only controls: sent only when they can actually apply, so a
+        // stale value left behind by a provider switch is never dispatched.
+        ...(codexSelected && newTask.reasoningOverride
+          ? { reasoningOverride: newTask.reasoningOverride as TaskInputReasoningOverride }
+          : {}),
+        ...(codexSelected && newTask.continueConversation
+          ? { continueConversation: true }
+          : {}),
       }
     });
   };
@@ -832,7 +1055,12 @@ export default function TasksPage() {
                       </SelectTrigger>
                       <SelectContent className={selectContentClass}>
                         <SelectItem value="none" className={selectItemClass}>Agent Default</SelectItem>
-                        <SelectItem value={TaskInputProviderOverride.claude_max} className={selectItemClass}>Claude Max</SelectItem>
+                        <SelectItem value={TaskInputProviderOverride.claude_max} className={selectItemClass}>Claude Code</SelectItem>
+                        {codexStatus?.enabled ? (
+                          <SelectItem value={TaskInputProviderOverride.codex_chatgpt} className={selectItemClass}>
+                            Codex via ChatGPT Plus
+                          </SelectItem>
+                        ) : null}
                         <SelectItem value={TaskInputProviderOverride.openrouter} className={selectItemClass}>OpenRouter</SelectItem>
                       </SelectContent>
                     </Select>
@@ -850,6 +1078,67 @@ export default function TasksPage() {
                     />
                   </div>
                 </div>
+
+                {codexSelected ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 border-t-4 border-border pt-4">
+                    <div className="space-y-2">
+                      <label className="uppercase font-bold text-xs flex justify-between">
+                        <span>Reasoning Effort</span>
+                        <span className="text-muted-foreground font-normal">(Optional)</span>
+                      </label>
+                      <Select
+                        value={newTask.reasoningOverride || MODEL_DEFAULT_SENTINEL}
+                        onValueChange={(val) =>
+                          setNewTask({
+                            ...newTask,
+                            reasoningOverride: val === MODEL_DEFAULT_SENTINEL ? "" : val,
+                          })
+                        }
+                      >
+                        <SelectTrigger
+                          className={selectTriggerClass}
+                          data-testid="select-task-reasoning"
+                        >
+                          <SelectValue placeholder="Agent default" />
+                        </SelectTrigger>
+                        <SelectContent className={selectContentClass}>
+                          <SelectItem value={MODEL_DEFAULT_SENTINEL} className={selectItemClass}>
+                            Agent Default
+                          </SelectItem>
+                          {(codexStatus?.reasoningLevels ?? []).map((level) => (
+                            <SelectItem key={level} value={level} className={selectItemClass}>
+                              {level}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-[10px] text-muted-foreground uppercase font-bold">
+                        Higher effort spends more of the ChatGPT allowance.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="uppercase font-bold text-xs">Conversation</label>
+                      <label className="flex items-start gap-2 cursor-pointer border-4 border-border bg-background p-3">
+                        <input
+                          type="checkbox"
+                          checked={newTask.continueConversation}
+                          onChange={(e) =>
+                            setNewTask({ ...newTask, continueConversation: e.target.checked })
+                          }
+                          className="mt-0.5 accent-primary"
+                          data-testid="checkbox-continue-conversation"
+                        />
+                        <span className="text-[10px] uppercase font-bold leading-tight">
+                          Continue this agent's last Codex thread
+                        </span>
+                      </label>
+                      <p className="text-[10px] text-muted-foreground uppercase font-bold">
+                        Off starts a fresh thread with no earlier context.
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
 
                 <EstimatePanel
                   agentId={newTask.agentId}

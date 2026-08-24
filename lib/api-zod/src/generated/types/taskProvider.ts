@@ -11,5 +11,6 @@ export type TaskProvider = typeof TaskProvider[keyof typeof TaskProvider];
 
 export const TaskProvider = {
   claude_max: 'claude_max',
+  codex_chatgpt: 'codex_chatgpt',
   openrouter: 'openrouter',
 } as const;

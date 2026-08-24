@@ -1,7 +1,7 @@
 import { db, tasksTable } from "@workspace/db";
 import { eq, inArray, sql } from "drizzle-orm";
 import { callProvider, type ProviderCallRequest } from "../execution";
-import { isConfigured, type ProviderId } from "../providers";
+import { availableProviderIds, isConfigured, providerLabel } from "../providers";
 
 /**
  * Execution runtimes.
@@ -66,9 +66,9 @@ const nativeRuntime: RuntimeAdapter = {
   id: "native",
   label: "Built-in runtime",
   async health() {
-    const configured = (["claude_max", "openrouter"] as ProviderId[]).filter(
-      (provider) => isConfigured(provider),
-    );
+    const configured = availableProviderIds()
+      .filter((provider) => isConfigured(provider))
+      .map((provider) => providerLabel(provider));
     if (configured.length === 0) {
       return {
         id: "native",

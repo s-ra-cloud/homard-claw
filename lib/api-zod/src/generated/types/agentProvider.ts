@@ -14,5 +14,6 @@ export type AgentProvider = typeof AgentProvider[keyof typeof AgentProvider] | n
 
 export const AgentProvider = {
   claude_max: 'claude_max',
+  codex_chatgpt: 'codex_chatgpt',
   openrouter: 'openrouter',
 } as const;

@@ -57,6 +57,8 @@ export default function EditAgentPage() {
           instructions: agent.instructions ?? "",
           provider: agent.provider ?? "workspace_default",
           model: agent.model ?? "",
+          codexModel: agent.codexModel ?? "",
+          codexReasoning: agent.codexReasoning ?? "",
           voiceStyle: agent.voiceStyle ?? "none",
           securityPreset: agent.securityPreset,
           autonomy: agent.autonomy,
@@ -118,6 +120,12 @@ export default function EditAgentPage() {
         instructions: data.instructions.trim() || null,
         provider: data.provider === "workspace_default" ? null : data.provider,
         model: data.model.trim() || null,
+        codexModel: data.codexModel.trim() || null,
+        codexReasoning: data.codexReasoning.trim()
+          ? (data.codexReasoning.trim() as NonNullable<
+              Parameters<typeof updateAgent.mutate>[0]["data"]["codexReasoning"]
+            >)
+          : null,
         voiceStyle: data.voiceStyle && data.voiceStyle !== "none" ? data.voiceStyle : null,
         securityPreset: data.securityPreset,
         autonomy: data.autonomy,

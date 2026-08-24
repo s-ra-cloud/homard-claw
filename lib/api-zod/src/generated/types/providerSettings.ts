@@ -5,7 +5,9 @@
  * HomardClaw private agent office API
  * OpenAPI spec version: 0.1.0
  */
+import type { ProviderSettingsCodexReasoning } from './providerSettingsCodexReasoning';
 import type { ProviderSettingsDefaultProvider } from './providerSettingsDefaultProvider';
+import type { ProviderSettingsFallbackOrderItem } from './providerSettingsFallbackOrderItem';
 
 export interface ProviderSettings {
   defaultProvider: ProviderSettingsDefaultProvider;
@@ -13,4 +15,14 @@ export interface ProviderSettings {
   claudeModel: string | null;
   /** @nullable */
   openrouterModel: string | null;
+  /** @nullable */
+  codexModel: string | null;
+  /** @nullable */
+  codexReasoning: ProviderSettingsCodexReasoning;
+  /** Providers to try, in order, when the primary one stops. Empty means never fall back. */
+  fallbackOrder: ProviderSettingsFallbackOrderItem[];
+  /** Standing authorization to fall back onto a metered provider without per-task approval. */
+  paidFallbackConsent: boolean;
+  /** @nullable */
+  paidFallbackLimitCents: number | null;
 }

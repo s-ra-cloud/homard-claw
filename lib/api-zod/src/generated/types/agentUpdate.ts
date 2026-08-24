@@ -7,6 +7,7 @@
  */
 import type { AgentPermissionOverrides } from './agentPermissionOverrides';
 import type { AgentUpdateAutonomy } from './agentUpdateAutonomy';
+import type { AgentUpdateCodexReasoning } from './agentUpdateCodexReasoning';
 import type { AgentUpdateProvider } from './agentUpdateProvider';
 import type { AgentUpdateSecurityPreset } from './agentUpdateSecurityPreset';
 import type { AvatarConfig } from './avatarConfig';
@@ -54,6 +55,13 @@ export interface AgentUpdate {
      * @nullable
      */
   model?: string | null;
+  /**
+     * @maxLength 200
+     * @nullable
+     */
+  codexModel?: string | null;
+  /** @nullable */
+  codexReasoning?: AgentUpdateCodexReasoning;
   /**
      * @maxLength 60
      * @nullable

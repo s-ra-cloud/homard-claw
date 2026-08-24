@@ -5,15 +5,18 @@
  * HomardClaw private agent office API
  * OpenAPI spec version: 0.1.0
  */
+import type { TaskEstimateBilling } from './taskEstimateBilling';
 import type { TaskEstimateProvider } from './taskEstimateProvider';
 
 export interface TaskEstimate {
   provider: TaskEstimateProvider;
   model: string;
+  billing: TaskEstimateBilling;
   estimatedInputTokens: number;
   estimatedOutputTokens: number;
   estimatedTokens: number;
   estimatedCostCents: number;
+  /** False when no price can be computed; the UI must not present the amount as a real figure. */
   costKnown: boolean;
   /** @nullable */
   note?: string | null;

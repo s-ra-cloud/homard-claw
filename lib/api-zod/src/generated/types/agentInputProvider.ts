@@ -14,5 +14,6 @@ export type AgentInputProvider = typeof AgentInputProvider[keyof typeof AgentInp
 
 export const AgentInputProvider = {
   claude_max: 'claude_max',
+  codex_chatgpt: 'codex_chatgpt',
   openrouter: 'openrouter',
 } as const;

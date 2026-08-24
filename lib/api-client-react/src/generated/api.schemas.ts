@@ -17,7 +17,24 @@ export type AgentProvider = typeof AgentProvider[keyof typeof AgentProvider] | n
 
 export const AgentProvider = {
   claude_max: 'claude_max',
+  codex_chatgpt: 'codex_chatgpt',
   openrouter: 'openrouter',
+} as const;
+
+/**
+ * @nullable
+ */
+export type AgentCodexReasoning = typeof AgentCodexReasoning[keyof typeof AgentCodexReasoning] | null;
+
+
+export const AgentCodexReasoning = {
+  minimal: 'minimal',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+  max: 'max',
+  ultra: 'ultra',
 } as const;
 
 export type AgentStatus = typeof AgentStatus[keyof typeof AgentStatus];
@@ -76,7 +93,7 @@ export interface AgentPermissions {
      * @nullable
      */
   approvalThresholdCents: number | null;
-  allowedProviders: ('claude_max' | 'openrouter')[] | null;
+  allowedProviders: ('claude_max' | 'codex_chatgpt' | 'openrouter')[] | null;
   /**
      * @minimum 0
      * @nullable
@@ -128,7 +145,7 @@ export interface AgentPermissionOverrides {
      * @nullable
      */
   approvalThresholdCents?: number | null;
-  allowedProviders?: ('claude_max' | 'openrouter')[] | null;
+  allowedProviders?: ('claude_max' | 'codex_chatgpt' | 'openrouter')[] | null;
   /**
      * @minimum 0
      * @nullable
@@ -180,6 +197,13 @@ export interface Agent {
   provider: AgentProvider;
   /** @nullable */
   model?: string | null;
+  /**
+     * Preferred Codex model for this agent; falls back to the workspace default.
+     * @nullable
+     */
+  codexModel?: string | null;
+  /** @nullable */
+  codexReasoning?: AgentCodexReasoning;
   /** @nullable */
   voiceStyle?: string | null;
   status: AgentStatus;
@@ -221,6 +245,54 @@ export type TaskProvider = typeof TaskProvider[keyof typeof TaskProvider];
 
 export const TaskProvider = {
   claude_max: 'claude_max',
+  codex_chatgpt: 'codex_chatgpt',
+  openrouter: 'openrouter',
+} as const;
+
+/**
+ * @nullable
+ */
+export type TaskReasoningEffort = typeof TaskReasoningEffort[keyof typeof TaskReasoningEffort] | null;
+
+
+export const TaskReasoningEffort = {
+  minimal: 'minimal',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+  max: 'max',
+  ultra: 'ultra',
+} as const;
+
+/**
+ * Coarse execution phase shown while a task runs; `status` stays authoritative.
+ * @nullable
+ */
+export type TaskProviderPhase = typeof TaskProviderPhase[keyof typeof TaskProviderPhase] | null;
+
+
+export const TaskProviderPhase = {
+  queued: 'queued',
+  starting: 'starting',
+  running: 'running',
+  waiting_approval: 'waiting_approval',
+  completed: 'completed',
+  rate_limited: 'rate_limited',
+  auth_required: 'auth_required',
+  failed: 'failed',
+  cancelled: 'cancelled',
+} as const;
+
+/**
+ * @nullable
+ */
+export type TaskFallbackFromProvider = typeof TaskFallbackFromProvider[keyof typeof TaskFallbackFromProvider] | null;
+
+
+export const TaskFallbackFromProvider = {
+  claude_max: 'claude_max',
+  codex_chatgpt: 'codex_chatgpt',
   openrouter: 'openrouter',
 } as const;
 
@@ -257,6 +329,17 @@ export interface Task {
   /** @nullable */
   model?: string | null;
   /** @nullable */
+  reasoningEffort?: TaskReasoningEffort;
+  /**
+     * Coarse execution phase shown while a task runs; `status` stays authoritative.
+     * @nullable
+     */
+  providerPhase?: TaskProviderPhase;
+  /** @nullable */
+  providerThreadId?: string | null;
+  /** @nullable */
+  conversationId?: string | null;
+  /** @nullable */
   estimatedTokens?: number | null;
   /** @nullable */
   estimatedCostCents?: number | null;
@@ -264,8 +347,27 @@ export interface Task {
   actualInputTokens?: number | null;
   /** @nullable */
   actualOutputTokens?: number | null;
-  /** @nullable */
+  /**
+     * Null when the provider publishes no per-token price — for subscription allowances this is "not applicable", never a $0.00 charge.
+     * @nullable
+     */
   actualCostCents?: number | null;
+  /** @nullable */
+  cachedInputTokens?: number | null;
+  /** @nullable */
+  cacheWriteInputTokens?: number | null;
+  /** @nullable */
+  reasoningOutputTokens?: number | null;
+  /** @nullable */
+  queuedMs?: number | null;
+  /** @nullable */
+  runMs?: number | null;
+  /** @nullable */
+  fallbackFromProvider?: TaskFallbackFromProvider;
+  /** @nullable */
+  fallbackReason?: string | null;
+  /** @nullable */
+  paidFallbackApprovedAt?: string | null;
   /** @nullable */
   output?: string | null;
   files: TaskFile[];
@@ -310,6 +412,7 @@ export type RetiredAgentProvider = typeof RetiredAgentProvider[keyof typeof Reti
 
 export const RetiredAgentProvider = {
   claude_max: 'claude_max',
+  codex_chatgpt: 'codex_chatgpt',
   openrouter: 'openrouter',
 } as const;
 
@@ -345,7 +448,24 @@ export type AgentInputProvider = typeof AgentInputProvider[keyof typeof AgentInp
 
 export const AgentInputProvider = {
   claude_max: 'claude_max',
+  codex_chatgpt: 'codex_chatgpt',
   openrouter: 'openrouter',
+} as const;
+
+/**
+ * @nullable
+ */
+export type AgentInputCodexReasoning = typeof AgentInputCodexReasoning[keyof typeof AgentInputCodexReasoning] | null;
+
+
+export const AgentInputCodexReasoning = {
+  minimal: 'minimal',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+  max: 'max',
+  ultra: 'ultra',
 } as const;
 
 export type AgentInputSecurityPreset = typeof AgentInputSecurityPreset[keyof typeof AgentInputSecurityPreset];
@@ -394,6 +514,13 @@ export interface AgentInput {
   provider?: AgentInputProvider;
   /** @maxLength 180 */
   model?: string;
+  /**
+     * @maxLength 200
+     * @nullable
+     */
+  codexModel?: string | null;
+  /** @nullable */
+  codexReasoning?: AgentInputCodexReasoning;
   /** @maxLength 60 */
   voiceStyle?: string;
   securityPreset: AgentInputSecurityPreset;
@@ -410,7 +537,24 @@ export type AgentUpdateProvider = typeof AgentUpdateProvider[keyof typeof AgentU
 
 export const AgentUpdateProvider = {
   claude_max: 'claude_max',
+  codex_chatgpt: 'codex_chatgpt',
   openrouter: 'openrouter',
+} as const;
+
+/**
+ * @nullable
+ */
+export type AgentUpdateCodexReasoning = typeof AgentUpdateCodexReasoning[keyof typeof AgentUpdateCodexReasoning] | null;
+
+
+export const AgentUpdateCodexReasoning = {
+  minimal: 'minimal',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+  max: 'max',
+  ultra: 'ultra',
 } as const;
 
 export type AgentUpdateSecurityPreset = typeof AgentUpdateSecurityPreset[keyof typeof AgentUpdateSecurityPreset];
@@ -474,6 +618,13 @@ export interface AgentUpdate {
      * @nullable
      */
   model?: string | null;
+  /**
+     * @maxLength 200
+     * @nullable
+     */
+  codexModel?: string | null;
+  /** @nullable */
+  codexReasoning?: AgentUpdateCodexReasoning;
   /**
      * @maxLength 60
      * @nullable
@@ -771,7 +922,21 @@ export type TaskInputProviderOverride = typeof TaskInputProviderOverride[keyof t
 
 export const TaskInputProviderOverride = {
   claude_max: 'claude_max',
+  codex_chatgpt: 'codex_chatgpt',
   openrouter: 'openrouter',
+} as const;
+
+export type TaskInputReasoningOverride = typeof TaskInputReasoningOverride[keyof typeof TaskInputReasoningOverride];
+
+
+export const TaskInputReasoningOverride = {
+  minimal: 'minimal',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+  max: 'max',
+  ultra: 'ultra',
 } as const;
 
 export interface TaskInput {
@@ -790,6 +955,9 @@ export interface TaskInput {
   providerOverride?: TaskInputProviderOverride;
   /** @maxLength 200 */
   modelOverride?: string;
+  reasoningOverride?: TaskInputReasoningOverride;
+  /** Continue the agent's most recent provider thread instead of starting a new one. */
+  continueConversation?: boolean;
 }
 
 export type TaskEstimateInputProviderOverride = typeof TaskEstimateInputProviderOverride[keyof typeof TaskEstimateInputProviderOverride];
@@ -797,6 +965,7 @@ export type TaskEstimateInputProviderOverride = typeof TaskEstimateInputProvider
 
 export const TaskEstimateInputProviderOverride = {
   claude_max: 'claude_max',
+  codex_chatgpt: 'codex_chatgpt',
   openrouter: 'openrouter',
 } as const;
 
@@ -817,19 +986,47 @@ export type TaskEstimateProvider = typeof TaskEstimateProvider[keyof typeof Task
 
 export const TaskEstimateProvider = {
   claude_max: 'claude_max',
+  codex_chatgpt: 'codex_chatgpt',
   openrouter: 'openrouter',
+} as const;
+
+export type TaskEstimateBilling = typeof TaskEstimateBilling[keyof typeof TaskEstimateBilling];
+
+
+export const TaskEstimateBilling = {
+  subscription: 'subscription',
+  metered: 'metered',
 } as const;
 
 export interface TaskEstimate {
   provider: TaskEstimateProvider;
   model: string;
+  billing: TaskEstimateBilling;
   estimatedInputTokens: number;
   estimatedOutputTokens: number;
   estimatedTokens: number;
   estimatedCostCents: number;
+  /** False when no price can be computed; the UI must not present the amount as a real figure. */
   costKnown: boolean;
   /** @nullable */
   note?: string | null;
+}
+
+/**
+ * "wait" requeues the task on its current provider, "cancel" stops it, and "approve_paid_fallback" is the owner's explicit, per-task authorization to continue on a metered provider.
+ */
+export type TaskFallbackInputAction = typeof TaskFallbackInputAction[keyof typeof TaskFallbackInputAction];
+
+
+export const TaskFallbackInputAction = {
+  wait: 'wait',
+  cancel: 'cancel',
+  approve_paid_fallback: 'approve_paid_fallback',
+} as const;
+
+export interface TaskFallbackInput {
+  /** "wait" requeues the task on its current provider, "cancel" stops it, and "approve_paid_fallback" is the owner's explicit, per-task authorization to continue on a metered provider. */
+  action: TaskFallbackInputAction;
 }
 
 export interface TaskUsageInput {
@@ -885,14 +1082,80 @@ export type ProviderStatusProvider = typeof ProviderStatusProvider[keyof typeof 
 
 export const ProviderStatusProvider = {
   claude_max: 'claude_max',
+  codex_chatgpt: 'codex_chatgpt',
   openrouter: 'openrouter',
+} as const;
+
+export type ProviderStatusBilling = typeof ProviderStatusBilling[keyof typeof ProviderStatusBilling];
+
+
+export const ProviderStatusBilling = {
+  subscription: 'subscription',
+  metered: 'metered',
+} as const;
+
+/**
+ * Codex only. Only "chatgpt" draws on the ChatGPT Codex allowance; "api_key" means the stored credential bills OpenAI's API instead.
+ * @nullable
+ */
+export type ProviderStatusAuthMode = typeof ProviderStatusAuthMode[keyof typeof ProviderStatusAuthMode] | null;
+
+
+export const ProviderStatusAuthMode = {
+  chatgpt: 'chatgpt',
+  api_key: 'api_key',
+  unknown: 'unknown',
 } as const;
 
 export interface ProviderStatus {
   provider: ProviderStatusProvider;
+  label: string;
+  billing: ProviderStatusBilling;
+  /** False when a server-side feature flag hides this provider. */
+  enabled: boolean;
   configured: boolean;
   healthy: boolean;
   message?: string;
+  /**
+     * Codex only. Only "chatgpt" draws on the ChatGPT Codex allowance; "api_key" means the stored credential bills OpenAI's API instead.
+     * @nullable
+     */
+  authMode: ProviderStatusAuthMode;
+  /** Confirmed from stored credentials, never assumed from the provider id. */
+  usesSubscriptionAllowance: boolean;
+  /** Whether the remaining plan allowance can be reported at all. */
+  allowanceBalanceKnown: boolean;
+  /** Reasoning effort levels this provider accepts, from server configuration. Empty when it has no such control. */
+  reasoningLevels: string[];
+}
+
+export interface CodexConnectionCheck {
+  name: string;
+  ok: boolean;
+  detail: string;
+}
+
+/**
+ * Result of a local-only Codex readiness check. No request is made to OpenAI, so running it never consumes the ChatGPT allowance.
+ */
+export interface CodexConnectionTest {
+  ok: boolean;
+  checks: CodexConnectionCheck[];
+}
+
+export type CodexBootstrapResultAction = typeof CodexBootstrapResultAction[keyof typeof CodexBootstrapResultAction];
+
+
+export const CodexBootstrapResultAction = {
+  created: 'created',
+  preserved: 'preserved',
+  skipped: 'skipped',
+  unavailable: 'unavailable',
+} as const;
+
+export interface CodexBootstrapResult {
+  action: CodexBootstrapResultAction;
+  detail: string;
 }
 
 export type ProviderSettingsDefaultProvider = typeof ProviderSettingsDefaultProvider[keyof typeof ProviderSettingsDefaultProvider];
@@ -900,6 +1163,32 @@ export type ProviderSettingsDefaultProvider = typeof ProviderSettingsDefaultProv
 
 export const ProviderSettingsDefaultProvider = {
   claude_max: 'claude_max',
+  codex_chatgpt: 'codex_chatgpt',
+  openrouter: 'openrouter',
+} as const;
+
+/**
+ * @nullable
+ */
+export type ProviderSettingsCodexReasoning = typeof ProviderSettingsCodexReasoning[keyof typeof ProviderSettingsCodexReasoning] | null;
+
+
+export const ProviderSettingsCodexReasoning = {
+  minimal: 'minimal',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+  max: 'max',
+  ultra: 'ultra',
+} as const;
+
+export type ProviderSettingsFallbackOrderItem = typeof ProviderSettingsFallbackOrderItem[keyof typeof ProviderSettingsFallbackOrderItem];
+
+
+export const ProviderSettingsFallbackOrderItem = {
+  claude_max: 'claude_max',
+  codex_chatgpt: 'codex_chatgpt',
   openrouter: 'openrouter',
 } as const;
 
@@ -909,6 +1198,16 @@ export interface ProviderSettings {
   claudeModel: string | null;
   /** @nullable */
   openrouterModel: string | null;
+  /** @nullable */
+  codexModel: string | null;
+  /** @nullable */
+  codexReasoning: ProviderSettingsCodexReasoning;
+  /** Providers to try, in order, when the primary one stops. Empty means never fall back. */
+  fallbackOrder: ProviderSettingsFallbackOrderItem[];
+  /** Standing authorization to fall back onto a metered provider without per-task approval. */
+  paidFallbackConsent: boolean;
+  /** @nullable */
+  paidFallbackLimitCents: number | null;
 }
 
 export type ProviderSettingsInputDefaultProvider = typeof ProviderSettingsInputDefaultProvider[keyof typeof ProviderSettingsInputDefaultProvider];
@@ -916,6 +1215,32 @@ export type ProviderSettingsInputDefaultProvider = typeof ProviderSettingsInputD
 
 export const ProviderSettingsInputDefaultProvider = {
   claude_max: 'claude_max',
+  codex_chatgpt: 'codex_chatgpt',
+  openrouter: 'openrouter',
+} as const;
+
+/**
+ * @nullable
+ */
+export type ProviderSettingsInputCodexReasoning = typeof ProviderSettingsInputCodexReasoning[keyof typeof ProviderSettingsInputCodexReasoning] | null;
+
+
+export const ProviderSettingsInputCodexReasoning = {
+  minimal: 'minimal',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+  max: 'max',
+  ultra: 'ultra',
+} as const;
+
+export type ProviderSettingsInputFallbackOrderItem = typeof ProviderSettingsInputFallbackOrderItem[keyof typeof ProviderSettingsInputFallbackOrderItem];
+
+
+export const ProviderSettingsInputFallbackOrderItem = {
+  claude_max: 'claude_max',
+  codex_chatgpt: 'codex_chatgpt',
   openrouter: 'openrouter',
 } as const;
 
@@ -931,6 +1256,20 @@ export interface ProviderSettingsInput {
      * @nullable
      */
   openrouterModel?: string | null;
+  /**
+     * @maxLength 200
+     * @nullable
+     */
+  codexModel?: string | null;
+  /** @nullable */
+  codexReasoning?: ProviderSettingsInputCodexReasoning;
+  fallbackOrder?: ProviderSettingsInputFallbackOrderItem[];
+  paidFallbackConsent?: boolean;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  paidFallbackLimitCents?: number | null;
 }
 
 export interface ProviderModel {
@@ -949,6 +1288,7 @@ export type ProviderModelsProvider = typeof ProviderModelsProvider[keyof typeof 
 
 export const ProviderModelsProvider = {
   claude_max: 'claude_max',
+  codex_chatgpt: 'codex_chatgpt',
   openrouter: 'openrouter',
 } as const;
 
@@ -1134,6 +1474,7 @@ export type ScheduleInputProviderOverride = typeof ScheduleInputProviderOverride
 
 export const ScheduleInputProviderOverride = {
   claude_max: 'claude_max',
+  codex_chatgpt: 'codex_chatgpt',
   openrouter: 'openrouter',
 } as const;
 

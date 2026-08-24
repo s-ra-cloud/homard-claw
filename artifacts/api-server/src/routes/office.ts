@@ -6,9 +6,13 @@ import {
   CreateAgentResponse,
   CreateTaskBody,
   CreateTaskResponse,
+  BootstrapCodexResponse,
   DecideApprovalBody,
   DecideApprovalParams,
   DecideApprovalResponse,
+  DecideTaskFallbackBody,
+  DecideTaskFallbackParams,
+  DecideTaskFallbackResponse,
   DeleteAgentParams,
   DuplicateAgentParams,
   DuplicateAgentResponse,
@@ -46,6 +50,7 @@ import {
   SetAgentArchivedResponse,
   SetEmergencyStopBody,
   SetEmergencyStopResponse,
+  TestCodexConnectionResponse,
   UpdateAgentBody,
   UpdateAgentParams,
   UpdateAgentResponse,
@@ -72,16 +77,24 @@ import {
 } from "express";
 import {
   PROVIDER_IDS,
+  ProviderSettingsError,
+  RoutingError,
+  clearProviderCaches,
   computeUsageCostCents,
   estimateTask,
   getModelCatalog,
   getProviderHealth,
   getProviderSettings,
   isConfigured,
+  providerLabel,
   resolveRouting,
   updateProviderSettings,
   type ProviderId,
 } from "../providers";
+import { testCodexConnection } from "../codex/execute";
+import { bootstrapCodexHome } from "../codex/runtime";
+import { codexReasoningLevels } from "../codex/config";
+import { listProviderLeases } from "../provider-leases";
 import { recordAudit, verifyAuditChain } from "../audit";
 import { agentPromptContext, dispatchTask } from "../dispatch";
 import { publish } from "../events";
@@ -180,6 +193,8 @@ function toAgent(agent: typeof agentsTable.$inferSelect) {
     instructions: agent.instructions,
     provider: agent.provider,
     model: agent.model,
+    codexModel: agent.codexModel,
+    codexReasoning: agent.codexReasoning,
     voiceStyle: agent.voiceStyle,
     status: agent.status,
     securityPreset: agent.securityPreset,
@@ -208,6 +223,9 @@ function toTaskJson(
     delegatedByAgentName: lineage?.delegatedByAgentName ?? null,
     startedAt: task.startedAt ? task.startedAt.toISOString() : null,
     finishedAt: task.finishedAt ? task.finishedAt.toISOString() : null,
+    paidFallbackApprovedAt: task.paidFallbackApprovedAt
+      ? task.paidFallbackApprovedAt.toISOString()
+      : null,
     createdAt: task.createdAt.toISOString(),
   };
 }
@@ -831,6 +849,8 @@ router.post("/tasks", async (req, res): Promise<void> => {
     budgetCents: parsed.data.budgetCents ?? null,
     providerOverride: parsed.data.providerOverride as ProviderId | undefined,
     modelOverride: parsed.data.modelOverride,
+    reasoningOverride: parsed.data.reasoningOverride,
+    continueConversation: parsed.data.continueConversation,
   });
   if (outcome.status === 404) {
     res.status(404).json({ error: "Agent not found" });
@@ -840,6 +860,10 @@ router.post("/tasks", async (req, res): Promise<void> => {
     res.status(409).json({
       error: "This agent is retired or archived and cannot take new work",
     });
+    return;
+  }
+  if (outcome.status === 422) {
+    res.status(422).json({ error: outcome.message });
     return;
   }
   if (outcome.status === 425) {
@@ -1018,6 +1042,100 @@ router.post("/tasks/:taskId/retry", async (req, res): Promise<void> => {
   }
   publish("tasks", "overview");
   res.json(RetryTaskResponse.parse(toTaskJson(outcome.task, outcome.agentName)));
+});
+
+/**
+ * Owner decision for a task that stopped because its provider could not
+ * continue — an expired ChatGPT session, an exhausted allowance, or an
+ * outage. The three choices are exactly the ones the office offers: wait
+ * (requeue on the same provider), cancel, or explicitly authorize a paid
+ * fallback for this one task.
+ *
+ * Nothing here reroutes by itself. `approve_paid_fallback` only records
+ * the owner's consent and requeues; the worker still re-evaluates the
+ * fallback policy at execution time, so a consent recorded now cannot be
+ * used to escape a limit tightened since.
+ */
+router.post("/tasks/:taskId/fallback", async (req, res): Promise<void> => {
+  const params = DecideTaskFallbackParams.safeParse(req.params);
+  const body = DecideTaskFallbackBody.safeParse(req.body);
+  if (!params.success || !body.success) {
+    res.status(400).json({ error: "Invalid fallback decision" });
+    return;
+  }
+  const action = body.data.action;
+  const outcome = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .select({ task: tasksTable, agentName: agentsTable.name })
+      .from(tasksTable)
+      .innerJoin(agentsTable, eq(tasksTable.agentId, agentsTable.id))
+      .where(eq(tasksTable.id, params.data.taskId))
+      .limit(1)
+      .for("update", { of: tasksTable });
+    if (!row) return { status: 404 as const };
+    if (!RETRYABLE_STATUSES.includes(row.task.status)) {
+      return { status: 409 as const, current: row.task.status };
+    }
+    const changes =
+      action === "cancel"
+        ? {
+            status: "cancelled" as const,
+            finishedAt: new Date(),
+          }
+        : {
+            status: "queued" as const,
+            providerPhase: "queued" as const,
+            attempts: 0,
+            notBefore: null,
+            errorKind: null,
+            errorMessage: null,
+            startedAt: null,
+            finishedAt: null,
+            ...(action === "approve_paid_fallback"
+              ? { paidFallbackApprovedAt: new Date() }
+              : {}),
+          };
+    const [task] = await tx
+      .update(tasksTable)
+      .set(changes)
+      .where(eq(tasksTable.id, row.task.id))
+      .returning();
+    const message =
+      action === "cancel"
+        ? "Stopped by the owner after the provider could not continue."
+        : action === "wait"
+          ? `Requeued to wait for ${providerLabel(row.task.provider)} to recover.`
+          : "The owner authorized a paid fallback for this task; it will be re-checked against the spend policy before it runs.";
+    await tx.insert(taskLogsTable).values({
+      taskId: task.id,
+      level: "info",
+      message,
+    });
+    await recordAudit(
+      action === "approve_paid_fallback"
+        ? "task.paid_fallback_approved"
+        : "task.fallback_decision",
+      `${row.agentName}'s stopped task: ${message}`,
+      tx,
+    );
+    return { status: 200 as const, task, agentName: row.agentName };
+  });
+  if (outcome.status === 404) {
+    res.status(404).json({ error: "Task not found" });
+    return;
+  }
+  if (outcome.status === 409) {
+    res.status(409).json({
+      error: `Only a stopped task can take a fallback decision (this one is ${outcome.current})`,
+    });
+    return;
+  }
+  publish("tasks", "overview");
+  res.json(
+    DecideTaskFallbackResponse.parse(
+      toTaskJson(outcome.task, outcome.agentName),
+    ),
+  );
 });
 
 router.post("/tasks/estimate", async (req, res): Promise<void> => {
@@ -1306,10 +1424,45 @@ router.get("/audit/verify", async (_req, res): Promise<void> => {
 });
 
 router.get("/providers", async (_req, res): Promise<void> => {
+  // Every known provider is reported, including one whose flag is off:
+  // hiding it entirely would leave an agent that still references it
+  // looking mysteriously broken. `enabled: false` tells the UI to hide it.
   const statuses = await Promise.all(
     PROVIDER_IDS.map((provider) => getProviderHealth(provider)),
   );
   res.json(GetProvidersResponse.parse(statuses));
+});
+
+/**
+ * Owner-only, local-only Codex connection check. It inspects the private
+ * CODEX_HOME, the recorded auth mode, and SDK availability — it never
+ * starts a thread, so it cannot spend the ChatGPT allowance or leave a
+ * stray session behind.
+ */
+router.post("/providers/codex/test", async (_req, res): Promise<void> => {
+  clearProviderCaches();
+  const result = await testCodexConnection();
+  await recordAudit(
+    "providers.codex_tested",
+    `The Codex connection was checked locally: ${result.ok ? "ready" : "not ready"}.`,
+  );
+  res.json(TestCodexConnectionResponse.parse(result));
+});
+
+/**
+ * One-time bootstrap of the private CODEX_HOME from CODEX_AUTH_JSON.
+ * Refuses to overwrite an existing auth.json so a session the Codex CLI
+ * has since refreshed is never clobbered by a stale secret.
+ */
+router.post("/providers/codex/bootstrap", async (req, res): Promise<void> => {
+  const outcome = await bootstrapCodexHome();
+  clearProviderCaches();
+  await recordAudit(
+    "providers.codex_bootstrapped",
+    `Codex credential bootstrap: ${outcome.action}.`,
+  );
+  req.log.info({ action: outcome.action }, "Codex bootstrap");
+  res.json(BootstrapCodexResponse.parse(outcome));
 });
 
 router.get("/providers/settings", async (_req, res): Promise<void> => {
@@ -1322,14 +1475,28 @@ router.put("/providers/settings", async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-  const settings = await updateProviderSettings({
-    defaultProvider: parsed.data.defaultProvider as ProviderId | undefined,
-    claudeModel: parsed.data.claudeModel,
-    openrouterModel: parsed.data.openrouterModel,
-  });
+  let settings;
+  try {
+    settings = await updateProviderSettings({
+      defaultProvider: parsed.data.defaultProvider as ProviderId | undefined,
+      claudeModel: parsed.data.claudeModel,
+      openrouterModel: parsed.data.openrouterModel,
+      codexModel: parsed.data.codexModel,
+      codexReasoning: parsed.data.codexReasoning,
+      fallbackOrder: parsed.data.fallbackOrder as ProviderId[] | undefined,
+      paidFallbackConsent: parsed.data.paidFallbackConsent,
+      paidFallbackLimitCents: parsed.data.paidFallbackLimitCents,
+    });
+  } catch (error) {
+    if (error instanceof ProviderSettingsError) {
+      res.status(422).json({ error: error.message });
+      return;
+    }
+    throw error;
+  }
   await recordAudit(
       "providers.settings_updated",
-      `Provider routing defaults were updated (default: ${settings.defaultProvider}).`,
+      `Provider routing defaults were updated (default: ${providerLabel(settings.defaultProvider)}).`,
     );
   res.json(UpdateProviderSettingsResponse.parse(settings));
 });

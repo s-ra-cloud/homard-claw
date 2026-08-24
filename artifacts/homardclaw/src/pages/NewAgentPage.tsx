@@ -36,6 +36,8 @@ export default function NewAgentPage() {
       instructions: "",
       provider: "workspace_default",
       model: "",
+      codexModel: "",
+      codexReasoning: "",
       voiceStyle: "none",
       securityPreset: AgentSecurityPreset.assistant,
       autonomy: "limited",
@@ -79,6 +81,14 @@ export default function NewAgentPage() {
         ...(data.instructions.trim() ? { instructions: data.instructions.trim() } : {}),
         provider: data.provider === "workspace_default" ? null : data.provider,
         ...(data.model.trim() ? { model: data.model.trim() } : {}),
+        ...(data.codexModel.trim() ? { codexModel: data.codexModel.trim() } : {}),
+        ...(data.codexReasoning.trim()
+          ? {
+              codexReasoning: data.codexReasoning.trim() as NonNullable<
+                Parameters<typeof createAgent.mutate>[0]["data"]["codexReasoning"]
+              >,
+            }
+          : {}),
         ...(data.voiceStyle && data.voiceStyle !== "none" ? { voiceStyle: data.voiceStyle } : {}),
         securityPreset: data.securityPreset,
         autonomy: data.autonomy,

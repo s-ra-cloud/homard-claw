@@ -86,8 +86,10 @@ export const ListAgentsResponseItem = zod.object({
   "personality": zod.string().nullish(),
   "goals": zod.string().nullish(),
   "instructions": zod.string().nullish(),
-  "provider": zod.union([zod.literal('claude_max'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
+  "provider": zod.union([zod.literal('claude_max'),zod.literal('codex_chatgpt'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
   "model": zod.string().nullish(),
+  "codexModel": zod.string().nullish().describe('Preferred Codex model for this agent; falls back to the workspace default.'),
+  "codexReasoning": zod.union([zod.literal('minimal'),zod.literal('low'),zod.literal('medium'),zod.literal('high'),zod.literal('xhigh'),zod.literal('max'),zod.literal('ultra'),zod.literal(null)]).nullish(),
   "voiceStyle": zod.string().nullish(),
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
@@ -97,7 +99,7 @@ export const ListAgentsResponseItem = zod.object({
   "dailyBudgetCents": zod.number().min(listAgentsResponsePermissionsDailyBudgetCentsMin).nullable(),
   "maxTasksPerDay": zod.number().min(listAgentsResponsePermissionsMaxTasksPerDayMin).nullable(),
   "approvalThresholdCents": zod.number().min(listAgentsResponsePermissionsApprovalThresholdCentsMin).nullable(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'codex_chatgpt', 'openrouter'])),zod.null()]),
   "maxRunSeconds": zod.number().min(listAgentsResponsePermissionsMaxRunSecondsMin).nullable(),
   "maxOutputTokens": zod.number().min(listAgentsResponsePermissionsMaxOutputTokensMin).nullable(),
   "maxAttempts": zod.number().min(listAgentsResponsePermissionsMaxAttemptsMin).nullable(),
@@ -109,7 +111,7 @@ export const ListAgentsResponseItem = zod.object({
   "dailyBudgetCents": zod.number().min(listAgentsResponsePermissionOverridesOneDailyBudgetCentsMin).nullish(),
   "maxTasksPerDay": zod.number().min(listAgentsResponsePermissionOverridesOneMaxTasksPerDayMin).nullish(),
   "approvalThresholdCents": zod.number().min(listAgentsResponsePermissionOverridesOneApprovalThresholdCentsMin).nullish(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional(),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'codex_chatgpt', 'openrouter'])),zod.null()]).optional(),
   "maxRunSeconds": zod.number().min(listAgentsResponsePermissionOverridesOneMaxRunSecondsMin).nullish(),
   "maxOutputTokens": zod.number().min(listAgentsResponsePermissionOverridesOneMaxOutputTokensMin).nullish(),
   "maxAttempts": zod.number().min(listAgentsResponsePermissionOverridesOneMaxAttemptsMin).nullish(),
@@ -151,6 +153,8 @@ export const createAgentBodyInstructionsMax = 4000;
 
 export const createAgentBodyModelMax = 180;
 
+export const createAgentBodyCodexModelMax = 200;
+
 export const createAgentBodyVoiceStyleMax = 60;
 
 export const createAgentBodyPermissionOverridesOneMaxTaskBudgetCentsMin = 0;
@@ -181,8 +185,10 @@ export const CreateAgentBody = zod.object({
   "personality": zod.string().max(createAgentBodyPersonalityMax).optional(),
   "goals": zod.string().max(createAgentBodyGoalsMax).optional(),
   "instructions": zod.string().max(createAgentBodyInstructionsMax).optional(),
-  "provider": zod.union([zod.literal('claude_max'),zod.literal('openrouter'),zod.literal(null)]).nullish(),
+  "provider": zod.union([zod.literal('claude_max'),zod.literal('codex_chatgpt'),zod.literal('openrouter'),zod.literal(null)]).nullish(),
   "model": zod.string().max(createAgentBodyModelMax).optional(),
+  "codexModel": zod.string().max(createAgentBodyCodexModelMax).nullish(),
+  "codexReasoning": zod.union([zod.literal('minimal'),zod.literal('low'),zod.literal('medium'),zod.literal('high'),zod.literal('xhigh'),zod.literal('max'),zod.literal('ultra'),zod.literal(null)]).nullish(),
   "voiceStyle": zod.string().max(createAgentBodyVoiceStyleMax).optional(),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
   "autonomy": zod.enum(['supervised', 'limited', 'autonomous']).optional(),
@@ -191,7 +197,7 @@ export const CreateAgentBody = zod.object({
   "dailyBudgetCents": zod.number().min(createAgentBodyPermissionOverridesOneDailyBudgetCentsMin).nullish(),
   "maxTasksPerDay": zod.number().min(createAgentBodyPermissionOverridesOneMaxTasksPerDayMin).nullish(),
   "approvalThresholdCents": zod.number().min(createAgentBodyPermissionOverridesOneApprovalThresholdCentsMin).nullish(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional(),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'codex_chatgpt', 'openrouter'])),zod.null()]).optional(),
   "maxRunSeconds": zod.number().min(createAgentBodyPermissionOverridesOneMaxRunSecondsMin).nullish(),
   "maxOutputTokens": zod.number().min(createAgentBodyPermissionOverridesOneMaxOutputTokensMin).nullish(),
   "maxAttempts": zod.number().min(createAgentBodyPermissionOverridesOneMaxAttemptsMin).nullish(),
@@ -253,8 +259,10 @@ export const CreateAgentResponse = zod.object({
   "personality": zod.string().nullish(),
   "goals": zod.string().nullish(),
   "instructions": zod.string().nullish(),
-  "provider": zod.union([zod.literal('claude_max'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
+  "provider": zod.union([zod.literal('claude_max'),zod.literal('codex_chatgpt'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
   "model": zod.string().nullish(),
+  "codexModel": zod.string().nullish().describe('Preferred Codex model for this agent; falls back to the workspace default.'),
+  "codexReasoning": zod.union([zod.literal('minimal'),zod.literal('low'),zod.literal('medium'),zod.literal('high'),zod.literal('xhigh'),zod.literal('max'),zod.literal('ultra'),zod.literal(null)]).nullish(),
   "voiceStyle": zod.string().nullish(),
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
@@ -264,7 +272,7 @@ export const CreateAgentResponse = zod.object({
   "dailyBudgetCents": zod.number().min(createAgentResponsePermissionsDailyBudgetCentsMin).nullable(),
   "maxTasksPerDay": zod.number().min(createAgentResponsePermissionsMaxTasksPerDayMin).nullable(),
   "approvalThresholdCents": zod.number().min(createAgentResponsePermissionsApprovalThresholdCentsMin).nullable(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'codex_chatgpt', 'openrouter'])),zod.null()]),
   "maxRunSeconds": zod.number().min(createAgentResponsePermissionsMaxRunSecondsMin).nullable(),
   "maxOutputTokens": zod.number().min(createAgentResponsePermissionsMaxOutputTokensMin).nullable(),
   "maxAttempts": zod.number().min(createAgentResponsePermissionsMaxAttemptsMin).nullable(),
@@ -276,7 +284,7 @@ export const CreateAgentResponse = zod.object({
   "dailyBudgetCents": zod.number().min(createAgentResponsePermissionOverridesOneDailyBudgetCentsMin).nullish(),
   "maxTasksPerDay": zod.number().min(createAgentResponsePermissionOverridesOneMaxTasksPerDayMin).nullish(),
   "approvalThresholdCents": zod.number().min(createAgentResponsePermissionOverridesOneApprovalThresholdCentsMin).nullish(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional(),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'codex_chatgpt', 'openrouter'])),zod.null()]).optional(),
   "maxRunSeconds": zod.number().min(createAgentResponsePermissionOverridesOneMaxRunSecondsMin).nullish(),
   "maxOutputTokens": zod.number().min(createAgentResponsePermissionOverridesOneMaxOutputTokensMin).nullish(),
   "maxAttempts": zod.number().min(createAgentResponsePermissionOverridesOneMaxAttemptsMin).nullish(),
@@ -350,8 +358,10 @@ export const GetAgentResponse = zod.object({
   "personality": zod.string().nullish(),
   "goals": zod.string().nullish(),
   "instructions": zod.string().nullish(),
-  "provider": zod.union([zod.literal('claude_max'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
+  "provider": zod.union([zod.literal('claude_max'),zod.literal('codex_chatgpt'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
   "model": zod.string().nullish(),
+  "codexModel": zod.string().nullish().describe('Preferred Codex model for this agent; falls back to the workspace default.'),
+  "codexReasoning": zod.union([zod.literal('minimal'),zod.literal('low'),zod.literal('medium'),zod.literal('high'),zod.literal('xhigh'),zod.literal('max'),zod.literal('ultra'),zod.literal(null)]).nullish(),
   "voiceStyle": zod.string().nullish(),
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
@@ -361,7 +371,7 @@ export const GetAgentResponse = zod.object({
   "dailyBudgetCents": zod.number().min(getAgentResponseAgentPermissionsDailyBudgetCentsMin).nullable(),
   "maxTasksPerDay": zod.number().min(getAgentResponseAgentPermissionsMaxTasksPerDayMin).nullable(),
   "approvalThresholdCents": zod.number().min(getAgentResponseAgentPermissionsApprovalThresholdCentsMin).nullable(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'codex_chatgpt', 'openrouter'])),zod.null()]),
   "maxRunSeconds": zod.number().min(getAgentResponseAgentPermissionsMaxRunSecondsMin).nullable(),
   "maxOutputTokens": zod.number().min(getAgentResponseAgentPermissionsMaxOutputTokensMin).nullable(),
   "maxAttempts": zod.number().min(getAgentResponseAgentPermissionsMaxAttemptsMin).nullable(),
@@ -373,7 +383,7 @@ export const GetAgentResponse = zod.object({
   "dailyBudgetCents": zod.number().min(getAgentResponseAgentPermissionOverridesOneDailyBudgetCentsMin).nullish(),
   "maxTasksPerDay": zod.number().min(getAgentResponseAgentPermissionOverridesOneMaxTasksPerDayMin).nullish(),
   "approvalThresholdCents": zod.number().min(getAgentResponseAgentPermissionOverridesOneApprovalThresholdCentsMin).nullish(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional(),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'codex_chatgpt', 'openrouter'])),zod.null()]).optional(),
   "maxRunSeconds": zod.number().min(getAgentResponseAgentPermissionOverridesOneMaxRunSecondsMin).nullish(),
   "maxOutputTokens": zod.number().min(getAgentResponseAgentPermissionOverridesOneMaxOutputTokensMin).nullish(),
   "maxAttempts": zod.number().min(getAgentResponseAgentPermissionOverridesOneMaxAttemptsMin).nullish(),
@@ -398,13 +408,25 @@ export const GetAgentResponse = zod.object({
   "status": zod.enum(['queued', 'running', 'waiting_approval', 'blocked', 'completed', 'failed', 'cancelled']),
   "priority": zod.enum(['low', 'normal', 'high']),
   "budgetCents": zod.number().nullish(),
-  "provider": zod.enum(['claude_max', 'openrouter']).optional(),
+  "provider": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter']).optional(),
   "model": zod.string().nullish(),
+  "reasoningEffort": zod.union([zod.literal('minimal'),zod.literal('low'),zod.literal('medium'),zod.literal('high'),zod.literal('xhigh'),zod.literal('max'),zod.literal('ultra'),zod.literal(null)]).nullish(),
+  "providerPhase": zod.union([zod.literal('queued'),zod.literal('starting'),zod.literal('running'),zod.literal('waiting_approval'),zod.literal('completed'),zod.literal('rate_limited'),zod.literal('auth_required'),zod.literal('failed'),zod.literal('cancelled'),zod.literal(null)]).nullish().describe('Coarse execution phase shown while a task runs; `status` stays authoritative.'),
+  "providerThreadId": zod.string().nullish(),
+  "conversationId": zod.string().nullish(),
   "estimatedTokens": zod.number().nullish(),
   "estimatedCostCents": zod.number().nullish(),
   "actualInputTokens": zod.number().nullish(),
   "actualOutputTokens": zod.number().nullish(),
-  "actualCostCents": zod.number().nullish(),
+  "actualCostCents": zod.number().nullish().describe('Null when the provider publishes no per-token price — for subscription allowances this is \"not applicable\", never a $0.00 charge.'),
+  "cachedInputTokens": zod.number().nullish(),
+  "cacheWriteInputTokens": zod.number().nullish(),
+  "reasoningOutputTokens": zod.number().nullish(),
+  "queuedMs": zod.number().nullish(),
+  "runMs": zod.number().nullish(),
+  "fallbackFromProvider": zod.union([zod.literal('claude_max'),zod.literal('codex_chatgpt'),zod.literal('openrouter'),zod.literal(null)]).nullish(),
+  "fallbackReason": zod.string().nullish(),
+  "paidFallbackApprovedAt": zod.coerce.date().nullish(),
   "output": zod.string().nullish(),
   "files": zod.array(zod.object({
   "name": zod.string(),
@@ -460,6 +482,8 @@ export const updateAgentBodyInstructionsMax = 4000;
 
 export const updateAgentBodyModelMax = 180;
 
+export const updateAgentBodyCodexModelMax = 200;
+
 export const updateAgentBodyVoiceStyleMax = 60;
 
 export const updateAgentBodyPermissionOverridesOneMaxTaskBudgetCentsMin = 0;
@@ -490,8 +514,10 @@ export const UpdateAgentBody = zod.object({
   "personality": zod.string().max(updateAgentBodyPersonalityMax).nullish(),
   "goals": zod.string().max(updateAgentBodyGoalsMax).nullish(),
   "instructions": zod.string().max(updateAgentBodyInstructionsMax).nullish(),
-  "provider": zod.union([zod.literal('claude_max'),zod.literal('openrouter'),zod.literal(null)]).nullish(),
+  "provider": zod.union([zod.literal('claude_max'),zod.literal('codex_chatgpt'),zod.literal('openrouter'),zod.literal(null)]).nullish(),
   "model": zod.string().max(updateAgentBodyModelMax).nullish(),
+  "codexModel": zod.string().max(updateAgentBodyCodexModelMax).nullish(),
+  "codexReasoning": zod.union([zod.literal('minimal'),zod.literal('low'),zod.literal('medium'),zod.literal('high'),zod.literal('xhigh'),zod.literal('max'),zod.literal('ultra'),zod.literal(null)]).nullish(),
   "voiceStyle": zod.string().max(updateAgentBodyVoiceStyleMax).nullish(),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']).optional(),
   "autonomy": zod.enum(['supervised', 'limited', 'autonomous']).optional(),
@@ -500,7 +526,7 @@ export const UpdateAgentBody = zod.object({
   "dailyBudgetCents": zod.number().min(updateAgentBodyPermissionOverridesOneDailyBudgetCentsMin).nullish(),
   "maxTasksPerDay": zod.number().min(updateAgentBodyPermissionOverridesOneMaxTasksPerDayMin).nullish(),
   "approvalThresholdCents": zod.number().min(updateAgentBodyPermissionOverridesOneApprovalThresholdCentsMin).nullish(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional(),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'codex_chatgpt', 'openrouter'])),zod.null()]).optional(),
   "maxRunSeconds": zod.number().min(updateAgentBodyPermissionOverridesOneMaxRunSecondsMin).nullish(),
   "maxOutputTokens": zod.number().min(updateAgentBodyPermissionOverridesOneMaxOutputTokensMin).nullish(),
   "maxAttempts": zod.number().min(updateAgentBodyPermissionOverridesOneMaxAttemptsMin).nullish(),
@@ -562,8 +588,10 @@ export const UpdateAgentResponse = zod.object({
   "personality": zod.string().nullish(),
   "goals": zod.string().nullish(),
   "instructions": zod.string().nullish(),
-  "provider": zod.union([zod.literal('claude_max'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
+  "provider": zod.union([zod.literal('claude_max'),zod.literal('codex_chatgpt'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
   "model": zod.string().nullish(),
+  "codexModel": zod.string().nullish().describe('Preferred Codex model for this agent; falls back to the workspace default.'),
+  "codexReasoning": zod.union([zod.literal('minimal'),zod.literal('low'),zod.literal('medium'),zod.literal('high'),zod.literal('xhigh'),zod.literal('max'),zod.literal('ultra'),zod.literal(null)]).nullish(),
   "voiceStyle": zod.string().nullish(),
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
@@ -573,7 +601,7 @@ export const UpdateAgentResponse = zod.object({
   "dailyBudgetCents": zod.number().min(updateAgentResponsePermissionsDailyBudgetCentsMin).nullable(),
   "maxTasksPerDay": zod.number().min(updateAgentResponsePermissionsMaxTasksPerDayMin).nullable(),
   "approvalThresholdCents": zod.number().min(updateAgentResponsePermissionsApprovalThresholdCentsMin).nullable(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'codex_chatgpt', 'openrouter'])),zod.null()]),
   "maxRunSeconds": zod.number().min(updateAgentResponsePermissionsMaxRunSecondsMin).nullable(),
   "maxOutputTokens": zod.number().min(updateAgentResponsePermissionsMaxOutputTokensMin).nullable(),
   "maxAttempts": zod.number().min(updateAgentResponsePermissionsMaxAttemptsMin).nullable(),
@@ -585,7 +613,7 @@ export const UpdateAgentResponse = zod.object({
   "dailyBudgetCents": zod.number().min(updateAgentResponsePermissionOverridesOneDailyBudgetCentsMin).nullish(),
   "maxTasksPerDay": zod.number().min(updateAgentResponsePermissionOverridesOneMaxTasksPerDayMin).nullish(),
   "approvalThresholdCents": zod.number().min(updateAgentResponsePermissionOverridesOneApprovalThresholdCentsMin).nullish(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional(),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'codex_chatgpt', 'openrouter'])),zod.null()]).optional(),
   "maxRunSeconds": zod.number().min(updateAgentResponsePermissionOverridesOneMaxRunSecondsMin).nullish(),
   "maxOutputTokens": zod.number().min(updateAgentResponsePermissionOverridesOneMaxOutputTokensMin).nullish(),
   "maxAttempts": zod.number().min(updateAgentResponsePermissionOverridesOneMaxAttemptsMin).nullish(),
@@ -668,8 +696,10 @@ export const DuplicateAgentResponse = zod.object({
   "personality": zod.string().nullish(),
   "goals": zod.string().nullish(),
   "instructions": zod.string().nullish(),
-  "provider": zod.union([zod.literal('claude_max'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
+  "provider": zod.union([zod.literal('claude_max'),zod.literal('codex_chatgpt'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
   "model": zod.string().nullish(),
+  "codexModel": zod.string().nullish().describe('Preferred Codex model for this agent; falls back to the workspace default.'),
+  "codexReasoning": zod.union([zod.literal('minimal'),zod.literal('low'),zod.literal('medium'),zod.literal('high'),zod.literal('xhigh'),zod.literal('max'),zod.literal('ultra'),zod.literal(null)]).nullish(),
   "voiceStyle": zod.string().nullish(),
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
@@ -679,7 +709,7 @@ export const DuplicateAgentResponse = zod.object({
   "dailyBudgetCents": zod.number().min(duplicateAgentResponsePermissionsDailyBudgetCentsMin).nullable(),
   "maxTasksPerDay": zod.number().min(duplicateAgentResponsePermissionsMaxTasksPerDayMin).nullable(),
   "approvalThresholdCents": zod.number().min(duplicateAgentResponsePermissionsApprovalThresholdCentsMin).nullable(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'codex_chatgpt', 'openrouter'])),zod.null()]),
   "maxRunSeconds": zod.number().min(duplicateAgentResponsePermissionsMaxRunSecondsMin).nullable(),
   "maxOutputTokens": zod.number().min(duplicateAgentResponsePermissionsMaxOutputTokensMin).nullable(),
   "maxAttempts": zod.number().min(duplicateAgentResponsePermissionsMaxAttemptsMin).nullable(),
@@ -691,7 +721,7 @@ export const DuplicateAgentResponse = zod.object({
   "dailyBudgetCents": zod.number().min(duplicateAgentResponsePermissionOverridesOneDailyBudgetCentsMin).nullish(),
   "maxTasksPerDay": zod.number().min(duplicateAgentResponsePermissionOverridesOneMaxTasksPerDayMin).nullish(),
   "approvalThresholdCents": zod.number().min(duplicateAgentResponsePermissionOverridesOneApprovalThresholdCentsMin).nullish(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional(),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'codex_chatgpt', 'openrouter'])),zod.null()]).optional(),
   "maxRunSeconds": zod.number().min(duplicateAgentResponsePermissionOverridesOneMaxRunSecondsMin).nullish(),
   "maxOutputTokens": zod.number().min(duplicateAgentResponsePermissionOverridesOneMaxOutputTokensMin).nullish(),
   "maxAttempts": zod.number().min(duplicateAgentResponsePermissionOverridesOneMaxAttemptsMin).nullish(),
@@ -768,8 +798,10 @@ export const SetAgentArchivedResponse = zod.object({
   "personality": zod.string().nullish(),
   "goals": zod.string().nullish(),
   "instructions": zod.string().nullish(),
-  "provider": zod.union([zod.literal('claude_max'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
+  "provider": zod.union([zod.literal('claude_max'),zod.literal('codex_chatgpt'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
   "model": zod.string().nullish(),
+  "codexModel": zod.string().nullish().describe('Preferred Codex model for this agent; falls back to the workspace default.'),
+  "codexReasoning": zod.union([zod.literal('minimal'),zod.literal('low'),zod.literal('medium'),zod.literal('high'),zod.literal('xhigh'),zod.literal('max'),zod.literal('ultra'),zod.literal(null)]).nullish(),
   "voiceStyle": zod.string().nullish(),
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
@@ -779,7 +811,7 @@ export const SetAgentArchivedResponse = zod.object({
   "dailyBudgetCents": zod.number().min(setAgentArchivedResponsePermissionsDailyBudgetCentsMin).nullable(),
   "maxTasksPerDay": zod.number().min(setAgentArchivedResponsePermissionsMaxTasksPerDayMin).nullable(),
   "approvalThresholdCents": zod.number().min(setAgentArchivedResponsePermissionsApprovalThresholdCentsMin).nullable(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'codex_chatgpt', 'openrouter'])),zod.null()]),
   "maxRunSeconds": zod.number().min(setAgentArchivedResponsePermissionsMaxRunSecondsMin).nullable(),
   "maxOutputTokens": zod.number().min(setAgentArchivedResponsePermissionsMaxOutputTokensMin).nullable(),
   "maxAttempts": zod.number().min(setAgentArchivedResponsePermissionsMaxAttemptsMin).nullable(),
@@ -791,7 +823,7 @@ export const SetAgentArchivedResponse = zod.object({
   "dailyBudgetCents": zod.number().min(setAgentArchivedResponsePermissionOverridesOneDailyBudgetCentsMin).nullish(),
   "maxTasksPerDay": zod.number().min(setAgentArchivedResponsePermissionOverridesOneMaxTasksPerDayMin).nullish(),
   "approvalThresholdCents": zod.number().min(setAgentArchivedResponsePermissionOverridesOneApprovalThresholdCentsMin).nullish(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional(),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'codex_chatgpt', 'openrouter'])),zod.null()]).optional(),
   "maxRunSeconds": zod.number().min(setAgentArchivedResponsePermissionOverridesOneMaxRunSecondsMin).nullish(),
   "maxOutputTokens": zod.number().min(setAgentArchivedResponsePermissionOverridesOneMaxOutputTokensMin).nullish(),
   "maxAttempts": zod.number().min(setAgentArchivedResponsePermissionOverridesOneMaxAttemptsMin).nullish(),
@@ -868,8 +900,10 @@ export const PauseAgentResponse = zod.object({
   "personality": zod.string().nullish(),
   "goals": zod.string().nullish(),
   "instructions": zod.string().nullish(),
-  "provider": zod.union([zod.literal('claude_max'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
+  "provider": zod.union([zod.literal('claude_max'),zod.literal('codex_chatgpt'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
   "model": zod.string().nullish(),
+  "codexModel": zod.string().nullish().describe('Preferred Codex model for this agent; falls back to the workspace default.'),
+  "codexReasoning": zod.union([zod.literal('minimal'),zod.literal('low'),zod.literal('medium'),zod.literal('high'),zod.literal('xhigh'),zod.literal('max'),zod.literal('ultra'),zod.literal(null)]).nullish(),
   "voiceStyle": zod.string().nullish(),
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
@@ -879,7 +913,7 @@ export const PauseAgentResponse = zod.object({
   "dailyBudgetCents": zod.number().min(pauseAgentResponsePermissionsDailyBudgetCentsMin).nullable(),
   "maxTasksPerDay": zod.number().min(pauseAgentResponsePermissionsMaxTasksPerDayMin).nullable(),
   "approvalThresholdCents": zod.number().min(pauseAgentResponsePermissionsApprovalThresholdCentsMin).nullable(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'codex_chatgpt', 'openrouter'])),zod.null()]),
   "maxRunSeconds": zod.number().min(pauseAgentResponsePermissionsMaxRunSecondsMin).nullable(),
   "maxOutputTokens": zod.number().min(pauseAgentResponsePermissionsMaxOutputTokensMin).nullable(),
   "maxAttempts": zod.number().min(pauseAgentResponsePermissionsMaxAttemptsMin).nullable(),
@@ -891,7 +925,7 @@ export const PauseAgentResponse = zod.object({
   "dailyBudgetCents": zod.number().min(pauseAgentResponsePermissionOverridesOneDailyBudgetCentsMin).nullish(),
   "maxTasksPerDay": zod.number().min(pauseAgentResponsePermissionOverridesOneMaxTasksPerDayMin).nullish(),
   "approvalThresholdCents": zod.number().min(pauseAgentResponsePermissionOverridesOneApprovalThresholdCentsMin).nullish(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional(),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'codex_chatgpt', 'openrouter'])),zod.null()]).optional(),
   "maxRunSeconds": zod.number().min(pauseAgentResponsePermissionOverridesOneMaxRunSecondsMin).nullish(),
   "maxOutputTokens": zod.number().min(pauseAgentResponsePermissionOverridesOneMaxOutputTokensMin).nullish(),
   "maxAttempts": zod.number().min(pauseAgentResponsePermissionOverridesOneMaxAttemptsMin).nullish(),
@@ -922,7 +956,7 @@ export const RetireAgentResponse = zod.object({
   "name": zod.string(),
   "title": zod.string(),
   "mission": zod.string(),
-  "provider": zod.union([zod.literal('claude_max'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
+  "provider": zod.union([zod.literal('claude_max'),zod.literal('codex_chatgpt'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
   "model": zod.string().nullish(),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
   "avatar": zod.object({
@@ -944,7 +978,7 @@ export const ListRetiredAgentsResponseItem = zod.object({
   "name": zod.string(),
   "title": zod.string(),
   "mission": zod.string(),
-  "provider": zod.union([zod.literal('claude_max'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
+  "provider": zod.union([zod.literal('claude_max'),zod.literal('codex_chatgpt'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
   "model": zod.string().nullish(),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
   "avatar": zod.object({
@@ -970,13 +1004,25 @@ export const ListTasksResponseItem = zod.object({
   "status": zod.enum(['queued', 'running', 'waiting_approval', 'blocked', 'completed', 'failed', 'cancelled']),
   "priority": zod.enum(['low', 'normal', 'high']),
   "budgetCents": zod.number().nullish(),
-  "provider": zod.enum(['claude_max', 'openrouter']).optional(),
+  "provider": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter']).optional(),
   "model": zod.string().nullish(),
+  "reasoningEffort": zod.union([zod.literal('minimal'),zod.literal('low'),zod.literal('medium'),zod.literal('high'),zod.literal('xhigh'),zod.literal('max'),zod.literal('ultra'),zod.literal(null)]).nullish(),
+  "providerPhase": zod.union([zod.literal('queued'),zod.literal('starting'),zod.literal('running'),zod.literal('waiting_approval'),zod.literal('completed'),zod.literal('rate_limited'),zod.literal('auth_required'),zod.literal('failed'),zod.literal('cancelled'),zod.literal(null)]).nullish().describe('Coarse execution phase shown while a task runs; `status` stays authoritative.'),
+  "providerThreadId": zod.string().nullish(),
+  "conversationId": zod.string().nullish(),
   "estimatedTokens": zod.number().nullish(),
   "estimatedCostCents": zod.number().nullish(),
   "actualInputTokens": zod.number().nullish(),
   "actualOutputTokens": zod.number().nullish(),
-  "actualCostCents": zod.number().nullish(),
+  "actualCostCents": zod.number().nullish().describe('Null when the provider publishes no per-token price — for subscription allowances this is \"not applicable\", never a $0.00 charge.'),
+  "cachedInputTokens": zod.number().nullish(),
+  "cacheWriteInputTokens": zod.number().nullish(),
+  "reasoningOutputTokens": zod.number().nullish(),
+  "queuedMs": zod.number().nullish(),
+  "runMs": zod.number().nullish(),
+  "fallbackFromProvider": zod.union([zod.literal('claude_max'),zod.literal('codex_chatgpt'),zod.literal('openrouter'),zod.literal(null)]).nullish(),
+  "fallbackReason": zod.string().nullish(),
+  "paidFallbackApprovedAt": zod.coerce.date().nullish(),
   "output": zod.string().nullish(),
   "files": zod.array(zod.object({
   "name": zod.string(),
@@ -1024,8 +1070,10 @@ export const CreateTaskBody = zod.object({
   "objective": zod.string().min(createTaskBodyObjectiveMin).max(createTaskBodyObjectiveMax),
   "priority": zod.enum(['low', 'normal', 'high']).optional(),
   "budgetCents": zod.number().min(createTaskBodyBudgetCentsMin).max(createTaskBodyBudgetCentsMax).optional(),
-  "providerOverride": zod.enum(['claude_max', 'openrouter']).optional(),
-  "modelOverride": zod.string().max(createTaskBodyModelOverrideMax).optional()
+  "providerOverride": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter']).optional(),
+  "modelOverride": zod.string().max(createTaskBodyModelOverrideMax).optional(),
+  "reasoningOverride": zod.enum(['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']).optional(),
+  "continueConversation": zod.boolean().optional().describe('Continue the agent\'s most recent provider thread instead of starting a new one.')
 })
 
 export const CreateTaskResponse = zod.object({
@@ -1036,13 +1084,25 @@ export const CreateTaskResponse = zod.object({
   "status": zod.enum(['queued', 'running', 'waiting_approval', 'blocked', 'completed', 'failed', 'cancelled']),
   "priority": zod.enum(['low', 'normal', 'high']),
   "budgetCents": zod.number().nullish(),
-  "provider": zod.enum(['claude_max', 'openrouter']).optional(),
+  "provider": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter']).optional(),
   "model": zod.string().nullish(),
+  "reasoningEffort": zod.union([zod.literal('minimal'),zod.literal('low'),zod.literal('medium'),zod.literal('high'),zod.literal('xhigh'),zod.literal('max'),zod.literal('ultra'),zod.literal(null)]).nullish(),
+  "providerPhase": zod.union([zod.literal('queued'),zod.literal('starting'),zod.literal('running'),zod.literal('waiting_approval'),zod.literal('completed'),zod.literal('rate_limited'),zod.literal('auth_required'),zod.literal('failed'),zod.literal('cancelled'),zod.literal(null)]).nullish().describe('Coarse execution phase shown while a task runs; `status` stays authoritative.'),
+  "providerThreadId": zod.string().nullish(),
+  "conversationId": zod.string().nullish(),
   "estimatedTokens": zod.number().nullish(),
   "estimatedCostCents": zod.number().nullish(),
   "actualInputTokens": zod.number().nullish(),
   "actualOutputTokens": zod.number().nullish(),
-  "actualCostCents": zod.number().nullish(),
+  "actualCostCents": zod.number().nullish().describe('Null when the provider publishes no per-token price — for subscription allowances this is \"not applicable\", never a $0.00 charge.'),
+  "cachedInputTokens": zod.number().nullish(),
+  "cacheWriteInputTokens": zod.number().nullish(),
+  "reasoningOutputTokens": zod.number().nullish(),
+  "queuedMs": zod.number().nullish(),
+  "runMs": zod.number().nullish(),
+  "fallbackFromProvider": zod.union([zod.literal('claude_max'),zod.literal('codex_chatgpt'),zod.literal('openrouter'),zod.literal(null)]).nullish(),
+  "fallbackReason": zod.string().nullish(),
+  "paidFallbackApprovedAt": zod.coerce.date().nullish(),
   "output": zod.string().nullish(),
   "files": zod.array(zod.object({
   "name": zod.string(),
@@ -1400,13 +1460,25 @@ export const DelegateTaskResponse = zod.object({
   "status": zod.enum(['queued', 'running', 'waiting_approval', 'blocked', 'completed', 'failed', 'cancelled']),
   "priority": zod.enum(['low', 'normal', 'high']),
   "budgetCents": zod.number().nullish(),
-  "provider": zod.enum(['claude_max', 'openrouter']).optional(),
+  "provider": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter']).optional(),
   "model": zod.string().nullish(),
+  "reasoningEffort": zod.union([zod.literal('minimal'),zod.literal('low'),zod.literal('medium'),zod.literal('high'),zod.literal('xhigh'),zod.literal('max'),zod.literal('ultra'),zod.literal(null)]).nullish(),
+  "providerPhase": zod.union([zod.literal('queued'),zod.literal('starting'),zod.literal('running'),zod.literal('waiting_approval'),zod.literal('completed'),zod.literal('rate_limited'),zod.literal('auth_required'),zod.literal('failed'),zod.literal('cancelled'),zod.literal(null)]).nullish().describe('Coarse execution phase shown while a task runs; `status` stays authoritative.'),
+  "providerThreadId": zod.string().nullish(),
+  "conversationId": zod.string().nullish(),
   "estimatedTokens": zod.number().nullish(),
   "estimatedCostCents": zod.number().nullish(),
   "actualInputTokens": zod.number().nullish(),
   "actualOutputTokens": zod.number().nullish(),
-  "actualCostCents": zod.number().nullish(),
+  "actualCostCents": zod.number().nullish().describe('Null when the provider publishes no per-token price — for subscription allowances this is \"not applicable\", never a $0.00 charge.'),
+  "cachedInputTokens": zod.number().nullish(),
+  "cacheWriteInputTokens": zod.number().nullish(),
+  "reasoningOutputTokens": zod.number().nullish(),
+  "queuedMs": zod.number().nullish(),
+  "runMs": zod.number().nullish(),
+  "fallbackFromProvider": zod.union([zod.literal('claude_max'),zod.literal('codex_chatgpt'),zod.literal('openrouter'),zod.literal(null)]).nullish(),
+  "fallbackReason": zod.string().nullish(),
+  "paidFallbackApprovedAt": zod.coerce.date().nullish(),
   "output": zod.string().nullish(),
   "files": zod.array(zod.object({
   "name": zod.string(),
@@ -1576,10 +1648,17 @@ export const VoiceConverseWithAgentResponse = zod.unknown()
  * @summary Get configured provider health
  */
 export const GetProvidersResponseItem = zod.object({
-  "provider": zod.enum(['claude_max', 'openrouter']),
+  "provider": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter']),
+  "label": zod.string(),
+  "billing": zod.enum(['subscription', 'metered']),
+  "enabled": zod.boolean().describe('False when a server-side feature flag hides this provider.'),
   "configured": zod.boolean(),
   "healthy": zod.boolean(),
-  "message": zod.string().optional()
+  "message": zod.string().optional(),
+  "authMode": zod.union([zod.literal('chatgpt'),zod.literal('api_key'),zod.literal('unknown'),zod.literal(null)]).nullable().describe('Codex only. Only \"chatgpt\" draws on the ChatGPT Codex allowance; \"api_key\" means the stored credential bills OpenAI\'s API instead.'),
+  "usesSubscriptionAllowance": zod.boolean().describe('Confirmed from stored credentials, never assumed from the provider id.'),
+  "allowanceBalanceKnown": zod.boolean().describe('Whether the remaining plan allowance can be reported at all.'),
+  "reasoningLevels": zod.array(zod.string()).describe('Reasoning effort levels this provider accepts, from server configuration. Empty when it has no such control.')
 })
 export const GetProvidersResponse = zod.array(GetProvidersResponseItem)
 
@@ -1588,9 +1667,14 @@ export const GetProvidersResponse = zod.array(GetProvidersResponseItem)
  * @summary Get workspace-level provider routing defaults
  */
 export const GetProviderSettingsResponse = zod.object({
-  "defaultProvider": zod.enum(['claude_max', 'openrouter']),
+  "defaultProvider": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter']),
   "claudeModel": zod.string().nullable(),
-  "openrouterModel": zod.string().nullable()
+  "openrouterModel": zod.string().nullable(),
+  "codexModel": zod.string().nullable(),
+  "codexReasoning": zod.union([zod.literal('minimal'),zod.literal('low'),zod.literal('medium'),zod.literal('high'),zod.literal('xhigh'),zod.literal('max'),zod.literal('ultra'),zod.literal(null)]).nullable(),
+  "fallbackOrder": zod.array(zod.enum(['claude_max', 'codex_chatgpt', 'openrouter'])).describe('Providers to try, in order, when the primary one stops. Empty means never fall back.'),
+  "paidFallbackConsent": zod.boolean().describe('Standing authorization to fall back onto a metered provider without per-task approval.'),
+  "paidFallbackLimitCents": zod.number().nullable()
 })
 
 
@@ -1601,18 +1685,54 @@ export const updateProviderSettingsBodyClaudeModelMax = 200;
 
 export const updateProviderSettingsBodyOpenrouterModelMax = 200;
 
+export const updateProviderSettingsBodyCodexModelMax = 200;
+
+export const updateProviderSettingsBodyPaidFallbackLimitCentsMin = 0;
+
 
 
 export const UpdateProviderSettingsBody = zod.object({
-  "defaultProvider": zod.enum(['claude_max', 'openrouter']).optional(),
+  "defaultProvider": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter']).optional(),
   "claudeModel": zod.string().max(updateProviderSettingsBodyClaudeModelMax).nullish(),
-  "openrouterModel": zod.string().max(updateProviderSettingsBodyOpenrouterModelMax).nullish()
+  "openrouterModel": zod.string().max(updateProviderSettingsBodyOpenrouterModelMax).nullish(),
+  "codexModel": zod.string().max(updateProviderSettingsBodyCodexModelMax).nullish(),
+  "codexReasoning": zod.union([zod.literal('minimal'),zod.literal('low'),zod.literal('medium'),zod.literal('high'),zod.literal('xhigh'),zod.literal('max'),zod.literal('ultra'),zod.literal(null)]).nullish(),
+  "fallbackOrder": zod.array(zod.enum(['claude_max', 'codex_chatgpt', 'openrouter'])).optional(),
+  "paidFallbackConsent": zod.boolean().optional(),
+  "paidFallbackLimitCents": zod.number().min(updateProviderSettingsBodyPaidFallbackLimitCentsMin).nullish()
 })
 
 export const UpdateProviderSettingsResponse = zod.object({
-  "defaultProvider": zod.enum(['claude_max', 'openrouter']),
+  "defaultProvider": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter']),
   "claudeModel": zod.string().nullable(),
-  "openrouterModel": zod.string().nullable()
+  "openrouterModel": zod.string().nullable(),
+  "codexModel": zod.string().nullable(),
+  "codexReasoning": zod.union([zod.literal('minimal'),zod.literal('low'),zod.literal('medium'),zod.literal('high'),zod.literal('xhigh'),zod.literal('max'),zod.literal('ultra'),zod.literal(null)]).nullable(),
+  "fallbackOrder": zod.array(zod.enum(['claude_max', 'codex_chatgpt', 'openrouter'])).describe('Providers to try, in order, when the primary one stops. Empty means never fall back.'),
+  "paidFallbackConsent": zod.boolean().describe('Standing authorization to fall back onto a metered provider without per-task approval.'),
+  "paidFallbackLimitCents": zod.number().nullable()
+})
+
+
+/**
+ * @summary Check Codex readiness locally without contacting OpenAI
+ */
+export const TestCodexConnectionResponse = zod.object({
+  "ok": zod.boolean(),
+  "checks": zod.array(zod.object({
+  "name": zod.string(),
+  "ok": zod.boolean(),
+  "detail": zod.string()
+}))
+}).describe('Result of a local-only Codex readiness check. No request is made to OpenAI, so running it never consumes the ChatGPT allowance.')
+
+
+/**
+ * @summary Seed the private CODEX_HOME from CODEX_AUTH_JSON if it is empty
+ */
+export const BootstrapCodexResponse = zod.object({
+  "action": zod.enum(['created', 'preserved', 'skipped', 'unavailable']),
+  "detail": zod.string()
 })
 
 
@@ -1620,11 +1740,11 @@ export const UpdateProviderSettingsResponse = zod.object({
  * @summary List models available for a provider
  */
 export const ListProviderModelsParams = zod.object({
-  "provider": zod.enum(['claude_max', 'openrouter'])
+  "provider": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter'])
 })
 
 export const ListProviderModelsResponse = zod.object({
-  "provider": zod.enum(['claude_max', 'openrouter']),
+  "provider": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter']),
   "available": zod.boolean(),
   "message": zod.string().nullish(),
   "models": zod.array(zod.object({
@@ -1653,13 +1773,25 @@ export const GetTaskResponse = zod.object({
   "status": zod.enum(['queued', 'running', 'waiting_approval', 'blocked', 'completed', 'failed', 'cancelled']),
   "priority": zod.enum(['low', 'normal', 'high']),
   "budgetCents": zod.number().nullish(),
-  "provider": zod.enum(['claude_max', 'openrouter']).optional(),
+  "provider": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter']).optional(),
   "model": zod.string().nullish(),
+  "reasoningEffort": zod.union([zod.literal('minimal'),zod.literal('low'),zod.literal('medium'),zod.literal('high'),zod.literal('xhigh'),zod.literal('max'),zod.literal('ultra'),zod.literal(null)]).nullish(),
+  "providerPhase": zod.union([zod.literal('queued'),zod.literal('starting'),zod.literal('running'),zod.literal('waiting_approval'),zod.literal('completed'),zod.literal('rate_limited'),zod.literal('auth_required'),zod.literal('failed'),zod.literal('cancelled'),zod.literal(null)]).nullish().describe('Coarse execution phase shown while a task runs; `status` stays authoritative.'),
+  "providerThreadId": zod.string().nullish(),
+  "conversationId": zod.string().nullish(),
   "estimatedTokens": zod.number().nullish(),
   "estimatedCostCents": zod.number().nullish(),
   "actualInputTokens": zod.number().nullish(),
   "actualOutputTokens": zod.number().nullish(),
-  "actualCostCents": zod.number().nullish(),
+  "actualCostCents": zod.number().nullish().describe('Null when the provider publishes no per-token price — for subscription allowances this is \"not applicable\", never a $0.00 charge.'),
+  "cachedInputTokens": zod.number().nullish(),
+  "cacheWriteInputTokens": zod.number().nullish(),
+  "reasoningOutputTokens": zod.number().nullish(),
+  "queuedMs": zod.number().nullish(),
+  "runMs": zod.number().nullish(),
+  "fallbackFromProvider": zod.union([zod.literal('claude_max'),zod.literal('codex_chatgpt'),zod.literal('openrouter'),zod.literal(null)]).nullish(),
+  "fallbackReason": zod.string().nullish(),
+  "paidFallbackApprovedAt": zod.coerce.date().nullish(),
   "output": zod.string().nullish(),
   "files": zod.array(zod.object({
   "name": zod.string(),
@@ -1710,13 +1842,25 @@ export const CancelTaskResponse = zod.object({
   "status": zod.enum(['queued', 'running', 'waiting_approval', 'blocked', 'completed', 'failed', 'cancelled']),
   "priority": zod.enum(['low', 'normal', 'high']),
   "budgetCents": zod.number().nullish(),
-  "provider": zod.enum(['claude_max', 'openrouter']).optional(),
+  "provider": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter']).optional(),
   "model": zod.string().nullish(),
+  "reasoningEffort": zod.union([zod.literal('minimal'),zod.literal('low'),zod.literal('medium'),zod.literal('high'),zod.literal('xhigh'),zod.literal('max'),zod.literal('ultra'),zod.literal(null)]).nullish(),
+  "providerPhase": zod.union([zod.literal('queued'),zod.literal('starting'),zod.literal('running'),zod.literal('waiting_approval'),zod.literal('completed'),zod.literal('rate_limited'),zod.literal('auth_required'),zod.literal('failed'),zod.literal('cancelled'),zod.literal(null)]).nullish().describe('Coarse execution phase shown while a task runs; `status` stays authoritative.'),
+  "providerThreadId": zod.string().nullish(),
+  "conversationId": zod.string().nullish(),
   "estimatedTokens": zod.number().nullish(),
   "estimatedCostCents": zod.number().nullish(),
   "actualInputTokens": zod.number().nullish(),
   "actualOutputTokens": zod.number().nullish(),
-  "actualCostCents": zod.number().nullish(),
+  "actualCostCents": zod.number().nullish().describe('Null when the provider publishes no per-token price — for subscription allowances this is \"not applicable\", never a $0.00 charge.'),
+  "cachedInputTokens": zod.number().nullish(),
+  "cacheWriteInputTokens": zod.number().nullish(),
+  "reasoningOutputTokens": zod.number().nullish(),
+  "queuedMs": zod.number().nullish(),
+  "runMs": zod.number().nullish(),
+  "fallbackFromProvider": zod.union([zod.literal('claude_max'),zod.literal('codex_chatgpt'),zod.literal('openrouter'),zod.literal(null)]).nullish(),
+  "fallbackReason": zod.string().nullish(),
+  "paidFallbackApprovedAt": zod.coerce.date().nullish(),
   "output": zod.string().nullish(),
   "files": zod.array(zod.object({
   "name": zod.string(),
@@ -1760,13 +1904,91 @@ export const RetryTaskResponse = zod.object({
   "status": zod.enum(['queued', 'running', 'waiting_approval', 'blocked', 'completed', 'failed', 'cancelled']),
   "priority": zod.enum(['low', 'normal', 'high']),
   "budgetCents": zod.number().nullish(),
-  "provider": zod.enum(['claude_max', 'openrouter']).optional(),
+  "provider": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter']).optional(),
   "model": zod.string().nullish(),
+  "reasoningEffort": zod.union([zod.literal('minimal'),zod.literal('low'),zod.literal('medium'),zod.literal('high'),zod.literal('xhigh'),zod.literal('max'),zod.literal('ultra'),zod.literal(null)]).nullish(),
+  "providerPhase": zod.union([zod.literal('queued'),zod.literal('starting'),zod.literal('running'),zod.literal('waiting_approval'),zod.literal('completed'),zod.literal('rate_limited'),zod.literal('auth_required'),zod.literal('failed'),zod.literal('cancelled'),zod.literal(null)]).nullish().describe('Coarse execution phase shown while a task runs; `status` stays authoritative.'),
+  "providerThreadId": zod.string().nullish(),
+  "conversationId": zod.string().nullish(),
   "estimatedTokens": zod.number().nullish(),
   "estimatedCostCents": zod.number().nullish(),
   "actualInputTokens": zod.number().nullish(),
   "actualOutputTokens": zod.number().nullish(),
-  "actualCostCents": zod.number().nullish(),
+  "actualCostCents": zod.number().nullish().describe('Null when the provider publishes no per-token price — for subscription allowances this is \"not applicable\", never a $0.00 charge.'),
+  "cachedInputTokens": zod.number().nullish(),
+  "cacheWriteInputTokens": zod.number().nullish(),
+  "reasoningOutputTokens": zod.number().nullish(),
+  "queuedMs": zod.number().nullish(),
+  "runMs": zod.number().nullish(),
+  "fallbackFromProvider": zod.union([zod.literal('claude_max'),zod.literal('codex_chatgpt'),zod.literal('openrouter'),zod.literal(null)]).nullish(),
+  "fallbackReason": zod.string().nullish(),
+  "paidFallbackApprovedAt": zod.coerce.date().nullish(),
+  "output": zod.string().nullish(),
+  "files": zod.array(zod.object({
+  "name": zod.string(),
+  "content": zod.string()
+})),
+  "errorKind": zod.string().nullish(),
+  "errorMessage": zod.string().nullish(),
+  "attempts": zod.number(),
+  "parentTaskId": zod.string().nullish(),
+  "rootTaskId": zod.string().nullish(),
+  "depth": zod.number().optional(),
+  "teamId": zod.string().nullish(),
+  "teamName": zod.string().nullish(),
+  "delegatedByAgentId": zod.string().nullish(),
+  "delegatedByAgentName": zod.string().nullish(),
+  "runtime": zod.string().optional(),
+  "contextSources": zod.array(zod.object({
+  "type": zod.enum(['memory', 'file']),
+  "id": zod.string(),
+  "label": zod.string(),
+  "title": zod.string()
+})).nullish(),
+  "startedAt": zod.coerce.date().nullish(),
+  "finishedAt": zod.coerce.date().nullish(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Decide what a task stopped by a provider outage or exhausted allowance should do
+ */
+export const DecideTaskFallbackParams = zod.object({
+  "taskId": zod.coerce.string()
+})
+
+export const DecideTaskFallbackBody = zod.object({
+  "action": zod.enum(['wait', 'cancel', 'approve_paid_fallback']).describe('\"wait\" requeues the task on its current provider, \"cancel\" stops it, and \"approve_paid_fallback\" is the owner\'s explicit, per-task authorization to continue on a metered provider.')
+})
+
+export const DecideTaskFallbackResponse = zod.object({
+  "id": zod.string(),
+  "agentId": zod.string(),
+  "agentName": zod.string(),
+  "objective": zod.string(),
+  "status": zod.enum(['queued', 'running', 'waiting_approval', 'blocked', 'completed', 'failed', 'cancelled']),
+  "priority": zod.enum(['low', 'normal', 'high']),
+  "budgetCents": zod.number().nullish(),
+  "provider": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter']).optional(),
+  "model": zod.string().nullish(),
+  "reasoningEffort": zod.union([zod.literal('minimal'),zod.literal('low'),zod.literal('medium'),zod.literal('high'),zod.literal('xhigh'),zod.literal('max'),zod.literal('ultra'),zod.literal(null)]).nullish(),
+  "providerPhase": zod.union([zod.literal('queued'),zod.literal('starting'),zod.literal('running'),zod.literal('waiting_approval'),zod.literal('completed'),zod.literal('rate_limited'),zod.literal('auth_required'),zod.literal('failed'),zod.literal('cancelled'),zod.literal(null)]).nullish().describe('Coarse execution phase shown while a task runs; `status` stays authoritative.'),
+  "providerThreadId": zod.string().nullish(),
+  "conversationId": zod.string().nullish(),
+  "estimatedTokens": zod.number().nullish(),
+  "estimatedCostCents": zod.number().nullish(),
+  "actualInputTokens": zod.number().nullish(),
+  "actualOutputTokens": zod.number().nullish(),
+  "actualCostCents": zod.number().nullish().describe('Null when the provider publishes no per-token price — for subscription allowances this is \"not applicable\", never a $0.00 charge.'),
+  "cachedInputTokens": zod.number().nullish(),
+  "cacheWriteInputTokens": zod.number().nullish(),
+  "reasoningOutputTokens": zod.number().nullish(),
+  "queuedMs": zod.number().nullish(),
+  "runMs": zod.number().nullish(),
+  "fallbackFromProvider": zod.union([zod.literal('claude_max'),zod.literal('codex_chatgpt'),zod.literal('openrouter'),zod.literal(null)]).nullish(),
+  "fallbackReason": zod.string().nullish(),
+  "paidFallbackApprovedAt": zod.coerce.date().nullish(),
   "output": zod.string().nullish(),
   "files": zod.array(zod.object({
   "name": zod.string(),
@@ -1808,18 +2030,19 @@ export const estimateTaskBodyModelOverrideMax = 200;
 export const EstimateTaskBody = zod.object({
   "agentId": zod.string(),
   "objective": zod.string().min(estimateTaskBodyObjectiveMin).max(estimateTaskBodyObjectiveMax),
-  "providerOverride": zod.enum(['claude_max', 'openrouter']).optional(),
+  "providerOverride": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter']).optional(),
   "modelOverride": zod.string().max(estimateTaskBodyModelOverrideMax).optional()
 })
 
 export const EstimateTaskResponse = zod.object({
-  "provider": zod.enum(['claude_max', 'openrouter']),
+  "provider": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter']),
   "model": zod.string(),
+  "billing": zod.enum(['subscription', 'metered']),
   "estimatedInputTokens": zod.number(),
   "estimatedOutputTokens": zod.number(),
   "estimatedTokens": zod.number(),
   "estimatedCostCents": zod.number(),
-  "costKnown": zod.boolean(),
+  "costKnown": zod.boolean().describe('False when no price can be computed; the UI must not present the amount as a real figure.'),
   "note": zod.string().nullish()
 })
 
@@ -2068,13 +2291,25 @@ export const RecordTaskUsageResponse = zod.object({
   "status": zod.enum(['queued', 'running', 'waiting_approval', 'blocked', 'completed', 'failed', 'cancelled']),
   "priority": zod.enum(['low', 'normal', 'high']),
   "budgetCents": zod.number().nullish(),
-  "provider": zod.enum(['claude_max', 'openrouter']).optional(),
+  "provider": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter']).optional(),
   "model": zod.string().nullish(),
+  "reasoningEffort": zod.union([zod.literal('minimal'),zod.literal('low'),zod.literal('medium'),zod.literal('high'),zod.literal('xhigh'),zod.literal('max'),zod.literal('ultra'),zod.literal(null)]).nullish(),
+  "providerPhase": zod.union([zod.literal('queued'),zod.literal('starting'),zod.literal('running'),zod.literal('waiting_approval'),zod.literal('completed'),zod.literal('rate_limited'),zod.literal('auth_required'),zod.literal('failed'),zod.literal('cancelled'),zod.literal(null)]).nullish().describe('Coarse execution phase shown while a task runs; `status` stays authoritative.'),
+  "providerThreadId": zod.string().nullish(),
+  "conversationId": zod.string().nullish(),
   "estimatedTokens": zod.number().nullish(),
   "estimatedCostCents": zod.number().nullish(),
   "actualInputTokens": zod.number().nullish(),
   "actualOutputTokens": zod.number().nullish(),
-  "actualCostCents": zod.number().nullish(),
+  "actualCostCents": zod.number().nullish().describe('Null when the provider publishes no per-token price — for subscription allowances this is \"not applicable\", never a $0.00 charge.'),
+  "cachedInputTokens": zod.number().nullish(),
+  "cacheWriteInputTokens": zod.number().nullish(),
+  "reasoningOutputTokens": zod.number().nullish(),
+  "queuedMs": zod.number().nullish(),
+  "runMs": zod.number().nullish(),
+  "fallbackFromProvider": zod.union([zod.literal('claude_max'),zod.literal('codex_chatgpt'),zod.literal('openrouter'),zod.literal(null)]).nullish(),
+  "fallbackReason": zod.string().nullish(),
+  "paidFallbackApprovedAt": zod.coerce.date().nullish(),
   "output": zod.string().nullish(),
   "files": zod.array(zod.object({
   "name": zod.string(),
@@ -2166,7 +2401,7 @@ export const CreateScheduleBody = zod.object({
   "agentId": zod.string(),
   "objective": zod.string().min(createScheduleBodyObjectiveMin).max(createScheduleBodyObjectiveMax),
   "priority": zod.enum(['low', 'normal', 'high']).optional(),
-  "providerOverride": zod.enum(['claude_max', 'openrouter']).optional(),
+  "providerOverride": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter']).optional(),
   "modelOverride": zod.string().max(createScheduleBodyModelOverrideMax).optional(),
   "budgetCents": zod.number().min(createScheduleBodyBudgetCentsMin).max(createScheduleBodyBudgetCentsMax).optional(),
   "cadence": zod.enum(['once', 'daily', 'weekly', 'monthly']),

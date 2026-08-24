@@ -11,5 +11,6 @@ export type ProviderModelsProvider = typeof ProviderModelsProvider[keyof typeof 
 
 export const ProviderModelsProvider = {
   claude_max: 'claude_max',
+  codex_chatgpt: 'codex_chatgpt',
   openrouter: 'openrouter',
 } as const;

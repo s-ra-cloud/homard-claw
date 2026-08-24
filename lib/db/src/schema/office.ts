@@ -67,6 +67,11 @@ export const agentsTable = pgTable(
     // Null means "follow the workspace default provider".
     provider: text("provider"),
     model: text("model"),
+    // Codex-specific routing preferences. Kept separate from `model` so an
+    // agent that pins Claude Code or OpenRouter today keeps a remembered
+    // Codex model/reasoning choice for when it is switched over.
+    codexModel: text("codex_model"),
+    codexReasoning: text("codex_reasoning"),
     voiceStyle: text("voice_style"),
     status: text("status").notNull().default("idle"),
     securityPreset: text("security_preset").notNull(),
@@ -177,11 +182,38 @@ export const tasksTable = pgTable("tasks", {
   budgetCents: doublePrecision("budget_cents"),
   provider: text("provider").notNull(),
   model: text("model"),
+  /** Codex reasoning effort selected for this run; null for other providers. */
+  reasoningEffort: text("reasoning_effort"),
+  /**
+   * Fine-grained execution phase inside a coarse `status`. queued |
+   * starting | running | waiting_approval | completed | rate_limited |
+   * auth_required | failed | cancelled. `status` stays authoritative for
+   * the lifecycle; this is what the office displays.
+   */
+  providerPhase: text("provider_phase"),
+  /** Provider-side conversation the task ran in (Codex thread continuity). */
+  conversationId: uuid("conversation_id"),
+  /** Thread id emitted by the provider SDK for this run, when it has one. */
+  providerThreadId: text("provider_thread_id"),
   estimatedTokens: integer("estimated_tokens"),
   estimatedCostCents: doublePrecision("estimated_cost_cents"),
   actualInputTokens: integer("actual_input_tokens"),
   actualOutputTokens: integer("actual_output_tokens"),
   actualCostCents: doublePrecision("actual_cost_cents"),
+  /** Granular usage as reported by the provider; null when not exposed. */
+  cachedInputTokens: integer("cached_input_tokens"),
+  cacheWriteInputTokens: integer("cache_write_input_tokens"),
+  reasoningOutputTokens: integer("reasoning_output_tokens"),
+  /** Wall-clock milliseconds spent waiting in the queue / executing. */
+  queuedMs: integer("queued_ms"),
+  runMs: integer("run_ms"),
+  /** Set when this task was moved off its original provider by a fallback. */
+  fallbackFromProvider: text("fallback_from_provider"),
+  fallbackReason: text("fallback_reason"),
+  /** When the owner authorized a paid fallback for this specific task. */
+  paidFallbackApprovedAt: timestamp("paid_fallback_approved_at", {
+    withTimezone: true,
+  }),
   output: text("output"),
   files: jsonb("files").$type<TaskFile[]>().notNull().default([]),
   errorKind: text("error_kind"),
@@ -286,6 +318,68 @@ export const notificationsTable = pgTable(
   },
   (table) => [index("notifications_read_created_idx").on(table.readAt, table.createdAt)],
 );
+
+/**
+ * A provider-side conversation owned by one agent.
+ *
+ * Codex threads are stateful: resuming one replays the previous turns. A
+ * row here is HomardClaw's record of that thread — which agent owns it,
+ * which provider issued it, and the isolated working directory its runs
+ * are confined to. HomardClaw stays authoritative for identity, memory,
+ * permissions, files, and history; this table only tracks continuity.
+ */
+export const providerConversationsTable = pgTable(
+  "provider_conversations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => agentsTable.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    /** Emitted by the SDK on the first turn; null until then. */
+    threadId: text("thread_id"),
+    /** Absolute path of this conversation's isolated workspace. */
+    workspacePath: text("workspace_path").notNull(),
+    /** Cleared when the thread can no longer be resumed. */
+    resumable: boolean("resumable").notNull().default(true),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("provider_conversations_agent_idx").on(
+      table.agentId,
+      table.provider,
+      table.lastUsedAt,
+    ),
+  ],
+);
+
+/**
+ * Durable, provider-scoped mutual exclusion.
+ *
+ * Codex runs against a single ChatGPT auth file; two concurrent runs
+ * against it corrupt refreshed credentials and burn the allowance twice.
+ * The lease key identifies the resource (for Codex: a hash of the auth
+ * file path), never the credential itself. Leases expire so a crashed
+ * process cannot wedge the queue forever, and the holder heartbeats while
+ * it works. Claude Code and OpenRouter do not take leases.
+ */
+export const providerLeasesTable = pgTable("provider_leases", {
+  key: text("key").primaryKey(),
+  taskId: uuid("task_id"),
+  holder: text("holder").notNull(),
+  acquiredAt: timestamp("acquired_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  heartbeatAt: timestamp("heartbeat_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+});
 
 export const taskLogsTable = pgTable("task_logs", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -475,6 +569,9 @@ export type TaskRecord = typeof tasksTable.$inferSelect;
 export type TaskLogRecord = typeof taskLogsTable.$inferSelect;
 export type ApprovalRecord = typeof approvalsTable.$inferSelect;
 export type MemoryRecord = typeof memoriesTable.$inferSelect;
+export type ProviderConversationRecord =
+  typeof providerConversationsTable.$inferSelect;
+export type ProviderLeaseRecord = typeof providerLeasesTable.$inferSelect;
 export type KnowledgeFileRecord = typeof knowledgeFilesTable.$inferSelect;
 export type InsertAgent = z.infer<typeof insertAgentSchema>;
 export type InsertTask = z.infer<typeof insertTaskSchema>;

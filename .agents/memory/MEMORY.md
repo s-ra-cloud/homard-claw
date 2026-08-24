@@ -9,3 +9,4 @@
 - [Voice conversations](voice-conversations.md) — Managed OpenAI is only mouth/ears; agent replies use native providers, and chat can only propose tasks, never queue them.
 - [Durable scheduling](durable-scheduling.md) — Schedules fire via claim → dispatch → finalize with evidence-based crash recovery; paused agents defer, and tests scope the scheduler like the worker.
 - [Drizzle error wrapping](drizzle-error-wrapping.md) — Pg error codes hide on the cause chain of DrizzleQueryError; walk it or unique-violation checks silently 500.
+- [Codex provider runtime](codex-provider-runtime.md) — Third provider runs on the owner's ChatGPT allowance; serialize by lease table, fail closed, never invent a cost.

@@ -12,6 +12,8 @@ export type ProviderCallErrorKind =
   | "rate_limit"
   /** Provider 5xx or a dropped/refused connection: worth another attempt. */
   | "transient"
+  /** A subscription plan allowance is exhausted; money would be needed. */
+  | "allowance"
   | "timeout"
   | "cancelled"
   | "provider_error";
@@ -26,9 +28,9 @@ export class ProviderCallError extends Error {
   readonly kind: ProviderCallErrorKind;
   /**
    * Rate limits and transient outages are retryable with backoff. Auth
-   * failures, policy blocks, timeouts, and malformed responses are not:
-   * repeating them would just burn attempts on a problem that needs a
-   * human.
+   * failures, allowance exhaustion, policy blocks, timeouts, and malformed
+   * responses are not: repeating them would just burn attempts on a problem
+   * that needs a human.
    */
   readonly retryable: boolean;
 
@@ -40,20 +42,78 @@ export class ProviderCallError extends Error {
   }
 }
 
+/**
+ * Granular usage as the provider reported it. Every field is nullable:
+ * a provider that does not expose a number must leave it null rather than
+ * have one invented for it.
+ */
+export type ProviderUsageDetail = {
+  cachedInputTokens: number | null;
+  cacheWriteInputTokens: number | null;
+  reasoningOutputTokens: number | null;
+};
+
 export type ProviderCallResult = {
   output: string;
   inputTokens: number;
   outputTokens: number;
+  usageDetail?: ProviderUsageDetail;
+  /** Provider-side conversation id, when the provider keeps threads. */
+  threadId?: string | null;
 };
 
+/**
+ * Coarse execution phase, surfaced to the office while a task runs. The
+ * durable `status` column stays authoritative for the lifecycle.
+ */
+export type ProviderPhase =
+  | "queued"
+  | "starting"
+  | "running"
+  | "waiting_approval"
+  | "completed"
+  | "rate_limited"
+  | "auth_required"
+  | "failed"
+  | "cancelled";
+
 export type ProviderCallRequest = {
-  provider: "claude_max" | "openrouter";
+  provider: ProviderId;
   model: string;
   system: string;
   prompt: string;
   maxOutputTokens: number;
   signal: AbortSignal;
+  /** Codex reasoning effort; ignored by providers that have none. */
+  reasoningEffort?: string | null;
+  /** Resume this provider-side thread instead of starting a new one. */
+  threadId?: string | null;
+  /** Isolated working directory for providers that execute in a sandbox. */
+  workingDirectory?: string | null;
+  /** Agent trust inputs used to derive a restrictive sandbox. */
+  sandbox?: { securityPreset: string; autonomy: string } | null;
+  onPhase?: (phase: ProviderPhase) => void | Promise<void>;
+  onProgress?: (progress: { level: "info" | "warn" | "error"; message: string }) => void | Promise<void>;
+  onThreadId?: (threadId: string) => void | Promise<void>;
 };
+
+/**
+ * One provider, behind one contract.
+ *
+ * Start/continue, cancellation, streaming progress, final output, usage,
+ * sanitized errors, and authentication status all go through the adapter,
+ * so the worker never special-cases a provider. Claude Code and OpenRouter
+ * keep their exact previous behavior; Codex adds thread continuity and
+ * streamed progress on the same interface.
+ */
+export interface ProviderAdapter {
+  readonly id: ProviderId;
+  readonly label: string;
+  readonly billing: ProviderBilling;
+  /** Whether a run may be attempted right now, and why not if it may not. */
+  authStatus(): Promise<{ ready: boolean; message: string }>;
+  execute(req: ProviderCallRequest): Promise<ProviderCallResult>;
+}
 
 /** Hard ceiling on a single completion, independent of budget. */
 export const MAX_OUTPUT_TOKENS = 4096;
@@ -109,6 +169,14 @@ function mapHttpError(status: number): ProviderCallError {
 }
 
 import { sanitizeErrorMessage } from "./lib/sanitize";
+import {
+  PROVIDER_BILLING,
+  PROVIDER_LABELS,
+  providerReadiness,
+  type ProviderBilling,
+  type ProviderId,
+} from "./providers";
+import { CodexRunError, codexSandboxFor, runCodexTurn } from "./codex/execute";
 
 /**
  * Connection-level failures that say nothing about the request itself:
@@ -270,8 +338,115 @@ async function callOpenRouter(req: ProviderCallRequest): Promise<ProviderCallRes
   };
 }
 
+// ---------------------------------------------------------------------------
+// Adapters
+// ---------------------------------------------------------------------------
+
+const claudeAdapter: ProviderAdapter = {
+  id: "claude_max",
+  label: PROVIDER_LABELS.claude_max,
+  billing: PROVIDER_BILLING.claude_max,
+  authStatus: () => providerReadiness("claude_max"),
+  execute: callClaude,
+};
+
+const openrouterAdapter: ProviderAdapter = {
+  id: "openrouter",
+  label: PROVIDER_LABELS.openrouter,
+  billing: PROVIDER_BILLING.openrouter,
+  authStatus: () => providerReadiness("openrouter"),
+  execute: callOpenRouter,
+};
+
+/** Codex failure kinds map one-to-one onto the shared error contract. */
+function toCallError(error: unknown): ProviderCallError {
+  if (error instanceof ProviderCallError) return error;
+  if (error instanceof CodexRunError) {
+    return new ProviderCallError(error.kind, error.message);
+  }
+  if (error instanceof Error && error.name === "CodexRuntimeError") {
+    const kind = (error as { kind?: string }).kind;
+    return new ProviderCallError(
+      kind === "auth" || kind === "api_key_auth" ? "auth" : "not_configured",
+      sanitizeErrorMessage(error.message),
+    );
+  }
+  return new ProviderCallError(
+    "provider_error",
+    error instanceof Error
+      ? sanitizeErrorMessage(error.message)
+      : "Unknown provider error",
+  );
+}
+
+const codexAdapter: ProviderAdapter = {
+  id: "codex_chatgpt",
+  label: PROVIDER_LABELS.codex_chatgpt,
+  billing: PROVIDER_BILLING.codex_chatgpt,
+  authStatus: () => providerReadiness("codex_chatgpt"),
+  async execute(req) {
+    if (!req.workingDirectory) {
+      throw new ProviderCallError(
+        "not_configured",
+        "Codex needs an isolated working directory, and none was prepared for this task.",
+      );
+    }
+    try {
+      const result = await runCodexTurn({
+        system: req.system,
+        prompt: req.prompt,
+        model: req.model,
+        reasoningEffort: req.reasoningEffort ?? "medium",
+        workingDirectory: req.workingDirectory,
+        threadId: req.threadId ?? null,
+        sandbox: codexSandboxFor({
+          securityPreset: req.sandbox?.securityPreset ?? "observer",
+          autonomy: req.sandbox?.autonomy ?? "supervised",
+          allowNetwork: process.env.CODEX_ALLOW_NETWORK === "true",
+        }),
+        signal: req.signal,
+        onThreadId: req.onThreadId,
+        onPhase: (phase) => req.onPhase?.(phase),
+        onProgress: req.onProgress,
+      });
+      return {
+        output: result.output,
+        // Total input tokens include the cached portion; both are recorded
+        // separately below so nothing is double-counted downstream.
+        inputTokens: Math.max(0, Math.round(result.usage?.input_tokens ?? 0)),
+        outputTokens: Math.max(0, Math.round(result.usage?.output_tokens ?? 0)),
+        usageDetail: {
+          cachedInputTokens: result.usage?.cached_input_tokens ?? null,
+          cacheWriteInputTokens: result.usage?.cache_write_input_tokens ?? null,
+          reasoningOutputTokens: result.usage?.reasoning_output_tokens ?? null,
+        },
+        threadId: result.threadId,
+      };
+    } catch (error) {
+      throw toCallError(error);
+    }
+  },
+};
+
+const ADAPTERS: Record<ProviderId, ProviderAdapter> = {
+  claude_max: claudeAdapter,
+  codex_chatgpt: codexAdapter,
+  openrouter: openrouterAdapter,
+};
+
+export function getProviderAdapter(provider: ProviderId): ProviderAdapter {
+  const adapter = ADAPTERS[provider];
+  if (!adapter) {
+    throw new ProviderCallError(
+      "not_configured",
+      `Unknown provider "${provider}".`,
+    );
+  }
+  return adapter;
+}
+
 export async function callProvider(
   req: ProviderCallRequest,
 ): Promise<ProviderCallResult> {
-  return req.provider === "claude_max" ? callClaude(req) : callOpenRouter(req);
+  return getProviderAdapter(req.provider).execute(req);
 }

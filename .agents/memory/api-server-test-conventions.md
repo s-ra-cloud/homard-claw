@@ -20,6 +20,6 @@ The api-server uses vitest + supertest suites (e.g. src/routes/office.lifecycle.
 
 The dev API server runs a live queue worker (advisory-lock singleton) against the same Postgres the tests use, so tests must never leave claimable `queued` rows or call unscoped claim functions — they would steal or mutate real work.
 
-A test that flips a task row straight to `running` to simulate the next attempt must also null `errorKind`/`errorMessage`: the real claim clears them, and completion paths only write status/output, so a leftover error kind survives onto a "completed" row and fools assertions.
+A test that hand-writes a row to simulate a state the real code would have reached must reproduce *everything* that transition clears, not just the fields it sets. Outcome paths tend to write only what they own, so any stale field the real path would have reset survives into the final row and quietly fools assertions.
 
 **How to apply:** keep test agents paused (the worker skips paused agents), use the worker's test-only claim scope (`agentIds` + `includePausedAgents`) for ordering assertions, insert `running` rows directly to exercise execution paths, and cancel/block every row a test leaves behind. All provider traffic goes through a stubbed global fetch — never the network.
