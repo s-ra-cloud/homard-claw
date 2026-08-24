@@ -35,7 +35,6 @@ import {
   MAX_KNOWLEDGE_TOTAL_BYTES,
   MemoryQuotaError,
 } from "../memory-context";
-
 /**
  * Memory and knowledge management. Mounted inside the office router, so
  * every route here is already owner-only.
@@ -74,7 +73,7 @@ async function listMemoriesWithAgents(where?: ReturnType<typeof and>) {
 }
 
 router.get("/memories", async (req, res): Promise<void> => {
-  const query = ListMemoriesQueryParams.safeParse(req.query);
+  const query = ClearMemoriesQueryParams.safeParse(req.query);
   if (!query.success) {
     res.status(400).json({ error: "Invalid memory query" });
     return;
@@ -99,14 +98,12 @@ router.get("/memories", async (req, res): Promise<void> => {
       ),
     );
   }
-  const memories = await listMemoriesWithAgents(
-    conditions.length > 0 ? and(...conditions) : undefined,
-  );
+  const memories = await listMemoriesWithAgents();
   res.json(ListMemoriesResponse.parse({ memories, total: memories.length }));
 });
 
 router.post("/memories", async (req, res): Promise<void> => {
-  const body = CreateMemoryBody.safeParse(req.body);
+  const body = SetKnowledgeAssignmentsBody.safeParse(req.body);
   if (!body.success) {
     res.status(400).json({ error: body.error.message });
     return;
@@ -114,15 +111,18 @@ router.post("/memories", async (req, res): Promise<void> => {
   const agentId = body.data.agentId ?? null;
   if (agentId) {
     const [agent] = await db
-      .select({ id: agentsTable.id, name: agentsTable.name })
+      .select({ id: agentsTable.id })
       .from(agentsTable)
-      .where(eq(agentsTable.id, agentId))
+      .where(eq(agentsTable.id, updates.agentId))
       .limit(1);
-    if (!agent) {
-      res.status(404).json({ error: "Agent not found" });
-      return;
-    }
-  }
+
+  const [{ count }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(memoriesTable);
+
+  const [{ count }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(memoriesTable);
   let memory: typeof memoriesTable.$inferSelect;
   try {
     const inserted = await insertMemoryEnforcingCap(
@@ -143,12 +143,12 @@ router.post("/memories", async (req, res): Promise<void> => {
     }
     throw error;
   }
-  const agentName = agentId
+  const agentName = memory.agentId
     ? (
         await db
           .select({ name: agentsTable.name })
           .from(agentsTable)
-          .where(eq(agentsTable.id, agentId))
+          .where(eq(agentsTable.id, memory.agentId))
           .limit(1)
       )[0]?.name ?? null
     : null;
@@ -162,11 +162,9 @@ router.delete("/memories", async (req, res): Promise<void> => {
     return;
   }
   const deleted = await db
-    .delete(memoriesTable)
-    .where(
-      query.data.agentId ? eq(memoriesTable.agentId, query.data.agentId) : undefined,
-    )
-    .returning({ id: memoriesTable.id });
+    .delete(knowledgeFilesTable)
+    .where(eq(knowledgeFilesTable.id, params.data.fileId))
+    .returning({ name: knowledgeFilesTable.name });
   await recordAudit(
       "memory.cleared",
       query.data.agentId
@@ -182,8 +180,8 @@ router.get("/memories/export", async (_req, res): Promise<void> => {
 });
 
 router.patch("/memories/:memoryId", async (req, res): Promise<void> => {
-  const params = UpdateMemoryParams.safeParse(req.params);
-  const body = UpdateMemoryBody.safeParse(req.body);
+  const params = SetKnowledgeAssignmentsParams.safeParse(req.params);
+  const body = SetKnowledgeAssignmentsBody.safeParse(req.body);
   if (!params.success || !body.success) {
     res.status(400).json({ error: "Invalid memory update" });
     return;
@@ -201,11 +199,14 @@ router.patch("/memories/:memoryId", async (req, res): Promise<void> => {
       .from(agentsTable)
       .where(eq(agentsTable.id, updates.agentId))
       .limit(1);
-    if (!agent) {
-      res.status(404).json({ error: "Agent not found" });
-      return;
-    }
-  }
+
+  const [{ count }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(memoriesTable);
+
+  const [{ count }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(memoriesTable);
   const [memory] = await db
     .update(memoriesTable)
     .set({ ...updates, updatedAt: new Date() })
@@ -228,15 +229,15 @@ router.patch("/memories/:memoryId", async (req, res): Promise<void> => {
 });
 
 router.delete("/memories/:memoryId", async (req, res): Promise<void> => {
-  const params = DeleteMemoryParams.safeParse(req.params);
+  const params = SetKnowledgeAssignmentsParams.safeParse(req.params);
   if (!params.success) {
-    res.status(400).json({ error: "Invalid memory id" });
+    res.status(400).json({ error: "Invalid file id" });
     return;
   }
   const deleted = await db
-    .delete(memoriesTable)
-    .where(eq(memoriesTable.id, params.data.memoryId))
-    .returning({ id: memoriesTable.id });
+    .delete(knowledgeFilesTable)
+    .where(eq(knowledgeFilesTable.id, params.data.fileId))
+    .returning({ name: knowledgeFilesTable.name });
   if (deleted.length === 0) {
     res.status(404).json({ error: "Memory not found" });
     return;
@@ -303,7 +304,7 @@ router.get("/knowledge", async (_req, res): Promise<void> => {
 });
 
 router.post("/knowledge", async (req, res): Promise<void> => {
-  const body = UploadKnowledgeFileBody.safeParse(req.body);
+  const body = SetKnowledgeAssignmentsBody.safeParse(req.body);
   if (!body.success) {
     res.status(400).json({ error: body.error.message });
     return;
@@ -366,7 +367,7 @@ router.post("/knowledge", async (req, res): Promise<void> => {
 });
 
 router.delete("/knowledge/:fileId", async (req, res): Promise<void> => {
-  const params = DeleteKnowledgeFileParams.safeParse(req.params);
+  const params = SetKnowledgeAssignmentsParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: "Invalid file id" });
     return;
