@@ -1,0 +1,310 @@
+Continue building HomardClaw from the existing project. The graphical interface and visual assets are already complete. Preserve the current design exactly. Do not redesign, replace, regenerate, or restyle any visual element. Focus exclusively on implementing the application’s functionality.
+
+1. nt
+
+Allow users to create, edit, duplicate, archive, and delete agents.
+
+Each agent must have:
+
+* A unique name
+* A role and specialization
+* A system prompt
+* A personality description
+* Goals and operating instructions
+* A configurable model provider
+* Its own persistent memory
+* Its own files and knowledge sources
+* Configurable permissions
+* A task history
+* An activity status
+* Optional voice settings
+
+Connect the existing character-customization interface to these settings. The selected appearance must be saved with the agent.
+
+3. AI provider switch
+
+Every agent must support two execution modes:
+
+Claude Code mode
+
+Connect the agent to the user’s Claude Code environment when technically available and authorized. Store authentication information securely. Detect expired or unavailable sessions and show a clear error instead of silently failing.
+
+OpenRouter mode
+
+Allow the user to enter an OpenRouter API key and select an available model. Retrieve model information dynamically when possible.
+
+Display before execution:
+
+* Selected provider
+* Selected model
+* Estimated token usage
+* Estimated cost
+
+Record the actual usage and cost after each task.
+
+Users must be able to change providers globally or for an individual agent without losing the agent’s memory or configuration.
+
+4. Persistent memory
+
+Implement long-term memory for every agent.
+
+Memory should include:
+
+* User-approved facts and preferences
+* Important decisions
+* Project context
+* Previous tasks and results
+* Relevant documents
+* Relationships with other agents
+
+Use semantic retrieval so that only relevant memories are inserted into the context for a new task.
+
+Provide a memory-management screen where users can:
+
+* Inspect memories
+* Search memories
+* Edit or delete entries
+* Pin important information
+* Disable memory temporarily
+* Clear an agent’s memory
+* Export memories
+
+Clearly distinguish permanent memories from temporary conversation context.
+
+5. Task execution
+
+Users must be able to give an agent a task through text or voice.
+
+Each task should have:
+
+* A title
+* Instructions
+* Assigned agent
+* Priority
+* Current status
+* Creation and completion timestamps
+* Provider and model used
+* Token usage and cost
+* Execution logs
+* Final output
+* Related files
+
+Supported statuses:
+
+* Pending
+* Running
+* Waiting for approval
+* Blocked
+* Completed
+* Failed
+* Cancelled
+
+Agents should continue working in the background when the user leaves the page, using the Replit Reserved VM and a persistent job queue.
+
+Do not rely on browser tabs remaining open.
+
+6. OpenClaw orchestration
+
+Install and configure OpenClaw on the Replit Reserved VM as the agent orchestration layer.
+
+Use it to manage:
+
+* Long-running tasks
+* Tool calls
+* Multi-step workflows
+* Agent-to-agent delegation
+* Scheduled work
+* Retries
+* Interruptions
+* Approval requests
+* Execution logs
+
+An agent may delegate a subtask only to another agent that has the required permissions. Every delegation must be visible in the activity log.
+
+Prevent infinite loops by enforcing maximum execution time, maximum iterations, token limits, cost limits, and delegation-depth limits.
+
+7. Agent autonomy
+
+Support three autonomy levels:
+
+1. Supervised: approval required before every external action.
+2. Limited autonomy: the agent can perform approved categories of actions within defined limits.
+3. Autonomous: the agent can execute workflows without approval, while respecting permissions, budgets, and safety rules.
+
+Users must be able to stop any running task immediately.
+
+Require explicit confirmation for sensitive operations such as:
+
+* Deleting files or data
+* Publishing content
+* Sending messages
+* Spending money
+* Modifying account settings
+* Accessing sensitive information
+* Running potentially destructive commands
+
+8. Permissions and security
+
+Create granular permissions for each agent:
+
+* Read files
+* Create or edit files
+* Delete files
+* Access the internet
+* Execute code
+* Use external services
+* Communicate with other agents
+* Start scheduled tasks
+* Send messages
+* Perform financial actions
+* Request user approval
+
+Provide predefined permission profiles:
+
+* Read-only
+* Researcher
+* Writer
+* Developer
+* Project manager
+* Administrator
+* Custom
+
+Encrypt API keys and authentication tokens. Never expose secrets in the client, prompts, logs, or agent memory.
+
+Maintain an immutable audit log of important actions.
+
+9. Multi-agent collaboration
+
+Allow users to create teams of agents.
+
+A lead agent should be able to:
+
+* Break a goal into subtasks
+* Assign tasks to authorized agents
+* Monitor their progress
+* Request revisions
+* Combine their outputs
+* Report the final result to the user
+
+Display the task hierarchy and the agent responsible for each action.
+
+Agent-to-agent messages must remain inspectable by the user.
+
+10. Voice interaction
+
+Connect the existing voice button to a complete voice workflow.
+
+Users should be able to:
+
+* Select an agent
+* Call the agent by name
+* Speak instructions
+* See a live transcription
+* Receive a spoken response
+* Interrupt the response
+* Confirm sensitive actions verbally
+* Return to text mode at any time
+
+Ask for microphone permission only when voice mode is activated.
+
+Save transcripts in the relevant conversation unless the user disables transcript storage.
+
+11. Files and knowledge
+
+Allow users to upload files and assign them to one or more agents.
+
+Support common document, text, code, spreadsheet, image, and PDF formats.
+
+Agents should be able to search authorized files and cite the source files used in their answers.
+
+Apply storage limits and file-access permissions per user and per agent.
+
+12. Dashboard functionality
+
+Connect all existing interface elements to real application state.
+
+The dashboard must show:
+
+* Available agents
+* Current agent status
+* Running and queued tasks
+* Tasks waiting for approval
+* Recent results
+* Errors and blockers
+* Provider usage
+* Token consumption
+* Costs by agent and provider
+* System health
+
+Use real-time updates for active tasks.
+
+13. Notifications and scheduling
+
+Allow users to schedule one-time and recurring tasks.
+
+Support:
+
+* Date and time
+* Time zone
+* Recurrence
+* Assigned agent
+* Provider selection
+* Maximum budget
+* Notification preferences
+
+Send in-app notifications when a task finishes, fails, becomes blocked, or requires approval.
+
+14. Reliability
+
+Implement:
+
+* Persistent database storage
+* Background job processing
+* Automatic retries with limits
+* Structured error handling
+* Health checks
+* Rate-limit handling
+* Task cancellation
+* Crash recovery
+* Database migrations
+* Server-side logging
+
+A server restart must not erase agents, memories, tasks, schedules, or conversations.
+
+15. Development requirements
+
+Use the existing project structure whenever possible.
+
+Before changing code:
+
+1. Inspect the current implementation.
+2. Identify existing functional and placeholder components.
+3. Preserve completed visual work.
+4. Connect the interface incrementally to the backend.
+5. Avoid replacing working components unnecessarily.
+
+Use environment variables or Replit Secrets for credentials. Never hard-code secrets.
+
+Create a clear database schema, documented API routes, validation, authorization middleware, and automated tests for critical workflows.
+
+16. Implementation order
+
+Implement the application in this order:
+
+1. Authentication and database
+2. Agent CRUD operations
+3. Provider configuration
+4. Chat and task execution
+5. Persistent memory
+6. Permissions and approval system
+7. Background jobs
+8. OpenClaw orchestration
+9. Multi-agent delegation
+10. Voice interaction
+11. Scheduling and notifications
+12. Usage and cost reporting
+13. Security review and automated tests
+
+After each phase, verify the feature in the running application before proceeding.
+
+Do not simulate completed integrations with fake data. Clearly label any functionality that still requires external credentials or configuration. At the end, provide a concise report listing completed features, remaining limitations, required secrets, and instructions for testing the system.
