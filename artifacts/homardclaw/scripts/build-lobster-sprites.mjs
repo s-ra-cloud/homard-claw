@@ -14,6 +14,7 @@
  * - lobster-chair-music-source.png     -> lobsters-idle-music
  * - lobster-chair-reading-source.png   -> lobsters-idle-reading
  * - lobster-chair-stretch-source.png   -> lobsters-idle-stretch
+ * - lobster-beach-towel-source.png     -> lobsters-beach
  *
  * LOBSTER_SOURCE=../../../attached_assets/generated_images/<source>.png \
  * LOBSTER_OUT_DIR=../public/images/<out-dir> \

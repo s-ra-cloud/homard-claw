@@ -9,17 +9,18 @@ import "./island.css";
 const beachArt = `${import.meta.env.BASE_URL}images/island-beach.png`;
 
 // Fixed relaxing spots on the beach artwork (percent coordinates).
-// Chairs/loungers are baked into the composite sprite, so these anchors
-// point at the towel/shade zones in the furniture-free background art.
+// There are four painted towels, with two roomy diagonal placements per towel.
+// Keeping the anchors on those surfaces prevents beach sprites from landing on
+// umbrellas, stools, or the hammock while preserving the eight-agent limit.
 const BEACH_SPOTS = [
-  { left: 38, top: 54 },  // under the red & white umbrella
-  { left: 61, top: 46 },  // under the blue & white umbrella
-  { left: 31, top: 69 },  // under the teal umbrella
-  { left: 59, top: 69 },  // under the yellow umbrella
-  { left: 68, top: 38 },  // hammock between the palms
-  { left: 24, top: 52 },  // left tiki bar stool
-  { left: 29, top: 55 },  // middle tiki bar stool
-  { left: 34, top: 57 },  // right tiki bar stool
+  { left: 32, top: 61 },  // red towel, upper-left half
+  { left: 36, top: 64 },  // red towel, lower-right half
+  { left: 57, top: 56 },  // blue towel, upper-left half
+  { left: 62, top: 60 },  // blue towel, lower-right half
+  { left: 46, top: 84 },  // teal towel, upper-left half
+  { left: 51, top: 88 },  // teal towel, lower-right half
+  { left: 62, top: 76 },  // yellow towel, upper-left half
+  { left: 65, top: 79 },  // yellow towel, lower-right half
 ];
 
 const SALUTES = [
@@ -89,7 +90,7 @@ export default function IslandPage() {
                   >
                     {saluting && <span className="island__bubble">{salute.text}</span>}
                     <MarlowLobster
-                      size={80}
+                      size={56}
                       pose="beach"
                       status="idle"
                       shellColor={agent.avatar.shellColor}

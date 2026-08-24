@@ -65,11 +65,12 @@ export function presetForShellColor(shellColor: string | null | undefined): Lobs
 }
 
 /**
- * Every non-standing pose is a composite sprite that includes the chair,
- * so the room/beach artwork itself stays furniture-free where agents sit.
+ * Every office seated pose is a composite sprite that includes the chair,
+ * so the room artwork itself stays furniture-free where agents sit.
  * `floor-working` is a composite with a floor cushion + laptop for the
  * four floor workstations that expand the office beyond its four desks.
- * The "beach" pose includes the beach lounger — used by the retirement island.
+ * The "beach" pose is a transparent, towel-resting lobster; the towel remains
+ * in the retirement island artwork so this pose can move without duplicating it.
  */
 export type LobsterPose =
   | "standing"

@@ -95,7 +95,7 @@
 /* ── Responsive ── */
 @media (max-width: 760px) {
   /* Keep the lobsters from swallowing the beach once the scene shrinks. */
-  .island__lobster .marlow-lobster { width: 52px; height: 52px; }
+  .island__lobster .marlow-lobster { width: 44px; height: 44px; }
   .island__lobster { padding: 2px; }
   .island__bubble { font-size: 9px; padding: 4px 6px; white-space: normal; width: max-content; max-width: 42vw; }
   .island__roster { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
@@ -106,7 +106,7 @@
   .island__bar { flex-wrap: wrap; gap: 8px; }
   .island__status { margin-left: 0; }
   .island__nametag { font-size: 7px; padding: 1px 3px; border-width: 1px; }
-  .island__lobster .marlow-lobster { width: 40px; height: 40px; }
+  .island__lobster .marlow-lobster { width: 36px; height: 36px; }
   .island__caption { top: 8px; left: 10px; font-size: 8px; }
   .island__scene { border-width: 3px; box-shadow: 4px 4px 0 #546b72; }
   .island__empty h2 { font-size: 13px; }
