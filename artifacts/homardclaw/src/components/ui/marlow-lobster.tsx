@@ -66,6 +66,8 @@ export function presetForShellColor(shellColor: string | null | undefined): Lobs
 /**
  * Every non-standing pose is a composite sprite that includes the office
  * chair, so the room artwork itself stays furniture-free where agents sit.
+ * `floor-working` is a composite with a floor cushion + laptop for the
+ * four floor workstations that expand the office beyond its four desks.
  */
 export type LobsterPose =
   | "standing"
@@ -74,7 +76,8 @@ export type LobsterPose =
   | "idle-coffee"
   | "idle-music"
   | "idle-reading"
-  | "idle-stretch";
+  | "idle-stretch"
+  | "floor-working";
 
 const POSE_FOLDERS: Record<LobsterPose, string> = {
   standing: "lobsters",
@@ -84,6 +87,7 @@ const POSE_FOLDERS: Record<LobsterPose, string> = {
   "idle-music": "lobsters-idle-music",
   "idle-reading": "lobsters-idle-reading",
   "idle-stretch": "lobsters-idle-stretch",
+  "floor-working": "lobsters-floor-working",
 };
 
 export interface MarlowLobsterProps {

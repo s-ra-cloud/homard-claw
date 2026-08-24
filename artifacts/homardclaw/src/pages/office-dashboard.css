@@ -34,11 +34,14 @@
 .room-wrap { position: relative; min-height: 0; padding-top: 3px; }
 .room-wrap.is-paused .room-art img { filter: grayscale(0.55) brightness(0.92); }
 .room-caption { position: absolute; z-index: 5; top: 14px; left: 20px; color: #fff7df; font: 700 10px "Space Mono", monospace; letter-spacing: 0.8px; text-shadow: 2px 2px var(--ink); }
+.room-overflow { margin-bottom: 6px; padding: 6px 10px; border: 2px solid #6b8c85; background: #c6d9d6; color: var(--navy); font: 700 9px "Space Mono", monospace; text-transform: uppercase; letter-spacing: 0.3px; }
+.room-overflow a { color: var(--navy); text-decoration: underline; }
 .room-art { position: relative; width: 100%; max-height: calc(100dvh - 120px); display: flex; justify-content: center; align-items: center; overflow: hidden; background: #8fa9a5; border: 4px solid var(--ink); box-shadow: 7px 7px 0 #546b72; }
 .room-scene { position: relative; width: min(100%, calc(100dvh - 128px)); aspect-ratio: 1; flex: 0 0 auto; }
 .room-scene > img { display: block; width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
 .room-agent { position: absolute; z-index: 4; display: flex; flex-direction: column; align-items: center; transform: translate(-50%, -50%); pointer-events: none; }
 .room-agent .marlow-lobster { filter: drop-shadow(2px 3px 0 rgba(43, 39, 51, 0.5)); }
+.room-agent--floor { z-index: 3; }
 .room-agent__name { margin-top: -3px; padding: 1px 4px; border: 1px solid var(--ink); background: var(--paper); color: var(--ink); font: 700 7px "Space Mono", monospace; text-transform: uppercase; white-space: nowrap; box-shadow: 1px 1px 0 rgba(43, 39, 51, 0.55); }
 
 .side-panel { padding-top: 4px; display: grid; gap: 12px; }
@@ -98,6 +101,7 @@
   .room-art { border-width: 3px; box-shadow: 4px 4px 0 #546b72; }
   .room-caption { top: 8px; left: 10px; font-size: 8px; }
   .room-agent .marlow-lobster { width: 64px; height: 64px; }
+  .room-agent--floor .marlow-lobster { width: 52px; height: 52px; }
   .room-agent__name { font-size: 5px; padding: 0 2px; }
   .summary b { font-size: 15px; }
   .approval-actions { display: flex; gap: 6px; }

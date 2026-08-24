@@ -16,7 +16,7 @@ import "./office-dashboard.css";
 
 const officeArt = `${import.meta.env.BASE_URL}images/four-desk-office.png`;
 
-// Chair centres in the generated office scene. Agent sprites are layered on top
+// Chair centres in the original office scene. Agent sprites are layered on top
 // so every employee is rendered by the same canonical component as the roster.
 const DESK_SEATS = [
   { left: 29.0, top: 43.0, label: "window desk" },
@@ -24,6 +24,18 @@ const DESK_SEATS = [
   { left: 29.0, top: 72.0, label: "garden desk" },
   { left: 71.0, top: 72.0, label: "filing desk" },
 ];
+
+// The original scene intentionally leaves its centre open. Each floor pose is
+// a complete lobster + cushion + laptop composite, so no floor furniture is
+// added to the background and nothing is rendered twice.
+const FLOOR_SEATS = [
+  { left: 42.0, top: 48.0, label: "floor workstation A" },
+  { left: 58.0, top: 48.0, label: "floor workstation B" },
+  { left: 42.0, top: 63.0, label: "floor workstation C" },
+  { left: 58.0, top: 63.0, label: "floor workstation D" },
+];
+
+const MAX_VISIBLE = DESK_SEATS.length + FLOOR_SEATS.length; // 8
 
 /** Breaks an agent can take between tasks. */
 const IDLE_ACTIVITIES = [
@@ -164,12 +176,23 @@ export default function OfficeDashboard() {
         )}
 
         <main className="iso-office__layout">
-          <section className={`room-wrap ${stopped ? "is-paused" : ""}`} aria-label="Live four-desk isometric office">
+          {(() => {
+            const activeAgents = (agents ?? []).filter((a) => !a.archived);
+            const deskAgents = activeAgents.slice(0, DESK_SEATS.length);
+            const floorAgents = activeAgents.slice(DESK_SEATS.length, MAX_VISIBLE);
+            const overflowCount = Math.max(0, activeAgents.length - MAX_VISIBLE);
+            return (
+          <section className={`room-wrap ${stopped ? "is-paused" : ""}`} aria-label="Live office with four desks and four floor workstations">
             <div className="room-caption">LIVE VIEW / FOUR-DESK OFFICE{stopped ? " / PAUSED" : ""}</div>
+            {overflowCount > 0 && (
+              <div className="room-overflow" role="status" aria-live="polite">
+                +{overflowCount} agent{overflowCount !== 1 ? "s" : ""} in roster — room holds 8 · <Link href="/agents">view all</Link>
+              </div>
+            )}
             <div className="room-art">
               <div className="room-scene">
-                <img src={officeArt} alt="Isometric pixel-art HomardClaw office with four desks and chairs" />
-                {(agents ?? []).filter((agent) => !agent.archived).slice(0, DESK_SEATS.length).map((agent, index) => {
+                <img src={officeArt} alt="Isometric pixel-art HomardClaw office with four desks and an open central floor" />
+                {deskAgents.map((agent, index) => {
                   const seat = DESK_SEATS[index];
                   return (
                     <div
@@ -180,11 +203,27 @@ export default function OfficeDashboard() {
                     >
                       <MarlowLobster
                         size={96}
-                        pose={
-                          stopped
-                            ? "seated"
-                            : poseForAgent(agent.status, idleActivities[agent.id])
-                        }
+                        pose={stopped ? "seated" : poseForAgent(agent.status, idleActivities[agent.id])}
+                        status={stopped ? "paused" : agent.status}
+                        shellColor={agent.avatar.shellColor}
+                        title={`${agent.name} at the ${seat.label}`}
+                      />
+                      <span className="room-agent__name">{agent.name}</span>
+                    </div>
+                  );
+                })}
+                {floorAgents.map((agent, index) => {
+                  const seat = FLOOR_SEATS[index];
+                  return (
+                    <div
+                      key={agent.id}
+                      className="room-agent room-agent--floor"
+                      style={{ left: `${seat.left}%`, top: `${seat.top}%` }}
+                      title={`${agent.name} at the ${seat.label}`}
+                    >
+                      <MarlowLobster
+                        size={80}
+                        pose="floor-working"
                         status={stopped ? "paused" : agent.status}
                         shellColor={agent.avatar.shellColor}
                         title={`${agent.name} at the ${seat.label}`}
@@ -196,6 +235,8 @@ export default function OfficeDashboard() {
               </div>
             </div>
           </section>
+            );
+          })()}
 
           <aside className="side-panel">
             <section className="quiet-card rail-control">
