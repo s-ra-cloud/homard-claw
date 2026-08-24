@@ -23,16 +23,15 @@
 .island__scene { position: relative; width: 100%; overflow: hidden; background: #7fb2b5; border: 4px solid var(--ink); box-shadow: 7px 7px 0 #546b72; }
 .island__scene > img { display: block; width: 100%; height: auto; image-rendering: pixelated; }
 
-.island__lobster { position: absolute; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px; background: transparent; border: 0; cursor: pointer; z-index: 3; animation: island-bob 2.4s steps(2) infinite; }
+.island__lobster { position: absolute; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px; background: transparent; border: 0; cursor: pointer; z-index: 3; animation: island-sway 3.6s steps(2) infinite; }
 .island__lobster:hover { filter: brightness(1.1); }
 .island__lobster:focus-visible { outline: 3px solid var(--paper); }
 .island__lobster.is-saluting { animation: island-hop 0.5s steps(2) 2; }
-.island__drink { position: absolute; top: -4px; right: -6px; font-size: 16px; text-shadow: 1px 1px var(--ink); }
 .island__nametag { background: var(--paper); border: 2px solid var(--ink); padding: 1px 5px; font: 700 9px "Space Mono", monospace; text-transform: uppercase; box-shadow: 2px 2px 0 rgba(43, 39, 51, 0.5); white-space: nowrap; }
 .island__bubble { position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); z-index: 6; background: var(--paper); border: 3px solid var(--ink); padding: 6px 9px; font: 700 10px "Space Mono", monospace; color: var(--ink); white-space: nowrap; box-shadow: 3px 3px 0 #546b72; animation: island-pop 0.18s steps(2); }
 .island__bubble::after { content: ""; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 6px solid transparent; border-top-color: var(--ink); }
 
-@keyframes island-bob { 50% { transform: translate(-50%, calc(-50% + 2px)); } }
+@keyframes island-sway { 50% { transform: translate(-50%, calc(-50% + 1px)) rotate(0.5deg); } }
 @keyframes island-hop { 50% { transform: translate(-50%, calc(-50% - 8px)); } }
 @keyframes island-pop { from { transform: translateX(-50%) scale(0.6); } }
 
@@ -54,9 +53,8 @@
 
 @media (max-width: 760px) {
   /* Keep the lobsters from swallowing the beach once the scene shrinks. */
-  .island__lobster .marlow-lobster { width: 40px; height: 40px; }
+  .island__lobster .marlow-lobster { width: 52px; height: 52px; }
   .island__lobster { padding: 2px; }
-  .island__drink { font-size: 12px; }
   .island__bubble { font-size: 9px; padding: 4px 6px; white-space: normal; width: max-content; max-width: 42vw; }
   .island__roster { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
 }
@@ -66,7 +64,7 @@
   .island__bar { flex-wrap: wrap; gap: 8px; }
   .island__status { margin-left: 0; }
   .island__nametag { font-size: 7px; padding: 1px 3px; border-width: 1px; }
-  .island__lobster .marlow-lobster { width: 30px; height: 30px; }
+  .island__lobster .marlow-lobster { width: 40px; height: 40px; }
   .island__caption { top: 8px; left: 10px; font-size: 8px; }
   .island__scene { border-width: 3px; box-shadow: 4px 4px 0 #546b72; }
   .island__empty h2 { font-size: 13px; }

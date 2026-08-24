@@ -652,7 +652,13 @@ export async function workOnce(): Promise<boolean> {
  */
 const WORKER_LOCK_KEY = 0x484f4d41; // "HOMA"
 
-let leaseClient: import("@workspace/db").PoolClient | null = null;
+// Structurally typed to avoid a direct `pg` dep in api-server's package.json.
+type LeaseClient = {
+  query<T extends Record<string, unknown>>(sql: string, values?: unknown[]): Promise<{ rows: T[] }>;
+  release(err?: boolean | Error): void;
+  on(event: "error", listener: (err: Error) => void): unknown;
+};
+let leaseClient: LeaseClient | null = null;
 let leaseRecovered = false;
 
 async function ensureWorkerLease(): Promise<boolean> {

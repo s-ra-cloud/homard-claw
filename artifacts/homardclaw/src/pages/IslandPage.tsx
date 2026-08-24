@@ -8,15 +8,17 @@ import "./island.css";
 const beachArt = `${import.meta.env.BASE_URL}images/island-beach.png`;
 
 // Fixed relaxing spots on the beach artwork (percent coordinates).
+// Chairs/loungers are baked into the composite sprite, so these anchors
+// point at the towel/shade zones in the furniture-free background art.
 const BEACH_SPOTS = [
-  { left: 47, top: 54 },  // lounger under the red & white umbrella
-  { left: 72, top: 52 },  // lounger under the blue & white umbrella
-  { left: 28, top: 67 },  // lounger under the teal umbrella
-  { left: 64, top: 75 },  // lounger under the yellow umbrella
-  { left: 61, top: 29 },  // hammock between the palms
-  { left: 18.5, top: 41 }, // left tiki bar stool
-  { left: 28, top: 39 },  // middle tiki bar stool
-  { left: 35, top: 36 },  // right tiki bar stool
+  { left: 38, top: 54 },  // under the red & white umbrella
+  { left: 61, top: 46 },  // under the blue & white umbrella
+  { left: 31, top: 69 },  // under the teal umbrella
+  { left: 59, top: 69 },  // under the yellow umbrella
+  { left: 68, top: 38 },  // hammock between the palms
+  { left: 24, top: 52 },  // left tiki bar stool
+  { left: 29, top: 55 },  // middle tiki bar stool
+  { left: 34, top: 57 },  // right tiki bar stool
 ];
 
 const SALUTES = [
@@ -84,9 +86,9 @@ export default function IslandPage() {
                     aria-label={`Salute ${agent.name}, retired ${agent.title}`}
                   >
                     {saluting && <span className="island__bubble">{salute.text}</span>}
-                    <span className="island__drink" aria-hidden="true">🍹</span>
                     <MarlowLobster
-                      size={64}
+                      size={80}
+                      pose="beach"
                       status="idle"
                       shellColor={agent.avatar.shellColor}
                     />
