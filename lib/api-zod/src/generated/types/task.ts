@@ -42,6 +42,20 @@ export interface Task {
   errorMessage?: string | null;
   attempts: number;
   /** @nullable */
+  parentTaskId?: string | null;
+  /** @nullable */
+  rootTaskId?: string | null;
+  depth?: number;
+  /** @nullable */
+  teamId?: string | null;
+  /** @nullable */
+  teamName?: string | null;
+  /** @nullable */
+  delegatedByAgentId?: string | null;
+  /** @nullable */
+  delegatedByAgentName?: string | null;
+  runtime?: string;
+  /** @nullable */
   contextSources?: TaskSource[] | null;
   /** @nullable */
   startedAt?: Date | null;

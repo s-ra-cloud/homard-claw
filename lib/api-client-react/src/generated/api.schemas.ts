@@ -77,6 +77,31 @@ export interface AgentPermissions {
      */
   approvalThresholdCents: number | null;
   allowedProviders: ('claude_max' | 'openrouter')[] | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  maxRunSeconds: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  maxOutputTokens: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  maxAttempts: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  maxDelegationDepth: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  maxSubtasksPerTask: number | null;
 }
 
 /**
@@ -104,6 +129,31 @@ export interface AgentPermissionOverrides {
      */
   approvalThresholdCents?: number | null;
   allowedProviders?: ('claude_max' | 'openrouter')[] | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  maxRunSeconds?: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  maxOutputTokens?: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  maxAttempts?: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  maxDelegationDepth?: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  maxSubtasksPerTask?: number | null;
 }
 
 export interface AvatarConfig {
@@ -224,6 +274,20 @@ export interface Task {
   /** @nullable */
   errorMessage?: string | null;
   attempts: number;
+  /** @nullable */
+  parentTaskId?: string | null;
+  /** @nullable */
+  rootTaskId?: string | null;
+  depth?: number;
+  /** @nullable */
+  teamId?: string | null;
+  /** @nullable */
+  teamName?: string | null;
+  /** @nullable */
+  delegatedByAgentId?: string | null;
+  /** @nullable */
+  delegatedByAgentName?: string | null;
+  runtime?: string;
   /** @nullable */
   contextSources?: TaskSource[] | null;
   /** @nullable */
@@ -427,6 +491,186 @@ export interface ArchiveInput {
 
 export interface PauseInput {
   paused: boolean;
+}
+
+export interface TeamMember {
+  agentId: string;
+  name: string;
+  title: string;
+  isLead: boolean;
+  avatar: AvatarConfig;
+}
+
+export interface Team {
+  id: string;
+  name: string;
+  /** @nullable */
+  mission?: string | null;
+  /** @nullable */
+  leadAgentId?: string | null;
+  /** @nullable */
+  leadAgentName?: string | null;
+  members: TeamMember[];
+  createdAt: string;
+}
+
+export interface TeamInput {
+  /**
+     * @minLength 2
+     * @maxLength 60
+     */
+  name: string;
+  /** @maxLength 2000 */
+  mission?: string;
+  leadAgentId?: string;
+  memberAgentIds?: string[];
+}
+
+export interface TeamUpdate {
+  /**
+     * @minLength 2
+     * @maxLength 60
+     */
+  name?: string;
+  /**
+     * @maxLength 2000
+     * @nullable
+     */
+  mission?: string | null;
+  /** @nullable */
+  leadAgentId?: string | null;
+}
+
+export interface TeamMemberInput {
+  agentId: string;
+}
+
+export type DelegationInputPriority = typeof DelegationInputPriority[keyof typeof DelegationInputPriority];
+
+
+export const DelegationInputPriority = {
+  low: 'low',
+  normal: 'normal',
+  high: 'high',
+} as const;
+
+export interface DelegationInput {
+  agentId: string;
+  /**
+     * @minLength 3
+     * @maxLength 5000
+     */
+  objective: string;
+  priority?: DelegationInputPriority;
+  /**
+     * @minimum 0.01
+     * @maximum 1000000
+     */
+  budgetCents?: number;
+  /** @maxLength 2000 */
+  note?: string;
+}
+
+export type TaskTreeNodeStatus = typeof TaskTreeNodeStatus[keyof typeof TaskTreeNodeStatus];
+
+
+export const TaskTreeNodeStatus = {
+  queued: 'queued',
+  running: 'running',
+  waiting_approval: 'waiting_approval',
+  blocked: 'blocked',
+  completed: 'completed',
+  failed: 'failed',
+  cancelled: 'cancelled',
+} as const;
+
+export interface TaskTreeNode {
+  id: string;
+  /** @nullable */
+  parentTaskId?: string | null;
+  agentId: string;
+  agentName: string;
+  objective: string;
+  status: TaskTreeNodeStatus;
+  depth: number;
+  /** @nullable */
+  delegatedByAgentName?: string | null;
+  /** @nullable */
+  actualCostCents?: number | null;
+  createdAt: string;
+}
+
+export interface TaskTree {
+  rootTaskId: string;
+  nodes: TaskTreeNode[];
+}
+
+export type AgentMessageKind = typeof AgentMessageKind[keyof typeof AgentMessageKind];
+
+
+export const AgentMessageKind = {
+  delegation: 'delegation',
+  result: 'result',
+  note: 'note',
+} as const;
+
+export interface AgentMessage {
+  id: string;
+  /** @nullable */
+  fromAgentId?: string | null;
+  /** @nullable */
+  fromAgentName?: string | null;
+  /** @nullable */
+  toAgentId?: string | null;
+  /** @nullable */
+  toAgentName?: string | null;
+  /** @nullable */
+  taskId?: string | null;
+  kind: AgentMessageKind;
+  body: string;
+  createdAt: string;
+}
+
+export type RuntimeInfoStatus = typeof RuntimeInfoStatus[keyof typeof RuntimeInfoStatus];
+
+
+export const RuntimeInfoStatus = {
+  ready: 'ready',
+  degraded: 'degraded',
+  not_installed: 'not_installed',
+} as const;
+
+export interface RuntimeInfo {
+  id: string;
+  label: string;
+  status: RuntimeInfoStatus;
+  detail: string;
+  acceptsWork: boolean;
+}
+
+export type RuntimeHealthReportQueue = {
+  queued: number;
+  running: number;
+  waitingApproval: number;
+  blocked: number;
+  /** @nullable */
+  oldestQueuedSeconds: number | null;
+};
+
+export type RuntimeHealthReportWorker = {
+  leaseHeld: boolean;
+  running: boolean;
+  inFlight: number;
+  emergencyStop: boolean;
+  /** @nullable */
+  lastTickAt?: string | null;
+};
+
+export interface RuntimeHealthReport {
+  activeRuntime: string;
+  runtimes: RuntimeInfo[];
+  queue: RuntimeHealthReportQueue;
+  worker: RuntimeHealthReportWorker;
 }
 
 export type TaskLogLevel = typeof TaskLogLevel[keyof typeof TaskLogLevel];
@@ -811,6 +1055,12 @@ q?: string;
 kind?: string;
 limit?: number;
 offset?: number;
+};
+
+export type ListAgentMessagesParams = {
+taskId?: string;
+agentId?: string;
+limit?: number;
 };
 
 export type ListMemoriesParams = {

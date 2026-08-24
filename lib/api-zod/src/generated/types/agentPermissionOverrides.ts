@@ -31,4 +31,29 @@ export interface AgentPermissionOverrides {
      */
   approvalThresholdCents?: number | null;
   allowedProviders?: ('claude_max' | 'openrouter')[] | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  maxRunSeconds?: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  maxOutputTokens?: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  maxAttempts?: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  maxDelegationDepth?: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  maxSubtasksPerTask?: number | null;
 }

@@ -47,6 +47,16 @@ export const listAgentsResponsePermissionsMaxTasksPerDayMin = 0;
 
 export const listAgentsResponsePermissionsApprovalThresholdCentsMin = 0;
 
+export const listAgentsResponsePermissionsMaxRunSecondsMin = 0;
+
+export const listAgentsResponsePermissionsMaxOutputTokensMin = 0;
+
+export const listAgentsResponsePermissionsMaxAttemptsMin = 0;
+
+export const listAgentsResponsePermissionsMaxDelegationDepthMin = 0;
+
+export const listAgentsResponsePermissionsMaxSubtasksPerTaskMin = 0;
+
 export const listAgentsResponsePermissionOverridesOneMaxTaskBudgetCentsMin = 0;
 
 export const listAgentsResponsePermissionOverridesOneDailyBudgetCentsMin = 0;
@@ -54,6 +64,16 @@ export const listAgentsResponsePermissionOverridesOneDailyBudgetCentsMin = 0;
 export const listAgentsResponsePermissionOverridesOneMaxTasksPerDayMin = 0;
 
 export const listAgentsResponsePermissionOverridesOneApprovalThresholdCentsMin = 0;
+
+export const listAgentsResponsePermissionOverridesOneMaxRunSecondsMin = 0;
+
+export const listAgentsResponsePermissionOverridesOneMaxOutputTokensMin = 0;
+
+export const listAgentsResponsePermissionOverridesOneMaxAttemptsMin = 0;
+
+export const listAgentsResponsePermissionOverridesOneMaxDelegationDepthMin = 0;
+
+export const listAgentsResponsePermissionOverridesOneMaxSubtasksPerTaskMin = 0;
 
 
 
@@ -77,14 +97,24 @@ export const ListAgentsResponseItem = zod.object({
   "dailyBudgetCents": zod.number().min(listAgentsResponsePermissionsDailyBudgetCentsMin).nullable(),
   "maxTasksPerDay": zod.number().min(listAgentsResponsePermissionsMaxTasksPerDayMin).nullable(),
   "approvalThresholdCents": zod.number().min(listAgentsResponsePermissionsApprovalThresholdCentsMin).nullable(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()])
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]),
+  "maxRunSeconds": zod.number().min(listAgentsResponsePermissionsMaxRunSecondsMin).nullable(),
+  "maxOutputTokens": zod.number().min(listAgentsResponsePermissionsMaxOutputTokensMin).nullable(),
+  "maxAttempts": zod.number().min(listAgentsResponsePermissionsMaxAttemptsMin).nullable(),
+  "maxDelegationDepth": zod.number().min(listAgentsResponsePermissionsMaxDelegationDepthMin).nullable(),
+  "maxSubtasksPerTask": zod.number().min(listAgentsResponsePermissionsMaxSubtasksPerTaskMin).nullable()
 }).describe('Effective budgets and limits after overrides are applied. Null means no limit.'),
   "permissionOverrides": zod.union([zod.object({
   "maxTaskBudgetCents": zod.number().min(listAgentsResponsePermissionOverridesOneMaxTaskBudgetCentsMin).nullish(),
   "dailyBudgetCents": zod.number().min(listAgentsResponsePermissionOverridesOneDailyBudgetCentsMin).nullish(),
   "maxTasksPerDay": zod.number().min(listAgentsResponsePermissionOverridesOneMaxTasksPerDayMin).nullish(),
   "approvalThresholdCents": zod.number().min(listAgentsResponsePermissionOverridesOneApprovalThresholdCentsMin).nullish(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional()
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional(),
+  "maxRunSeconds": zod.number().min(listAgentsResponsePermissionOverridesOneMaxRunSecondsMin).nullish(),
+  "maxOutputTokens": zod.number().min(listAgentsResponsePermissionOverridesOneMaxOutputTokensMin).nullish(),
+  "maxAttempts": zod.number().min(listAgentsResponsePermissionOverridesOneMaxAttemptsMin).nullish(),
+  "maxDelegationDepth": zod.number().min(listAgentsResponsePermissionOverridesOneMaxDelegationDepthMin).nullish(),
+  "maxSubtasksPerTask": zod.number().min(listAgentsResponsePermissionOverridesOneMaxSubtasksPerTaskMin).nullish()
 }).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
   "avatar": zod.object({
   "shellColor": zod.string(),
@@ -131,6 +161,16 @@ export const createAgentBodyPermissionOverridesOneMaxTasksPerDayMin = 0;
 
 export const createAgentBodyPermissionOverridesOneApprovalThresholdCentsMin = 0;
 
+export const createAgentBodyPermissionOverridesOneMaxRunSecondsMin = 0;
+
+export const createAgentBodyPermissionOverridesOneMaxOutputTokensMin = 0;
+
+export const createAgentBodyPermissionOverridesOneMaxAttemptsMin = 0;
+
+export const createAgentBodyPermissionOverridesOneMaxDelegationDepthMin = 0;
+
+export const createAgentBodyPermissionOverridesOneMaxSubtasksPerTaskMin = 0;
+
 
 
 export const CreateAgentBody = zod.object({
@@ -151,7 +191,12 @@ export const CreateAgentBody = zod.object({
   "dailyBudgetCents": zod.number().min(createAgentBodyPermissionOverridesOneDailyBudgetCentsMin).nullish(),
   "maxTasksPerDay": zod.number().min(createAgentBodyPermissionOverridesOneMaxTasksPerDayMin).nullish(),
   "approvalThresholdCents": zod.number().min(createAgentBodyPermissionOverridesOneApprovalThresholdCentsMin).nullish(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional()
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional(),
+  "maxRunSeconds": zod.number().min(createAgentBodyPermissionOverridesOneMaxRunSecondsMin).nullish(),
+  "maxOutputTokens": zod.number().min(createAgentBodyPermissionOverridesOneMaxOutputTokensMin).nullish(),
+  "maxAttempts": zod.number().min(createAgentBodyPermissionOverridesOneMaxAttemptsMin).nullish(),
+  "maxDelegationDepth": zod.number().min(createAgentBodyPermissionOverridesOneMaxDelegationDepthMin).nullish(),
+  "maxSubtasksPerTask": zod.number().min(createAgentBodyPermissionOverridesOneMaxSubtasksPerTaskMin).nullish()
 }).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
   "avatar": zod.object({
   "shellColor": zod.string(),
@@ -169,6 +214,16 @@ export const createAgentResponsePermissionsMaxTasksPerDayMin = 0;
 
 export const createAgentResponsePermissionsApprovalThresholdCentsMin = 0;
 
+export const createAgentResponsePermissionsMaxRunSecondsMin = 0;
+
+export const createAgentResponsePermissionsMaxOutputTokensMin = 0;
+
+export const createAgentResponsePermissionsMaxAttemptsMin = 0;
+
+export const createAgentResponsePermissionsMaxDelegationDepthMin = 0;
+
+export const createAgentResponsePermissionsMaxSubtasksPerTaskMin = 0;
+
 export const createAgentResponsePermissionOverridesOneMaxTaskBudgetCentsMin = 0;
 
 export const createAgentResponsePermissionOverridesOneDailyBudgetCentsMin = 0;
@@ -176,6 +231,16 @@ export const createAgentResponsePermissionOverridesOneDailyBudgetCentsMin = 0;
 export const createAgentResponsePermissionOverridesOneMaxTasksPerDayMin = 0;
 
 export const createAgentResponsePermissionOverridesOneApprovalThresholdCentsMin = 0;
+
+export const createAgentResponsePermissionOverridesOneMaxRunSecondsMin = 0;
+
+export const createAgentResponsePermissionOverridesOneMaxOutputTokensMin = 0;
+
+export const createAgentResponsePermissionOverridesOneMaxAttemptsMin = 0;
+
+export const createAgentResponsePermissionOverridesOneMaxDelegationDepthMin = 0;
+
+export const createAgentResponsePermissionOverridesOneMaxSubtasksPerTaskMin = 0;
 
 
 
@@ -199,14 +264,24 @@ export const CreateAgentResponse = zod.object({
   "dailyBudgetCents": zod.number().min(createAgentResponsePermissionsDailyBudgetCentsMin).nullable(),
   "maxTasksPerDay": zod.number().min(createAgentResponsePermissionsMaxTasksPerDayMin).nullable(),
   "approvalThresholdCents": zod.number().min(createAgentResponsePermissionsApprovalThresholdCentsMin).nullable(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()])
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]),
+  "maxRunSeconds": zod.number().min(createAgentResponsePermissionsMaxRunSecondsMin).nullable(),
+  "maxOutputTokens": zod.number().min(createAgentResponsePermissionsMaxOutputTokensMin).nullable(),
+  "maxAttempts": zod.number().min(createAgentResponsePermissionsMaxAttemptsMin).nullable(),
+  "maxDelegationDepth": zod.number().min(createAgentResponsePermissionsMaxDelegationDepthMin).nullable(),
+  "maxSubtasksPerTask": zod.number().min(createAgentResponsePermissionsMaxSubtasksPerTaskMin).nullable()
 }).describe('Effective budgets and limits after overrides are applied. Null means no limit.'),
   "permissionOverrides": zod.union([zod.object({
   "maxTaskBudgetCents": zod.number().min(createAgentResponsePermissionOverridesOneMaxTaskBudgetCentsMin).nullish(),
   "dailyBudgetCents": zod.number().min(createAgentResponsePermissionOverridesOneDailyBudgetCentsMin).nullish(),
   "maxTasksPerDay": zod.number().min(createAgentResponsePermissionOverridesOneMaxTasksPerDayMin).nullish(),
   "approvalThresholdCents": zod.number().min(createAgentResponsePermissionOverridesOneApprovalThresholdCentsMin).nullish(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional()
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional(),
+  "maxRunSeconds": zod.number().min(createAgentResponsePermissionOverridesOneMaxRunSecondsMin).nullish(),
+  "maxOutputTokens": zod.number().min(createAgentResponsePermissionOverridesOneMaxOutputTokensMin).nullish(),
+  "maxAttempts": zod.number().min(createAgentResponsePermissionOverridesOneMaxAttemptsMin).nullish(),
+  "maxDelegationDepth": zod.number().min(createAgentResponsePermissionOverridesOneMaxDelegationDepthMin).nullish(),
+  "maxSubtasksPerTask": zod.number().min(createAgentResponsePermissionOverridesOneMaxSubtasksPerTaskMin).nullish()
 }).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
   "avatar": zod.object({
   "shellColor": zod.string(),
@@ -235,6 +310,16 @@ export const getAgentResponseAgentPermissionsMaxTasksPerDayMin = 0;
 
 export const getAgentResponseAgentPermissionsApprovalThresholdCentsMin = 0;
 
+export const getAgentResponseAgentPermissionsMaxRunSecondsMin = 0;
+
+export const getAgentResponseAgentPermissionsMaxOutputTokensMin = 0;
+
+export const getAgentResponseAgentPermissionsMaxAttemptsMin = 0;
+
+export const getAgentResponseAgentPermissionsMaxDelegationDepthMin = 0;
+
+export const getAgentResponseAgentPermissionsMaxSubtasksPerTaskMin = 0;
+
 export const getAgentResponseAgentPermissionOverridesOneMaxTaskBudgetCentsMin = 0;
 
 export const getAgentResponseAgentPermissionOverridesOneDailyBudgetCentsMin = 0;
@@ -242,6 +327,16 @@ export const getAgentResponseAgentPermissionOverridesOneDailyBudgetCentsMin = 0;
 export const getAgentResponseAgentPermissionOverridesOneMaxTasksPerDayMin = 0;
 
 export const getAgentResponseAgentPermissionOverridesOneApprovalThresholdCentsMin = 0;
+
+export const getAgentResponseAgentPermissionOverridesOneMaxRunSecondsMin = 0;
+
+export const getAgentResponseAgentPermissionOverridesOneMaxOutputTokensMin = 0;
+
+export const getAgentResponseAgentPermissionOverridesOneMaxAttemptsMin = 0;
+
+export const getAgentResponseAgentPermissionOverridesOneMaxDelegationDepthMin = 0;
+
+export const getAgentResponseAgentPermissionOverridesOneMaxSubtasksPerTaskMin = 0;
 
 
 
@@ -266,14 +361,24 @@ export const GetAgentResponse = zod.object({
   "dailyBudgetCents": zod.number().min(getAgentResponseAgentPermissionsDailyBudgetCentsMin).nullable(),
   "maxTasksPerDay": zod.number().min(getAgentResponseAgentPermissionsMaxTasksPerDayMin).nullable(),
   "approvalThresholdCents": zod.number().min(getAgentResponseAgentPermissionsApprovalThresholdCentsMin).nullable(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()])
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]),
+  "maxRunSeconds": zod.number().min(getAgentResponseAgentPermissionsMaxRunSecondsMin).nullable(),
+  "maxOutputTokens": zod.number().min(getAgentResponseAgentPermissionsMaxOutputTokensMin).nullable(),
+  "maxAttempts": zod.number().min(getAgentResponseAgentPermissionsMaxAttemptsMin).nullable(),
+  "maxDelegationDepth": zod.number().min(getAgentResponseAgentPermissionsMaxDelegationDepthMin).nullable(),
+  "maxSubtasksPerTask": zod.number().min(getAgentResponseAgentPermissionsMaxSubtasksPerTaskMin).nullable()
 }).describe('Effective budgets and limits after overrides are applied. Null means no limit.'),
   "permissionOverrides": zod.union([zod.object({
   "maxTaskBudgetCents": zod.number().min(getAgentResponseAgentPermissionOverridesOneMaxTaskBudgetCentsMin).nullish(),
   "dailyBudgetCents": zod.number().min(getAgentResponseAgentPermissionOverridesOneDailyBudgetCentsMin).nullish(),
   "maxTasksPerDay": zod.number().min(getAgentResponseAgentPermissionOverridesOneMaxTasksPerDayMin).nullish(),
   "approvalThresholdCents": zod.number().min(getAgentResponseAgentPermissionOverridesOneApprovalThresholdCentsMin).nullish(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional()
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional(),
+  "maxRunSeconds": zod.number().min(getAgentResponseAgentPermissionOverridesOneMaxRunSecondsMin).nullish(),
+  "maxOutputTokens": zod.number().min(getAgentResponseAgentPermissionOverridesOneMaxOutputTokensMin).nullish(),
+  "maxAttempts": zod.number().min(getAgentResponseAgentPermissionOverridesOneMaxAttemptsMin).nullish(),
+  "maxDelegationDepth": zod.number().min(getAgentResponseAgentPermissionOverridesOneMaxDelegationDepthMin).nullish(),
+  "maxSubtasksPerTask": zod.number().min(getAgentResponseAgentPermissionOverridesOneMaxSubtasksPerTaskMin).nullish()
 }).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
   "avatar": zod.object({
   "shellColor": zod.string(),
@@ -308,6 +413,14 @@ export const GetAgentResponse = zod.object({
   "errorKind": zod.string().nullish(),
   "errorMessage": zod.string().nullish(),
   "attempts": zod.number(),
+  "parentTaskId": zod.string().nullish(),
+  "rootTaskId": zod.string().nullish(),
+  "depth": zod.number().optional(),
+  "teamId": zod.string().nullish(),
+  "teamName": zod.string().nullish(),
+  "delegatedByAgentId": zod.string().nullish(),
+  "delegatedByAgentName": zod.string().nullish(),
+  "runtime": zod.string().optional(),
   "contextSources": zod.array(zod.object({
   "type": zod.enum(['memory', 'file']),
   "id": zod.string(),
@@ -357,6 +470,16 @@ export const updateAgentBodyPermissionOverridesOneMaxTasksPerDayMin = 0;
 
 export const updateAgentBodyPermissionOverridesOneApprovalThresholdCentsMin = 0;
 
+export const updateAgentBodyPermissionOverridesOneMaxRunSecondsMin = 0;
+
+export const updateAgentBodyPermissionOverridesOneMaxOutputTokensMin = 0;
+
+export const updateAgentBodyPermissionOverridesOneMaxAttemptsMin = 0;
+
+export const updateAgentBodyPermissionOverridesOneMaxDelegationDepthMin = 0;
+
+export const updateAgentBodyPermissionOverridesOneMaxSubtasksPerTaskMin = 0;
+
 
 
 export const UpdateAgentBody = zod.object({
@@ -377,7 +500,12 @@ export const UpdateAgentBody = zod.object({
   "dailyBudgetCents": zod.number().min(updateAgentBodyPermissionOverridesOneDailyBudgetCentsMin).nullish(),
   "maxTasksPerDay": zod.number().min(updateAgentBodyPermissionOverridesOneMaxTasksPerDayMin).nullish(),
   "approvalThresholdCents": zod.number().min(updateAgentBodyPermissionOverridesOneApprovalThresholdCentsMin).nullish(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional()
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional(),
+  "maxRunSeconds": zod.number().min(updateAgentBodyPermissionOverridesOneMaxRunSecondsMin).nullish(),
+  "maxOutputTokens": zod.number().min(updateAgentBodyPermissionOverridesOneMaxOutputTokensMin).nullish(),
+  "maxAttempts": zod.number().min(updateAgentBodyPermissionOverridesOneMaxAttemptsMin).nullish(),
+  "maxDelegationDepth": zod.number().min(updateAgentBodyPermissionOverridesOneMaxDelegationDepthMin).nullish(),
+  "maxSubtasksPerTask": zod.number().min(updateAgentBodyPermissionOverridesOneMaxSubtasksPerTaskMin).nullish()
 }).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
   "avatar": zod.object({
   "shellColor": zod.string(),
@@ -395,6 +523,16 @@ export const updateAgentResponsePermissionsMaxTasksPerDayMin = 0;
 
 export const updateAgentResponsePermissionsApprovalThresholdCentsMin = 0;
 
+export const updateAgentResponsePermissionsMaxRunSecondsMin = 0;
+
+export const updateAgentResponsePermissionsMaxOutputTokensMin = 0;
+
+export const updateAgentResponsePermissionsMaxAttemptsMin = 0;
+
+export const updateAgentResponsePermissionsMaxDelegationDepthMin = 0;
+
+export const updateAgentResponsePermissionsMaxSubtasksPerTaskMin = 0;
+
 export const updateAgentResponsePermissionOverridesOneMaxTaskBudgetCentsMin = 0;
 
 export const updateAgentResponsePermissionOverridesOneDailyBudgetCentsMin = 0;
@@ -402,6 +540,16 @@ export const updateAgentResponsePermissionOverridesOneDailyBudgetCentsMin = 0;
 export const updateAgentResponsePermissionOverridesOneMaxTasksPerDayMin = 0;
 
 export const updateAgentResponsePermissionOverridesOneApprovalThresholdCentsMin = 0;
+
+export const updateAgentResponsePermissionOverridesOneMaxRunSecondsMin = 0;
+
+export const updateAgentResponsePermissionOverridesOneMaxOutputTokensMin = 0;
+
+export const updateAgentResponsePermissionOverridesOneMaxAttemptsMin = 0;
+
+export const updateAgentResponsePermissionOverridesOneMaxDelegationDepthMin = 0;
+
+export const updateAgentResponsePermissionOverridesOneMaxSubtasksPerTaskMin = 0;
 
 
 
@@ -425,14 +573,24 @@ export const UpdateAgentResponse = zod.object({
   "dailyBudgetCents": zod.number().min(updateAgentResponsePermissionsDailyBudgetCentsMin).nullable(),
   "maxTasksPerDay": zod.number().min(updateAgentResponsePermissionsMaxTasksPerDayMin).nullable(),
   "approvalThresholdCents": zod.number().min(updateAgentResponsePermissionsApprovalThresholdCentsMin).nullable(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()])
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]),
+  "maxRunSeconds": zod.number().min(updateAgentResponsePermissionsMaxRunSecondsMin).nullable(),
+  "maxOutputTokens": zod.number().min(updateAgentResponsePermissionsMaxOutputTokensMin).nullable(),
+  "maxAttempts": zod.number().min(updateAgentResponsePermissionsMaxAttemptsMin).nullable(),
+  "maxDelegationDepth": zod.number().min(updateAgentResponsePermissionsMaxDelegationDepthMin).nullable(),
+  "maxSubtasksPerTask": zod.number().min(updateAgentResponsePermissionsMaxSubtasksPerTaskMin).nullable()
 }).describe('Effective budgets and limits after overrides are applied. Null means no limit.'),
   "permissionOverrides": zod.union([zod.object({
   "maxTaskBudgetCents": zod.number().min(updateAgentResponsePermissionOverridesOneMaxTaskBudgetCentsMin).nullish(),
   "dailyBudgetCents": zod.number().min(updateAgentResponsePermissionOverridesOneDailyBudgetCentsMin).nullish(),
   "maxTasksPerDay": zod.number().min(updateAgentResponsePermissionOverridesOneMaxTasksPerDayMin).nullish(),
   "approvalThresholdCents": zod.number().min(updateAgentResponsePermissionOverridesOneApprovalThresholdCentsMin).nullish(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional()
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional(),
+  "maxRunSeconds": zod.number().min(updateAgentResponsePermissionOverridesOneMaxRunSecondsMin).nullish(),
+  "maxOutputTokens": zod.number().min(updateAgentResponsePermissionOverridesOneMaxOutputTokensMin).nullish(),
+  "maxAttempts": zod.number().min(updateAgentResponsePermissionOverridesOneMaxAttemptsMin).nullish(),
+  "maxDelegationDepth": zod.number().min(updateAgentResponsePermissionOverridesOneMaxDelegationDepthMin).nullish(),
+  "maxSubtasksPerTask": zod.number().min(updateAgentResponsePermissionOverridesOneMaxSubtasksPerTaskMin).nullish()
 }).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
   "avatar": zod.object({
   "shellColor": zod.string(),
@@ -471,6 +629,16 @@ export const duplicateAgentResponsePermissionsMaxTasksPerDayMin = 0;
 
 export const duplicateAgentResponsePermissionsApprovalThresholdCentsMin = 0;
 
+export const duplicateAgentResponsePermissionsMaxRunSecondsMin = 0;
+
+export const duplicateAgentResponsePermissionsMaxOutputTokensMin = 0;
+
+export const duplicateAgentResponsePermissionsMaxAttemptsMin = 0;
+
+export const duplicateAgentResponsePermissionsMaxDelegationDepthMin = 0;
+
+export const duplicateAgentResponsePermissionsMaxSubtasksPerTaskMin = 0;
+
 export const duplicateAgentResponsePermissionOverridesOneMaxTaskBudgetCentsMin = 0;
 
 export const duplicateAgentResponsePermissionOverridesOneDailyBudgetCentsMin = 0;
@@ -478,6 +646,16 @@ export const duplicateAgentResponsePermissionOverridesOneDailyBudgetCentsMin = 0
 export const duplicateAgentResponsePermissionOverridesOneMaxTasksPerDayMin = 0;
 
 export const duplicateAgentResponsePermissionOverridesOneApprovalThresholdCentsMin = 0;
+
+export const duplicateAgentResponsePermissionOverridesOneMaxRunSecondsMin = 0;
+
+export const duplicateAgentResponsePermissionOverridesOneMaxOutputTokensMin = 0;
+
+export const duplicateAgentResponsePermissionOverridesOneMaxAttemptsMin = 0;
+
+export const duplicateAgentResponsePermissionOverridesOneMaxDelegationDepthMin = 0;
+
+export const duplicateAgentResponsePermissionOverridesOneMaxSubtasksPerTaskMin = 0;
 
 
 
@@ -501,14 +679,24 @@ export const DuplicateAgentResponse = zod.object({
   "dailyBudgetCents": zod.number().min(duplicateAgentResponsePermissionsDailyBudgetCentsMin).nullable(),
   "maxTasksPerDay": zod.number().min(duplicateAgentResponsePermissionsMaxTasksPerDayMin).nullable(),
   "approvalThresholdCents": zod.number().min(duplicateAgentResponsePermissionsApprovalThresholdCentsMin).nullable(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()])
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]),
+  "maxRunSeconds": zod.number().min(duplicateAgentResponsePermissionsMaxRunSecondsMin).nullable(),
+  "maxOutputTokens": zod.number().min(duplicateAgentResponsePermissionsMaxOutputTokensMin).nullable(),
+  "maxAttempts": zod.number().min(duplicateAgentResponsePermissionsMaxAttemptsMin).nullable(),
+  "maxDelegationDepth": zod.number().min(duplicateAgentResponsePermissionsMaxDelegationDepthMin).nullable(),
+  "maxSubtasksPerTask": zod.number().min(duplicateAgentResponsePermissionsMaxSubtasksPerTaskMin).nullable()
 }).describe('Effective budgets and limits after overrides are applied. Null means no limit.'),
   "permissionOverrides": zod.union([zod.object({
   "maxTaskBudgetCents": zod.number().min(duplicateAgentResponsePermissionOverridesOneMaxTaskBudgetCentsMin).nullish(),
   "dailyBudgetCents": zod.number().min(duplicateAgentResponsePermissionOverridesOneDailyBudgetCentsMin).nullish(),
   "maxTasksPerDay": zod.number().min(duplicateAgentResponsePermissionOverridesOneMaxTasksPerDayMin).nullish(),
   "approvalThresholdCents": zod.number().min(duplicateAgentResponsePermissionOverridesOneApprovalThresholdCentsMin).nullish(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional()
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional(),
+  "maxRunSeconds": zod.number().min(duplicateAgentResponsePermissionOverridesOneMaxRunSecondsMin).nullish(),
+  "maxOutputTokens": zod.number().min(duplicateAgentResponsePermissionOverridesOneMaxOutputTokensMin).nullish(),
+  "maxAttempts": zod.number().min(duplicateAgentResponsePermissionOverridesOneMaxAttemptsMin).nullish(),
+  "maxDelegationDepth": zod.number().min(duplicateAgentResponsePermissionOverridesOneMaxDelegationDepthMin).nullish(),
+  "maxSubtasksPerTask": zod.number().min(duplicateAgentResponsePermissionOverridesOneMaxSubtasksPerTaskMin).nullish()
 }).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
   "avatar": zod.object({
   "shellColor": zod.string(),
@@ -541,6 +729,16 @@ export const setAgentArchivedResponsePermissionsMaxTasksPerDayMin = 0;
 
 export const setAgentArchivedResponsePermissionsApprovalThresholdCentsMin = 0;
 
+export const setAgentArchivedResponsePermissionsMaxRunSecondsMin = 0;
+
+export const setAgentArchivedResponsePermissionsMaxOutputTokensMin = 0;
+
+export const setAgentArchivedResponsePermissionsMaxAttemptsMin = 0;
+
+export const setAgentArchivedResponsePermissionsMaxDelegationDepthMin = 0;
+
+export const setAgentArchivedResponsePermissionsMaxSubtasksPerTaskMin = 0;
+
 export const setAgentArchivedResponsePermissionOverridesOneMaxTaskBudgetCentsMin = 0;
 
 export const setAgentArchivedResponsePermissionOverridesOneDailyBudgetCentsMin = 0;
@@ -548,6 +746,16 @@ export const setAgentArchivedResponsePermissionOverridesOneDailyBudgetCentsMin =
 export const setAgentArchivedResponsePermissionOverridesOneMaxTasksPerDayMin = 0;
 
 export const setAgentArchivedResponsePermissionOverridesOneApprovalThresholdCentsMin = 0;
+
+export const setAgentArchivedResponsePermissionOverridesOneMaxRunSecondsMin = 0;
+
+export const setAgentArchivedResponsePermissionOverridesOneMaxOutputTokensMin = 0;
+
+export const setAgentArchivedResponsePermissionOverridesOneMaxAttemptsMin = 0;
+
+export const setAgentArchivedResponsePermissionOverridesOneMaxDelegationDepthMin = 0;
+
+export const setAgentArchivedResponsePermissionOverridesOneMaxSubtasksPerTaskMin = 0;
 
 
 
@@ -571,14 +779,24 @@ export const SetAgentArchivedResponse = zod.object({
   "dailyBudgetCents": zod.number().min(setAgentArchivedResponsePermissionsDailyBudgetCentsMin).nullable(),
   "maxTasksPerDay": zod.number().min(setAgentArchivedResponsePermissionsMaxTasksPerDayMin).nullable(),
   "approvalThresholdCents": zod.number().min(setAgentArchivedResponsePermissionsApprovalThresholdCentsMin).nullable(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()])
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]),
+  "maxRunSeconds": zod.number().min(setAgentArchivedResponsePermissionsMaxRunSecondsMin).nullable(),
+  "maxOutputTokens": zod.number().min(setAgentArchivedResponsePermissionsMaxOutputTokensMin).nullable(),
+  "maxAttempts": zod.number().min(setAgentArchivedResponsePermissionsMaxAttemptsMin).nullable(),
+  "maxDelegationDepth": zod.number().min(setAgentArchivedResponsePermissionsMaxDelegationDepthMin).nullable(),
+  "maxSubtasksPerTask": zod.number().min(setAgentArchivedResponsePermissionsMaxSubtasksPerTaskMin).nullable()
 }).describe('Effective budgets and limits after overrides are applied. Null means no limit.'),
   "permissionOverrides": zod.union([zod.object({
   "maxTaskBudgetCents": zod.number().min(setAgentArchivedResponsePermissionOverridesOneMaxTaskBudgetCentsMin).nullish(),
   "dailyBudgetCents": zod.number().min(setAgentArchivedResponsePermissionOverridesOneDailyBudgetCentsMin).nullish(),
   "maxTasksPerDay": zod.number().min(setAgentArchivedResponsePermissionOverridesOneMaxTasksPerDayMin).nullish(),
   "approvalThresholdCents": zod.number().min(setAgentArchivedResponsePermissionOverridesOneApprovalThresholdCentsMin).nullish(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional()
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional(),
+  "maxRunSeconds": zod.number().min(setAgentArchivedResponsePermissionOverridesOneMaxRunSecondsMin).nullish(),
+  "maxOutputTokens": zod.number().min(setAgentArchivedResponsePermissionOverridesOneMaxOutputTokensMin).nullish(),
+  "maxAttempts": zod.number().min(setAgentArchivedResponsePermissionOverridesOneMaxAttemptsMin).nullish(),
+  "maxDelegationDepth": zod.number().min(setAgentArchivedResponsePermissionOverridesOneMaxDelegationDepthMin).nullish(),
+  "maxSubtasksPerTask": zod.number().min(setAgentArchivedResponsePermissionOverridesOneMaxSubtasksPerTaskMin).nullish()
 }).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
   "avatar": zod.object({
   "shellColor": zod.string(),
@@ -611,6 +829,16 @@ export const pauseAgentResponsePermissionsMaxTasksPerDayMin = 0;
 
 export const pauseAgentResponsePermissionsApprovalThresholdCentsMin = 0;
 
+export const pauseAgentResponsePermissionsMaxRunSecondsMin = 0;
+
+export const pauseAgentResponsePermissionsMaxOutputTokensMin = 0;
+
+export const pauseAgentResponsePermissionsMaxAttemptsMin = 0;
+
+export const pauseAgentResponsePermissionsMaxDelegationDepthMin = 0;
+
+export const pauseAgentResponsePermissionsMaxSubtasksPerTaskMin = 0;
+
 export const pauseAgentResponsePermissionOverridesOneMaxTaskBudgetCentsMin = 0;
 
 export const pauseAgentResponsePermissionOverridesOneDailyBudgetCentsMin = 0;
@@ -618,6 +846,16 @@ export const pauseAgentResponsePermissionOverridesOneDailyBudgetCentsMin = 0;
 export const pauseAgentResponsePermissionOverridesOneMaxTasksPerDayMin = 0;
 
 export const pauseAgentResponsePermissionOverridesOneApprovalThresholdCentsMin = 0;
+
+export const pauseAgentResponsePermissionOverridesOneMaxRunSecondsMin = 0;
+
+export const pauseAgentResponsePermissionOverridesOneMaxOutputTokensMin = 0;
+
+export const pauseAgentResponsePermissionOverridesOneMaxAttemptsMin = 0;
+
+export const pauseAgentResponsePermissionOverridesOneMaxDelegationDepthMin = 0;
+
+export const pauseAgentResponsePermissionOverridesOneMaxSubtasksPerTaskMin = 0;
 
 
 
@@ -641,14 +879,24 @@ export const PauseAgentResponse = zod.object({
   "dailyBudgetCents": zod.number().min(pauseAgentResponsePermissionsDailyBudgetCentsMin).nullable(),
   "maxTasksPerDay": zod.number().min(pauseAgentResponsePermissionsMaxTasksPerDayMin).nullable(),
   "approvalThresholdCents": zod.number().min(pauseAgentResponsePermissionsApprovalThresholdCentsMin).nullable(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()])
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]),
+  "maxRunSeconds": zod.number().min(pauseAgentResponsePermissionsMaxRunSecondsMin).nullable(),
+  "maxOutputTokens": zod.number().min(pauseAgentResponsePermissionsMaxOutputTokensMin).nullable(),
+  "maxAttempts": zod.number().min(pauseAgentResponsePermissionsMaxAttemptsMin).nullable(),
+  "maxDelegationDepth": zod.number().min(pauseAgentResponsePermissionsMaxDelegationDepthMin).nullable(),
+  "maxSubtasksPerTask": zod.number().min(pauseAgentResponsePermissionsMaxSubtasksPerTaskMin).nullable()
 }).describe('Effective budgets and limits after overrides are applied. Null means no limit.'),
   "permissionOverrides": zod.union([zod.object({
   "maxTaskBudgetCents": zod.number().min(pauseAgentResponsePermissionOverridesOneMaxTaskBudgetCentsMin).nullish(),
   "dailyBudgetCents": zod.number().min(pauseAgentResponsePermissionOverridesOneDailyBudgetCentsMin).nullish(),
   "maxTasksPerDay": zod.number().min(pauseAgentResponsePermissionOverridesOneMaxTasksPerDayMin).nullish(),
   "approvalThresholdCents": zod.number().min(pauseAgentResponsePermissionOverridesOneApprovalThresholdCentsMin).nullish(),
-  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional()
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional(),
+  "maxRunSeconds": zod.number().min(pauseAgentResponsePermissionOverridesOneMaxRunSecondsMin).nullish(),
+  "maxOutputTokens": zod.number().min(pauseAgentResponsePermissionOverridesOneMaxOutputTokensMin).nullish(),
+  "maxAttempts": zod.number().min(pauseAgentResponsePermissionOverridesOneMaxAttemptsMin).nullish(),
+  "maxDelegationDepth": zod.number().min(pauseAgentResponsePermissionOverridesOneMaxDelegationDepthMin).nullish(),
+  "maxSubtasksPerTask": zod.number().min(pauseAgentResponsePermissionOverridesOneMaxSubtasksPerTaskMin).nullish()
 }).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
   "avatar": zod.object({
   "shellColor": zod.string(),
@@ -737,6 +985,14 @@ export const ListTasksResponseItem = zod.object({
   "errorKind": zod.string().nullish(),
   "errorMessage": zod.string().nullish(),
   "attempts": zod.number(),
+  "parentTaskId": zod.string().nullish(),
+  "rootTaskId": zod.string().nullish(),
+  "depth": zod.number().optional(),
+  "teamId": zod.string().nullish(),
+  "teamName": zod.string().nullish(),
+  "delegatedByAgentId": zod.string().nullish(),
+  "delegatedByAgentName": zod.string().nullish(),
+  "runtime": zod.string().optional(),
   "contextSources": zod.array(zod.object({
   "type": zod.enum(['memory', 'file']),
   "id": zod.string(),
@@ -795,6 +1051,14 @@ export const CreateTaskResponse = zod.object({
   "errorKind": zod.string().nullish(),
   "errorMessage": zod.string().nullish(),
   "attempts": zod.number(),
+  "parentTaskId": zod.string().nullish(),
+  "rootTaskId": zod.string().nullish(),
+  "depth": zod.number().optional(),
+  "teamId": zod.string().nullish(),
+  "teamName": zod.string().nullish(),
+  "delegatedByAgentId": zod.string().nullish(),
+  "delegatedByAgentName": zod.string().nullish(),
+  "runtime": zod.string().optional(),
   "contextSources": zod.array(zod.object({
   "type": zod.enum(['memory', 'file']),
   "id": zod.string(),
@@ -895,6 +1159,330 @@ export const VerifyAuditResponse = zod.object({
 
 
 /**
+ * @summary Report execution runtime and queue health
+ */
+export const GetRuntimeHealthResponse = zod.object({
+  "activeRuntime": zod.string(),
+  "runtimes": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "status": zod.enum(['ready', 'degraded', 'not_installed']),
+  "detail": zod.string(),
+  "acceptsWork": zod.boolean()
+})),
+  "queue": zod.object({
+  "queued": zod.number(),
+  "running": zod.number(),
+  "waitingApproval": zod.number(),
+  "blocked": zod.number(),
+  "oldestQueuedSeconds": zod.number().nullable()
+}),
+  "worker": zod.object({
+  "leaseHeld": zod.boolean(),
+  "running": zod.boolean(),
+  "inFlight": zod.number(),
+  "emergencyStop": zod.boolean(),
+  "lastTickAt": zod.coerce.date().nullish()
+})
+})
+
+
+/**
+ * @summary List teams with their lead and members
+ */
+export const ListTeamsResponseItem = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "mission": zod.string().nullish(),
+  "leadAgentId": zod.string().nullish(),
+  "leadAgentName": zod.string().nullish(),
+  "members": zod.array(zod.object({
+  "agentId": zod.string(),
+  "name": zod.string(),
+  "title": zod.string(),
+  "isLead": zod.boolean(),
+  "avatar": zod.object({
+  "shellColor": zod.string(),
+  "deskStyle": zod.string(),
+  "accessory": zod.string(),
+  "expression": zod.string().optional()
+})
+})),
+  "createdAt": zod.coerce.date()
+})
+export const ListTeamsResponse = zod.array(ListTeamsResponseItem)
+
+
+/**
+ * @summary Create a team
+ */
+export const createTeamBodyNameMin = 2;
+export const createTeamBodyNameMax = 60;
+
+export const createTeamBodyMissionMax = 2000;
+
+
+
+export const CreateTeamBody = zod.object({
+  "name": zod.string().min(createTeamBodyNameMin).max(createTeamBodyNameMax),
+  "mission": zod.string().max(createTeamBodyMissionMax).optional(),
+  "leadAgentId": zod.string().optional(),
+  "memberAgentIds": zod.array(zod.string()).optional()
+})
+
+export const CreateTeamResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "mission": zod.string().nullish(),
+  "leadAgentId": zod.string().nullish(),
+  "leadAgentName": zod.string().nullish(),
+  "members": zod.array(zod.object({
+  "agentId": zod.string(),
+  "name": zod.string(),
+  "title": zod.string(),
+  "isLead": zod.boolean(),
+  "avatar": zod.object({
+  "shellColor": zod.string(),
+  "deskStyle": zod.string(),
+  "accessory": zod.string(),
+  "expression": zod.string().optional()
+})
+})),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Rename a team, change its mission, or assign its lead
+ */
+export const UpdateTeamParams = zod.object({
+  "teamId": zod.coerce.string()
+})
+
+export const updateTeamBodyNameMin = 2;
+export const updateTeamBodyNameMax = 60;
+
+export const updateTeamBodyMissionMax = 2000;
+
+
+
+export const UpdateTeamBody = zod.object({
+  "name": zod.string().min(updateTeamBodyNameMin).max(updateTeamBodyNameMax).optional(),
+  "mission": zod.string().max(updateTeamBodyMissionMax).nullish(),
+  "leadAgentId": zod.string().nullish()
+})
+
+export const UpdateTeamResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "mission": zod.string().nullish(),
+  "leadAgentId": zod.string().nullish(),
+  "leadAgentName": zod.string().nullish(),
+  "members": zod.array(zod.object({
+  "agentId": zod.string(),
+  "name": zod.string(),
+  "title": zod.string(),
+  "isLead": zod.boolean(),
+  "avatar": zod.object({
+  "shellColor": zod.string(),
+  "deskStyle": zod.string(),
+  "accessory": zod.string(),
+  "expression": zod.string().optional()
+})
+})),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Disband a team
+ */
+export const DeleteTeamParams = zod.object({
+  "teamId": zod.coerce.string()
+})
+
+export const DeleteTeamResponse = zod.void()
+
+
+/**
+ * @summary Add an agent to a team
+ */
+export const AddTeamMemberParams = zod.object({
+  "teamId": zod.coerce.string()
+})
+
+export const AddTeamMemberBody = zod.object({
+  "agentId": zod.string()
+})
+
+export const AddTeamMemberResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "mission": zod.string().nullish(),
+  "leadAgentId": zod.string().nullish(),
+  "leadAgentName": zod.string().nullish(),
+  "members": zod.array(zod.object({
+  "agentId": zod.string(),
+  "name": zod.string(),
+  "title": zod.string(),
+  "isLead": zod.boolean(),
+  "avatar": zod.object({
+  "shellColor": zod.string(),
+  "deskStyle": zod.string(),
+  "accessory": zod.string(),
+  "expression": zod.string().optional()
+})
+})),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Remove an agent from a team
+ */
+export const RemoveTeamMemberParams = zod.object({
+  "teamId": zod.coerce.string(),
+  "agentId": zod.coerce.string()
+})
+
+export const RemoveTeamMemberResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "mission": zod.string().nullish(),
+  "leadAgentId": zod.string().nullish(),
+  "leadAgentName": zod.string().nullish(),
+  "members": zod.array(zod.object({
+  "agentId": zod.string(),
+  "name": zod.string(),
+  "title": zod.string(),
+  "isLead": zod.boolean(),
+  "avatar": zod.object({
+  "shellColor": zod.string(),
+  "deskStyle": zod.string(),
+  "accessory": zod.string(),
+  "expression": zod.string().optional()
+})
+})),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Delegate a sub-task from this task to an authorized teammate
+ */
+export const DelegateTaskParams = zod.object({
+  "taskId": zod.coerce.string()
+})
+
+export const delegateTaskBodyObjectiveMin = 3;
+export const delegateTaskBodyObjectiveMax = 5000;
+
+export const delegateTaskBodyBudgetCentsMin = 0.01;
+export const delegateTaskBodyBudgetCentsMax = 1000000;
+
+export const delegateTaskBodyNoteMax = 2000;
+
+
+
+export const DelegateTaskBody = zod.object({
+  "agentId": zod.string(),
+  "objective": zod.string().min(delegateTaskBodyObjectiveMin).max(delegateTaskBodyObjectiveMax),
+  "priority": zod.enum(['low', 'normal', 'high']).optional(),
+  "budgetCents": zod.number().min(delegateTaskBodyBudgetCentsMin).max(delegateTaskBodyBudgetCentsMax).optional(),
+  "note": zod.string().max(delegateTaskBodyNoteMax).optional()
+})
+
+export const DelegateTaskResponse = zod.object({
+  "id": zod.string(),
+  "agentId": zod.string(),
+  "agentName": zod.string(),
+  "objective": zod.string(),
+  "status": zod.enum(['queued', 'running', 'waiting_approval', 'blocked', 'completed', 'failed', 'cancelled']),
+  "priority": zod.enum(['low', 'normal', 'high']),
+  "budgetCents": zod.number().nullish(),
+  "provider": zod.enum(['claude_max', 'openrouter']).optional(),
+  "model": zod.string().nullish(),
+  "estimatedTokens": zod.number().nullish(),
+  "estimatedCostCents": zod.number().nullish(),
+  "actualInputTokens": zod.number().nullish(),
+  "actualOutputTokens": zod.number().nullish(),
+  "actualCostCents": zod.number().nullish(),
+  "output": zod.string().nullish(),
+  "files": zod.array(zod.object({
+  "name": zod.string(),
+  "content": zod.string()
+})),
+  "errorKind": zod.string().nullish(),
+  "errorMessage": zod.string().nullish(),
+  "attempts": zod.number(),
+  "parentTaskId": zod.string().nullish(),
+  "rootTaskId": zod.string().nullish(),
+  "depth": zod.number().optional(),
+  "teamId": zod.string().nullish(),
+  "teamName": zod.string().nullish(),
+  "delegatedByAgentId": zod.string().nullish(),
+  "delegatedByAgentName": zod.string().nullish(),
+  "runtime": zod.string().optional(),
+  "contextSources": zod.array(zod.object({
+  "type": zod.enum(['memory', 'file']),
+  "id": zod.string(),
+  "label": zod.string(),
+  "title": zod.string()
+})).nullish(),
+  "startedAt": zod.coerce.date().nullish(),
+  "finishedAt": zod.coerce.date().nullish(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Get the whole delegation tree this task belongs to
+ */
+export const GetTaskTreeParams = zod.object({
+  "taskId": zod.coerce.string()
+})
+
+export const GetTaskTreeResponse = zod.object({
+  "rootTaskId": zod.string(),
+  "nodes": zod.array(zod.object({
+  "id": zod.string(),
+  "parentTaskId": zod.string().nullish(),
+  "agentId": zod.string(),
+  "agentName": zod.string(),
+  "objective": zod.string(),
+  "status": zod.enum(['queued', 'running', 'waiting_approval', 'blocked', 'completed', 'failed', 'cancelled']),
+  "depth": zod.number(),
+  "delegatedByAgentName": zod.string().nullish(),
+  "actualCostCents": zod.number().nullish(),
+  "createdAt": zod.coerce.date()
+}))
+})
+
+
+/**
+ * @summary List messages exchanged between agents
+ */
+export const ListAgentMessagesQueryParams = zod.object({
+  "taskId": zod.coerce.string().optional(),
+  "agentId": zod.coerce.string().optional(),
+  "limit": zod.coerce.number().optional()
+})
+
+export const ListAgentMessagesResponseItem = zod.object({
+  "id": zod.string(),
+  "fromAgentId": zod.string().nullish(),
+  "fromAgentName": zod.string().nullish(),
+  "toAgentId": zod.string().nullish(),
+  "toAgentName": zod.string().nullish(),
+  "taskId": zod.string().nullish(),
+  "kind": zod.enum(['delegation', 'result', 'note']),
+  "body": zod.string(),
+  "createdAt": zod.coerce.date()
+})
+export const ListAgentMessagesResponse = zod.array(ListAgentMessagesResponseItem)
+
+
+/**
  * @summary Get configured provider health
  */
 export const GetProvidersResponseItem = zod.object({
@@ -990,6 +1578,14 @@ export const GetTaskResponse = zod.object({
   "errorKind": zod.string().nullish(),
   "errorMessage": zod.string().nullish(),
   "attempts": zod.number(),
+  "parentTaskId": zod.string().nullish(),
+  "rootTaskId": zod.string().nullish(),
+  "depth": zod.number().optional(),
+  "teamId": zod.string().nullish(),
+  "teamName": zod.string().nullish(),
+  "delegatedByAgentId": zod.string().nullish(),
+  "delegatedByAgentName": zod.string().nullish(),
+  "runtime": zod.string().optional(),
   "contextSources": zod.array(zod.object({
   "type": zod.enum(['memory', 'file']),
   "id": zod.string(),
@@ -1039,6 +1635,14 @@ export const CancelTaskResponse = zod.object({
   "errorKind": zod.string().nullish(),
   "errorMessage": zod.string().nullish(),
   "attempts": zod.number(),
+  "parentTaskId": zod.string().nullish(),
+  "rootTaskId": zod.string().nullish(),
+  "depth": zod.number().optional(),
+  "teamId": zod.string().nullish(),
+  "teamName": zod.string().nullish(),
+  "delegatedByAgentId": zod.string().nullish(),
+  "delegatedByAgentName": zod.string().nullish(),
+  "runtime": zod.string().optional(),
   "contextSources": zod.array(zod.object({
   "type": zod.enum(['memory', 'file']),
   "id": zod.string(),
@@ -1081,6 +1685,14 @@ export const RetryTaskResponse = zod.object({
   "errorKind": zod.string().nullish(),
   "errorMessage": zod.string().nullish(),
   "attempts": zod.number(),
+  "parentTaskId": zod.string().nullish(),
+  "rootTaskId": zod.string().nullish(),
+  "depth": zod.number().optional(),
+  "teamId": zod.string().nullish(),
+  "teamName": zod.string().nullish(),
+  "delegatedByAgentId": zod.string().nullish(),
+  "delegatedByAgentName": zod.string().nullish(),
+  "runtime": zod.string().optional(),
   "contextSources": zod.array(zod.object({
   "type": zod.enum(['memory', 'file']),
   "id": zod.string(),
@@ -1381,6 +1993,14 @@ export const RecordTaskUsageResponse = zod.object({
   "errorKind": zod.string().nullish(),
   "errorMessage": zod.string().nullish(),
   "attempts": zod.number(),
+  "parentTaskId": zod.string().nullish(),
+  "rootTaskId": zod.string().nullish(),
+  "depth": zod.number().optional(),
+  "teamId": zod.string().nullish(),
+  "teamName": zod.string().nullish(),
+  "delegatedByAgentId": zod.string().nullish(),
+  "delegatedByAgentName": zod.string().nullish(),
+  "runtime": zod.string().optional(),
   "contextSources": zod.array(zod.object({
   "type": zod.enum(['memory', 'file']),
   "id": zod.string(),

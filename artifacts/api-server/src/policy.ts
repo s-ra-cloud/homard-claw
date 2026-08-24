@@ -3,6 +3,8 @@ import {
   approvalsTable,
   db,
   tasksTable,
+  teamMembersTable,
+  teamsTable,
   type AgentPermissions,
 } from "@workspace/db";
 import { and, count, eq, gte, ne, sum } from "drizzle-orm";
@@ -33,6 +35,12 @@ export const PERMISSION_PROFILES: Record<string, AgentPermissions> = {
     maxTasksPerDay: 10,
     approvalThresholdCents: 0,
     allowedProviders: null,
+    maxRunSeconds: 120,
+    maxOutputTokens: 1024,
+    maxAttempts: 2,
+    // Observers report; they never hand work to anyone else.
+    maxDelegationDepth: 0,
+    maxSubtasksPerTask: 0,
   },
   assistant: {
     maxTaskBudgetCents: 50,
@@ -40,6 +48,11 @@ export const PERMISSION_PROFILES: Record<string, AgentPermissions> = {
     maxTasksPerDay: 50,
     approvalThresholdCents: 20,
     allowedProviders: null,
+    maxRunSeconds: 180,
+    maxOutputTokens: 4096,
+    maxAttempts: 3,
+    maxDelegationDepth: 1,
+    maxSubtasksPerTask: 3,
   },
   operator: {
     maxTaskBudgetCents: 250,
@@ -47,11 +60,17 @@ export const PERMISSION_PROFILES: Record<string, AgentPermissions> = {
     maxTasksPerDay: 200,
     approvalThresholdCents: 100,
     allowedProviders: null,
+    maxRunSeconds: 300,
+    maxOutputTokens: 4096,
+    maxAttempts: 3,
+    maxDelegationDepth: 2,
+    maxSubtasksPerTask: 5,
   },
 };
 
 type AgentRow = typeof agentsTable.$inferSelect;
 type TaskRow = typeof tasksTable.$inferSelect;
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export function effectivePermissions(
   agent: Pick<AgentRow, "securityPreset" | "permissionOverrides">,
@@ -80,6 +99,26 @@ export function effectivePermissions(
       overrides.allowedProviders !== undefined
         ? overrides.allowedProviders
         : base.allowedProviders,
+    maxRunSeconds:
+      overrides.maxRunSeconds !== undefined
+        ? overrides.maxRunSeconds
+        : base.maxRunSeconds,
+    maxOutputTokens:
+      overrides.maxOutputTokens !== undefined
+        ? overrides.maxOutputTokens
+        : base.maxOutputTokens,
+    maxAttempts:
+      overrides.maxAttempts !== undefined
+        ? overrides.maxAttempts
+        : base.maxAttempts,
+    maxDelegationDepth:
+      overrides.maxDelegationDepth !== undefined
+        ? overrides.maxDelegationDepth
+        : base.maxDelegationDepth,
+    maxSubtasksPerTask:
+      overrides.maxSubtasksPerTask !== undefined
+        ? overrides.maxSubtasksPerTask
+        : base.maxSubtasksPerTask,
   };
 }
 
@@ -230,4 +269,102 @@ export async function evaluateTaskPolicy(
     };
   }
   return { kind: "allow" };
+}
+
+export type DelegationDecision =
+  | { kind: "allow"; teamId: string; depth: number }
+  | { kind: "deny"; reason: string };
+
+/**
+ * Decide whether one agent may hand work to another.
+ *
+ * Delegation is authorized by team structure, never by the request: the
+ * delegating agent must lead a team, the target must be a member of that
+ * same team, and the resulting chain must stay inside the lead's
+ * delegation-depth and sub-task (iteration) limits. Everything here is
+ * evaluated server-side, so a crafted API call cannot widen the circle.
+ */
+export async function evaluateDelegation({
+  lead,
+  targetAgentId,
+  parentTask,
+  tx,
+}: {
+  lead: AgentRow;
+  targetAgentId: string;
+  parentTask: TaskRow;
+  /**
+   * Transaction the caller has already locked the parent task in. Passing
+   * it keeps authorization, the quota count, and the child insert in one
+   * atomic step, so concurrent hand-offs cannot both see free capacity.
+   */
+  tx: Tx;
+}): Promise<DelegationDecision> {
+  const conn = tx;
+  const perms = effectivePermissions(lead);
+  const depth = parentTask.depth + 1;
+
+  if (perms.maxDelegationDepth === null || perms.maxDelegationDepth < 1) {
+    return {
+      kind: "deny",
+      reason: `${lead.name} is not allowed to delegate work.`,
+    };
+  }
+  if (depth > perms.maxDelegationDepth) {
+    return {
+      kind: "deny",
+      reason: `This would create a delegation chain ${depth} level(s) deep, beyond ${lead.name}'s limit of ${perms.maxDelegationDepth}.`,
+    };
+  }
+  if (targetAgentId === lead.id) {
+    return { kind: "deny", reason: `${lead.name} cannot delegate to itself.` };
+  }
+
+  // The lead must actually lead a team that contains the target.
+  const [team] = await conn
+    .select({ id: teamsTable.id })
+    .from(teamsTable)
+    .innerJoin(teamMembersTable, eq(teamMembersTable.teamId, teamsTable.id))
+    .where(
+      and(
+        eq(teamsTable.leadAgentId, lead.id),
+        eq(teamMembersTable.agentId, targetAgentId),
+        ...(parentTask.teamId ? [eq(teamsTable.id, parentTask.teamId)] : []),
+      ),
+    )
+    .limit(1);
+  if (!team) {
+    return {
+      kind: "deny",
+      reason: `${lead.name} may only delegate to members of a team it leads.`,
+    };
+  }
+
+  const [target] = await conn
+    .select()
+    .from(agentsTable)
+    .where(eq(agentsTable.id, targetAgentId))
+    .limit(1);
+  if (!target) return { kind: "deny", reason: "That teammate no longer exists." };
+  if (target.retired || target.archived) {
+    return {
+      kind: "deny",
+      reason: `${target.name} is no longer working in the office.`,
+    };
+  }
+
+  if (perms.maxSubtasksPerTask !== null) {
+    const [row] = await conn
+      .select({ children: count() })
+      .from(tasksTable)
+      .where(eq(tasksTable.parentTaskId, parentTask.id));
+    if ((row?.children ?? 0) >= perms.maxSubtasksPerTask) {
+      return {
+        kind: "deny",
+        reason: `This task already delegated ${row?.children ?? 0} sub-task(s), reaching ${lead.name}'s limit of ${perms.maxSubtasksPerTask}.`,
+      };
+    }
+  }
+
+  return { kind: "allow", teamId: team.id, depth };
 }

@@ -7,6 +7,7 @@ import {
   useListApprovals,
   useDecideApproval,
   useSetEmergencyStop,
+  useGetRuntimeHealth,
   ApprovalDecisionDecision,
 } from "@workspace/api-client-react";
 import { Shell } from "@/components/layout/Shell";
@@ -94,6 +95,10 @@ export default function OfficeDashboard() {
     isError: agentsError,
   } = useListAgents();
   const { data: approvals } = useListApprovals();
+  // Polls so a stalled queue or a lost worker lease surfaces on its own.
+  const { data: runtimeHealth } = useGetRuntimeHealth({
+    query: { queryKey: ["/api/runtime/health"], refetchInterval: 10000 },
+  });
   const queryClient = useQueryClient();
 
   // One break activity per idle period: assigned when an agent is first seen
@@ -175,6 +180,32 @@ export default function OfficeDashboard() {
   }
 
   const stopped = overview.emergencyStop;
+  // Runtime health: what is actually executing work, how deep the durable
+  // queue is, and which runtimes are present but unavailable.
+  const activeRuntime = runtimeHealth?.runtimes.find(
+    (runtime) => runtime.id === runtimeHealth.activeRuntime,
+  );
+  const runtimeLabel = activeRuntime
+    ? activeRuntime.status === "ready"
+      ? runtimeHealth!.worker.leaseHeld
+        ? "steady"
+        : "standby"
+      : activeRuntime.status.replace(/_/g, " ")
+    : "checking";
+  const queued = runtimeHealth?.queue.queued ?? 0;
+  const running = runtimeHealth?.queue.running ?? 0;
+  const oldestQueued = runtimeHealth?.queue.oldestQueuedSeconds ?? null;
+  // Work sitting unclaimed for minutes means nothing is draining the queue.
+  const queueStalled = queued > 0 && (oldestQueued ?? 0) > 300;
+  const queueLabel =
+    queued === 0 && running === 0
+      ? "empty"
+      : `${running} running · ${queued} waiting${
+          queueStalled ? ` · oldest ${Math.round((oldestQueued ?? 0) / 60)}m` : ""
+        }`;
+  const offlineRuntimes = (runtimeHealth?.runtimes ?? []).filter(
+    (runtime) => !runtime.acceptsWork,
+  );
   const nextApproval = approvals?.find((a) => a.status === "pending");
   const justDecided = decideApproval.isSuccess ? decideApproval.variables : undefined;
   const hasPendingApprovals = (overview.pendingApprovals ?? 0) > 0;
@@ -316,7 +347,10 @@ export default function OfficeDashboard() {
             <section className="quiet-card">
               <h2>Systems</h2>
               <div className="system-row">
-                <i className={`signal ${stopped ? "is-halted" : ""}`} /> Agent runtime <span>{stopped ? "paused" : "steady"}</span>
+                <i className={`signal ${stopped ? "is-halted" : ""}`} /> Agent runtime <span>{stopped ? "paused" : runtimeLabel}</span>
+              </div>
+              <div className="system-row">
+                <i className={`signal ${queueStalled ? "is-halted" : ""}`} /> Work queue <span>{queueLabel}</span>
               </div>
               <div className="system-row">
                 <i className="signal" /> Approval queue <span>{overview.pendingApprovals > 0 ? `${overview.pendingApprovals} waiting` : "clear"}</span>
@@ -324,6 +358,12 @@ export default function OfficeDashboard() {
               <div className="system-row">
                 <i className="signal" /> Monthly compute <span>${(overview.monthlyCostCents / 100).toFixed(2)}</span>
               </div>
+              {offlineRuntimes.map((runtime) => (
+                <div className="system-row" key={runtime.id} title={runtime.detail}>
+                  <i className="signal is-halted" /> {runtime.label}{" "}
+                  <span>{runtime.status.replace(/_/g, " ")}</span>
+                </div>
+              ))}
             </section>
 
             <section className="quiet-card approval">

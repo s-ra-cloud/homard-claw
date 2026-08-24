@@ -19,6 +19,7 @@ import {
   GetOfficeOverviewResponse,
   GetProviderSettingsResponse,
   GetProvidersResponse,
+  GetRuntimeHealthResponse,
   GetTaskParams,
   GetTaskResponse,
   ListAgentsResponse,
@@ -59,6 +60,7 @@ import {
   systemStateTable,
   taskLogsTable,
   tasksTable,
+  teamsTable,
 } from "@workspace/db";
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import {
@@ -82,8 +84,14 @@ import {
 } from "../providers";
 import { recordAudit, verifyAuditChain } from "../audit";
 import { effectivePermissions } from "../policy";
-import { abortRunningTask } from "../worker";
+import {
+  DEFAULT_RUNTIME,
+  listRuntimeHealth,
+  queueHealth,
+} from "../runtime";
+import { abortRunningTask, getWorkerStatus } from "../worker";
 import memoryRouter from "./memory";
+import teamsRouter from "./teams";
 
 const router: IRouter = Router();
 
@@ -117,8 +125,36 @@ async function requireOwner(
 }
 
 router.use(requireOwner);
-// Memory and knowledge routes share the owner gate above.
+// Memory, knowledge, and team routes share the owner gate above.
 router.use(memoryRouter);
+router.use(teamsRouter);
+
+router.get("/runtime/health", async (_req: Request, res: Response) => {
+  const [runtimes, queue, stop] = await Promise.all([
+    listRuntimeHealth(),
+    queueHealth(),
+    db
+      .select()
+      .from(systemStateTable)
+      .where(eq(systemStateTable.key, "emergency_stop"))
+      .limit(1),
+  ]);
+  const worker = getWorkerStatus();
+  res.json(
+    GetRuntimeHealthResponse.parse({
+      activeRuntime: DEFAULT_RUNTIME,
+      runtimes,
+      queue,
+      worker: {
+        leaseHeld: worker.leaseHeld,
+        running: worker.running,
+        inFlight: worker.inFlight,
+        emergencyStop: stop[0]?.value === "true",
+        lastTickAt: worker.lastTickAt ? worker.lastTickAt.toISOString() : null,
+      },
+    }),
+  );
+});
 
 function toAgent(agent: typeof agentsTable.$inferSelect) {
   return {
@@ -150,10 +186,14 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 function toTaskJson(
   task: typeof tasksTable.$inferSelect,
   agentName: string,
+  /** Delegation attribution, when the caller resolved the related names. */
+  lineage?: { teamName?: string | null; delegatedByAgentName?: string | null },
 ) {
   return {
     ...task,
     agentName,
+    teamName: lineage?.teamName ?? null,
+    delegatedByAgentName: lineage?.delegatedByAgentName ?? null,
     startedAt: task.startedAt ? task.startedAt.toISOString() : null,
     finishedAt: task.finishedAt ? task.finishedAt.toISOString() : null,
     createdAt: task.createdAt.toISOString(),
@@ -923,10 +963,21 @@ router.get("/tasks/:taskId", async (req, res): Promise<void> => {
     res.status(400).json({ error: "Invalid task id" });
     return;
   }
+  const delegator = sql`delegator`;
   const [row] = await db
-    .select({ task: tasksTable, agentName: agentsTable.name })
+    .select({
+      task: tasksTable,
+      agentName: agentsTable.name,
+      teamName: teamsTable.name,
+      delegatedByAgentName: sql<string | null>`${delegator}.name`,
+    })
     .from(tasksTable)
     .innerJoin(agentsTable, eq(tasksTable.agentId, agentsTable.id))
+    .leftJoin(teamsTable, eq(tasksTable.teamId, teamsTable.id))
+    .leftJoin(
+      sql`${agentsTable} as delegator`,
+      sql`${tasksTable.delegatedByAgentId} = ${delegator}.id`,
+    )
     .where(eq(tasksTable.id, params.data.taskId))
     .limit(1);
   if (!row) {
@@ -940,7 +991,10 @@ router.get("/tasks/:taskId", async (req, res): Promise<void> => {
     .orderBy(taskLogsTable.createdAt);
   res.json(
     GetTaskResponse.parse({
-      task: toTaskJson(row.task, row.agentName),
+      task: toTaskJson(row.task, row.agentName, {
+        teamName: row.teamName,
+        delegatedByAgentName: row.delegatedByAgentName,
+      }),
       logs: logs.map((log) => ({
         ...log,
         createdAt: log.createdAt.toISOString(),

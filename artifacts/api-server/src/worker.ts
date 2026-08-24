@@ -1,4 +1,5 @@
 import {
+  agentMessagesTable,
   agentsTable,
   approvalsTable,
   db,
@@ -14,11 +15,13 @@ import {
   evaluateTaskPolicy,
   meteredSpendTodayCents,
 } from "./policy";
+import { MAX_OUTPUT_TOKENS, ProviderCallError } from "./execution";
 import {
-  MAX_OUTPUT_TOKENS,
-  ProviderCallError,
-  callProvider,
-} from "./execution";
+  DEFAULT_RUNTIME,
+  RuntimeUnavailableError,
+  getRuntime,
+  isRuntimeId,
+} from "./runtime";
 import {
   computeUsageCostCents,
   estimatePromptTokens,
@@ -356,6 +359,34 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     .where(eq(agentsTable.id, agent.id))
     .limit(1);
   agent = freshAgent ?? agent;
+  const perms = effectivePermissions(agent);
+
+  // Retry ceiling, checked before anything is dispatched. The claim already
+  // consumed this attempt, so a cap of 0 blocks the very first run, and a
+  // cap tightened after the task was queued applies immediately.
+  const maxAttempts = Math.min(
+    MAX_ATTEMPTS,
+    perms.maxAttempts !== null ? perms.maxAttempts : MAX_ATTEMPTS,
+  );
+  if (task.attempts > maxAttempts) {
+    const reason =
+      maxAttempts === 0
+        ? `${agent.name} is not allowed to run tasks (attempt limit is 0).`
+        : `This task has used all ${maxAttempts} attempt(s) allowed for ${agent.name}.`;
+    await finishIfStillRunning(task.id, task.attempts, {
+      status: "blocked",
+      errorKind: "policy",
+      errorMessage: reason,
+    });
+    await addTaskLog(task.id, "error", `Blocked by policy: ${reason}`);
+    await recordAudit(
+      "policy.denied",
+      `A task for ${agent.name} was blocked by policy: ${reason}`,
+    );
+    await settleAgentStatus(agent.id);
+    return;
+  }
+
   const decision = await evaluateTaskPolicy(agent, task);
   if (decision.kind === "deny") {
     await finishIfStillRunning(task.id, task.attempts, {
@@ -438,7 +469,6 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     // Approval never bypasses this — an approved task is still clamped.
     let maxOutputTokens = MAX_OUTPUT_TOKENS;
     if (provider !== "claude_max") {
-      const perms = effectivePermissions(agent);
       const bounds: Array<{ cents: number; label: string }> = [];
       if (task.budgetCents != null) {
         bounds.push({ cents: task.budgetCents, label: "task budget" });
@@ -508,12 +538,62 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
       }
     }
 
+    // Token limit: never request more output than the agent is allowed,
+    // whatever the budget maths above worked out.
+    if (perms.maxOutputTokens !== null && perms.maxOutputTokens < maxOutputTokens) {
+      maxOutputTokens = perms.maxOutputTokens;
+      await addTaskLog(
+        task.id,
+        "info",
+        `Output capped at ${maxOutputTokens} tokens by ${agent.name}'s limits.`,
+      );
+    }
+    if (maxOutputTokens < 1) {
+      await finishIfStillRunning(task.id, task.attempts, {
+        status: "blocked",
+        errorKind: "policy",
+        errorMessage: `${agent.name}'s output-token limit leaves no room to answer. Raise the limit and retry.`,
+      });
+      await addTaskLog(
+        task.id,
+        "error",
+        "Blocked: the output-token limit leaves no room for a reply.",
+      );
+      return;
+    }
+
+    // Time limit: the run is interrupted at the agent's wall-clock ceiling,
+    // never later than the global call timeout.
+    const runLimitMs = Math.min(
+      CALL_TIMEOUT_MS,
+      perms.maxRunSeconds !== null ? perms.maxRunSeconds * 1000 : CALL_TIMEOUT_MS,
+    );
+
+    // An unrecognized runtime id throws, and the catch below blocks the
+    // task. Silently falling back to the built-in runtime would run work
+    // somewhere it was never assigned.
+    const runtime = getRuntime(task.runtime || DEFAULT_RUNTIME);
+    const runtimeStatus = await runtime.health();
+    if (!runtimeStatus.acceptsWork) {
+      await finishIfStillRunning(task.id, task.attempts, {
+        status: "blocked",
+        errorKind: "runtime_unavailable",
+        errorMessage: runtimeStatus.detail,
+      });
+      await addTaskLog(
+        task.id,
+        "error",
+        `Blocked: ${runtimeStatus.label} cannot run tasks. ${runtimeStatus.detail}`,
+      );
+      return;
+    }
+
     const controller = new AbortController();
     inFlight.set(task.id, controller);
-    const timeout = setTimeout(() => controller.abort("timeout"), CALL_TIMEOUT_MS);
+    const timeout = setTimeout(() => controller.abort("timeout"), runLimitMs);
     let result;
     try {
-      result = await callProvider({
+      result = await runtime.execute({
         provider,
         model: task.model ?? "",
         system,
@@ -549,6 +629,17 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         `Completed: ${result.inputTokens} in / ${result.outputTokens} out tokens${costCents != null ? `, ${costCents.toFixed(4)}¢` : ""}.`,
       );
       await recordAudit("task.completed", `${agent.name} completed a task.`);
+      // Delegated work reports back to whoever handed it over, so the
+      // lead's thread shows the outcome without polling the task tree.
+      if (task.delegatedByAgentId) {
+        await db.insert(agentMessagesTable).values({
+          fromAgentId: agent.id,
+          toAgentId: task.delegatedByAgentId,
+          taskId: task.id,
+          kind: "result",
+          body: `Finished "${task.objective.slice(0, 160)}": ${result.output.slice(0, 400)}`,
+        });
+      }
       // Retain the outcome as agent memory so future tasks can draw on it.
       try {
         const saved = await saveTaskOutcomeMemory({
@@ -584,6 +675,17 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
       );
     }
   } catch (error) {
+    // A missing runtime is a configuration problem, not a flaky call: block
+    // the task instead of burning retries against something not installed.
+    if (error instanceof RuntimeUnavailableError) {
+      await finishIfStillRunning(task.id, task.attempts, {
+        status: "blocked",
+        errorKind: "runtime_unavailable",
+        errorMessage: error.message,
+      });
+      await addTaskLog(task.id, "error", `Blocked: ${error.message}`);
+      return;
+    }
     const callError =
       error instanceof ProviderCallError
         ? error
@@ -596,7 +698,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
       await addTaskLog(task.id, "warn", "Provider call aborted by cancellation.");
       return;
     }
-    if (callError.retryable && task.attempts < MAX_ATTEMPTS) {
+    if (callError.retryable && task.attempts < maxAttempts) {
       const backoffMs = RATE_LIMIT_BACKOFF_MS * task.attempts;
       await db
         .update(tasksTable)
@@ -698,6 +800,26 @@ async function ensureWorkerLease(): Promise<boolean> {
 
 let timer: NodeJS.Timeout | null = null;
 let draining = false;
+let lastTickAt: Date | null = null;
+
+export type WorkerStatus = {
+  /** This process holds the singleton queue lease. */
+  leaseHeld: boolean;
+  /** The polling loop is scheduled. */
+  running: boolean;
+  /** Provider calls in flight in this process. */
+  inFlight: number;
+  lastTickAt: Date | null;
+};
+
+export function getWorkerStatus(): WorkerStatus {
+  return {
+    leaseHeld: leaseClient !== null,
+    running: timer !== null,
+    inFlight: inFlight.size,
+    lastTickAt,
+  };
+}
 
 /** Start the polling worker loop. Idempotent. */
 export function startWorker(intervalMs = POLL_INTERVAL_MS): void {
@@ -705,6 +827,7 @@ export function startWorker(intervalMs = POLL_INTERVAL_MS): void {
   const tick = async (): Promise<void> => {
     if (draining) return;
     draining = true;
+    lastTickAt = new Date();
     try {
       // Only the lease holder recovers and claims; other instances keep
       // polling so one of them takes over if the holder dies.

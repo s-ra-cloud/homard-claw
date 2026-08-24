@@ -22,6 +22,7 @@ import AgentsPage from '@/pages/AgentsPage';
 import NewAgentPage from '@/pages/NewAgentPage';
 import EditAgentPage from '@/pages/EditAgentPage';
 import TasksPage from '@/pages/TasksPage';
+import TeamsPage from '@/pages/TeamsPage';
 import ApprovalsPage from '@/pages/ApprovalsPage';
 import ProvidersPage from '@/pages/ProvidersPage';
 import IslandPage from '@/pages/IslandPage';
@@ -190,6 +191,10 @@ function ClerkProviderWithRoutes() {
 
             <Route path="/tasks">
               <ProtectedRoute component={TasksPage} />
+            </Route>
+
+            <Route path="/teams">
+              <ProtectedRoute component={TeamsPage} />
             </Route>
 
             <Route path="/memory">

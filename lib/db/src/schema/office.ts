@@ -38,6 +38,16 @@ export type AgentPermissions = {
   approvalThresholdCents: number | null;
   /** Providers the agent may use; null allows any configured provider. */
   allowedProviders: string[] | null;
+  /** Wall-clock ceiling for a single run before it is interrupted. */
+  maxRunSeconds: number | null;
+  /** Hard ceiling on output tokens the agent may request per run. */
+  maxOutputTokens: number | null;
+  /** Attempts a task may make before it stops retrying. */
+  maxAttempts: number | null;
+  /** How deep a delegation chain rooted at this agent may go; 0 = no delegating. */
+  maxDelegationDepth: number | null;
+  /** Iteration guard: how many sub-tasks one task may spawn. */
+  maxSubtasksPerTask: number | null;
 };
 
 /** Owner-set overrides on top of the security-preset profile. */
@@ -84,6 +94,43 @@ export const agentsTable = pgTable(
   ],
 );
 
+/**
+ * A working group. The lead is the only member allowed to delegate, and it
+ * may only delegate to other members of the same team — membership IS the
+ * delegation authorization list.
+ */
+export const teamsTable = pgTable(
+  "teams",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    mission: text("mission"),
+    leadAgentId: uuid("lead_agent_id").references(() => agentsTable.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [uniqueIndex("teams_name_lower_unique").on(sql`lower(${table.name})`)],
+);
+
+export const teamMembersTable = pgTable(
+  "team_members",
+  {
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teamsTable.id, { onDelete: "cascade" }),
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => agentsTable.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.teamId, table.agentId] })],
+);
+
 export type TaskFile = {
   name: string;
   content: string;
@@ -105,6 +152,22 @@ export const tasksTable = pgTable("tasks", {
   agentId: uuid("agent_id")
     .notNull()
     .references(() => agentsTable.id),
+  // Delegation lineage. parentTaskId is the task that spawned this one,
+  // rootTaskId the top of the tree (itself for owner-created tasks), and
+  // depth the delegation distance from the root, capped by policy.
+  parentTaskId: uuid("parent_task_id"),
+  rootTaskId: uuid("root_task_id"),
+  depth: integer("depth").notNull().default(0),
+  teamId: uuid("team_id").references(() => teamsTable.id, {
+    onDelete: "set null",
+  }),
+  delegatedByAgentId: uuid("delegated_by_agent_id").references(
+    () => agentsTable.id,
+    { onDelete: "set null" },
+  ),
+  // Which execution runtime should run this task. "native" is the built-in
+  // provider runner; other adapters can be registered without a migration.
+  runtime: text("runtime").notNull().default("native"),
   objective: text("objective").notNull(),
   status: text("status").notNull().default("queued"),
   priority: text("priority").notNull().default("normal"),
@@ -180,6 +243,34 @@ export const auditEventsTable = pgTable("audit_events", {
     .notNull()
     .defaultNow(),
 });
+
+/**
+ * Messages exchanged around delegated work: a lead briefing a teammate, a
+ * teammate reporting back, or the office narrating what happened. A null
+ * agent id on either side means the owner/system rather than an agent.
+ */
+export const agentMessagesTable = pgTable(
+  "agent_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    fromAgentId: uuid("from_agent_id").references(() => agentsTable.id, {
+      onDelete: "cascade",
+    }),
+    toAgentId: uuid("to_agent_id").references(() => agentsTable.id, {
+      onDelete: "cascade",
+    }),
+    taskId: uuid("task_id").references(() => tasksTable.id, {
+      onDelete: "cascade",
+    }),
+    // delegation | result | note
+    kind: text("kind").notNull().default("note"),
+    body: text("body").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("agent_messages_task_idx").on(table.taskId)],
+);
 
 export const systemStateTable = pgTable("system_state", {
   key: text("key").primaryKey(),
@@ -279,6 +370,14 @@ export const insertAuditEventSchema = createInsertSchema(auditEventsTable).omit(
   createdAt: true,
 });
 
+export const insertTeamSchema = createInsertSchema(teamsTable).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type TeamRecord = typeof teamsTable.$inferSelect;
+export type TeamMemberRecord = typeof teamMembersTable.$inferSelect;
+export type AgentMessageRecord = typeof agentMessagesTable.$inferSelect;
 export type AgentRecord = typeof agentsTable.$inferSelect;
 export type TaskRecord = typeof tasksTable.$inferSelect;
 export type TaskLogRecord = typeof taskLogsTable.$inferSelect;

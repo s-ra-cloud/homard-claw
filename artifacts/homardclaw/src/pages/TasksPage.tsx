@@ -7,6 +7,10 @@ import {
   useGetProviderSettings,
   useEstimateTask,
   useGetTask,
+  useGetTaskTree,
+  useListAgentMessages,
+  useListTeams,
+  useDelegateTask,
   useCancelTask,
   useRetryTask,
   TaskStatus,
@@ -20,7 +24,7 @@ import { Shell } from "@/components/layout/Shell";
 import { PixelCard } from "@/components/ui/pixel-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Activity, Play, Clock, AlertTriangle, CheckCircle, Calculator, Ban, RotateCcw, ScrollText, XCircle } from "lucide-react";
+import { Activity, Play, Clock, AlertTriangle, CheckCircle, Calculator, Ban, RotateCcw, ScrollText, XCircle, Network } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
@@ -232,6 +236,179 @@ const RETRYABLE: TaskStatus[] = [
 ];
 
 /** Full task inspector: live status, output, error, and execution logs. */
+/**
+ * The delegation view for one task: who handed it over, the tree of
+ * sub-tasks it belongs to, the messages exchanged around it, and — when the
+ * agent leads a team — a form to hand a slice of work to a teammate.
+ */
+function DelegationSection({ task }: { task: Task }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [objective, setObjective] = useState("");
+  const [teammateId, setTeammateId] = useState("");
+
+  const { data: tree } = useGetTaskTree(task.id, {
+    query: { queryKey: [`/api/tasks/${task.id}/tree`] },
+  });
+  const { data: messages } = useListAgentMessages(
+    { taskId: task.id },
+    { query: { queryKey: [`/api/messages?taskId=${task.id}`] } },
+  );
+  const { data: teams } = useListTeams({ query: { queryKey: ["/api/teams"] } });
+
+  // Only a lead may delegate, and only to its own team's members.
+  const ledTeam = teams?.find((team) => team.leadAgentId === task.agentId);
+  const teammates =
+    ledTeam?.members.filter((member) => member.agentId !== task.agentId) ?? [];
+  const canDelegate =
+    teammates.length > 0 &&
+    !["completed", "failed", "cancelled"].includes(task.status);
+
+  const delegate = useDelegateTask({
+    mutation: {
+      onSuccess: () => {
+        setObjective("");
+        setTeammateId("");
+        void queryClient.invalidateQueries({ queryKey: [`/api/tasks/${task.id}/tree`] });
+        void queryClient.invalidateQueries({
+          queryKey: [`/api/messages?taskId=${task.id}`],
+        });
+        void queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+        toast({ title: "Sub-task delegated" });
+      },
+      onError: (error: unknown) => {
+        toast({
+          title: "Could not delegate",
+          description:
+            error instanceof Error ? error.message : "The office refused that hand-off.",
+          variant: "destructive",
+        });
+      },
+    },
+  });
+
+  const nodes = tree?.nodes ?? [];
+  const hasTree = nodes.length > 1;
+  const hasMessages = (messages?.length ?? 0) > 0;
+  if (!hasTree && !hasMessages && !canDelegate) return null;
+
+  return (
+    <div className="space-y-4 border-t-4 border-border pt-4">
+      <div className="flex items-center gap-2 text-[10px] font-bold uppercase text-muted-foreground">
+        <Network className="w-3 h-3" />
+        Delegation
+      </div>
+
+      {task.delegatedByAgentName && (
+        <p className="font-mono text-xs text-muted-foreground">
+          Handed over by{" "}
+          <span className="text-accent font-bold">{task.delegatedByAgentName}</span>
+          {task.teamName ? ` · ${task.teamName}` : ""}
+        </p>
+      )}
+
+      {hasTree && (
+        <div className="space-y-1" data-testid="task-tree">
+          {nodes.map((node) => (
+            <div
+              key={node.id}
+              className={`flex items-start gap-2 border-2 p-2 font-mono text-xs ${
+                node.id === task.id
+                  ? "border-primary bg-primary/10"
+                  : "border-border/50 bg-muted/20"
+              }`}
+              style={{ marginLeft: `${Math.min(node.depth, 4) * 16}px` }}
+            >
+              <TaskStatusBadge status={node.status} />
+              <div className="min-w-0 flex-1">
+                <div className="truncate">{node.objective}</div>
+                <div className="text-[10px] uppercase text-muted-foreground">
+                  {node.agentName}
+                  {node.delegatedByAgentName ? ` ← ${node.delegatedByAgentName}` : ""}
+                  {node.actualCostCents != null
+                    ? ` · ${formatCents(node.actualCostCents)}`
+                    : ""}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {hasMessages && (
+        <div className="space-y-1">
+          <div className="text-[10px] font-bold uppercase text-muted-foreground">
+            Messages
+          </div>
+          {messages!.map((message) => (
+            <div
+              key={message.id}
+              className="border-2 border-border/50 bg-background p-2 font-mono text-xs"
+            >
+              <div className="text-[10px] uppercase text-muted-foreground">
+                {message.fromAgentName ?? "Office"} →{" "}
+                {message.toAgentName ?? "Office"} · {message.kind}
+              </div>
+              <p className="whitespace-pre-wrap">{message.body}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {canDelegate && (
+        <form
+          className="space-y-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!teammateId || objective.trim().length < 3) return;
+            delegate.mutate({
+              taskId: task.id,
+              data: { agentId: teammateId, objective: objective.trim() },
+            });
+          }}
+        >
+          <div className="text-[10px] font-bold uppercase text-muted-foreground">
+            Hand a slice to a teammate
+          </div>
+          <Select value={teammateId} onValueChange={setTeammateId}>
+            <SelectTrigger className={selectTriggerClass} data-testid="select-teammate">
+              <SelectValue placeholder="Choose a teammate" />
+            </SelectTrigger>
+            <SelectContent className={selectContentClass}>
+              {teammates.map((member) => (
+                <SelectItem
+                  key={member.agentId}
+                  value={member.agentId}
+                  className={selectItemClass}
+                >
+                  {member.name} — {member.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Textarea
+            value={objective}
+            onChange={(event) => setObjective(event.target.value)}
+            placeholder="What should they do?"
+            className="border-4 border-border rounded-none font-mono text-sm"
+            rows={2}
+            data-testid="input-delegate-objective"
+          />
+          <Button
+            type="submit"
+            disabled={delegate.isPending || !teammateId || objective.trim().length < 3}
+            className="rounded-none font-bold uppercase"
+            data-testid="button-delegate"
+          >
+            <Network className="w-3 h-3 mr-2" />
+            {delegate.isPending ? "Delegating..." : "Delegate"}
+          </Button>
+        </form>
+      )}
+    </div>
+  );
+}
+
 function TaskDetailDialog({
   taskId,
   onClose,
@@ -352,6 +529,8 @@ function TaskDetailDialog({
             <div className="flex flex-wrap items-center gap-2">
               <TaskCostLine task={task} />
             </div>
+
+            <DelegationSection task={task} />
 
             <div>
               <div className="flex items-center gap-2 text-[10px] font-bold uppercase text-muted-foreground mb-1">

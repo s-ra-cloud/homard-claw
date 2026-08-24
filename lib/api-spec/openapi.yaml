@@ -339,6 +339,192 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuditVerification"
+  /runtime/health:
+    get:
+      operationId: getRuntimeHealth
+      tags: [office]
+      summary: Report execution runtime and queue health
+      responses:
+        "200":
+          description: Runtime health
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeHealthReport"
+  /teams:
+    get:
+      operationId: listTeams
+      tags: [office]
+      summary: List teams with their lead and members
+      responses:
+        "200":
+          description: Teams
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Team"
+    post:
+      operationId: createTeam
+      tags: [office]
+      summary: Create a team
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeamInput"
+      responses:
+        "201":
+          description: Created team
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Team"
+        "409":
+          description: Team name already in use
+  /teams/{teamId}:
+    patch:
+      operationId: updateTeam
+      tags: [office]
+      summary: Rename a team, change its mission, or assign its lead
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeamUpdate"
+      responses:
+        "200":
+          description: Updated team
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Team"
+        "404":
+          description: Team not found
+        "409":
+          description: Team name already in use or lead is not a member
+    delete:
+      operationId: deleteTeam
+      tags: [office]
+      summary: Disband a team
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      responses:
+        "204":
+          description: Team disbanded
+        "404":
+          description: Team not found
+  /teams/{teamId}/members:
+    post:
+      operationId: addTeamMember
+      tags: [office]
+      summary: Add an agent to a team
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeamMemberInput"
+      responses:
+        "200":
+          description: Updated team
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Team"
+        "404":
+          description: Team or agent not found
+  /teams/{teamId}/members/{agentId}:
+    delete:
+      operationId: removeTeamMember
+      tags: [office]
+      summary: Remove an agent from a team
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+        - $ref: "#/components/parameters/AgentId"
+      responses:
+        "200":
+          description: Updated team
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Team"
+        "404":
+          description: Team or member not found
+  /tasks/{taskId}/delegate:
+    post:
+      operationId: delegateTask
+      tags: [office]
+      summary: Delegate a sub-task from this task to an authorized teammate
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DelegationInput"
+      responses:
+        "201":
+          description: Delegated sub-task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "403":
+          description: Delegation not permitted by policy
+        "404":
+          description: Task or teammate not found
+  /tasks/{taskId}/tree:
+    get:
+      operationId: getTaskTree
+      tags: [office]
+      summary: Get the whole delegation tree this task belongs to
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Task tree
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskTree"
+        "404":
+          description: Task not found
+  /messages:
+    get:
+      operationId: listAgentMessages
+      tags: [office]
+      summary: List messages exchanged between agents
+      parameters:
+        - name: taskId
+          in: query
+          required: false
+          schema: { type: string }
+        - name: agentId
+          in: query
+          required: false
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: number }
+      responses:
+        "200":
+          description: Messages, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AgentMessage"
   /providers:
     get:
       operationId: getProviders
@@ -686,6 +872,11 @@ components:
       in: path
       required: true
       schema: { type: string }
+    TeamId:
+      name: teamId
+      in: path
+      required: true
+      schema: { type: string }
     MemoryId:
       name: memoryId
       in: path
@@ -734,7 +925,19 @@ components:
     AgentPermissions:
       type: object
       description: Effective budgets and limits after overrides are applied. Null means no limit.
-      required: [maxTaskBudgetCents, dailyBudgetCents, maxTasksPerDay, approvalThresholdCents, allowedProviders]
+      required:
+        [
+          maxTaskBudgetCents,
+          dailyBudgetCents,
+          maxTasksPerDay,
+          approvalThresholdCents,
+          allowedProviders,
+          maxRunSeconds,
+          maxOutputTokens,
+          maxAttempts,
+          maxDelegationDepth,
+          maxSubtasksPerTask,
+        ]
       properties:
         maxTaskBudgetCents: { type: [number, "null"], minimum: 0 }
         dailyBudgetCents: { type: [number, "null"], minimum: 0 }
@@ -745,6 +948,11 @@ components:
             - type: array
               items: { type: string, enum: [claude_max, openrouter] }
             - type: "null"
+        maxRunSeconds: { type: [number, "null"], minimum: 0 }
+        maxOutputTokens: { type: [number, "null"], minimum: 0 }
+        maxAttempts: { type: [number, "null"], minimum: 0 }
+        maxDelegationDepth: { type: [number, "null"], minimum: 0 }
+        maxSubtasksPerTask: { type: [number, "null"], minimum: 0 }
     AgentPermissionOverrides:
       type: object
       description: Custom limits overriding the security preset profile. Omitted fields fall back to the profile.
@@ -758,6 +966,11 @@ components:
             - type: array
               items: { type: string, enum: [claude_max, openrouter] }
             - type: "null"
+        maxRunSeconds: { type: [number, "null"], minimum: 0 }
+        maxOutputTokens: { type: [number, "null"], minimum: 0 }
+        maxAttempts: { type: [number, "null"], minimum: 0 }
+        maxDelegationDepth: { type: [number, "null"], minimum: 0 }
+        maxSubtasksPerTask: { type: [number, "null"], minimum: 0 }
     AgentDetail:
       type: object
       required: [agent, tasks]
@@ -866,6 +1079,14 @@ components:
         errorKind: { type: [string, "null"] }
         errorMessage: { type: [string, "null"] }
         attempts: { type: number }
+        parentTaskId: { type: [string, "null"] }
+        rootTaskId: { type: [string, "null"] }
+        depth: { type: number }
+        teamId: { type: [string, "null"] }
+        teamName: { type: [string, "null"] }
+        delegatedByAgentId: { type: [string, "null"] }
+        delegatedByAgentName: { type: [string, "null"] }
+        runtime: { type: string }
         contextSources:
           type: ["array", "null"]
           items:
@@ -873,6 +1094,131 @@ components:
         startedAt: { type: [string, "null"], format: date-time }
         finishedAt: { type: [string, "null"], format: date-time }
         createdAt: { type: string, format: date-time }
+    Team:
+      type: object
+      required: [id, name, members, createdAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        mission: { type: [string, "null"] }
+        leadAgentId: { type: [string, "null"] }
+        leadAgentName: { type: [string, "null"] }
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/TeamMember"
+        createdAt: { type: string, format: date-time }
+    TeamMember:
+      type: object
+      required: [agentId, name, title, isLead, avatar]
+      properties:
+        agentId: { type: string }
+        name: { type: string }
+        title: { type: string }
+        isLead: { type: boolean }
+        avatar: { $ref: "#/components/schemas/AvatarConfig" }
+    TeamInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 2, maxLength: 60 }
+        mission: { type: string, maxLength: 2000 }
+        leadAgentId: { type: string }
+        memberAgentIds:
+          type: array
+          items: { type: string }
+    TeamUpdate:
+      type: object
+      properties:
+        name: { type: string, minLength: 2, maxLength: 60 }
+        mission: { type: [string, "null"], maxLength: 2000 }
+        leadAgentId: { type: [string, "null"] }
+    TeamMemberInput:
+      type: object
+      required: [agentId]
+      properties:
+        agentId: { type: string }
+    DelegationInput:
+      type: object
+      required: [agentId, objective]
+      properties:
+        agentId: { type: string }
+        objective: { type: string, minLength: 3, maxLength: 5000 }
+        priority: { type: string, enum: [low, normal, high] }
+        budgetCents: { type: number, minimum: 0.01, maximum: 1000000 }
+        note: { type: string, maxLength: 2000 }
+    TaskTreeNode:
+      type: object
+      required: [id, agentId, agentName, objective, status, depth, createdAt]
+      properties:
+        id: { type: string }
+        parentTaskId: { type: [string, "null"] }
+        agentId: { type: string }
+        agentName: { type: string }
+        objective: { type: string }
+        status: { type: string, enum: [queued, running, waiting_approval, blocked, completed, failed, cancelled] }
+        depth: { type: number }
+        delegatedByAgentName: { type: [string, "null"] }
+        actualCostCents: { type: [number, "null"] }
+        createdAt: { type: string, format: date-time }
+    TaskTree:
+      type: object
+      required: [rootTaskId, nodes]
+      properties:
+        rootTaskId: { type: string }
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaskTreeNode"
+    AgentMessage:
+      type: object
+      required: [id, kind, body, createdAt]
+      properties:
+        id: { type: string }
+        fromAgentId: { type: [string, "null"] }
+        fromAgentName: { type: [string, "null"] }
+        toAgentId: { type: [string, "null"] }
+        toAgentName: { type: [string, "null"] }
+        taskId: { type: [string, "null"] }
+        kind: { type: string, enum: [delegation, result, note] }
+        body: { type: string }
+        createdAt: { type: string, format: date-time }
+    RuntimeInfo:
+      type: object
+      required: [id, label, status, detail, acceptsWork]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        status: { type: string, enum: [ready, degraded, not_installed] }
+        detail: { type: string }
+        acceptsWork: { type: boolean }
+    RuntimeHealthReport:
+      type: object
+      required: [activeRuntime, runtimes, queue, worker]
+      properties:
+        activeRuntime: { type: string }
+        runtimes:
+          type: array
+          items:
+            $ref: "#/components/schemas/RuntimeInfo"
+        queue:
+          type: object
+          required: [queued, running, waitingApproval, blocked, oldestQueuedSeconds]
+          properties:
+            queued: { type: number }
+            running: { type: number }
+            waitingApproval: { type: number }
+            blocked: { type: number }
+            oldestQueuedSeconds: { type: [number, "null"] }
+        worker:
+          type: object
+          required: [leaseHeld, running, inFlight, emergencyStop]
+          properties:
+            leaseHeld: { type: boolean }
+            running: { type: boolean }
+            inFlight: { type: number }
+            emergencyStop: { type: boolean }
+            lastTickAt: { type: [string, "null"], format: date-time }
     TaskSource:
       type: object
       required: [type, id, label, title]
