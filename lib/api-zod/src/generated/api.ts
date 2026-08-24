@@ -1475,11 +1475,101 @@ export const ListAgentMessagesResponseItem = zod.object({
   "toAgentId": zod.string().nullish(),
   "toAgentName": zod.string().nullish(),
   "taskId": zod.string().nullish(),
-  "kind": zod.enum(['delegation', 'result', 'note']),
+  "kind": zod.enum(['delegation', 'result', 'note', 'voice']),
   "body": zod.string(),
   "createdAt": zod.coerce.date()
 })
 export const ListAgentMessagesResponse = zod.array(ListAgentMessagesResponseItem)
+
+
+/**
+ * @summary Report whether voice conversations are available
+ */
+export const GetVoiceStatusResponse = zod.object({
+  "available": zod.boolean(),
+  "reason": zod.string().nullable(),
+  "transcriptsEnabled": zod.boolean()
+})
+
+
+/**
+ * @summary Update voice settings such as transcript storage
+ */
+export const UpdateVoiceSettingsBody = zod.object({
+  "transcriptsEnabled": zod.boolean()
+})
+
+export const UpdateVoiceSettingsResponse = zod.object({
+  "available": zod.boolean(),
+  "reason": zod.string().nullable(),
+  "transcriptsEnabled": zod.boolean()
+})
+
+
+/**
+ * @summary Transcribe a (possibly in-progress) recording for live captions
+ */
+export const TranscribeAudioBody = zod.object({
+  "audio": zod.string().describe('Base64-encoded audio captured so far (webm\/mp4\/wav\/ogg)')
+})
+
+export const TranscribeAudioResponse = zod.object({
+  "text": zod.string()
+})
+
+
+/**
+ * @summary Have a short text conversation with an agent
+ */
+export const ConverseWithAgentParams = zod.object({
+  "agentId": zod.coerce.string()
+})
+
+export const converseWithAgentBodyTextMax = 4000;
+
+export const converseWithAgentBodyHistoryItemTextMax = 8000;
+
+export const converseWithAgentBodyHistoryMax = 20;
+
+
+
+export const ConverseWithAgentBody = zod.object({
+  "text": zod.string().min(1).max(converseWithAgentBodyTextMax),
+  "history": zod.array(zod.object({
+  "role": zod.enum(['user', 'agent']),
+  "text": zod.string().max(converseWithAgentBodyHistoryItemTextMax)
+})).max(converseWithAgentBodyHistoryMax).optional()
+})
+
+export const ConverseWithAgentResponse = zod.object({
+  "reply": zod.string(),
+  "proposedTaskObjective": zod.string().nullable(),
+  "voice": zod.string().nullable().describe('OpenAI voice id the agent speaks with; null = text only')
+})
+
+
+/**
+ * @summary Speak to an agent; streams transcription, reply, and audio
+ */
+export const VoiceConverseWithAgentParams = zod.object({
+  "agentId": zod.coerce.string()
+})
+
+export const voiceConverseWithAgentBodyHistoryItemTextMax = 8000;
+
+export const voiceConverseWithAgentBodyHistoryMax = 20;
+
+
+
+export const VoiceConverseWithAgentBody = zod.object({
+  "audio": zod.string().describe('Base64-encoded audio recording (webm\/mp4\/wav\/ogg)'),
+  "history": zod.array(zod.object({
+  "role": zod.enum(['user', 'agent']),
+  "text": zod.string().max(voiceConverseWithAgentBodyHistoryItemTextMax)
+})).max(voiceConverseWithAgentBodyHistoryMax).optional()
+})
+
+export const VoiceConverseWithAgentResponse = zod.unknown()
 
 
 /**

@@ -13,4 +13,5 @@ export const AgentMessageKind = {
   delegation: 'delegation',
   result: 'result',
   note: 'note',
+  voice: 'voice',
 } as const;

@@ -262,7 +262,7 @@ export const agentMessagesTable = pgTable(
     taskId: uuid("task_id").references(() => tasksTable.id, {
       onDelete: "cascade",
     }),
-    // delegation | result | note
+    // delegation | result | note | voice
     kind: text("kind").notNull().default("note"),
     body: text("body").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })

@@ -32,6 +32,8 @@ import type {
   AuditVerification,
   ClearMemoriesParams,
   ClearMemoriesResult,
+  ConverseInput,
+  ConverseResponse,
   DelegationInput,
   EmergencyStop,
   EmergencyStopInput,
@@ -64,7 +66,12 @@ import type {
   Team,
   TeamInput,
   TeamMemberInput,
-  TeamUpdate
+  TeamUpdate,
+  TranscribeAudioInput,
+  TranscribedText,
+  VoiceConverseInput,
+  VoiceSettingsInput,
+  VoiceStatus
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -2254,6 +2261,369 @@ export function useListAgentMessages<TData = Awaited<ReturnType<typeof listAgent
 
 
 
+
+export const getGetVoiceStatusUrl = () => {
+
+
+
+
+  return `/api/voice/status`
+}
+
+/**
+ * @summary Report whether voice conversations are available
+ */
+export const getVoiceStatus = async ( options?: Parameters<typeof customFetch>[1]): Promise<VoiceStatus> => {
+
+  return customFetch<VoiceStatus>(getGetVoiceStatusUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetVoiceStatusQueryKey = () => {
+    return [
+    `/api/voice/status`
+    ] as const;
+    }
+
+
+export const getGetVoiceStatusQueryOptions = <TData = Awaited<ReturnType<typeof getVoiceStatus>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getVoiceStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetVoiceStatusQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getVoiceStatus>>> = ({ signal }) => getVoiceStatus({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getVoiceStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetVoiceStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getVoiceStatus>>>
+export type GetVoiceStatusQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Report whether voice conversations are available
+ */
+
+export function useGetVoiceStatus<TData = Awaited<ReturnType<typeof getVoiceStatus>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getVoiceStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetVoiceStatusQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateVoiceSettingsUrl = () => {
+
+
+
+
+  return `/api/voice/settings`
+}
+
+/**
+ * @summary Update voice settings such as transcript storage
+ */
+export const updateVoiceSettings = async (voiceSettingsInput: VoiceSettingsInput, options?: Parameters<typeof customFetch>[1]): Promise<VoiceStatus> => {
+
+  return customFetch<VoiceStatus>(getUpdateVoiceSettingsUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(voiceSettingsInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateVoiceSettingsMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateVoiceSettings>>, TError,{data: BodyType<VoiceSettingsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateVoiceSettings>>, TError,{data: BodyType<VoiceSettingsInput>}, TContext> => {
+
+const mutationKey = ['updateVoiceSettings'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateVoiceSettings>>, {data: BodyType<VoiceSettingsInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateVoiceSettings(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateVoiceSettingsMutationResult = NonNullable<Awaited<ReturnType<typeof updateVoiceSettings>>>
+    export type UpdateVoiceSettingsMutationBody = BodyType<VoiceSettingsInput>
+    export type UpdateVoiceSettingsMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Update voice settings such as transcript storage
+ */
+export const useUpdateVoiceSettings = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateVoiceSettings>>, TError,{data: BodyType<VoiceSettingsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateVoiceSettings>>,
+        TError,
+        {data: BodyType<VoiceSettingsInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateVoiceSettingsMutationOptions(options));
+    }
+
+export const getTranscribeAudioUrl = () => {
+
+
+
+
+  return `/api/voice/transcribe`
+}
+
+/**
+ * @summary Transcribe a (possibly in-progress) recording for live captions
+ */
+export const transcribeAudio = async (transcribeAudioInput: TranscribeAudioInput, options?: Parameters<typeof customFetch>[1]): Promise<TranscribedText> => {
+
+  return customFetch<TranscribedText>(getTranscribeAudioUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(transcribeAudioInput)
+  }
+);}
+
+
+
+
+
+export const getTranscribeAudioMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof transcribeAudio>>, TError,{data: BodyType<TranscribeAudioInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof transcribeAudio>>, TError,{data: BodyType<TranscribeAudioInput>}, TContext> => {
+
+const mutationKey = ['transcribeAudio'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof transcribeAudio>>, {data: BodyType<TranscribeAudioInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  transcribeAudio(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type TranscribeAudioMutationResult = NonNullable<Awaited<ReturnType<typeof transcribeAudio>>>
+    export type TranscribeAudioMutationBody = BodyType<TranscribeAudioInput>
+    export type TranscribeAudioMutationError = ErrorType<void>
+
+    /**
+ * @summary Transcribe a (possibly in-progress) recording for live captions
+ */
+export const useTranscribeAudio = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof transcribeAudio>>, TError,{data: BodyType<TranscribeAudioInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof transcribeAudio>>,
+        TError,
+        {data: BodyType<TranscribeAudioInput>},
+        TContext
+      > => {
+      return useMutation(getTranscribeAudioMutationOptions(options));
+    }
+
+export const getConverseWithAgentUrl = (agentId: string,) => {
+
+
+
+
+  return `/api/agents/${agentId}/converse`
+}
+
+/**
+ * @summary Have a short text conversation with an agent
+ */
+export const converseWithAgent = async (agentId: string,
+    converseInput: ConverseInput, options?: Parameters<typeof customFetch>[1]): Promise<ConverseResponse> => {
+
+  return customFetch<ConverseResponse>(getConverseWithAgentUrl(agentId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(converseInput)
+  }
+);}
+
+
+
+
+
+export const getConverseWithAgentMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof converseWithAgent>>, TError,{agentId: string;data: BodyType<ConverseInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof converseWithAgent>>, TError,{agentId: string;data: BodyType<ConverseInput>}, TContext> => {
+
+const mutationKey = ['converseWithAgent'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof converseWithAgent>>, {agentId: string;data: BodyType<ConverseInput>}> = (props) => {
+          const {agentId,data} = props ?? {};
+
+          return  converseWithAgent(agentId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ConverseWithAgentMutationResult = NonNullable<Awaited<ReturnType<typeof converseWithAgent>>>
+    export type ConverseWithAgentMutationBody = BodyType<ConverseInput>
+    export type ConverseWithAgentMutationError = ErrorType<void>
+
+    /**
+ * @summary Have a short text conversation with an agent
+ */
+export const useConverseWithAgent = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof converseWithAgent>>, TError,{agentId: string;data: BodyType<ConverseInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof converseWithAgent>>,
+        TError,
+        {agentId: string;data: BodyType<ConverseInput>},
+        TContext
+      > => {
+      return useMutation(getConverseWithAgentMutationOptions(options));
+    }
+
+export const getVoiceConverseWithAgentUrl = (agentId: string,) => {
+
+
+
+
+  return `/api/agents/${agentId}/voice-converse`
+}
+
+/**
+ * @summary Speak to an agent; streams transcription, reply, and audio
+ */
+export const voiceConverseWithAgent = async (agentId: string,
+    voiceConverseInput: VoiceConverseInput, options?: Parameters<typeof customFetch>[1]): Promise<string> => {
+
+  return customFetch<string>(getVoiceConverseWithAgentUrl(agentId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(voiceConverseInput)
+  }
+);}
+
+
+
+
+
+export const getVoiceConverseWithAgentMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof voiceConverseWithAgent>>, TError,{agentId: string;data: BodyType<VoiceConverseInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof voiceConverseWithAgent>>, TError,{agentId: string;data: BodyType<VoiceConverseInput>}, TContext> => {
+
+const mutationKey = ['voiceConverseWithAgent'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof voiceConverseWithAgent>>, {agentId: string;data: BodyType<VoiceConverseInput>}> = (props) => {
+          const {agentId,data} = props ?? {};
+
+          return  voiceConverseWithAgent(agentId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type VoiceConverseWithAgentMutationResult = NonNullable<Awaited<ReturnType<typeof voiceConverseWithAgent>>>
+    export type VoiceConverseWithAgentMutationBody = BodyType<VoiceConverseInput>
+    export type VoiceConverseWithAgentMutationError = ErrorType<void>
+
+    /**
+ * @summary Speak to an agent; streams transcription, reply, and audio
+ */
+export const useVoiceConverseWithAgent = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof voiceConverseWithAgent>>, TError,{agentId: string;data: BodyType<VoiceConverseInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof voiceConverseWithAgent>>,
+        TError,
+        {agentId: string;data: BodyType<VoiceConverseInput>},
+        TContext
+      > => {
+      return useMutation(getVoiceConverseWithAgentMutationOptions(options));
+    }
 
 export const getGetProvidersUrl = () => {
 

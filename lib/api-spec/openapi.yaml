@@ -525,6 +525,113 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/AgentMessage"
+  /voice/status:
+    get:
+      operationId: getVoiceStatus
+      tags: [office]
+      summary: Report whether voice conversations are available
+      responses:
+        "200":
+          description: Voice service status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VoiceStatus"
+  /voice/settings:
+    put:
+      operationId: updateVoiceSettings
+      tags: [office]
+      summary: Update voice settings such as transcript storage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VoiceSettingsInput"
+      responses:
+        "200":
+          description: Updated voice status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VoiceStatus"
+  /voice/transcribe:
+    post:
+      operationId: transcribeAudio
+      tags: [office]
+      summary: Transcribe a (possibly in-progress) recording for live captions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TranscribeAudioInput"
+      responses:
+        "200":
+          description: Transcribed text so far
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscribedText"
+        "400":
+          description: The audio payload could not be decoded
+        "502":
+          description: Transcription failed
+        "503":
+          description: Voice services are unavailable
+  /agents/{agentId}/converse:
+    post:
+      operationId: converseWithAgent
+      tags: [office]
+      summary: Have a short text conversation with an agent
+      parameters:
+        - $ref: "#/components/parameters/AgentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConverseInput"
+      responses:
+        "200":
+          description: The agent's reply
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConverseResponse"
+        "404":
+          description: Agent not found
+        "409":
+          description: Agent cannot converse right now
+        "503":
+          description: No response provider is configured
+  /agents/{agentId}/voice-converse:
+    post:
+      operationId: voiceConverseWithAgent
+      tags: [office]
+      summary: Speak to an agent; streams transcription, reply, and audio
+      parameters:
+        - $ref: "#/components/parameters/AgentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VoiceConverseInput"
+      responses:
+        "200":
+          description: >-
+            Server-sent event stream with events: user_transcript, reply,
+            proposed_task, audio (base64 PCM16 chunks), error, done.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "404":
+          description: Agent not found
+        "409":
+          description: Agent cannot converse right now
+        "503":
+          description: Voice services are unavailable
   /providers:
     get:
       operationId: getProviders
@@ -1180,9 +1287,70 @@ components:
         toAgentId: { type: [string, "null"] }
         toAgentName: { type: [string, "null"] }
         taskId: { type: [string, "null"] }
-        kind: { type: string, enum: [delegation, result, note] }
+        kind: { type: string, enum: [delegation, result, note, voice] }
         body: { type: string }
         createdAt: { type: string, format: date-time }
+    VoiceStatus:
+      type: object
+      required: [available, reason, transcriptsEnabled]
+      properties:
+        available: { type: boolean }
+        reason: { type: [string, "null"] }
+        transcriptsEnabled: { type: boolean }
+    VoiceSettingsInput:
+      type: object
+      required: [transcriptsEnabled]
+      properties:
+        transcriptsEnabled: { type: boolean }
+    ConverseTurn:
+      type: object
+      required: [role, text]
+      properties:
+        role: { type: string, enum: [user, agent] }
+        text: { type: string, maxLength: 8000 }
+    ConverseInput:
+      type: object
+      required: [text]
+      properties:
+        text: { type: string, minLength: 1, maxLength: 4000 }
+        history:
+          type: array
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/ConverseTurn"
+    ConverseResponse:
+      type: object
+      required: [reply, proposedTaskObjective, voice]
+      properties:
+        reply: { type: string }
+        proposedTaskObjective: { type: [string, "null"] }
+        voice:
+          type: [string, "null"]
+          description: OpenAI voice id the agent speaks with; null = text only
+    VoiceConverseInput:
+      type: object
+      required: [audio]
+      properties:
+        audio:
+          type: string
+          description: Base64-encoded audio recording (webm/mp4/wav/ogg)
+        history:
+          type: array
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/ConverseTurn"
+    TranscribeAudioInput:
+      type: object
+      required: [audio]
+      properties:
+        audio:
+          type: string
+          description: Base64-encoded audio captured so far (webm/mp4/wav/ogg)
+    TranscribedText:
+      type: object
+      required: [text]
+      properties:
+        text: { type: string }
     RuntimeInfo:
       type: object
       required: [id, label, status, detail, acceptsWork]

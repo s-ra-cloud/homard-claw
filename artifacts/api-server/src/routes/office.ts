@@ -92,6 +92,7 @@ import {
 import { abortRunningTask, getWorkerStatus } from "../worker";
 import memoryRouter from "./memory";
 import teamsRouter from "./teams";
+import voiceRouter from "./voice";
 
 const router: IRouter = Router();
 
@@ -128,6 +129,7 @@ router.use(requireOwner);
 // Memory, knowledge, and team routes share the owner gate above.
 router.use(memoryRouter);
 router.use(teamsRouter);
+router.use(voiceRouter);
 
 router.get("/runtime/health", async (_req: Request, res: Response) => {
   const [runtimes, queue, stop] = await Promise.all([

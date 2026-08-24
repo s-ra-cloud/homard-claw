@@ -34,7 +34,8 @@ app.use(
 );
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 app.use(cors({ credentials: true, origin: true }));
-app.use(express.json());
+// Voice recordings arrive as base64 JSON; allow a few minutes of audio.
+app.use(express.json({ limit: "25mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(
   clerkMiddleware((req) => ({

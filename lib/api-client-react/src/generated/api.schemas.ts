@@ -612,6 +612,7 @@ export const AgentMessageKind = {
   delegation: 'delegation',
   result: 'result',
   note: 'note',
+  voice: 'voice',
 } as const;
 
 export interface AgentMessage {
@@ -629,6 +630,68 @@ export interface AgentMessage {
   kind: AgentMessageKind;
   body: string;
   createdAt: string;
+}
+
+export interface VoiceStatus {
+  available: boolean;
+  /** @nullable */
+  reason: string | null;
+  transcriptsEnabled: boolean;
+}
+
+export interface VoiceSettingsInput {
+  transcriptsEnabled: boolean;
+}
+
+export type ConverseTurnRole = typeof ConverseTurnRole[keyof typeof ConverseTurnRole];
+
+
+export const ConverseTurnRole = {
+  user: 'user',
+  agent: 'agent',
+} as const;
+
+export interface ConverseTurn {
+  role: ConverseTurnRole;
+  /** @maxLength 8000 */
+  text: string;
+}
+
+export interface ConverseInput {
+  /**
+     * @minLength 1
+     * @maxLength 4000
+     */
+  text: string;
+  /** @maxItems 20 */
+  history?: ConverseTurn[];
+}
+
+export interface ConverseResponse {
+  reply: string;
+  /** @nullable */
+  proposedTaskObjective: string | null;
+  /**
+     * OpenAI voice id the agent speaks with; null = text only
+     * @nullable
+     */
+  voice: string | null;
+}
+
+export interface VoiceConverseInput {
+  /** Base64-encoded audio recording (webm/mp4/wav/ogg) */
+  audio: string;
+  /** @maxItems 20 */
+  history?: ConverseTurn[];
+}
+
+export interface TranscribeAudioInput {
+  /** Base64-encoded audio captured so far (webm/mp4/wav/ogg) */
+  audio: string;
+}
+
+export interface TranscribedText {
+  text: string;
 }
 
 export type RuntimeInfoStatus = typeof RuntimeInfoStatus[keyof typeof RuntimeInfoStatus];
