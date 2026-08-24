@@ -1,24 +1,29 @@
 import { createHash } from "node:crypto";
 import { auditEventsTable, db } from "@workspace/db";
-import { asc, desc, isNotNull } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 
 /**
- * Tamper-evident audit log. Every event written through recordAudit is
- * hash-chained to its predecessor: hash = sha256(prevHash | kind | summary
- * | createdAt). Editing or deleting any chained row breaks verification of
- * every row after it, so the history is inspectable AND its integrity is
- * checkable. Rows written before chaining existed have a null hash and are
- * excluded from verification.
+ * Tamper-evident audit log, one hash chain per workspace. Every event
+ * written through recordAudit is chained to its workspace's predecessor:
+ * hash = sha256(prevHash | kind | summary | createdAt). Editing or deleting
+ * any chained row breaks verification of every row after it in that
+ * workspace. Rows written before chaining existed have a null hash and are
+ * excluded from verification; rows written before workspaces existed were
+ * backfilled to the legacy owner's workspace, so its chain stays whole.
  */
 
-/** Anchor value for the first chained event. */
+/** Anchor value for the first chained event of a workspace. */
 const GENESIS = "genesis";
 
-/** Advisory lock key serializing chain appends across processes. */
-// Distinct from the worker singleton lease (0x484f4d41), which is held for
-// the whole process lifetime — sharing that key would deadlock every append.
-const AUDIT_CHAIN_LOCK = 872_003;
+/**
+ * Advisory lock namespace serializing chain appends per workspace. Uses the
+ * two-int advisory keyspace (classid, objid) which is disjoint from the
+ * single-bigint keys elsewhere (worker lease 0x484f4d41, legacy audit
+ * 872003), so appends in different workspaces never serialize each other
+ * and nothing can queue behind the process-lifetime worker lease.
+ */
+const AUDIT_CHAIN_CLASS = 872_004;
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -41,28 +46,35 @@ export function computeAuditHash(event: {
 }
 
 /**
- * Append a hash-chained audit event. Pass the surrounding transaction when
- * the event must commit atomically with the operation it describes; the
- * advisory xact lock serializes concurrent appends so the chain never
- * forks. Never insert into auditEventsTable directly.
+ * Append a hash-chained audit event to a workspace's chain. Pass the
+ * surrounding transaction when the event must commit atomically with the
+ * operation it describes; the advisory xact lock serializes concurrent
+ * appends within one workspace so its chain never forks. Never insert into
+ * auditEventsTable directly.
  */
 export async function recordAudit(
+  workspaceId: string | null | undefined,
   kind: string,
   summary: string,
   tx?: Tx,
 ): Promise<void> {
+  // A null workspace can only be a legacy row the startup backfill has not
+  // stamped yet; there is no chain to append to, so skip rather than fork.
+  if (!workspaceId) return;
   const work = async (executor: Tx): Promise<void> => {
     await executor.execute(
-      sql`select pg_advisory_xact_lock(${AUDIT_CHAIN_LOCK})`,
+      sql`select pg_advisory_xact_lock(${AUDIT_CHAIN_CLASS}, hashtext(${workspaceId}))`,
     );
     const [prev] = await executor
       .select({ hash: auditEventsTable.hash })
       .from(auditEventsTable)
+      .where(eq(auditEventsTable.workspaceId, workspaceId))
       .orderBy(desc(auditEventsTable.seq))
       .limit(1);
     const prevHash = prev?.hash ?? GENESIS;
     const createdAt = new Date();
     await executor.insert(auditEventsTable).values({
+      workspaceId,
       kind,
       summary,
       prevHash,
@@ -81,22 +93,29 @@ export type AuditVerification = {
 };
 
 /**
- * Recompute the whole chain in seq order. Any edited summary/kind/time,
- * deleted row, or reordered row surfaces as the first invalid event. The
- * first chained row must anchor to the genesis marker, so the chain's
- * start cannot be silently rewritten either.
+ * Recompute one workspace's chain in seq order. Any edited summary/kind/
+ * time, deleted row, or reordered row surfaces as the first invalid event.
+ * The workspace's first chained row must anchor to the genesis marker, so
+ * the chain's start cannot be silently rewritten either.
  *
  * Known limitation: deleting ONLY the newest rows (tail truncation) is
- * undetectable from inside the database — catching that would require an
- * externally anchored copy of the latest hash. `checked` shrinking
- * between runs is the observable hint.
+ * undetectable from inside the database; `checked` shrinking between runs
+ * is the observable hint.
  */
-export async function verifyAuditChain(tx?: Tx): Promise<AuditVerification> {
+export async function verifyAuditChain(
+  workspaceId: string,
+  tx?: Tx,
+): Promise<AuditVerification> {
   const executor = tx ?? db;
   const rows = await executor
     .select()
     .from(auditEventsTable)
-    .where(isNotNull(auditEventsTable.hash))
+    .where(
+      and(
+        isNotNull(auditEventsTable.hash),
+        eq(auditEventsTable.workspaceId, workspaceId),
+      ),
+    )
     .orderBy(asc(auditEventsTable.seq));
   if (rows.length > 0 && rows[0]!.prevHash !== GENESIS) {
     return { valid: false, checked: 0, firstInvalidId: rows[0]!.id };

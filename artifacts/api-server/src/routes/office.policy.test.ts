@@ -7,12 +7,13 @@ import {
   auditEventsTable,
   db,
   pool,
-  systemStateTable,
   tasksTable,
+  workspacesTable,
 } from "@workspace/db";
 import { and, eq, inArray } from "drizzle-orm";
 
 const authState = vi.hoisted(() => ({ userId: "hc-test-owner" }));
+let wsId = "";
 
 vi.mock("@clerk/express", () => ({
   getAuth: () => ({ userId: authState.userId }),
@@ -39,7 +40,6 @@ app.use("/api", officeRouter);
 
 const RUN_TAG = `HC Policy ${Date.now()}`;
 const createdAgentIds: string[] = [];
-let createdOwnerRow = false;
 
 /**
  * Agents are created paused so the live development worker never claims
@@ -84,6 +84,7 @@ async function insertTask(
   const [task] = await db
     .insert(tasksTable)
     .values({
+      workspaceId: wsId,
       agentId,
       objective: `${RUN_TAG} scripted objective`,
       provider: "openrouter",
@@ -152,16 +153,12 @@ function mockOpenRouterSuccess() {
 }
 
 beforeAll(async () => {
-  const [owner] = await db
-    .select()
-    .from(systemStateTable)
-    .where(eq(systemStateTable.key, "owner_clerk_id"))
-    .limit(1);
-  if (owner) {
-    authState.userId = owner.value;
-  } else {
-    createdOwnerRow = true;
-  }
+  const [ws] = await db
+    .insert(workspacesTable)
+    .values({ clerkUserId: `hc-policy-${Date.now()}` })
+    .returning({ id: workspacesTable.id, clerkUserId: workspacesTable.clerkUserId });
+  wsId = ws.id;
+  authState.userId = ws.clerkUserId;
 });
 
 beforeEach(() => {
@@ -185,18 +182,9 @@ afterAll(async () => {
       .where(inArray(tasksTable.agentId, createdAgentIds));
     await db.delete(agentsTable).where(inArray(agentsTable.id, createdAgentIds));
   }
-  // Audit rows are intentionally left in place: the log is hash-chained
-  // and append-only, so deleting rows would break chain verification.
-  if (createdOwnerRow) {
-    await db
-      .delete(systemStateTable)
-      .where(
-        and(
-          eq(systemStateTable.key, "owner_clerk_id"),
-          eq(systemStateTable.value, authState.userId),
-        ),
-      );
-  }
+  // This suite owns the entire workspace, so cascading its deletion removes
+  // the isolated audit chain without touching any real user's append-only log.
+  await db.delete(workspacesTable).where(eq(workspacesTable.id, wsId));
   await pool.end();
 });
 
@@ -572,10 +560,10 @@ describe("provider-call spend ceiling", () => {
 describe("tamper-evident audit history", () => {
   it("chains events, detects tampering, and supports search", async () => {
     const marker = `${RUN_TAG} chain probe`;
-    await recordAudit("test.probe", `${marker} first`);
-    await recordAudit("test.probe", `${marker} second`);
+    await recordAudit(wsId, "test.probe", `${marker} first`);
+    await recordAudit(wsId, "test.probe", `${marker} second`);
 
-    const before = await verifyAuditChain();
+    const before = await verifyAuditChain(wsId);
     expect(before.valid).toBe(true);
     expect(before.checked).toBeGreaterThanOrEqual(2);
 
@@ -607,7 +595,7 @@ describe("tamper-evident audit history", () => {
           .update(auditEventsTable)
           .set({ summary: `${marker} FORGED` })
           .where(eq(auditEventsTable.id, victim!.id));
-        const tampered = await verifyAuditChain(tx);
+        const tampered = await verifyAuditChain(wsId, tx);
         expect(tampered.valid).toBe(false);
         expect(tampered.firstInvalidId).toBe(victim!.id);
         throw new Error(ROLLBACK);
@@ -617,6 +605,6 @@ describe("tamper-evident audit history", () => {
           throw error;
         }
       });
-    expect((await verifyAuditChain()).valid).toBe(true);
+    expect((await verifyAuditChain(wsId)).valid).toBe(true);
   });
 });

@@ -2,8 +2,8 @@ import {
   agentsTable,
   db,
   schedulesTable,
-  systemStateTable,
   tasksTable,
+  workspaceSettingsTable,
   type ScheduleRecord,
 } from "@workspace/db";
 import { and, eq, gte, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
@@ -114,6 +114,7 @@ async function dispatchClaimed(claimed: ScheduleRecord, firedAt: Date): Promise<
         .set({ enabled: false, claimedAt: null })
         .where(eq(schedulesTable.id, claimed.id));
       await notifyScheduleIssue(
+        claimed.workspaceId,
         claimed.name,
         claimed.agentId,
         "Its agent is retired or archived, so the schedule was turned off.",
@@ -124,6 +125,7 @@ async function dispatchClaimed(claimed: ScheduleRecord, firedAt: Date): Promise<
     // so it fires again at the next occurrence rather than looping forever.
     await finalizeRun(claimed.id, firedAt, null);
     await notifyScheduleIssue(
+      claimed.workspaceId,
       claimed.name,
       claimed.agentId,
       outcome.status === 404
@@ -160,18 +162,18 @@ export async function runDueSchedules(
   now = new Date(),
   opts: RunDueSchedulesOptions = {},
 ): Promise<number> {
-  // While the emergency stop is engaged, nothing fires. Due schedules keep
-  // their past nextRunAt, so each catches up with a single run on resume.
-  const [stop] = await db
-    .select()
-    .from(systemStateTable)
-    .where(eq(systemStateTable.key, "emergency_stop"))
-    .limit(1);
-  if (stop?.value === "true") return 0;
-
   const staleClaimBefore = new Date(now.getTime() - CLAIM_TIMEOUT_MS);
   const dueConditions = [
     eq(schedulesTable.enabled, true),
+    // While a workspace's emergency stop is engaged, none of ITS schedules
+    // fire. Due schedules keep their past nextRunAt, so each catches up
+    // with a single run on resume. Other workspaces are unaffected.
+    sql`not exists (
+      select 1 from ${workspaceSettingsTable}
+      where ${workspaceSettingsTable.workspaceId} = ${schedulesTable.workspaceId}
+        and ${workspaceSettingsTable.key} = 'emergency_stop'
+        and ${workspaceSettingsTable.value} = 'true'
+    )`,
     isNotNull(schedulesTable.nextRunAt),
     lte(schedulesTable.nextRunAt, now),
     // Skip fresh claims: their dispatch is (or was very recently) in
@@ -195,6 +197,7 @@ export async function runDueSchedules(
     .limit(20);
 
   let fired = 0;
+  const firedWorkspaces = new Set<string>();
   for (const { id } of due) {
     // Phase 1 — claim under a row lock, re-checking dueness inside the
     // transaction so a concurrent claim/edit cannot double-fire.
@@ -271,9 +274,13 @@ export async function runDueSchedules(
     }
     // Phase 2 — dispatch outside the row lock (routing/estimation may hit
     // the network), then finalize.
-    if (await dispatchClaimed(claim.schedule, now)) fired += 1;
+    if (await dispatchClaimed(claim.schedule, now)) {
+      fired += 1;
+      if (claim.schedule.workspaceId)
+        firedWorkspaces.add(claim.schedule.workspaceId);
+    }
   }
-  if (fired > 0) publish("schedules");
+  for (const workspaceId of firedWorkspaces) publish(workspaceId, "schedules");
   return fired;
 }
 

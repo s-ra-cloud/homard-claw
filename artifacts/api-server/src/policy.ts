@@ -419,6 +419,8 @@ export type FallbackDecision =
  * owner can wait, cancel, or authorize a paid run themselves.
  */
 export async function evaluateFallback(input: {
+  /** Workspace whose fallback policy applies (the task's durable owner). */
+  workspaceId: string;
   fromProvider: ProviderId;
   /** Cents the fallback run could cost, when knowable. */
   costBoundCents: number | null;
@@ -427,7 +429,7 @@ export async function evaluateFallback(input: {
   /** Providers currently able to accept the work. */
   healthyProviders: ProviderId[];
 }): Promise<FallbackDecision> {
-  const settings = await getProviderSettings();
+  const settings = await getProviderSettings(input.workspaceId);
   const candidates = settings.fallbackOrder.filter(
     (provider) =>
       provider !== input.fromProvider && input.healthyProviders.includes(provider),

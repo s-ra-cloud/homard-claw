@@ -615,12 +615,12 @@ function ConnectedAppsFields({ form }: { form: UseFormReturn<AgentFormValues> })
         </p>
         <p className="text-[10px] text-muted-foreground mt-1">
           These dropdowns only grant permission — they don't connect an
-          account. You connect Gmail, Drive, or GitHub once (as the owner) on
-          the{" "}
+          account. You connect your own accounts (like your Gmail) on the{" "}
           <Link href="/connected-apps" className="underline font-bold">
             Connected Apps
           </Link>{" "}
-          page; agents never see credentials.
+          page; they belong to your workspace alone, and agents never see
+          credentials.
         </p>
       </div>
       <div className="space-y-2">

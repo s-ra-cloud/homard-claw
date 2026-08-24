@@ -43,6 +43,8 @@ import type {
   DelegationInput,
   EmergencyStop,
   EmergencyStopInput,
+  GoogleOauthDisconnect,
+  GoogleOauthStart,
   HealthStatus,
   KnowledgeAssignmentsInput,
   KnowledgeFile,
@@ -5074,5 +5076,147 @@ export const useUpdateConnectedApp = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getUpdateConnectedAppMutationOptions(options));
+    }
+
+export const getStartGoogleOauthUrl = () => {
+
+
+
+
+  return `/api/google/oauth/start`
+}
+
+/**
+ * @summary Begin the in-app Google OAuth consent flow for Gmail
+ */
+export const startGoogleOauth = async ( options?: Parameters<typeof customFetch>[1]): Promise<GoogleOauthStart> => {
+
+  return customFetch<GoogleOauthStart>(getStartGoogleOauthUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getStartGoogleOauthMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startGoogleOauth>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof startGoogleOauth>>, TError,void, TContext> => {
+
+const mutationKey = ['startGoogleOauth'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startGoogleOauth>>, void> = () => {
+
+
+          return  startGoogleOauth(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StartGoogleOauthMutationResult = NonNullable<Awaited<ReturnType<typeof startGoogleOauth>>>
+
+    export type StartGoogleOauthMutationError = ErrorType<void>
+
+    /**
+ * @summary Begin the in-app Google OAuth consent flow for Gmail
+ */
+export const useStartGoogleOauth = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startGoogleOauth>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof startGoogleOauth>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getStartGoogleOauthMutationOptions(options));
+    }
+
+export const getDisconnectGoogleAccountUrl = () => {
+
+
+
+
+  return `/api/google/oauth/disconnect`
+}
+
+/**
+ * @summary Disconnect the workspace's Gmail account and revoke its credential
+ */
+export const disconnectGoogleAccount = async ( options?: Parameters<typeof customFetch>[1]): Promise<GoogleOauthDisconnect> => {
+
+  return customFetch<GoogleOauthDisconnect>(getDisconnectGoogleAccountUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getDisconnectGoogleAccountMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectGoogleAccount>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof disconnectGoogleAccount>>, TError,void, TContext> => {
+
+const mutationKey = ['disconnectGoogleAccount'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof disconnectGoogleAccount>>, void> = () => {
+
+
+          return  disconnectGoogleAccount(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DisconnectGoogleAccountMutationResult = NonNullable<Awaited<ReturnType<typeof disconnectGoogleAccount>>>
+
+    export type DisconnectGoogleAccountMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Disconnect the workspace's Gmail account and revoke its credential
+ */
+export const useDisconnectGoogleAccount = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectGoogleAccount>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof disconnectGoogleAccount>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getDisconnectGoogleAccountMutationOptions(options));
     }
 

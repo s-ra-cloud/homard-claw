@@ -14,14 +14,14 @@ import {
   UpdateVoiceSettingsBody,
   VoiceConverseWithAgentBody,
 } from "@workspace/api-zod";
-import { agentMessagesTable, agentsTable, db, systemStateTable } from "@workspace/db";
-import { eq, sql } from "drizzle-orm";
+import { agentMessagesTable, agentsTable, db } from "@workspace/db";
+import { and, eq } from "drizzle-orm";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { recordAudit } from "../audit";
 import { callProvider, ProviderCallError } from "../execution";
 import { resolveRouting } from "../providers";
 import { CodexTalkError, runCodexTalkTurn } from "../talk-codex";
-
+import { getWorkspaceSetting, setWorkspaceSetting } from "../workspace";
 const router: IRouter = Router();
 
 const TRANSCRIPTS_KEY = "voice_transcripts_enabled";
@@ -68,31 +68,25 @@ function speechAvailability(): { available: boolean; reason: string | null } {
   return { available: true, reason: null };
 }
 
-async function transcriptsEnabled(): Promise<boolean> {
-  const [row] = await db
-    .select()
-    .from(systemStateTable)
-    .where(eq(systemStateTable.key, TRANSCRIPTS_KEY))
-    .limit(1);
-  return row?.value === "true";
+async function transcriptsEnabled(workspaceId: string): Promise<boolean> {
+  return (await getWorkspaceSetting(workspaceId, TRANSCRIPTS_KEY)) === "true";
 }
 
-async function emergencyStopEngaged(): Promise<boolean> {
-  const [row] = await db
-    .select()
-    .from(systemStateTable)
-    .where(eq(systemStateTable.key, "emergency_stop"))
-    .limit(1);
-  return row?.value === "true";
+async function emergencyStopEngaged(workspaceId: string): Promise<boolean> {
+  return (await getWorkspaceSetting(workspaceId, "emergency_stop")) === "true";
 }
 
-async function voiceStatusPayload() {
+async function voiceStatusPayload(workspaceId: string) {
   const { available, reason } = speechAvailability();
-  return { available, reason, transcriptsEnabled: await transcriptsEnabled() };
+  return {
+    available,
+    reason,
+    transcriptsEnabled: await transcriptsEnabled(workspaceId),
+  };
 }
 
-router.get("/voice/status", async (_req: Request, res: Response) => {
-  res.json(await voiceStatusPayload());
+router.get("/voice/status", async (req: Request, res: Response) => {
+  res.json(await voiceStatusPayload(req.workspaceId!));
 });
 
 router.put("/voice/settings", async (req: Request, res: Response) => {
@@ -102,20 +96,15 @@ router.put("/voice/settings", async (req: Request, res: Response) => {
     return;
   }
   const value = parsed.data.transcriptsEnabled ? "true" : "false";
-  await db
-    .insert(systemStateTable)
-    .values({ key: TRANSCRIPTS_KEY, value })
-    .onConflictDoUpdate({
-      target: systemStateTable.key,
-      set: { value: sql`excluded.value` },
-    });
+  await setWorkspaceSetting(req.workspaceId!, TRANSCRIPTS_KEY, value);
   await recordAudit(
+    req.workspaceId!,
     "voice.settings",
     parsed.data.transcriptsEnabled
       ? "Voice transcript storage was turned on."
       : "Voice transcript storage was turned off.",
   );
-  res.json(await voiceStatusPayload());
+  res.json(await voiceStatusPayload(req.workspaceId!));
 });
 
 /**
@@ -139,7 +128,7 @@ router.post("/voice/transcribe", async (req: Request, res: Response) => {
     audioBuffer = Buffer.from(parsed.data.audio, "base64");
     if (audioBuffer.length === 0) throw new Error("empty");
   } catch {
-    res.status(400).json({ error: "The audio payload could not be decoded." });
+    res.status(400).json({ error: "The audio recording could not be decoded." });
     return;
   }
 
@@ -164,13 +153,16 @@ router.post("/voice/transcribe", async (req: Request, res: Response) => {
 
 /** Shared guardrails: the agent must exist and be able to hold a chat. */
 async function loadConversableAgent(
+  workspaceId: string,
   agentId: string,
   res: Response,
 ): Promise<AgentRow | null> {
   const [agent] = await db
     .select()
     .from(agentsTable)
-    .where(eq(agentsTable.id, agentId))
+    .where(
+      and(eq(agentsTable.id, agentId), eq(agentsTable.workspaceId, workspaceId)),
+    )
     .limit(1);
   if (!agent || agent.archived) {
     res.status(404).json({ error: "Agent not found." });
@@ -182,7 +174,7 @@ async function loadConversableAgent(
     });
     return null;
   }
-  if (await emergencyStopEngaged()) {
+  if (await emergencyStopEngaged(workspaceId)) {
     res.status(409).json({
       error: "The emergency stop is engaged; agents cannot converse until it is released.",
     });
@@ -271,12 +263,13 @@ function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 async function generateReply(
+  workspaceId: string,
   agent: AgentRow,
   userText: string,
   history: ConverseTurn[],
   signal: AbortSignal,
 ): Promise<{ reply: string; taskObjective: string | null }> {
-  const routing = await resolveRouting(agent);
+  const routing = await resolveRouting(workspaceId, agent);
 
   if (routing.provider === "codex_chatgpt") {
     // Codex executes in a sandbox, so a Talk turn needs the same safe
@@ -288,6 +281,7 @@ async function generateReply(
     const result = await runCodexTalkTurn({
       agent: {
         id: agent.id,
+        workspaceId,
         securityPreset: agent.securityPreset,
         autonomy: agent.autonomy,
         sensitiveDataSandbox: agent.sensitiveDataSandbox,
@@ -330,8 +324,13 @@ async function generateReply(
   return parseModelReply(result.output);
 }
 
-async function persistTranscript(agent: AgentRow, userText: string, reply: string) {
-  if (!(await transcriptsEnabled())) return;
+async function persistTranscript(
+  workspaceId: string,
+  agent: AgentRow,
+  userText: string,
+  reply: string,
+) {
+  if (!(await transcriptsEnabled(workspaceId))) return;
   await db.insert(agentMessagesTable).values([
     { fromAgentId: null, toAgentId: agent.id, kind: "voice", body: userText },
     { fromAgentId: agent.id, toAgentId: null, kind: "voice", body: reply },
@@ -426,25 +425,31 @@ function providerErrorMessage(err: unknown): { status: number; message: string }
 router.post("/agents/:agentId/converse", async (req: Request, res: Response) => {
   const parsed = ConverseWithAgentBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "A non-empty text message is required." });
+    res.status(400).json({ error: "A text message is required." });
     return;
   }
-  const agent = await loadConversableAgent(String(req.params.agentId), res);
+  const agent = await loadConversableAgent(
+    req.workspaceId!,
+    String(req.params.agentId),
+    res,
+  );
   if (!agent) return;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), CONVERSE_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), CONVERSE_TIMEOUT_MS * 2);
   req.on("close", () => controller.abort());
   try {
     const history = (parsed.data.history ?? []) as ConverseTurn[];
     const { reply, taskObjective } = await generateReply(
+      req.workspaceId!,
       agent,
       parsed.data.text,
       history,
       controller.signal,
     );
-    await persistTranscript(agent, parsed.data.text, reply);
+    await persistTranscript(req.workspaceId!, agent, parsed.data.text, reply);
     await recordAudit(
+      req.workspaceId!,
       "voice.converse",
       `${agent.name} chatted with the owner (text mode).`,
     );
@@ -476,7 +481,11 @@ router.post("/agents/:agentId/voice-converse", async (req: Request, res: Respons
     res.status(400).json({ error: "A base64 audio recording is required." });
     return;
   }
-  const agent = await loadConversableAgent(String(req.params.agentId), res);
+  const agent = await loadConversableAgent(
+    req.workspaceId!,
+    String(req.params.agentId),
+    res,
+  );
   if (!agent) return;
 
   let audioBuffer: Buffer;
@@ -532,6 +541,7 @@ router.post("/agents/:agentId/voice-converse", async (req: Request, res: Respons
     try {
       const history = (parsed.data.history ?? []) as ConverseTurn[];
       ({ reply, taskObjective } = await generateReply(
+        req.workspaceId!,
         agent,
         userText,
         history,
@@ -554,8 +564,9 @@ router.post("/agents/:agentId/voice-converse", async (req: Request, res: Respons
       voice,
     });
 
-    await persistTranscript(agent, userText, reply);
+    await persistTranscript(req.workspaceId!, agent, userText, reply);
     await recordAudit(
+      req.workspaceId!,
       "voice.converse",
       `${agent.name} spoke with the owner (voice mode).`,
     );

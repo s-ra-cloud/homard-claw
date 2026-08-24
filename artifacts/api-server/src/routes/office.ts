@@ -1,4 +1,4 @@
-import { clerkClient, getAuth } from "@clerk/express";
+import { getAuth } from "@clerk/express";
 import {
   CancelTaskParams,
   CancelTaskResponse,
@@ -67,7 +67,6 @@ import {
   approvalsTable,
   auditEventsTable,
   db,
-  systemStateTable,
   taskLogsTable,
   tasksTable,
   teamsTable,
@@ -75,13 +74,12 @@ import {
   type ConnectedAppId,
 } from "@workspace/db";
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { Router, type IRouter, type Request, type Response } from "express";
 import {
-  Router,
-  type IRouter,
-  type NextFunction,
-  type Request,
-  type Response,
-} from "express";
+  getWorkspaceSetting,
+  requireWorkspace,
+  setWorkspaceSetting,
+} from "../workspace";
 import {
   PROVIDER_IDS,
   ProviderSettingsError,
@@ -134,133 +132,12 @@ import voiceRouter from "./voice";
 const router: IRouter = Router();
 
 /**
- * The office is claimed by the first account that signs in, and the claim is
- * stored as a Clerk user id. Clerk keeps separate user stores for development
- * and production, so a published office whose owner row was seeded from
- * development holds an id no production account can ever match — the owner is
- * locked out of their own app with no way back in.
- *
- * OWNER_EMAIL is the identity that survives that move: whenever the signed-in
- * account's verified email matches it, ownership follows to that account's id.
- * Unset, the original first-come claim still applies.
+ * Every signed-in user gets (or resumes) their own personal workspace; all
+ * routes below are scoped to `req.workspaceId`. Legacy single-owner data is
+ * adopted via OWNER_EMAIL inside requireWorkspace's workspace resolution.
  */
-const configuredOwnerEmail = (): string | null =>
-  process.env.OWNER_EMAIL?.trim().toLowerCase() || null;
-
-/**
- * Only refusals are remembered, and only briefly: an account that does not own
- * the office keeps being turned away without a Clerk call per request. A match
- * is never cached, so handing over the office always rests on a fresh lookup —
- * a stale positive would keep authorising an address the owner has since
- * changed or lost.
- */
-const DENIAL_TTL_MS = 60_000;
-const DENIAL_LIMIT = 500;
-const denials = new Map<string, { email: string | null; at: number }>();
-
-/** The signed-in account's verified primary email, straight from Clerk. */
-async function verifiedEmail(
-  req: Request,
-  userId: string,
-): Promise<string | null> {
-  try {
-    const user = await clerkClient.users.getUser(userId);
-    const address = user.primaryEmailAddress ?? user.emailAddresses?.[0];
-    // An unverified address proves nothing: anyone could sign up claiming the
-    // owner's email and take the office with it.
-    if (address?.verification?.status !== "verified") return null;
-    return address.emailAddress?.trim().toLowerCase() ?? null;
-  } catch (error) {
-    // A Clerk outage must not hand the office to the wrong account, so a failed
-    // lookup simply means no match.
-    req.log.warn({ userId, err: error }, "Could not resolve signed-in email");
-    return null;
-  }
-}
-
-function rememberDenial(userId: string, email: string | null): void {
-  if (denials.size >= DENIAL_LIMIT) denials.clear();
-  denials.set(userId, { email, at: Date.now() });
-}
-
-async function currentOwner(): Promise<string | undefined> {
-  const [row] = await db
-    .select()
-    .from(systemStateTable)
-    .where(eq(systemStateTable.key, "owner_clerk_id"))
-    .limit(1);
-  return row?.value;
-}
-
-async function requireOwner(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-): Promise<void> {
-  const auth = getAuth(req);
-  const userId = auth?.userId;
-  if (!userId) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
-
-  await db
-    .insert(systemStateTable)
-    .values({ key: "owner_clerk_id", value: userId })
-    .onConflictDoNothing();
-  const [owner] = await db
-    .select()
-    .from(systemStateTable)
-    .where(eq(systemStateTable.key, "owner_clerk_id"))
-    .limit(1);
-  if (owner?.value === userId) {
-    next();
-    return;
-  }
-
-  const ownerEmail = configuredOwnerEmail();
-  let email: string | null = null;
-  if (ownerEmail) {
-    const denied = denials.get(userId);
-    if (denied && Date.now() - denied.at < DENIAL_TTL_MS) {
-      email = denied.email;
-    } else {
-      email = await verifiedEmail(req, userId);
-      if (email !== ownerEmail) rememberDenial(userId, email);
-    }
-  }
-
-  if (ownerEmail && email === ownerEmail) {
-    // Compare and set against the owner this request actually read, so two
-    // simultaneous hand-overs cannot interleave into a half-applied one.
-    const moved = await db
-      .update(systemStateTable)
-      .set({ value: userId })
-      .where(
-        and(
-          eq(systemStateTable.key, "owner_clerk_id"),
-          eq(systemStateTable.value, owner?.value ?? ""),
-        ),
-      )
-      .returning({ value: systemStateTable.value });
-    const settled = moved[0]?.value ?? (await currentOwner());
-    if (settled === userId) {
-      req.log.warn({ userId }, "Office ownership moved to the configured owner");
-      next();
-      return;
-    }
-  }
-
-  req.log.warn({ userId }, "Blocked non-owner access");
-  res.status(403).json({
-    error: email
-      ? `This office already has an owner. You are signed in as ${email}.`
-      : "This office already has an owner",
-  });
-}
-
-router.use(requireOwner);
-// Memory, knowledge, and team routes share the owner gate above.
+router.use(requireWorkspace);
+// Memory, knowledge, and team routes share the workspace gate above.
 router.use(memoryRouter);
 router.use(teamsRouter);
 router.use(voiceRouter);
@@ -270,15 +147,11 @@ router.use(reportsRouter);
 router.use(eventsRouter);
 router.use(connectedAppsRouter);
 
-router.get("/runtime/health", async (_req: Request, res: Response) => {
+router.get("/runtime/health", async (req: Request, res: Response) => {
   const [runtimes, queue, stop] = await Promise.all([
     listRuntimeHealth(),
     queueHealth(),
-    db
-      .select()
-      .from(systemStateTable)
-      .where(eq(systemStateTable.key, "emergency_stop"))
-      .limit(1),
+    getWorkspaceSetting(req.workspaceId!, "emergency_stop"),
   ]);
   const worker = getWorkerStatus();
   res.json(
@@ -290,7 +163,7 @@ router.get("/runtime/health", async (_req: Request, res: Response) => {
         leaseHeld: worker.leaseHeld,
         running: worker.running,
         inFlight: worker.inFlight,
-        emergencyStop: stop[0]?.value === "true",
+        emergencyStop: stop === "true",
         lastTickAt: worker.lastTickAt ? worker.lastTickAt.toISOString() : null,
       },
     }),
@@ -418,16 +291,22 @@ const CANCELLABLE_STATUSES = ["queued", "running", "waiting_approval", "blocked"
 const RETRYABLE_STATUSES = ["failed", "cancelled", "blocked"];
 
 
-/** Case-insensitive name collision check across every agent, any lifecycle state. */
+/** Case-insensitive name collision check across the workspace's agents, any lifecycle state. */
 async function findNameConflict(
   tx: Tx | typeof db,
+  workspaceId: string,
   name: string,
   excludeId?: string,
 ): Promise<boolean> {
   const rows = await tx
     .select({ id: agentsTable.id })
     .from(agentsTable)
-    .where(sql`lower(${agentsTable.name}) = lower(${name})`)
+    .where(
+      and(
+        eq(agentsTable.workspaceId, workspaceId),
+        sql`lower(${agentsTable.name}) = lower(${name})`,
+      ),
+    )
     .limit(2);
   return rows.some((row) => row.id !== excludeId);
 }
@@ -443,31 +322,44 @@ function isUniqueViolation(error: unknown): boolean {
   return false;
 }
 
-router.get("/office/overview", async (_req, res): Promise<void> => {
-  const [[agentCount], [activeCount], [approvalCount], [stop], events, [spend]] =
+router.get("/office/overview", async (req, res): Promise<void> => {
+  const wsId = req.workspaceId!;
+  const [[agentCount], [activeCount], [approvalCount], stop, events, [spend]] =
     await Promise.all([
       db
         .select({ count: sql<number>`count(*)::int` })
         .from(agentsTable)
         .where(
-          and(eq(agentsTable.retired, false), eq(agentsTable.archived, false)),
+          and(
+            eq(agentsTable.workspaceId, wsId),
+            eq(agentsTable.retired, false),
+            eq(agentsTable.archived, false),
+          ),
         ),
       db
         .select({ count: sql<number>`count(*)::int` })
         .from(tasksTable)
-        .where(inArray(tasksTable.status, ["queued", "running"])),
+        .where(
+          and(
+            eq(tasksTable.workspaceId, wsId),
+            inArray(tasksTable.status, ["queued", "running"]),
+          ),
+        ),
       db
         .select({ count: sql<number>`count(*)::int` })
         .from(approvalsTable)
-        .where(eq(approvalsTable.status, "pending")),
-      db
-        .select()
-        .from(systemStateTable)
-        .where(eq(systemStateTable.key, "emergency_stop"))
-        .limit(1),
+        .innerJoin(agentsTable, eq(approvalsTable.agentId, agentsTable.id))
+        .where(
+          and(
+            eq(agentsTable.workspaceId, wsId),
+            eq(approvalsTable.status, "pending"),
+          ),
+        ),
+      getWorkspaceSetting(wsId, "emergency_stop"),
       db
         .select()
         .from(auditEventsTable)
+        .where(eq(auditEventsTable.workspaceId, wsId))
         .orderBy(desc(auditEventsTable.createdAt))
         .limit(8),
       db
@@ -476,7 +368,10 @@ router.get("/office/overview", async (_req, res): Promise<void> => {
         })
         .from(tasksTable)
         .where(
-          sql`${tasksTable.createdAt} >= date_trunc('month', now())`,
+          and(
+            eq(tasksTable.workspaceId, wsId),
+            sql`${tasksTable.createdAt} >= date_trunc('month', now())`,
+          ),
         ),
     ]);
 
@@ -485,7 +380,7 @@ router.get("/office/overview", async (_req, res): Promise<void> => {
       agents: agentCount?.count ?? 0,
       activeTasks: activeCount?.count ?? 0,
       pendingApprovals: approvalCount?.count ?? 0,
-      emergencyStop: stop?.value === "true",
+      emergencyStop: stop === "true",
       monthlyCostCents: Math.round((spend?.cents ?? 0) * 100) / 100,
       recentEvents: events.map((event) => ({
         ...event,
@@ -495,11 +390,16 @@ router.get("/office/overview", async (_req, res): Promise<void> => {
   );
 });
 
-router.get("/agents", async (_req, res): Promise<void> => {
+router.get("/agents", async (req, res): Promise<void> => {
   const agents = await db
     .select()
     .from(agentsTable)
-    .where(eq(agentsTable.retired, false))
+    .where(
+      and(
+        eq(agentsTable.workspaceId, req.workspaceId!),
+        eq(agentsTable.retired, false),
+      ),
+    )
     .orderBy(agentsTable.name);
   const grants = await grantsByAgent(agents.map((agent) => agent.id));
   res.json(
@@ -522,7 +422,7 @@ router.post("/agents", async (req, res): Promise<void> => {
     accessory: "glasses",
     expression: "focused",
   };
-  if (await findNameConflict(db, parsed.data.name)) {
+  if (await findNameConflict(db, req.workspaceId!, parsed.data.name)) {
     res
       .status(409)
       .json({ error: `An agent named "${parsed.data.name}" already exists` });
@@ -535,7 +435,12 @@ router.post("/agents", async (req, res): Promise<void> => {
     const outcome = await db.transaction(async (tx) => {
       const [agent] = await tx
         .insert(agentsTable)
-        .values({ ...agentFields, avatar, status: "idle" })
+        .values({
+          ...agentFields,
+          workspaceId: req.workspaceId!,
+          avatar,
+          status: "idle",
+        })
         .returning();
       const grants = dedupeGrants(appGrants ?? []);
       if (grants.length > 0) {
@@ -548,6 +453,7 @@ router.post("/agents", async (req, res): Promise<void> => {
         );
       }
       await recordAudit(
+        req.workspaceId!,
         "agent.created",
         `${agent.name} joined the office as ${agent.title}.${grantAuditSuffix(grants)}`,
         tx,
@@ -577,7 +483,12 @@ router.get("/agents/:agentId", async (req, res): Promise<void> => {
   const [agent] = await db
     .select()
     .from(agentsTable)
-    .where(eq(agentsTable.id, params.data.agentId))
+    .where(
+      and(
+        eq(agentsTable.id, params.data.agentId),
+        eq(agentsTable.workspaceId, req.workspaceId!),
+      ),
+    )
     .limit(1);
   if (!agent) {
     res.status(404).json({ error: "Agent not found" });
@@ -626,14 +537,19 @@ router.patch("/agents/:agentId", async (req, res): Promise<void> => {
       const [existing] = await tx
         .select()
         .from(agentsTable)
-        .where(eq(agentsTable.id, params.data.agentId))
+        .where(
+          and(
+            eq(agentsTable.id, params.data.agentId),
+            eq(agentsTable.workspaceId, req.workspaceId!),
+          ),
+        )
         .limit(1)
         .for("update");
       if (!existing) return { status: 404 as const };
       if (existing.retired) return { status: 409 as const, retired: true };
       if (
         typeof updates.name === "string" &&
-        (await findNameConflict(tx, updates.name, existing.id))
+        (await findNameConflict(tx, req.workspaceId!, updates.name, existing.id))
       ) {
         return { status: 409 as const, retired: false, name: updates.name };
       }
@@ -674,6 +590,7 @@ router.patch("/agents/:agentId", async (req, res): Promise<void> => {
         }));
       }
       await recordAudit(
+        req.workspaceId!,
         "agent.updated",
         `${agent.name}'s profile was updated.${
           appGrants !== undefined
@@ -706,12 +623,17 @@ router.patch("/agents/:agentId", async (req, res): Promise<void> => {
   }
 });
 
-async function duplicateAgentOnce(agentId: string) {
+async function duplicateAgentOnce(workspaceId: string, agentId: string) {
   return db.transaction(async (tx) => {
     const [source] = await tx
       .select()
       .from(agentsTable)
-      .where(eq(agentsTable.id, agentId))
+      .where(
+        and(
+          eq(agentsTable.id, agentId),
+          eq(agentsTable.workspaceId, workspaceId),
+        ),
+      )
       .limit(1);
     if (!source) return { status: 404 as const };
     if (source.retired) return { status: 409 as const };
@@ -719,13 +641,14 @@ async function duplicateAgentOnce(agentId: string) {
     // name budget enforced by the API contract.
     const base = `${source.name.slice(0, 48).trimEnd()} Copy`;
     let candidate = base;
-    for (let n = 2; await findNameConflict(tx, candidate); n += 1) {
+    for (let n = 2; await findNameConflict(tx, workspaceId, candidate); n += 1) {
       if (n > 50) return { status: 409 as const };
       candidate = `${base} ${n}`;
     }
     const [agent] = await tx
       .insert(agentsTable)
       .values({
+        workspaceId,
         name: candidate,
         title: source.title,
         mission: source.mission,
@@ -749,6 +672,7 @@ async function duplicateAgentOnce(agentId: string) {
     // the owner, never inherited through duplication — and a copy without
     // grants has nothing sensitive to sandbox until the owner sets it up.
     await recordAudit(
+      workspaceId,
       "agent.duplicated",
       `${agent.name} was recruited as a copy of ${source.name}. Connected-app access was not copied.`,
       tx,
@@ -768,7 +692,7 @@ router.post("/agents/:agentId/duplicate", async (req, res): Promise<void> => {
   let outcome: Awaited<ReturnType<typeof duplicateAgentOnce>> | null = null;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      outcome = await duplicateAgentOnce(params.data.agentId);
+      outcome = await duplicateAgentOnce(req.workspaceId!, params.data.agentId);
       break;
     } catch (error) {
       if (!isUniqueViolation(error) || attempt === 2) throw error;
@@ -813,6 +737,7 @@ router.post("/agents/:agentId/archive", async (req, res): Promise<void> => {
       .where(
         and(
           eq(agentsTable.id, params.data.agentId),
+          eq(agentsTable.workspaceId, req.workspaceId!),
           eq(agentsTable.retired, false),
           eq(agentsTable.archived, !archived),
         ),
@@ -822,7 +747,12 @@ router.post("/agents/:agentId/archive", async (req, res): Promise<void> => {
       const [existing] = await tx
         .select({ id: agentsTable.id, retired: agentsTable.retired })
         .from(agentsTable)
-        .where(eq(agentsTable.id, params.data.agentId))
+        .where(
+          and(
+            eq(agentsTable.id, params.data.agentId),
+            eq(agentsTable.workspaceId, req.workspaceId!),
+          ),
+        )
         .limit(1);
       if (!existing) return { status: 404 as const };
       if (existing.retired) return { status: 409 as const };
@@ -856,6 +786,7 @@ router.post("/agents/:agentId/archive", async (req, res): Promise<void> => {
         .returning({ id: tasksTable.id });
     }
     await recordAudit(
+      req.workspaceId!,
       archived ? "agent.archived" : "agent.restored",
       archived
         ? `${agent.name} was archived and stepped away from the office.`
@@ -893,7 +824,12 @@ router.delete("/agents/:agentId", async (req, res): Promise<void> => {
     const [agent] = await tx
       .select()
       .from(agentsTable)
-      .where(eq(agentsTable.id, params.data.agentId))
+      .where(
+        and(
+          eq(agentsTable.id, params.data.agentId),
+          eq(agentsTable.workspaceId, req.workspaceId!),
+        ),
+      )
       .limit(1)
       .for("update");
     if (!agent) return { status: 404 as const };
@@ -918,6 +854,7 @@ router.delete("/agents/:agentId", async (req, res): Promise<void> => {
     await tx.delete(tasksTable).where(eq(tasksTable.agentId, agent.id));
     await tx.delete(agentsTable).where(eq(agentsTable.id, agent.id));
     await recordAudit(
+      req.workspaceId!,
       "agent.deleted",
       `${agent.name} and their task history were permanently deleted.`,
       tx,
@@ -956,6 +893,7 @@ router.post("/agents/:agentId/pause", async (req, res): Promise<void> => {
     .where(
       and(
         eq(agentsTable.id, params.data.agentId),
+        eq(agentsTable.workspaceId, req.workspaceId!),
         eq(agentsTable.retired, false),
         eq(agentsTable.archived, false),
       ),
@@ -965,7 +903,12 @@ router.post("/agents/:agentId/pause", async (req, res): Promise<void> => {
     const [existing] = await db
       .select({ archived: agentsTable.archived, retired: agentsTable.retired })
       .from(agentsTable)
-      .where(eq(agentsTable.id, params.data.agentId))
+      .where(
+        and(
+          eq(agentsTable.id, params.data.agentId),
+          eq(agentsTable.workspaceId, req.workspaceId!),
+        ),
+      )
       .limit(1);
     if (existing && (existing.archived || existing.retired)) {
       res.status(409).json({
@@ -979,6 +922,7 @@ router.post("/agents/:agentId/pause", async (req, res): Promise<void> => {
     return;
   }
   await recordAudit(
+      req.workspaceId!,
       body.data.paused ? "agent.paused" : "agent.resumed",
       `${agent.name} was ${body.data.paused ? "paused" : "resumed"}.`,
     );
@@ -1023,6 +967,7 @@ router.post("/agents/:agentId/retire", async (req, res): Promise<void> => {
       .where(
         and(
           eq(agentsTable.id, params.data.agentId),
+          eq(agentsTable.workspaceId, req.workspaceId!),
           eq(agentsTable.retired, false),
         ),
       )
@@ -1031,7 +976,12 @@ router.post("/agents/:agentId/retire", async (req, res): Promise<void> => {
       const [existing] = await tx
         .select({ id: agentsTable.id })
         .from(agentsTable)
-        .where(eq(agentsTable.id, params.data.agentId))
+        .where(
+          and(
+            eq(agentsTable.id, params.data.agentId),
+            eq(agentsTable.workspaceId, req.workspaceId!),
+          ),
+        )
         .limit(1);
       if (existing) return { status: 409 as const };
       return { status: 404 as const };
@@ -1051,6 +1001,7 @@ router.post("/agents/:agentId/retire", async (req, res): Promise<void> => {
       )
       .returning({ id: tasksTable.id });
     await recordAudit(
+      req.workspaceId!,
       "agent.retired",
       `${agent.name} retired to the island after honorable service.`,
       tx,
@@ -1071,16 +1022,21 @@ router.post("/agents/:agentId/retire", async (req, res): Promise<void> => {
   res.json(RetireAgentResponse.parse(toRetiredAgent(outcome.agent)));
 });
 
-router.get("/island/agents", async (_req, res): Promise<void> => {
+router.get("/island/agents", async (req, res): Promise<void> => {
   const agents = await db
     .select()
     .from(agentsTable)
-    .where(eq(agentsTable.retired, true))
+    .where(
+      and(
+        eq(agentsTable.workspaceId, req.workspaceId!),
+        eq(agentsTable.retired, true),
+      ),
+    )
     .orderBy(desc(agentsTable.retiredAt));
   res.json(ListRetiredAgentsResponse.parse(agents.map(toRetiredAgent)));
 });
 
-router.get("/tasks", async (_req, res): Promise<void> => {
+router.get("/tasks", async (req, res): Promise<void> => {
   const rows = await db
     .select({
       task: tasksTable,
@@ -1088,6 +1044,7 @@ router.get("/tasks", async (_req, res): Promise<void> => {
     })
     .from(tasksTable)
     .innerJoin(agentsTable, eq(tasksTable.agentId, agentsTable.id))
+    .where(eq(tasksTable.workspaceId, req.workspaceId!))
     .orderBy(desc(tasksTable.createdAt));
   res.json(
     ListTasksResponse.parse(
@@ -1104,6 +1061,7 @@ router.post("/tasks", async (req, res): Promise<void> => {
   }
   const outcome = await dispatchTask({
     agentId: parsed.data.agentId,
+    workspaceId: req.workspaceId!,
     objective: parsed.data.objective,
     priority: parsed.data.priority,
     budgetCents: parsed.data.budgetCents ?? null,
@@ -1158,7 +1116,12 @@ router.get("/tasks/:taskId", async (req, res): Promise<void> => {
       sql`${agentsTable} as delegator`,
       sql`${tasksTable.delegatedByAgentId} = ${delegator}.id`,
     )
-    .where(eq(tasksTable.id, params.data.taskId))
+    .where(
+      and(
+        eq(tasksTable.id, params.data.taskId),
+        eq(tasksTable.workspaceId, req.workspaceId!),
+      ),
+    )
     .limit(1);
   if (!row) {
     res.status(404).json({ error: "Task not found" });
@@ -1198,7 +1161,12 @@ router.post("/tasks/:taskId/cancel", async (req, res): Promise<void> => {
       .select({ task: tasksTable, agentName: agentsTable.name })
       .from(tasksTable)
       .innerJoin(agentsTable, eq(tasksTable.agentId, agentsTable.id))
-      .where(eq(tasksTable.id, params.data.taskId))
+      .where(
+        and(
+          eq(tasksTable.id, params.data.taskId),
+          eq(tasksTable.workspaceId, req.workspaceId!),
+        ),
+      )
       .limit(1)
       .for("update", { of: tasksTable });
     if (!row) return { status: 404 as const };
@@ -1227,6 +1195,7 @@ router.post("/tasks/:taskId/cancel", async (req, res): Promise<void> => {
       message: "Cancelled by the owner.",
     });
     await recordAudit(
+      req.workspaceId!,
       "task.cancelled",
       `A task for ${row.agentName} was cancelled.`,
       tx,
@@ -1246,7 +1215,7 @@ router.post("/tasks/:taskId/cancel", async (req, res): Promise<void> => {
   // Abort any in-flight provider call after the status is committed, so the
   // worker's conditional finish sees "cancelled" and discards the result.
   abortRunningTask(outcome.task.id);
-  publish("tasks", "approvals", "overview");
+  publish(req.workspaceId!, "tasks", "approvals", "overview");
   res.json(CancelTaskResponse.parse(toTaskJson(outcome.task, outcome.agentName)));
 });
 
@@ -1261,7 +1230,12 @@ router.post("/tasks/:taskId/retry", async (req, res): Promise<void> => {
       .select({ task: tasksTable, agentName: agentsTable.name })
       .from(tasksTable)
       .innerJoin(agentsTable, eq(tasksTable.agentId, agentsTable.id))
-      .where(eq(tasksTable.id, params.data.taskId))
+      .where(
+        and(
+          eq(tasksTable.id, params.data.taskId),
+          eq(tasksTable.workspaceId, req.workspaceId!),
+        ),
+      )
       .limit(1)
       .for("update", { of: tasksTable });
     if (!row) return { status: 404 as const };
@@ -1288,6 +1262,7 @@ router.post("/tasks/:taskId/retry", async (req, res): Promise<void> => {
       message: "Retried by the owner; requeued for a fresh attempt.",
     });
     await recordAudit(
+      req.workspaceId!,
       "task.retried",
       `A task for ${row.agentName} was requeued.`,
       tx,
@@ -1304,7 +1279,7 @@ router.post("/tasks/:taskId/retry", async (req, res): Promise<void> => {
     });
     return;
   }
-  publish("tasks", "overview");
+  publish(req.workspaceId!, "tasks", "overview");
   res.json(RetryTaskResponse.parse(toTaskJson(outcome.task, outcome.agentName)));
 });
 
@@ -1333,7 +1308,12 @@ router.post("/tasks/:taskId/fallback", async (req, res): Promise<void> => {
       .select({ task: tasksTable, agentName: agentsTable.name })
       .from(tasksTable)
       .innerJoin(agentsTable, eq(tasksTable.agentId, agentsTable.id))
-      .where(eq(tasksTable.id, params.data.taskId))
+      .where(
+        and(
+          eq(tasksTable.id, params.data.taskId),
+          eq(tasksTable.workspaceId, req.workspaceId!),
+        ),
+      )
       .limit(1)
       .for("update", { of: tasksTable });
     if (!row) return { status: 404 as const };
@@ -1376,6 +1356,7 @@ router.post("/tasks/:taskId/fallback", async (req, res): Promise<void> => {
       message,
     });
     await recordAudit(
+      req.workspaceId!,
       action === "approve_paid_fallback"
         ? "task.paid_fallback_approved"
         : "task.fallback_decision",
@@ -1394,7 +1375,7 @@ router.post("/tasks/:taskId/fallback", async (req, res): Promise<void> => {
     });
     return;
   }
-  publish("tasks", "overview");
+  publish(req.workspaceId!, "tasks", "overview");
   res.json(
     DecideTaskFallbackResponse.parse(
       toTaskJson(outcome.task, outcome.agentName),
@@ -1411,13 +1392,19 @@ router.post("/tasks/estimate", async (req, res): Promise<void> => {
   const [agent] = await db
     .select()
     .from(agentsTable)
-    .where(eq(agentsTable.id, parsed.data.agentId))
+    .where(
+      and(
+        eq(agentsTable.id, parsed.data.agentId),
+        eq(agentsTable.workspaceId, req.workspaceId!),
+      ),
+    )
     .limit(1);
   if (!agent) {
     res.status(404).json({ error: "Agent not found" });
     return;
   }
   const routing = await resolveRouting(
+    req.workspaceId!,
     agent,
     parsed.data.providerOverride as ProviderId | undefined,
     parsed.data.modelOverride,
@@ -1441,7 +1428,12 @@ router.post("/tasks/:taskId/usage", async (req, res): Promise<void> => {
     .select({ task: tasksTable, agentName: agentsTable.name })
     .from(tasksTable)
     .innerJoin(agentsTable, eq(tasksTable.agentId, agentsTable.id))
-    .where(eq(tasksTable.id, params.data.taskId))
+    .where(
+      and(
+        eq(tasksTable.id, params.data.taskId),
+        eq(tasksTable.workspaceId, req.workspaceId!),
+      ),
+    )
     .limit(1);
   if (!existing) {
     res.status(404).json({ error: "Task not found" });
@@ -1473,13 +1465,8 @@ router.post("/emergency-stop", async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-  await db
-    .insert(systemStateTable)
-    .values({ key: "emergency_stop", value: String(parsed.data.active) })
-    .onConflictDoUpdate({
-      target: systemStateTable.key,
-      set: { value: String(parsed.data.active) },
-    });
+  const wsId = req.workspaceId!;
+  await setWorkspaceSetting(wsId, "emergency_stop", String(parsed.data.active));
   if (parsed.data.active) {
     const interrupted = await db
       .update(tasksTable)
@@ -1488,17 +1475,23 @@ router.post("/emergency-stop", async (req, res): Promise<void> => {
         errorKind: "emergency_stop",
         errorMessage: "The emergency stop was engaged; retry once released.",
       })
-      .where(inArray(tasksTable.status, ["queued", "running"]))
+      .where(
+        and(
+          eq(tasksTable.workspaceId, wsId),
+          inArray(tasksTable.status, ["queued", "running"]),
+        ),
+      )
       .returning({ id: tasksTable.id });
     for (const task of interrupted) abortRunningTask(task.id);
   }
   await recordAudit(
+      wsId,
       parsed.data.active ? "system.stopped" : "system.resumed",
       parsed.data.active
-      ? "Global emergency stop was engaged."
-      : "Global emergency stop was released.",
+      ? "This workspace's emergency stop was engaged."
+      : "This workspace's emergency stop was released.",
     );
-  publish("tasks", "agents", "overview");
+  publish(wsId, "tasks", "agents", "overview");
   res.json(SetEmergencyStopResponse.parse(parsed.data));
 });
 
@@ -1521,7 +1514,7 @@ function toApprovalJson(
   };
 }
 
-router.get("/approvals", async (_req, res): Promise<void> => {
+router.get("/approvals", async (req, res): Promise<void> => {
   const rows = await db
     .select({
       approval: approvalsTable,
@@ -1531,6 +1524,7 @@ router.get("/approvals", async (_req, res): Promise<void> => {
     .from(approvalsTable)
     .innerJoin(agentsTable, eq(approvalsTable.agentId, agentsTable.id))
     .leftJoin(tasksTable, eq(approvalsTable.taskId, tasksTable.id))
+    .where(eq(agentsTable.workspaceId, req.workspaceId!))
     .orderBy(desc(approvalsTable.createdAt));
   res.json(
     ListApprovalsResponse.parse(
@@ -1552,6 +1546,9 @@ router.patch("/approvals/:approvalId", async (req, res): Promise<void> => {
   // requeues (the worker re-checks policy and honors the approval), a
   // rejected task cancels. Expired approvals cannot be decided.
   const outcome = await db.transaction(async (tx) => {
+    // Bind the decision to this workspace: the update only fires when the
+    // approval's agent belongs to the caller's workspace, so a guessed
+    // approval id from another tenant reads as "not found".
     const [approval] = await tx
       .update(approvalsTable)
       .set({ status: body.data.decision, decidedAt: new Date() })
@@ -1560,6 +1557,7 @@ router.patch("/approvals/:approvalId", async (req, res): Promise<void> => {
           eq(approvalsTable.id, params.data.approvalId),
           eq(approvalsTable.status, "pending"),
           sql`${approvalsTable.expiresAt} > now()`,
+          sql`exists (select 1 from ${agentsTable} where ${agentsTable.id} = ${approvalsTable.agentId} and ${agentsTable.workspaceId} = ${req.workspaceId!})`,
         ),
       )
       .returning();
@@ -1625,6 +1623,7 @@ router.patch("/approvals/:approvalId", async (req, res): Promise<void> => {
       body.data.decision === "approved" ? "approved" : "rejected",
     );
     await recordAudit(
+      req.workspaceId!,
       `approval.${body.data.decision}`,
       `${approval.action} was ${body.data.decision} by the owner.${
         settledAction
@@ -1639,7 +1638,7 @@ router.patch("/approvals/:approvalId", async (req, res): Promise<void> => {
     res.status(404).json({ error: "Pending approval not found" });
     return;
   }
-  publish("approvals", "tasks", "overview");
+  publish(req.workspaceId!, "approvals", "tasks", "overview");
   res.json(
     DecideApprovalResponse.parse(
       toApprovalJson(outcome.approval, outcome.agentName, outcome.taskObjective),
@@ -1657,6 +1656,7 @@ router.get("/audit", async (req, res): Promise<void> => {
   const offset = Math.max(Math.trunc(query.data.offset ?? 0), 0);
   const term = query.data.q?.trim();
   const conditions = [
+    eq(auditEventsTable.workspaceId, req.workspaceId!),
     term
       ? or(
           sql`${auditEventsTable.summary} ilike ${`%${term}%`}`,
@@ -1695,8 +1695,8 @@ router.get("/audit", async (req, res): Promise<void> => {
   );
 });
 
-router.get("/audit/verify", async (_req, res): Promise<void> => {
-  res.json(VerifyAuditResponse.parse(await verifyAuditChain()));
+router.get("/audit/verify", async (req, res): Promise<void> => {
+  res.json(VerifyAuditResponse.parse(await verifyAuditChain(req.workspaceId!)));
 });
 
 router.get("/providers", async (_req, res): Promise<void> => {
@@ -1719,6 +1719,7 @@ router.post("/providers/codex/test", async (req, res): Promise<void> => {
   clearProviderCaches();
   const result = await testCodexConnection(getAuth(req)?.userId);
   await recordAudit(
+    req.workspaceId!,
     "providers.codex_tested",
     `The Codex connection was checked locally: ${result.ok ? "ready" : "not ready"}.`,
   );
@@ -1755,6 +1756,7 @@ router.post("/providers/codex/credential", async (req, res): Promise<void> => {
   }
   clearProviderCaches();
   await recordAudit(
+    req.workspaceId!,
     "providers.codex_connected",
     `A ChatGPT Codex sign-in was connected for this account: ${outcome.action}.`,
   );
@@ -1771,6 +1773,7 @@ router.delete("/providers/codex/credential", async (req, res): Promise<void> => 
   const removed = await disconnectCodexCredential(userId);
   clearProviderCaches();
   await recordAudit(
+    req.workspaceId!,
     "providers.codex_disconnected",
     removed
       ? "The stored ChatGPT Codex sign-in was removed for this account."
@@ -1795,6 +1798,7 @@ router.post("/providers/codex/bootstrap", async (req, res): Promise<void> => {
   const outcome = await bootstrapCodexHome(getAuth(req)?.userId);
   clearProviderCaches();
   await recordAudit(
+    req.workspaceId!,
     "providers.codex_bootstrapped",
     `Codex credential bootstrap: ${outcome.action}.`,
   );
@@ -1802,8 +1806,12 @@ router.post("/providers/codex/bootstrap", async (req, res): Promise<void> => {
   res.json(BootstrapCodexResponse.parse(outcome));
 });
 
-router.get("/providers/settings", async (_req, res): Promise<void> => {
-  res.json(GetProviderSettingsResponse.parse(await getProviderSettings()));
+router.get("/providers/settings", async (req, res): Promise<void> => {
+  res.json(
+    GetProviderSettingsResponse.parse(
+      await getProviderSettings(req.workspaceId!),
+    ),
+  );
 });
 
 router.put("/providers/settings", async (req, res): Promise<void> => {
@@ -1814,7 +1822,7 @@ router.put("/providers/settings", async (req, res): Promise<void> => {
   }
   let settings;
   try {
-    settings = await updateProviderSettings({
+    settings = await updateProviderSettings(req.workspaceId!, {
       defaultProvider: parsed.data.defaultProvider as ProviderId | undefined,
       claudeModel: parsed.data.claudeModel,
       openrouterModel: parsed.data.openrouterModel,
@@ -1832,6 +1840,7 @@ router.put("/providers/settings", async (req, res): Promise<void> => {
     throw error;
   }
   await recordAudit(
+      req.workspaceId!,
       "providers.settings_updated",
       `Provider routing defaults were updated (default: ${providerLabel(settings.defaultProvider)}).`,
     );

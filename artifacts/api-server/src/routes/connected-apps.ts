@@ -2,8 +2,8 @@ import { Router, type IRouter } from "express";
 import {
   agentAppGrantsTable,
   agentsTable,
-  connectedAppSettingsTable,
   db,
+  workspaceConnectedAppsTable,
 } from "@workspace/db";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import {
@@ -24,18 +24,24 @@ import { publish } from "../events";
 const router: IRouter = Router();
 
 /**
- * Inventory of every supported app: live connection state of the owner's
- * account, the workspace-wide enable switch, and how many active agents
- * hold a grant. Status is looked up fresh on every request — connection
- * state belongs to the platform, and caching it here would let a revoked
- * account look connected.
+ * Inventory of every supported app for the signed-in user's workspace: live
+ * connection state of that user's account, the workspace enable switch, and
+ * how many of their active agents hold a grant. Status is looked up fresh on
+ * every request — connection state belongs to the credential store, and
+ * caching it here would let a revoked account look connected.
  */
-router.get("/connected-apps", async (_req, res): Promise<void> => {
+router.get("/connected-apps", async (req, res): Promise<void> => {
+  const wsId = req.workspaceId!;
   const [settings, grantCounts, statuses] = await Promise.all([
     db
       .select()
-      .from(connectedAppSettingsTable)
-      .where(inArray(connectedAppSettingsTable.app, [...CONNECTED_APP_IDS])),
+      .from(workspaceConnectedAppsTable)
+      .where(
+        and(
+          eq(workspaceConnectedAppsTable.workspaceId, wsId),
+          inArray(workspaceConnectedAppsTable.app, [...CONNECTED_APP_IDS]),
+        ),
+      ),
     db
       .select({
         app: agentAppGrantsTable.app,
@@ -44,10 +50,14 @@ router.get("/connected-apps", async (_req, res): Promise<void> => {
       .from(agentAppGrantsTable)
       .innerJoin(agentsTable, eq(agentAppGrantsTable.agentId, agentsTable.id))
       .where(
-        and(eq(agentsTable.retired, false), eq(agentsTable.archived, false)),
+        and(
+          eq(agentsTable.workspaceId, wsId),
+          eq(agentsTable.retired, false),
+          eq(agentsTable.archived, false),
+        ),
       )
       .groupBy(agentAppGrantsTable.app),
-    Promise.all(CONNECTED_APP_IDS.map((app) => connectionStatus(app))),
+    Promise.all(CONNECTED_APP_IDS.map((app) => connectionStatus(app, wsId))),
   ]);
   const enabledByApp = new Map(settings.map((row) => [row.app, row.enabled]));
   const countByApp = new Map(grantCounts.map((row) => [row.app, row.count]));
@@ -73,25 +83,30 @@ router.patch("/connected-apps/:app", async (req, res): Promise<void> => {
     res.status(400).json({ error: "Invalid connected-app update" });
     return;
   }
+  const wsId = req.workspaceId!;
   const app = params.data.app;
   const enabled = body.data.enabled;
   await db.transaction(async (tx) => {
     await tx
-      .insert(connectedAppSettingsTable)
-      .values({ app, enabled, updatedAt: new Date() })
+      .insert(workspaceConnectedAppsTable)
+      .values({ workspaceId: wsId, app, enabled, updatedAt: new Date() })
       .onConflictDoUpdate({
-        target: connectedAppSettingsTable.app,
+        target: [
+          workspaceConnectedAppsTable.workspaceId,
+          workspaceConnectedAppsTable.app,
+        ],
         set: { enabled, updatedAt: new Date() },
       });
     await recordAudit(
+      wsId,
       enabled ? "connected_app.enabled" : "connected_app.disabled",
-      `${APP_CATALOG[app].displayName} was ${enabled ? "enabled" : "disabled"} for all agents by the owner.`,
+      `${APP_CATALOG[app].displayName} was ${enabled ? "enabled" : "disabled"} for all agents in this workspace.`,
       tx,
     );
   });
-  publish("agents", "overview");
+  publish(wsId, "agents", "overview");
   const [status, grantCount] = await Promise.all([
-    connectionStatus(app),
+    connectionStatus(app, wsId),
     db
       .select({ count: sql<number>`count(*)::int` })
       .from(agentAppGrantsTable)
@@ -99,6 +114,7 @@ router.patch("/connected-apps/:app", async (req, res): Promise<void> => {
       .where(
         and(
           eq(agentAppGrantsTable.app, app),
+          eq(agentsTable.workspaceId, wsId),
           eq(agentsTable.retired, false),
           eq(agentsTable.archived, false),
         ),

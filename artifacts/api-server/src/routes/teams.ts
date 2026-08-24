@@ -42,11 +42,15 @@ type AgentRow = typeof agentsTable.$inferSelect;
 const DELEGATABLE_STATUSES = ["queued", "running", "waiting_approval"];
 
 /** Load teams with their members in two queries, newest first. */
-async function loadTeams(teamId?: string) {
+async function loadTeams(workspaceId: string, teamId?: string) {
   const teams = await db
     .select()
     .from(teamsTable)
-    .where(teamId ? eq(teamsTable.id, teamId) : undefined)
+    .where(
+      teamId
+        ? and(eq(teamsTable.workspaceId, workspaceId), eq(teamsTable.id, teamId))
+        : eq(teamsTable.workspaceId, workspaceId),
+    )
     .orderBy(desc(teamsTable.createdAt));
   if (teams.length === 0) return [];
 
@@ -102,21 +106,31 @@ async function loadTeams(teamId?: string) {
   }));
 }
 
-async function nameTaken(name: string, excludeId?: string): Promise<boolean> {
+async function nameTaken(
+  workspaceId: string,
+  name: string,
+  excludeId?: string,
+): Promise<boolean> {
   const rows = await db
     .select({ id: teamsTable.id })
     .from(teamsTable)
-    .where(sql`lower(${teamsTable.name}) = lower(${name})`);
+    .where(
+      and(
+        eq(teamsTable.workspaceId, workspaceId),
+        sql`lower(${teamsTable.name}) = lower(${name})`,
+      ),
+    );
   return rows.some((row) => row.id !== excludeId);
 }
 
-router.get("/teams", async (_req: Request, res: Response) => {
-  res.json(ListTeamsResponse.parse(await loadTeams()));
+router.get("/teams", async (req: Request, res: Response) => {
+  res.json(ListTeamsResponse.parse(await loadTeams(req.workspaceId!)));
 });
 
 router.post("/teams", async (req: Request, res: Response) => {
+  const wsId = req.workspaceId!;
   const body = CreateTeamBody.parse(req.body);
-  if (await nameTaken(body.name)) {
+  if (await nameTaken(wsId, body.name)) {
     res.status(409).json({ error: "A team with that name already exists" });
     return;
   }
@@ -128,7 +142,12 @@ router.post("/teams", async (req: Request, res: Response) => {
     const found = await db
       .select({ id: agentsTable.id })
       .from(agentsTable)
-      .where(inArray(agentsTable.id, memberIds));
+      .where(
+        and(
+          eq(agentsTable.workspaceId, wsId),
+          inArray(agentsTable.id, memberIds),
+        ),
+      );
     if (found.length !== memberIds.length) {
       res.status(404).json({ error: "One of those agents does not exist" });
       return;
@@ -139,6 +158,7 @@ router.post("/teams", async (req: Request, res: Response) => {
     const [team] = await tx
       .insert(teamsTable)
       .values({
+        workspaceId: wsId,
         name: body.name,
         mission: body.mission ?? null,
         leadAgentId: body.leadAgentId ?? null,
@@ -149,11 +169,11 @@ router.post("/teams", async (req: Request, res: Response) => {
         .insert(teamMembersTable)
         .values(memberIds.map((agentId) => ({ teamId: team.id, agentId })));
     }
-    await recordAudit("team.created", `Team "${team.name}" was created.`, tx);
+    await recordAudit(wsId, "team.created", `Team "${team.name}" was created.`, tx);
     return team.id;
   });
 
-  const [team] = await loadTeams(teamId);
+  const [team] = await loadTeams(wsId, teamId);
   res.status(201).json(CreateTeamResponse.parse(team));
 });
 
@@ -163,13 +183,18 @@ router.patch("/teams/:teamId", async (req: Request, res: Response) => {
   const [existing] = await db
     .select()
     .from(teamsTable)
-    .where(eq(teamsTable.id, teamId))
+    .where(
+      and(
+        eq(teamsTable.id, teamId),
+        eq(teamsTable.workspaceId, req.workspaceId!),
+      ),
+    )
     .limit(1);
   if (!existing) {
     res.status(404).json({ error: "Team not found" });
     return;
   }
-  if (body.name && (await nameTaken(body.name, teamId))) {
+  if (body.name && (await nameTaken(req.workspaceId!, body.name, teamId))) {
     res.status(409).json({ error: "A team with that name already exists" });
     return;
   }
@@ -203,7 +228,7 @@ router.patch("/teams/:teamId", async (req: Request, res: Response) => {
     })
     .where(eq(teamsTable.id, teamId));
 
-  const [team] = await loadTeams(teamId);
+  const [team] = await loadTeams(req.workspaceId!, teamId);
   res.json(UpdateTeamResponse.parse(team));
 });
 
@@ -211,22 +236,42 @@ router.delete("/teams/:teamId", async (req: Request, res: Response) => {
   const { teamId } = DeleteTeamParams.parse(req.params);
   const [deleted] = await db
     .delete(teamsTable)
-    .where(eq(teamsTable.id, teamId))
+    .where(
+      and(
+        eq(teamsTable.id, teamId),
+        eq(teamsTable.workspaceId, req.workspaceId!),
+      ),
+    )
     .returning({ name: teamsTable.name });
   if (!deleted) {
     res.status(404).json({ error: "Team not found" });
     return;
   }
-  await recordAudit("team.deleted", `Team "${deleted.name}" was disbanded.`);
+  await recordAudit(
+    req.workspaceId!,
+    "team.deleted",
+    `Team "${deleted.name}" was disbanded.`,
+  );
   res.status(204).end();
 });
 
 router.post("/teams/:teamId/members", async (req: Request, res: Response) => {
   const { teamId } = AddTeamMemberParams.parse(req.params);
   const body = AddTeamMemberBody.parse(req.body);
+  const wsId = req.workspaceId!;
   const [[team], [agent]] = await Promise.all([
-    db.select().from(teamsTable).where(eq(teamsTable.id, teamId)).limit(1),
-    db.select().from(agentsTable).where(eq(agentsTable.id, body.agentId)).limit(1),
+    db
+      .select()
+      .from(teamsTable)
+      .where(and(eq(teamsTable.id, teamId), eq(teamsTable.workspaceId, wsId)))
+      .limit(1),
+    db
+      .select()
+      .from(agentsTable)
+      .where(
+        and(eq(agentsTable.id, body.agentId), eq(agentsTable.workspaceId, wsId)),
+      )
+      .limit(1),
   ]);
   if (!team || !agent) {
     res.status(404).json({ error: "Team or agent not found" });
@@ -237,10 +282,11 @@ router.post("/teams/:teamId/members", async (req: Request, res: Response) => {
     .values({ teamId, agentId: body.agentId })
     .onConflictDoNothing();
   await recordAudit(
+    wsId,
     "team.member_added",
     `${agent.name} joined team "${team.name}".`,
   );
-  const [updated] = await loadTeams(teamId);
+  const [updated] = await loadTeams(wsId, teamId);
   res.json(AddTeamMemberResponse.parse(updated));
 });
 
@@ -248,6 +294,20 @@ router.delete(
   "/teams/:teamId/members/:agentId",
   async (req: Request, res: Response) => {
     const { teamId, agentId } = RemoveTeamMemberParams.parse(req.params);
+    const [owned] = await db
+      .select({ id: teamsTable.id })
+      .from(teamsTable)
+      .where(
+        and(
+          eq(teamsTable.id, teamId),
+          eq(teamsTable.workspaceId, req.workspaceId!),
+        ),
+      )
+      .limit(1);
+    if (!owned) {
+      res.status(404).json({ error: "Team not found" });
+      return;
+    }
     const [removed] = await db
       .delete(teamMembersTable)
       .where(
@@ -266,8 +326,12 @@ router.delete(
       .update(teamsTable)
       .set({ leadAgentId: null })
       .where(and(eq(teamsTable.id, teamId), eq(teamsTable.leadAgentId, agentId)));
-    await recordAudit("team.member_removed", "An agent left a team.");
-    const [updated] = await loadTeams(teamId);
+    await recordAudit(
+      req.workspaceId!,
+      "team.member_removed",
+      "An agent left a team.",
+    );
+    const [updated] = await loadTeams(req.workspaceId!, teamId);
     if (!updated) {
       res.status(404).json({ error: "Team not found" });
       return;
@@ -290,7 +354,12 @@ router.post("/tasks/:taskId/delegate", async (req: Request, res: Response) => {
       .select({ task: tasksTable, agent: agentsTable })
       .from(tasksTable)
       .innerJoin(agentsTable, eq(tasksTable.agentId, agentsTable.id))
-      .where(eq(tasksTable.id, taskId))
+      .where(
+        and(
+          eq(tasksTable.id, taskId),
+          eq(tasksTable.workspaceId, req.workspaceId!),
+        ),
+      )
       .limit(1)
       .for("update", { of: tasksTable });
     if (!parent) return { status: 404 as const, error: "Task not found" };
@@ -322,14 +391,21 @@ router.post("/tasks/:taskId/delegate", async (req: Request, res: Response) => {
     const [target] = await tx
       .select()
       .from(agentsTable)
-      .where(eq(agentsTable.id, body.agentId))
+      .where(
+        and(
+          eq(agentsTable.id, body.agentId),
+          eq(agentsTable.workspaceId, req.workspaceId!),
+        ),
+      )
       .limit(1);
-    const routing = await resolveRouting(target as AgentRow);
+    if (!target) return { status: 404 as const, error: "Agent not found" };
+    const routing = await resolveRouting(req.workspaceId!, target as AgentRow);
 
     const [child] = await tx
       .insert(tasksTable)
       .values({
         agentId: body.agentId,
+        workspaceId: req.workspaceId!,
         objective: body.objective,
         priority: body.priority ?? parent.task.priority,
         budgetCents: body.budgetCents ?? null,
@@ -354,6 +430,7 @@ router.post("/tasks/:taskId/delegate", async (req: Request, res: Response) => {
         `Please handle this for me: ${body.objective.slice(0, 300)}`,
     });
     await recordAudit(
+      req.workspaceId!,
       "task.delegated",
       `${parent.agent.name} delegated a sub-task to ${target?.name ?? "a teammate"}.`,
       tx,
@@ -369,6 +446,7 @@ router.post("/tasks/:taskId/delegate", async (req: Request, res: Response) => {
   if (outcome.status !== 201) {
     if (outcome.status === 403) {
       await recordAudit(
+        req.workspaceId!,
         "delegation.denied",
         `A delegation${outcome.lead ? ` from ${outcome.lead.name}` : ""} was refused: ${outcome.error}`,
       );
@@ -395,7 +473,12 @@ router.get("/tasks/:taskId/tree", async (req: Request, res: Response) => {
   const [task] = await db
     .select({ id: tasksTable.id, rootTaskId: tasksTable.rootTaskId })
     .from(tasksTable)
-    .where(eq(tasksTable.id, taskId))
+    .where(
+      and(
+        eq(tasksTable.id, taskId),
+        eq(tasksTable.workspaceId, req.workspaceId!),
+      ),
+    )
     .limit(1);
   if (!task) {
     res.status(404).json({ error: "Task not found" });
@@ -424,7 +507,10 @@ router.get("/tasks/:taskId/tree", async (req: Request, res: Response) => {
       sql`${tasksTable.delegatedByAgentId} = ${delegator}.id`,
     )
     .where(
-      or(eq(tasksTable.rootTaskId, rootTaskId), eq(tasksTable.id, rootTaskId)),
+      and(
+        eq(tasksTable.workspaceId, req.workspaceId!),
+        or(eq(tasksTable.rootTaskId, rootTaskId), eq(tasksTable.id, rootTaskId)),
+      ),
     )
     .orderBy(tasksTable.depth, tasksTable.createdAt);
 
@@ -468,6 +554,8 @@ router.get("/messages", async (req: Request, res: Response) => {
     )
     .where(
       and(
+        // Only messages between this workspace's agents are visible.
+        sql`exists (select 1 from ${agentsTable} where ${agentsTable.id} = coalesce(${agentMessagesTable.fromAgentId}, ${agentMessagesTable.toAgentId}) and ${agentsTable.workspaceId} = ${req.workspaceId!})`,
         ...(query.taskId ? [eq(agentMessagesTable.taskId, query.taskId)] : []),
         ...(query.agentId
           ? [

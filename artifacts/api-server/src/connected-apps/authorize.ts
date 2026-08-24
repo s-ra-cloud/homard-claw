@@ -1,12 +1,12 @@
 import {
   agentAppGrantsTable,
   agentsTable,
-  connectedAppSettingsTable,
   db,
+  workspaceConnectedAppsTable,
   type AppAccessLevel,
   type ConnectedAppId,
 } from "@workspace/db";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   APP_CATALOG,
   CONNECTED_APP_IDS,
@@ -17,7 +17,6 @@ import {
   validateParams,
   type AppOperation,
 } from "./catalog";
-
 /** Everything the worker needs to know about one agent's app access. */
 export type AgentAppAccess = {
   /** app → granted level, only for apps the workspace has enabled. */
@@ -41,22 +40,44 @@ export type AgentAppAccess = {
  */
 export async function loadAgentAppAccess(
   agentId: string,
+  workspaceId: string | null,
 ): Promise<AgentAppAccess> {
   const [grantRows, settingRows, agentRows] = await Promise.all([
     db
-      .select()
+      .select({
+        app: agentAppGrantsTable.app,
+        accessLevel: agentAppGrantsTable.accessLevel,
+      })
       .from(agentAppGrantsTable)
-      .where(eq(agentAppGrantsTable.agentId, agentId)),
-    db
-      .select()
-      .from(connectedAppSettingsTable)
+      .innerJoin(agentsTable, eq(agentAppGrantsTable.agentId, agentsTable.id))
       .where(
-        inArray(connectedAppSettingsTable.app, [...CONNECTED_APP_IDS]),
+        and(
+          eq(agentAppGrantsTable.agentId, agentId),
+          eq(agentsTable.workspaceId, workspaceId ?? ""),
+        ),
       ),
+    workspaceId
+      ? db
+          .select()
+          .from(workspaceConnectedAppsTable)
+          .where(
+            and(
+              eq(workspaceConnectedAppsTable.workspaceId, workspaceId),
+              inArray(workspaceConnectedAppsTable.app, [...CONNECTED_APP_IDS]),
+            ),
+          )
+      : Promise.resolve(
+          [] as (typeof workspaceConnectedAppsTable.$inferSelect)[],
+        ),
     db
       .select({ sensitiveDataSandbox: agentsTable.sensitiveDataSandbox })
       .from(agentsTable)
-      .where(eq(agentsTable.id, agentId))
+      .where(
+        and(
+          eq(agentsTable.id, agentId),
+          eq(agentsTable.workspaceId, workspaceId ?? ""),
+        ),
+      )
       .limit(1),
   ]);
   // Fail closed: an agent row we cannot read is treated as sandboxed.
@@ -65,10 +86,14 @@ export async function loadAgentAppAccess(
     settingRows.filter((row) => !row.enabled).map((row) => row.app),
   );
   const grants = new Map<ConnectedAppId, AppAccessLevel>();
-  for (const row of grantRows) {
-    if (!isConnectedAppId(row.app)) continue;
-    if (disabled.has(row.app)) continue;
-    grants.set(row.app, row.accessLevel as AppAccessLevel);
+  // Fail closed: an agent without a workspace has no app access at all —
+  // there is no owner whose credentials it could legitimately use.
+  if (workspaceId) {
+    for (const row of grantRows) {
+      if (!isConnectedAppId(row.app)) continue;
+      if (disabled.has(row.app)) continue;
+      grants.set(row.app, row.accessLevel as AppAccessLevel);
+    }
   }
   return {
     grants,

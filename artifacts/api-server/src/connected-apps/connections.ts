@@ -4,6 +4,12 @@ import {
   type AppOperation,
   type ConnectedAppId,
 } from "./catalog";
+import { legacyWorkspaceId } from "../workspace";
+import {
+  GoogleAuthError,
+  gmailAccessToken,
+  googleAccountSummary,
+} from "../google/credentials";
 
 /**
  * Live connection state of the workspace owner's account for one app.
@@ -88,9 +94,41 @@ function client(): ReplitConnectors {
   return new ReplitConnectors();
 }
 
+/**
+ * Gmail's connection is the workspace's own Google account, created by the
+ * in-app OAuth flow. Drive and GitHub still ride the Replit workspace
+ * connector, which belongs to the original owner alone: any other
+ * workspace sees them as not connected, so a shared platform credential
+ * can never become a cross-user access path.
+ */
 export async function connectionStatus(
   app: ConnectedAppId,
+  workspaceId: string,
 ): Promise<ConnectionStatus> {
+  if (app === "gmail") {
+    const account = await googleAccountSummary(workspaceId);
+    if (!account) {
+      return { status: "not_connected", detail: null, accountLabel: null };
+    }
+    if (account.missingScopes.length > 0) {
+      return {
+        status: "expired",
+        detail:
+          "The connected Google account is missing required Gmail permissions. Reconnect and grant all requested access.",
+        accountLabel: account.email,
+      };
+    }
+    return { status: "connected", detail: null, accountLabel: account.email };
+  }
+  const legacyId = await legacyWorkspaceId();
+  if (!legacyId || legacyId !== workspaceId) {
+    return {
+      status: "not_connected",
+      detail:
+        "This app is not yet available for personal accounts — per-user connections for it are coming later.",
+      accountLabel: null,
+    };
+  }
   const { connectorName } = APP_CATALOG[app];
   try {
     const connections = await client().listConnections({
@@ -203,7 +241,114 @@ async function proxyJson(
  * ambiguous outcome (crash mid-call) can later be verified against the
  * provider instead of guessed at.
  */
-export type ExecutionContext = { actionId: string | null };
+export type ExecutionContext = {
+  actionId: string | null;
+  /**
+   * The durable workspace that owns the task requesting the operation.
+   * Credentials are always resolved from this — never from a browser
+   * session or an ambient connector — so an approval decided in one
+   * session can only ever execute against its own owner's accounts.
+   */
+  workspaceId: string | null;
+};
+
+/** Outcome for operations attempted without a resolvable owner. */
+const NO_WORKSPACE_OUTCOME: ExecutionOutcome = {
+  ok: false,
+  kind: "auth",
+  message:
+    "This task has no workspace owner, so no connected account can be used for it.",
+};
+
+/**
+ * Guard for apps still served by the Replit workspace connector: only the
+ * legacy owner's workspace may use them.
+ */
+async function requireLegacyWorkspace(
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome | null> {
+  if (!ctx.workspaceId) return NO_WORKSPACE_OUTCOME;
+  const legacyId = await legacyWorkspaceId();
+  if (!legacyId || legacyId !== ctx.workspaceId) {
+    return {
+      ok: false,
+      kind: "auth",
+      message:
+        "This app is not connected for this workspace. Per-user connections for it are not available yet.",
+    };
+  }
+  return null;
+}
+
+/* -------------------- Per-workspace Gmail transport -------------------- */
+
+const GMAIL_API = "https://gmail.googleapis.com";
+
+/**
+ * Call the Gmail API as the owning workspace's own Google account. Every
+ * call resolves (and if needed refreshes) the credential fresh, so a
+ * disconnect or revocation blocks the very next operation.
+ */
+async function gmailJson(
+  workspaceId: string | null,
+  path: string,
+  options?: { method?: string; body?: unknown },
+): Promise<
+  | { ok: true; data: unknown }
+  | { ok: false; outcome: ExecutionOutcome }
+> {
+  if (!workspaceId) return { ok: false, outcome: NO_WORKSPACE_OUTCOME };
+  let token: string;
+  try {
+    ({ token } = await gmailAccessToken(workspaceId));
+  } catch (error) {
+    if (error instanceof GoogleAuthError) {
+      return {
+        ok: false,
+        outcome: {
+          ok: false,
+          kind: error.kind === "unavailable" ? "failed" : "auth",
+          message: error.message,
+        },
+      };
+    }
+    throw error;
+  }
+  let response: Response;
+  try {
+    response = await fetch(`${GMAIL_API}${path}`, {
+      method: options?.method ?? "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(options?.body !== undefined
+          ? { "Content-Type": "application/json" }
+          : {}),
+      },
+      ...(options?.body !== undefined
+        ? { body: JSON.stringify(options.body) }
+        : {}),
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      outcome: {
+        ok: false,
+        kind: "failed",
+        message: `Could not reach Gmail: ${error instanceof Error ? error.message : String(error)}`,
+      },
+    };
+  }
+  const text = await response.text();
+  if (!response.ok) {
+    return { ok: false, outcome: mapProxyFailure(response.status, text) };
+  }
+  if (!text) return { ok: true, data: null };
+  try {
+    return { ok: true, data: JSON.parse(text) };
+  } catch {
+    return { ok: true, data: text };
+  }
+}
 
 /* ------------------------------ Gmail ---------------------------------- */
 
@@ -242,10 +387,13 @@ function headerValue(headers: GmailHeaders | undefined, name: string): string {
   );
 }
 
-async function gmailSearch(params: Record<string, unknown>): Promise<ExecutionOutcome> {
+async function gmailSearch(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
   const query = encodeURIComponent(String(params.query));
-  const listed = await proxyJson(
-    "gmail",
+  const listed = await gmailJson(
+    ctx.workspaceId,
     `/gmail/v1/users/me/messages?q=${query}&maxResults=5`,
   );
   if (!listed.ok) return listed.outcome;
@@ -256,8 +404,8 @@ async function gmailSearch(params: Record<string, unknown>): Promise<ExecutionOu
   }
   const lines: string[] = [];
   for (const message of messages.slice(0, 5)) {
-    const detail = await proxyJson(
-      "gmail",
+    const detail = await gmailJson(
+      ctx.workspaceId,
       `/gmail/v1/users/me/messages/${message.id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`,
     );
     if (!detail.ok) return detail.outcome;
@@ -292,10 +440,13 @@ function collectPlainText(part: {
   return text;
 }
 
-async function gmailReadThread(params: Record<string, unknown>): Promise<ExecutionOutcome> {
+async function gmailReadThread(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
   const threadId = encodeURIComponent(String(params.threadId));
-  const result = await proxyJson(
-    "gmail",
+  const result = await gmailJson(
+    ctx.workspaceId,
     `/gmail/v1/users/me/threads/${threadId}?format=full`,
   );
   if (!result.ok) return result.outcome;
@@ -313,8 +464,11 @@ async function gmailReadThread(params: Record<string, unknown>): Promise<Executi
   };
 }
 
-async function gmailCreateDraft(params: Record<string, unknown>): Promise<ExecutionOutcome> {
-  const result = await proxyJson("gmail", "/gmail/v1/users/me/drafts", {
+async function gmailCreateDraft(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const result = await gmailJson(ctx.workspaceId, "/gmail/v1/users/me/drafts", {
     method: "POST",
     body: {
       message: {
@@ -334,8 +488,11 @@ async function gmailSendEmail(
   params: Record<string, unknown>,
   ctx: ExecutionContext,
 ): Promise<ExecutionOutcome> {
-  const result = await proxyJson("gmail", "/gmail/v1/users/me/messages/send", {
-    method: "POST",
+  const result = await gmailJson(
+    ctx.workspaceId,
+    "/gmail/v1/users/me/messages/send",
+    {
+      method: "POST",
     body: {
       raw: rfc822(
         String(params.to),
@@ -359,7 +516,12 @@ function escapeDriveQuery(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
 
-async function driveSearch(params: Record<string, unknown>): Promise<ExecutionOutcome> {
+async function driveSearch(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const denied = await requireLegacyWorkspace(ctx);
+  if (denied) return denied;
   const term = escapeDriveQuery(String(params.query));
   const q = encodeURIComponent(
     `(name contains '${term}' or fullText contains '${term}') and trashed = false`,
@@ -386,7 +548,12 @@ async function driveSearch(params: Record<string, unknown>): Promise<ExecutionOu
 /** Google-native docs must be exported; everything else downloads as-is. */
 const DRIVE_EXPORTABLE_PREFIX = "application/vnd.google-apps.";
 
-async function driveReadFile(params: Record<string, unknown>): Promise<ExecutionOutcome> {
+async function driveReadFile(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const denied = await requireLegacyWorkspace(ctx);
+  if (denied) return denied;
   const fileId = encodeURIComponent(String(params.fileId));
   const meta = await proxyJson(
     "google_drive",
@@ -417,6 +584,8 @@ async function driveCreateFile(
   params: Record<string, unknown>,
   ctx: ExecutionContext,
 ): Promise<ExecutionOutcome> {
+  const denied = await requireLegacyWorkspace(ctx);
+  if (denied) return denied;
   const created = await proxyJson("google_drive", "/drive/v3/files", {
     method: "POST",
     body: {
@@ -452,7 +621,12 @@ async function driveCreateFile(
 
 /* ------------------------------- GitHub -------------------------------- */
 
-async function githubListRepos(): Promise<ExecutionOutcome> {
+async function githubListRepos(
+  _params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const denied = await requireLegacyWorkspace(ctx);
+  if (denied) return denied;
   const result = await proxyJson(
     "github",
     "/user/repos?sort=pushed&per_page=30",
@@ -470,7 +644,12 @@ async function githubListRepos(): Promise<ExecutionOutcome> {
   };
 }
 
-async function githubReadFile(params: Record<string, unknown>): Promise<ExecutionOutcome> {
+async function githubReadFile(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const denied = await requireLegacyWorkspace(ctx);
+  if (denied) return denied;
   const { owner, repo, path } = params;
   const ref = params.ref ? `?ref=${encodeURIComponent(String(params.ref))}` : "";
   const result = await proxyJson(
@@ -489,7 +668,12 @@ async function githubReadFile(params: Record<string, unknown>): Promise<Executio
   return { ok: true, summary: truncate(text) };
 }
 
-async function githubListIssues(params: Record<string, unknown>): Promise<ExecutionOutcome> {
+async function githubListIssues(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const denied = await requireLegacyWorkspace(ctx);
+  if (denied) return denied;
   const state = ["open", "closed", "all"].includes(String(params.state))
     ? String(params.state)
     : "open";
@@ -530,6 +714,8 @@ async function githubCreateIssue(
   params: Record<string, unknown>,
   ctx: ExecutionContext,
 ): Promise<ExecutionOutcome> {
+  const denied = await requireLegacyWorkspace(ctx);
+  if (denied) return denied;
   const body = withGithubMarker(
     params.body ? String(params.body) : "",
     ctx.actionId,
@@ -557,6 +743,8 @@ async function githubCommentOnIssue(
   params: Record<string, unknown>,
   ctx: ExecutionContext,
 ): Promise<ExecutionOutcome> {
+  const denied = await requireLegacyWorkspace(ctx);
+  if (denied) return denied;
   const issueNumber = Math.trunc(Number(params.issueNumber));
   const result = await proxyJson(
     "github",
@@ -603,7 +791,7 @@ const EXECUTORS: Record<
 export async function executeOperation(
   op: AppOperation,
   params: Record<string, unknown>,
-  ctx: ExecutionContext = { actionId: null },
+  ctx: ExecutionContext = { actionId: null, workspaceId: null },
 ): Promise<ExecutionOutcome> {
   const executor = EXECUTORS[op.name];
   if (!executor) {
@@ -644,12 +832,15 @@ function failureMessage(outcome: ExecutionOutcome): string {
 async function verifyGmailSend(
   params: Record<string, unknown>,
   actionId: string,
+  workspaceId: string | null,
 ): Promise<VerificationResult> {
   // rfc822msgid: is an exact-match lookup on the Message-ID the send call
-  // embedded, so this cannot false-positive on a similar email.
+  // embedded, so this cannot false-positive on a similar email. The lookup
+  // runs against the OWNING workspace's mailbox — the same account the
+  // interrupted send used — never any other user's.
   const q = encodeURIComponent(`rfc822msgid:${gmailMessageId(actionId)}`);
-  const result = await proxyJson(
-    "gmail",
+  const result = await gmailJson(
+    workspaceId,
     `/gmail/v1/users/me/messages?q=${q}&maxResults=1&includeSpamTrash=true`,
   );
   if (!result.ok) {
@@ -667,7 +858,10 @@ async function verifyGmailSend(
 async function verifyGithubCreateIssue(
   params: Record<string, unknown>,
   actionId: string,
+  workspaceId: string | null,
 ): Promise<VerificationResult> {
+  const denied = await requireLegacyWorkspace({ actionId, workspaceId });
+  if (denied) return { kind: "unknown", message: failureMessage(denied) };
   const result = await proxyJson(
     "github",
     `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/issues?state=all&sort=created&direction=desc&per_page=100`,
@@ -702,7 +896,10 @@ async function verifyGithubCreateIssue(
 async function verifyGithubComment(
   params: Record<string, unknown>,
   actionId: string,
+  workspaceId: string | null,
 ): Promise<VerificationResult> {
+  const denied = await requireLegacyWorkspace({ actionId, workspaceId });
+  if (denied) return { kind: "unknown", message: failureMessage(denied) };
   const issueNumber = Math.trunc(Number(params.issueNumber));
   const result = await proxyJson(
     "github",
@@ -734,7 +931,10 @@ async function verifyGithubComment(
 async function verifyDriveCreateFile(
   params: Record<string, unknown>,
   actionId: string,
+  workspaceId: string | null,
 ): Promise<VerificationResult> {
+  const denied = await requireLegacyWorkspace({ actionId, workspaceId });
+  if (denied) return { kind: "unknown", message: failureMessage(denied) };
   const q = encodeURIComponent(
     `appProperties has { key='${DRIVE_ACTION_KEY}' and value='${actionId}' } and trashed = false`,
   );
@@ -800,6 +1000,7 @@ const VERIFIERS: Record<
     verify: (
       params: Record<string, unknown>,
       actionId: string,
+      workspaceId: string | null,
     ) => Promise<VerificationResult>;
   }
 > = {
@@ -840,6 +1041,7 @@ export async function verifyOperationOutcome(
   operation: string,
   params: Record<string, unknown>,
   actionId: string,
+  workspaceId: string | null,
 ): Promise<VerificationResult> {
   const verifier = VERIFIERS[operation];
   if (!verifier) {
@@ -849,7 +1051,7 @@ export async function verifyOperationOutcome(
     };
   }
   try {
-    return await verifier.verify(params, actionId);
+    return await verifier.verify(params, actionId, workspaceId);
   } catch (error) {
     return {
       kind: "unknown",

@@ -5,9 +5,9 @@ import {
   approvalsTable,
   db,
   pool,
-  systemStateTable,
   taskLogsTable,
   tasksTable,
+  workspaceSettingsTable,
 } from "@workspace/db";
 import { and, asc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { recordAudit } from "./audit";
@@ -103,13 +103,14 @@ export async function setTaskPhase(
   taskId: string,
   attempts: number,
   phase: ProviderPhase,
+  workspaceId?: string | null,
 ): Promise<void> {
   try {
     await db
       .update(tasksTable)
       .set({ providerPhase: phase })
       .where(and(eq(tasksTable.id, taskId), eq(tasksTable.attempts, attempts)));
-    publish("tasks");
+    publish(workspaceId, "tasks");
   } catch (error) {
     logger.warn({ taskId, phase, error }, "Could not record task phase");
   }
@@ -235,7 +236,18 @@ export async function expireStaleApprovals(): Promise<number> {
       ),
     )
     .returning();
+  const touchedWorkspaces = new Set<string>();
   for (const approval of expired) {
+    // Resolve the workspace this approval belongs to via its agent — the
+    // durable owner — so the audit entry lands on the right chain.
+    let workspaceId: string | null = null;
+    const [owningAgent] = await db
+      .select({ workspaceId: agentsTable.workspaceId })
+      .from(agentsTable)
+      .where(eq(agentsTable.id, approval.agentId))
+      .limit(1);
+    workspaceId = owningAgent?.workspaceId ?? null;
+    if (workspaceId) touchedWorkspaces.add(workspaceId);
     if (approval.taskId) {
       const [blocked] = await db
         .update(tasksTable)
@@ -262,6 +274,7 @@ export async function expireStaleApprovals(): Promise<number> {
       );
     }
     await recordAudit(
+      workspaceId,
       "approval.expired",
       `An approval request expired undecided: ${approval.action}`,
     );
@@ -270,12 +283,15 @@ export async function expireStaleApprovals(): Promise<number> {
     const settled = await settleActionForApproval(db, approval.id, "expired");
     if (settled) {
       await recordAudit(
+        workspaceId,
         "app_action.expired",
         `A connected-app action expired unapproved: ${settled.targetSummary}.`,
       );
     }
   }
-  if (expired.length > 0) publish("tasks", "approvals", "overview");
+  for (const workspaceId of touchedWorkspaces) {
+    publish(workspaceId, "tasks", "approvals", "overview");
+  }
   return expired.length;
 }
 
@@ -302,13 +318,6 @@ export type ClaimScope = {
  */
 export async function claimNextTask(scope?: ClaimScope): Promise<ClaimedTask | null> {
   return db.transaction(async (tx) => {
-    const [stop] = await tx
-      .select()
-      .from(systemStateTable)
-      .where(eq(systemStateTable.key, "emergency_stop"))
-      .limit(1);
-    if (stop?.value === "true") return null;
-
     const [row] = await tx
       .select({ task: tasksTable, agent: agentsTable })
       .from(tasksTable)
@@ -316,6 +325,14 @@ export async function claimNextTask(scope?: ClaimScope): Promise<ClaimedTask | n
       .where(
         and(
           eq(tasksTable.status, "queued"),
+          // Emergency stop is per workspace: a stopped office claims
+          // nothing, other workspaces keep running.
+          sql`not exists (
+            select 1 from ${workspaceSettingsTable}
+            where ${workspaceSettingsTable.workspaceId} = ${tasksTable.workspaceId}
+              and ${workspaceSettingsTable.key} = 'emergency_stop'
+              and ${workspaceSettingsTable.value} = 'true'
+          )`,
           or(isNull(tasksTable.notBefore), lte(tasksTable.notBefore, new Date())),
           ...(scope?.includePausedAgents ? [] : [eq(agentsTable.paused, false)]),
           eq(agentsTable.archived, false),
@@ -387,7 +404,7 @@ async function finishIfStillRunning(
     )
     .returning();
   if (task) {
-    publish("tasks", "overview");
+    publish(task.workspaceId, "tasks", "overview");
     // Every terminal transition the owner asked to hear about flows through
     // here, so this is the single notification hook for worker outcomes.
     if (set.status === "completed") {
@@ -401,12 +418,15 @@ async function finishIfStillRunning(
   return task ?? null;
 }
 
-async function settleAgentStatus(agentId: string): Promise<void> {
+async function settleAgentStatus(
+  agentId: string,
+  workspaceId?: string | null,
+): Promise<void> {
   await db
     .update(agentsTable)
     .set({ status: "idle" })
     .where(and(eq(agentsTable.id, agentId), eq(agentsTable.status, "working")));
-  publish("agents");
+  publish(workspaceId, "agents");
 }
 
 /**
@@ -452,6 +472,7 @@ async function parkForApproval(
       });
     }
     await recordAudit(
+      agent.workspaceId,
       "approval.requested",
       `${agent.name} needs approval to run a task: ${reason}`,
       tx,
@@ -459,7 +480,7 @@ async function parkForApproval(
     return true;
   });
   if (parked) {
-    publish("tasks", "approvals", "overview");
+    publish(agent.workspaceId, "tasks", "approvals", "overview");
     await notifyTaskEvent("approval_needed", task, reason);
   }
   await addTaskLog(task.id, "info", `Waiting for your approval: ${reason}`);
@@ -514,6 +535,7 @@ async function parkForAppAction(
       approvalId: approval.id,
     });
     await recordAudit(
+      agent.workspaceId,
       "app_action.requested",
       `${agent.name} asked to use a connected app: ${request.targetSummary}. Waiting for the owner.`,
       tx,
@@ -521,7 +543,7 @@ async function parkForAppAction(
     return true;
   });
   if (parked) {
-    publish("tasks", "approvals", "overview");
+    publish(agent.workspaceId, "tasks", "approvals", "overview");
     await notifyTaskEvent(
       "approval_needed",
       task,
@@ -538,6 +560,22 @@ async function parkForAppAction(
 /** Execute one claimed task attempt end to end. */
 export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
   const provider = task.provider as ProviderId;
+  // A task's workspace is the authority for every tenant-scoped lookup and
+  // side effect below. Legacy rows without one must never inherit the
+  // claimed agent's workspace and accidentally run there.
+  const workspaceId = task.workspaceId;
+  if (!workspaceId) {
+    const reason =
+      "This task has no workspace assignment and cannot be run. Retry it after assigning a workspace.";
+    await finishIfStillRunning(task.id, task.attempts, {
+      status: "blocked",
+      errorKind: "workspace_required",
+      errorMessage: reason,
+    });
+    await addTaskLog(task.id, "error", `Blocked: ${reason}`);
+    await settleAgentStatus(agent.id);
+    return;
+  }
 
   // Server-side policy gate: nothing reaches a provider without passing
   // the agent's autonomy and permission checks, no matter how the task
@@ -570,10 +608,11 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     });
     await addTaskLog(task.id, "error", `Blocked by policy: ${reason}`);
     await recordAudit(
+      workspaceId,
       "policy.denied",
       `A task for ${agent.name} was blocked by policy: ${reason}`,
     );
-    await settleAgentStatus(agent.id);
+    await settleAgentStatus(agent.id, workspaceId);
     return;
   }
 
@@ -586,15 +625,16 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     });
     await addTaskLog(task.id, "error", `Blocked by policy: ${decision.reason}`);
     await recordAudit(
+      workspaceId,
       "policy.denied",
       `A task for ${agent.name} was blocked by policy: ${decision.reason}`,
     );
-    await settleAgentStatus(agent.id);
+    await settleAgentStatus(agent.id, workspaceId);
     return;
   }
   if (decision.kind === "needs_approval") {
     await parkForApproval({ task, agent }, decision.reason);
-    await settleAgentStatus(agent.id);
+    await settleAgentStatus(agent.id, workspaceId);
     return;
   }
 
@@ -609,7 +649,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     sensitiveDataSandbox: agent.sensitiveDataSandbox,
   };
   try {
-    appAccess = await loadAgentAppAccess(agent.id);
+    appAccess = await loadAgentAppAccess(agent.id, workspaceId);
   } catch (error) {
     logger.warn({ taskId: task.id, error }, "Could not load connected-app grants");
     await addTaskLog(
@@ -629,7 +669,11 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     // that provably landed is settled as done, one that provably never
     // landed is re-queued (if approved) for a safe retry, and only when
     // verification is impossible is the outcome recorded as unknown.
-    const stranded = await reconcileStaleExecutingActions(task.id, agent.name);
+    const stranded = await reconcileStaleExecutingActions(
+      task.id,
+      agent.name,
+      workspaceId,
+    );
     for (const { action, resolution } of stranded) {
       switch (resolution) {
         case "confirmed":
@@ -674,7 +718,12 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         approved.params ?? {},
       );
       if (verdict.kind === "deny") {
-        await denyClaimedAction(approved, agent.name, verdict.reason);
+        await denyClaimedAction(
+          approved,
+          agent.name,
+          verdict.reason,
+          workspaceId,
+        );
         await addTaskLog(
           task.id,
           "warn",
@@ -689,7 +738,11 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         "info",
         `Running the approved action: ${claimed.targetSummary}.`,
       );
-      const { action } = await executeClaimedAction(claimed, agent.name);
+      const { action } = await executeClaimedAction(
+        claimed,
+        agent.name,
+        workspaceId,
+      );
       await addTaskLog(
         task.id,
         action.status === "executed" ? "info" : "warn",
@@ -736,7 +789,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     sources: [],
   };
   try {
-    context = await buildTaskContext(agent.id, task.objective, {
+    context = await buildTaskContext(agent.id, workspaceId, task.objective, {
       sensitiveDataSandbox: appAccess.sensitiveDataSandbox,
     });
   } catch (error) {
@@ -804,7 +857,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
       "warn",
       "Lost the Codex session lease mid-run, so the task was returned to the queue instead of being reported as finished.",
     );
-    publish("tasks");
+    publish(workspaceId, "tasks");
   };
 
   try {
@@ -813,7 +866,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     // fail closed here rather than be attempted.
     const readiness = await providerReadiness(provider);
     if (!readiness.ready) {
-      await setTaskPhase(task.id, task.attempts, "auth_required");
+      await setTaskPhase(task.id, task.attempts, "auth_required", workspaceId);
       await finishIfStillRunning(task.id, task.attempts, {
         status: "blocked",
         errorKind: "not_configured",
@@ -1002,7 +1055,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
           "info",
           "Another Codex task is using the ChatGPT session; queued behind it.",
         );
-        publish("tasks");
+        publish(workspaceId, "tasks");
         return;
       }
       heldLeaseKey = key;
@@ -1137,7 +1190,8 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
             // flag can re-open the network for a sandboxed agent.
             sensitiveDataSandbox: appAccess.sensitiveDataSandbox,
           },
-          onPhase: (phase) => setTaskPhase(task.id, task.attempts, phase),
+          onPhase: (phase) =>
+            setTaskPhase(task.id, task.attempts, phase, workspaceId),
           onProgress: (progress) =>
             addTaskLog(task.id, progress.level, progress.message),
           onThreadId: async (emitted) => {
@@ -1253,7 +1307,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         // A refresh failure fails closed: full sandbox, no grants at all.
         const wasSandboxed = appAccess.sensitiveDataSandbox;
         try {
-          appAccess = await loadAgentAppAccess(agent.id);
+          appAccess = await loadAgentAppAccess(agent.id, workspaceId);
         } catch (error) {
           logger.warn(
             { taskId: task.id, error },
@@ -1270,9 +1324,12 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
           // files must not feed any further round either. If the rebuild
           // fails, run the rest of the task with no stored context at all.
           try {
-            context = await buildTaskContext(agent.id, task.objective, {
-              sensitiveDataSandbox: true,
-            });
+            context = await buildTaskContext(
+              agent.id,
+              workspaceId,
+              task.objective,
+              { sensitiveDataSandbox: true },
+            );
           } catch {
             context = { promptSection: null, sources: [] };
           }
@@ -1302,6 +1359,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
               taskId: task.id,
               agentId: agent.id,
               agentName: agent.name,
+              workspaceId,
               app: null,
               operation: request.operation,
               params: null,
@@ -1341,6 +1399,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
             taskId: task.id,
             agentId: agent.id,
             agentName: agent.name,
+            workspaceId,
             app: verdict.op.app,
             operation: verdict.op.name,
             params: verdict.params,
@@ -1423,7 +1482,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
       output: finalOutput,
     });
     if (finished) {
-      await setTaskPhase(task.id, task.attempts, "completed");
+      await setTaskPhase(task.id, task.attempts, "completed", workspaceId);
       const detail = [
         `${inputTokensTotal} in / ${outputTokensTotal} out tokens`,
         cachedInputTotal ? `${cachedInputTotal} cached in` : null,
@@ -1435,7 +1494,11 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         .filter((part) => part !== null)
         .join(", ");
       await addTaskLog(task.id, "info", `Completed: ${detail}.`);
-      await recordAudit("task.completed", `${agent.name} completed a task.`);
+      await recordAudit(
+        workspaceId,
+        "task.completed",
+        `${agent.name} completed a task.`,
+      );
       // Delegated work reports back to whoever handed it over, so the
       // lead's thread shows the outcome without polling the task tree.
       if (task.delegatedByAgentId) {
@@ -1474,6 +1537,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         const saved = await saveTaskOutcomeMemory({
           taskId: task.id,
           agentId: agent.id,
+          workspaceId,
           objective: task.objective,
           output: finalOutput,
         });
@@ -1497,7 +1561,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         .where(
           and(eq(tasksTable.id, task.id), eq(tasksTable.attempts, task.attempts)),
         );
-      await setTaskPhase(task.id, task.attempts, "cancelled");
+      await setTaskPhase(task.id, task.attempts, "cancelled", workspaceId);
       await addTaskLog(
         task.id,
         "warn",
@@ -1529,16 +1593,16 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
           );
 
     if (callError.kind === "cancelled") {
-      await setTaskPhase(task.id, task.attempts, "cancelled");
+      await setTaskPhase(task.id, task.attempts, "cancelled", workspaceId);
       await addTaskLog(task.id, "warn", "Provider call aborted by cancellation.");
       return;
     }
     if (callError.kind === "rate_limit") {
-      await setTaskPhase(task.id, task.attempts, "rate_limited");
+      await setTaskPhase(task.id, task.attempts, "rate_limited", workspaceId);
     } else if (callError.kind === "auth") {
-      await setTaskPhase(task.id, task.attempts, "auth_required");
+      await setTaskPhase(task.id, task.attempts, "auth_required", workspaceId);
     } else {
-      await setTaskPhase(task.id, task.attempts, "failed");
+      await setTaskPhase(task.id, task.attempts, "failed", workspaceId);
     }
     // Rate limits and transient provider outages (5xx, dropped connections)
     // get another attempt under the same ceiling; auth failures, allowance
@@ -1567,7 +1631,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         "warn",
         `${callError.message} Retrying in ${Math.round(backoffMs / 1000)}s (attempt ${task.attempts} of ${maxAttempts}).`,
       );
-      publish("tasks");
+      publish(workspaceId, "tasks");
       return;
     }
     const finished = await finishIfStillRunning(task.id, task.attempts, {
@@ -1578,6 +1642,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     await addTaskLog(task.id, "error", `Failed (${callError.kind}): ${callError.message}`);
     if (finished) {
       await recordAudit(
+        workspaceId,
         "task.failed",
         `A task for ${agent.name} failed: ${callError.kind}.`,
       );
@@ -1589,7 +1654,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     }
   } finally {
     if (heldLeaseKey) await releaseProviderLease(heldLeaseKey, task.id);
-    await settleAgentStatus(agent.id);
+    await settleAgentStatus(agent.id, workspaceId);
   }
 }
 
@@ -1614,6 +1679,7 @@ async function offerFallback(
     if (readiness.ready) healthy.push(candidate);
   }
   const decision = await evaluateFallback({
+    workspaceId: task.workspaceId ?? "",
     fromProvider,
     costBoundCents: task.estimatedCostCents ?? task.budgetCents,
     paidFallbackApproved: task.paidFallbackApprovedAt !== null,
@@ -1627,7 +1693,7 @@ async function offerFallback(
     );
     return;
   }
-  const routing = await resolveRouting({
+  const routing = await resolveRouting(task.workspaceId ?? "", {
     provider: decision.provider,
     model: null,
     codexModel: agent.codexModel,
@@ -1665,16 +1731,17 @@ async function offerFallback(
     `Switched from ${providerLabel(fromProvider)} to ${providerLabel(routing.provider)}. ${decision.reason}`,
   );
   await recordAudit(
+    agent.workspaceId,
     "task.fallback",
     `A task for ${agent.name} moved from ${providerLabel(fromProvider)} to ${providerLabel(routing.provider)}: ${decision.reason}`,
   );
-  publish("tasks");
+  publish(task.workspaceId, "tasks");
 }
 /** Claim-and-run one task; returns whether anything was claimed. */
 export async function workOnce(): Promise<boolean> {
   const claimed = await claimNextTask();
   if (!claimed) return false;
-  publish("tasks", "agents", "overview");
+  publish(claimed.task.workspaceId, "tasks", "agents", "overview");
   await runTask(claimed);
   return true;
 }

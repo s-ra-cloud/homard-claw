@@ -49,6 +49,7 @@ function memoryRank(query: string) {
  */
 export async function buildTaskContext(
   agentId: string,
+  workspaceId: string | null,
   objective: string,
   options?: {
     /**
@@ -61,9 +62,17 @@ export async function buildTaskContext(
   },
 ): Promise<TaskContext> {
   const sandboxed = options?.sensitiveDataSandbox === true;
+  const workspaceScope = workspaceId
+    ? eq(memoriesTable.workspaceId, workspaceId)
+    : isNull(memoriesTable.workspaceId);
+  // Shared memories are shared within one workspace only; a task whose
+  // agent has no workspace (pre-backfill legacy) sees no shared memories.
+  const sharedScope = workspaceId
+    ? and(isNull(memoriesTable.agentId), eq(memoriesTable.workspaceId, workspaceId))
+    : sql`false`;
   const scope = sandboxed
-    ? eq(memoriesTable.agentId, agentId)
-    : or(eq(memoriesTable.agentId, agentId), isNull(memoriesTable.agentId));
+    ? and(eq(memoriesTable.agentId, agentId), workspaceScope)
+    : or(and(eq(memoriesTable.agentId, agentId), workspaceScope), sharedScope);
   const rank = memoryRank(objective);
 
   const [pinned, relevant, files] = await Promise.all([
@@ -113,6 +122,9 @@ export async function buildTaskContext(
           .where(
             and(
               eq(agentKnowledgeTable.agentId, agentId),
+              workspaceId
+                ? eq(knowledgeFilesTable.workspaceId, workspaceId)
+                : isNull(knowledgeFilesTable.workspaceId),
               sql`ts_rank(to_tsvector('english', ${knowledgeFilesTable.content}), websearch_to_tsquery('english', ${objective})) > ${RELEVANCE_FLOOR}`,
             ),
           )
@@ -197,11 +209,19 @@ export async function insertMemoryEnforcingCap(
   values: typeof memoriesTable.$inferInsert,
   { pruneToMakeRoom }: { pruneToMakeRoom: boolean },
 ): Promise<typeof memoriesTable.$inferSelect | null> {
+  const wsId = values.workspaceId ?? null;
   return db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(${MEMORY_QUOTA_LOCK})`);
+    // Quotas are per workspace; the lock key folds the workspace in so two
+    // tenants never serialize against each other.
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(${MEMORY_QUOTA_LOCK}, hashtext(${wsId ?? ""}))`,
+    );
     const [{ count }] = await tx
       .select({ count: sql<number>`count(*)::int` })
-      .from(memoriesTable);
+      .from(memoriesTable)
+      .where(
+        wsId ? eq(memoriesTable.workspaceId, wsId) : isNull(memoriesTable.workspaceId),
+      );
     if (count >= MAX_MEMORIES) {
       if (!pruneToMakeRoom) throw new MemoryQuotaError();
       const needed = count - MAX_MEMORIES + 1;
@@ -209,6 +229,7 @@ export async function insertMemoryEnforcingCap(
         DELETE FROM memories WHERE id IN (
           SELECT id FROM memories
           WHERE kind = 'task_outcome' AND pinned = false AND source_task_id IS NOT NULL
+            AND workspace_id IS NOT DISTINCT FROM ${wsId}
           ORDER BY created_at ASC
           LIMIT ${needed}
         ) RETURNING id
@@ -227,6 +248,7 @@ export async function insertMemoryEnforcingCap(
 export async function saveTaskOutcomeMemory(input: {
   taskId: string;
   agentId: string;
+  workspaceId: string | null;
   objective: string;
   output: string;
 }): Promise<boolean> {
@@ -234,6 +256,7 @@ export async function saveTaskOutcomeMemory(input: {
   const inserted = await insertMemoryEnforcingCap(
     {
       agentId: input.agentId,
+      workspaceId: input.workspaceId,
       kind: "task_outcome",
       content: summary.slice(0, MAX_MEMORY_CHARS),
       sourceTaskId: input.taskId,
@@ -247,6 +270,7 @@ export async function saveTaskOutcomeMemory(input: {
     DELETE FROM memories WHERE id IN (
       SELECT id FROM memories
       WHERE agent_id = ${input.agentId}
+        AND workspace_id IS NOT DISTINCT FROM ${input.workspaceId}
         AND kind = 'task_outcome'
         AND pinned = false
         AND source_task_id IS NOT NULL

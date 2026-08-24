@@ -14,3 +14,5 @@
 - [Codex provider runtime](codex-provider-runtime.md) — Third provider runs on the owner's ChatGPT allowance; serialize by lease table, fail closed, never invent a cost.
 - [Connected-app actions](connected-app-actions.md) — Closed catalog + explicit action blocks only; re-authorize after approval, strip blocks always, budget-check before each round.
 - [Drizzle lazy queries](drizzle-lazy-queries.md) — A drizzle builder chain executes only when awaited/.then()'d; `void db.delete(...)` silently does nothing.
+- [Workspace tenancy](workspace-tenancy.md) — Per-Clerk-user workspaces scope everything; foreign IDs 404, tests must stamp workspaceId on direct inserts.
+- [Google OAuth credentials](google-oauth-credentials.md) — Gmail runs on per-workspace encrypted OAuth creds resolved from the task owner; rotation is revision-fenced; Drive/GitHub stay legacy-connector-only.

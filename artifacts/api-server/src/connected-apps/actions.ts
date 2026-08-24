@@ -52,6 +52,7 @@ export async function recordDeniedAction(input: {
   taskId: string;
   agentId: string;
   agentName: string;
+  workspaceId: string | null;
   app: ConnectedAppId | null;
   operation: string;
   params: Record<string, unknown> | null;
@@ -73,6 +74,7 @@ export async function recordDeniedAction(input: {
       })
       .returning();
     await recordAudit(
+      input.workspaceId,
       "app_action.denied",
       `${input.agentName} was denied a connected-app action (${row.operation}): ${input.reason}`,
       tx,
@@ -90,6 +92,7 @@ export async function runAllowedAction(input: {
   taskId: string;
   agentId: string;
   agentName: string;
+  workspaceId: string | null;
   app: ConnectedAppId;
   operation: string;
   params: Record<string, unknown>;
@@ -111,9 +114,17 @@ export async function runAllowedAction(input: {
     .returning();
   const op = findOperation(input.operation);
   const outcome: ExecutionOutcome = op
-    ? await executeOperation(op, input.params, { actionId: pending.id })
+    ? await executeOperation(op, input.params, {
+        actionId: pending.id,
+        workspaceId: input.workspaceId,
+      })
     : { ok: false, kind: "failed", message: "Unknown operation." };
-  const action = await finalizeAction(pending.id, input.agentName, outcome);
+  const action = await finalizeAction(
+    pending.id,
+    input.agentName,
+    outcome,
+    input.workspaceId,
+  );
   return { action, outcome };
 }
 
@@ -147,6 +158,7 @@ export async function denyClaimedAction(
   action: AppActionRecord,
   agentName: string,
   reason: string,
+  workspaceId: string | null,
 ): Promise<AppActionRecord> {
   return db.transaction(async (tx) => {
     const [row] = await tx
@@ -155,6 +167,7 @@ export async function denyClaimedAction(
       .where(eq(appActionsTable.id, action.id))
       .returning();
     await recordAudit(
+      workspaceId,
       "app_action.denied",
       `An approved action by ${agentName} (${action.operation}: ${action.targetSummary}) was NOT run: ${reason}`,
       tx,
@@ -194,6 +207,7 @@ export type ReconciledAction = {
 export async function reconcileStaleExecutingActions(
   taskId: string,
   agentName: string,
+  workspaceId: string | null,
 ): Promise<ReconciledAction[]> {
   const stale = await db
     .select()
@@ -206,7 +220,7 @@ export async function reconcileStaleExecutingActions(
     );
   const resolved: ReconciledAction[] = [];
   for (const action of stale) {
-    resolved.push(await reconcileOneStaleAction(action, agentName));
+    resolved.push(await reconcileOneStaleAction(action, agentName, workspaceId));
   }
   return resolved;
 }
@@ -222,13 +236,19 @@ const EVENTUAL_ABSENCE_TRUST_AFTER_MS = 3 * 60 * 1000;
 async function reconcileOneStaleAction(
   action: AppActionRecord,
   agentName: string,
+  workspaceId: string | null,
 ): Promise<ReconciledAction> {
   const settleUnknown = async (detail?: string): Promise<ReconciledAction> => ({
-    action: await finalizeAction(action.id, agentName, {
-      ok: false,
-      kind: "failed",
-      message: `The outcome is unknown — a previous run was interrupted mid-execution${detail ? ` and could not be verified (${detail})` : ""}. Verify in the external app before requesting it again.`,
-    }),
+    action: await finalizeAction(
+      action.id,
+      agentName,
+      {
+        ok: false,
+        kind: "failed",
+        message: `The outcome is unknown — a previous run was interrupted mid-execution${detail ? ` and could not be verified (${detail})` : ""}. Verify in the external app before requesting it again.`,
+      },
+      workspaceId,
+    ),
     resolution: "unknown",
   });
 
@@ -238,14 +258,17 @@ async function reconcileOneStaleAction(
     action.operation,
     action.params ?? {},
     action.id,
+    workspaceId,
   );
   if (verdict.kind === "unknown") return settleUnknown(verdict.message);
   if (verdict.kind === "executed") {
     return {
-      action: await finalizeAction(action.id, agentName, {
-        ok: true,
-        summary: verdict.summary,
-      }),
+      action: await finalizeAction(
+        action.id,
+        agentName,
+        { ok: true, summary: verdict.summary },
+        workspaceId,
+      ),
       resolution: "confirmed",
     };
   }
@@ -288,6 +311,7 @@ async function reconcileOneStaleAction(
         .returning();
       if (row) {
         await recordAudit(
+          workspaceId,
           "app_action.requeued",
           `An interrupted action by ${agentName} (${action.operation}: ${action.targetSummary}) was verified as never delivered and re-queued for a safe retry.`,
           tx,
@@ -300,12 +324,17 @@ async function reconcileOneStaleAction(
     return settleUnknown("the row was concurrently modified");
   }
   return {
-    action: await finalizeAction(action.id, agentName, {
-      ok: false,
-      kind: "failed",
-      message:
-        "A previous run was interrupted, and verification confirmed the action never went through. It was not retried automatically — request it again if still needed.",
-    }),
+    action: await finalizeAction(
+      action.id,
+      agentName,
+      {
+        ok: false,
+        kind: "failed",
+        message:
+          "A previous run was interrupted, and verification confirmed the action never went through. It was not retried automatically — request it again if still needed.",
+      },
+      workspaceId,
+    ),
     resolution: "not_executed",
   };
 }
@@ -313,12 +342,16 @@ async function reconcileOneStaleAction(
 export async function executeClaimedAction(
   action: AppActionRecord,
   agentName: string,
+  workspaceId: string | null,
 ): Promise<{ action: AppActionRecord; outcome: ExecutionOutcome }> {
   const op = findOperation(action.operation);
   const outcome: ExecutionOutcome = op
-    ? await executeOperation(op, action.params ?? {}, { actionId: action.id })
+    ? await executeOperation(op, action.params ?? {}, {
+        actionId: action.id,
+        workspaceId,
+      })
     : { ok: false, kind: "failed", message: "Unknown operation." };
-  const finalized = await finalizeAction(action.id, agentName, outcome);
+  const finalized = await finalizeAction(action.id, agentName, outcome, workspaceId);
   return { action: finalized, outcome };
 }
 
@@ -326,6 +359,7 @@ async function finalizeAction(
   actionId: string,
   agentName: string,
   outcome: ExecutionOutcome,
+  workspaceId: string | null,
 ): Promise<AppActionRecord> {
   return db.transaction(async (tx) => {
     const [row] = await tx
@@ -346,6 +380,7 @@ async function finalizeAction(
       .where(eq(appActionsTable.id, actionId))
       .returning();
     await recordAudit(
+      workspaceId,
       outcome.ok ? "app_action.executed" : "app_action.failed",
       outcome.ok
         ? `${agentName} used a connected app: ${row.targetSummary}.`

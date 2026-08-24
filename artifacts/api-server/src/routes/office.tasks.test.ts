@@ -9,6 +9,7 @@ import {
   systemStateTable,
   taskLogsTable,
   tasksTable,
+  workspacesTable,
 } from "@workspace/db";
 import { and, eq, inArray, like } from "drizzle-orm";
 
@@ -43,6 +44,8 @@ app.use("/api", officeRouter);
 const RUN_TAG = `HC Tasks ${Date.now()}`;
 const createdAgentIds: string[] = [];
 let createdOwnerRow = false;
+let wsId = "";
+let createdWorkspace = false;
 
 async function createAgent(name: string, extra: Record<string, unknown> = {}) {
   const res = await request(app)
@@ -80,6 +83,7 @@ async function insertTask(
     .insert(tasksTable)
     .values({
       agentId,
+      workspaceId: wsId,
       objective: `${RUN_TAG} scripted objective`,
       provider: "openrouter",
       model: "test-vendor/test-model",
@@ -142,6 +146,20 @@ beforeAll(async () => {
   } else {
     createdOwnerRow = true;
   }
+  const [existingWorkspace] = await db
+    .select({ id: workspacesTable.id })
+    .from(workspacesTable)
+    .where(eq(workspacesTable.clerkUserId, authState.userId))
+    .limit(1);
+  const boot = await request(app).get("/api/agents");
+  expect(boot.status).toBe(200);
+  const [ws] = await db
+    .select({ id: workspacesTable.id })
+    .from(workspacesTable)
+    .where(eq(workspacesTable.clerkUserId, authState.userId))
+    .limit(1);
+  wsId = ws.id;
+  createdWorkspace = !existingWorkspace;
 });
 
 beforeEach(() => {
@@ -203,6 +221,9 @@ afterAll(async () => {
           eq(systemStateTable.value, authState.userId),
         ),
       );
+  }
+  if (createdWorkspace) {
+    await db.delete(workspacesTable).where(eq(workspacesTable.id, wsId));
   }
   await pool.end();
 });

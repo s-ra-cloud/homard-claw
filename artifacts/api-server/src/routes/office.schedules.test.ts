@@ -9,6 +9,7 @@ import {
   schedulesTable,
   systemStateTable,
   tasksTable,
+  workspacesTable,
 } from "@workspace/db";
 import { and, eq, inArray, like } from "drizzle-orm";
 
@@ -43,6 +44,7 @@ app.use("/api", officeRouter);
 const RUN_TAG = `HC Sched ${Date.now()}`;
 const createdAgentIds: string[] = [];
 let createdOwnerRow = false;
+let wsId: string;
 
 async function createAgent(name: string) {
   const res = await request(app)
@@ -96,6 +98,14 @@ beforeAll(async () => {
   } else {
     createdOwnerRow = true;
   }
+  const boot = await request(app).get("/api/agents");
+  expect(boot.status).toBe(200);
+  const [ws] = await db
+    .select({ id: workspacesTable.id })
+    .from(workspacesTable)
+    .where(eq(workspacesTable.clerkUserId, authState.userId))
+    .limit(1);
+  wsId = ws.id;
 });
 
 beforeEach(() => {
@@ -298,6 +308,7 @@ describe("schedule firing", () => {
     const [existingTask] = await db
       .insert(tasksTable)
       .values({
+        workspaceId: wsId,
         agentId: agent.id,
         objective: `${RUN_TAG} survived the crash`,
         provider: "openrouter",
@@ -394,6 +405,7 @@ describe("notifications", () => {
     const [mutedTask] = await db
       .insert(tasksTable)
       .values({
+        workspaceId: wsId,
         agentId: agent.id,
         objective: `${RUN_TAG} muted completion`,
         provider: "openrouter",
@@ -408,6 +420,7 @@ describe("notifications", () => {
     const [adhocTask] = await db
       .insert(tasksTable)
       .values({
+        workspaceId: wsId,
         agentId: agent.id,
         objective: `${RUN_TAG} adhoc failure`,
         provider: "openrouter",

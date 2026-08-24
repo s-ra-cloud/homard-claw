@@ -17,12 +17,13 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   agentAppGrantsTable,
   agentsTable,
-  connectedAppSettingsTable,
   db,
-  systemStateTable,
+  googleAccountsTable,
   tasksTable,
+  workspaceConnectedAppsTable,
+  workspacesTable,
 } from "@workspace/db";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 const authState = vi.hoisted(() => ({
   userId: "hc-apps-owner" as string | null,
@@ -52,6 +53,7 @@ import { describeConnection } from "../connected-apps/connections";
 import { parseAppActions } from "../connected-apps/parser";
 import { authorizeAppAction } from "../connected-apps/authorize";
 import { buildAppsPromptSection } from "../connected-apps/catalog";
+import { encryptRefreshToken } from "../google/credentials";
 import type { AppAccessLevel, ConnectedAppId } from "@workspace/db";
 
 const app = express();
@@ -64,8 +66,7 @@ app.use("/api", officeRouter);
 
 const RUN_TAG = `HC Apps Test ${Date.now()}`;
 const createdAgentIds: string[] = [];
-let createdOwnerRow = false;
-let ownerId = "hc-apps-owner";
+let workspaceId: string;
 /** app → original settings row (or null when there was none) to restore. */
 const touchedSettings = new Map<string, { enabled: boolean } | null>();
 
@@ -93,27 +94,34 @@ async function rememberSetting(appId: string) {
   if (touchedSettings.has(appId)) return;
   const [row] = await db
     .select()
-    .from(connectedAppSettingsTable)
-    .where(eq(connectedAppSettingsTable.app, appId))
+    .from(workspaceConnectedAppsTable)
+    .where(
+      and(
+        eq(workspaceConnectedAppsTable.workspaceId, workspaceId),
+        eq(workspaceConnectedAppsTable.app, appId),
+      ),
+    )
     .limit(1);
   touchedSettings.set(appId, row ? { enabled: row.enabled } : null);
 }
 
 beforeAll(async () => {
-  const [owner] = await db
-    .select()
-    .from(systemStateTable)
-    .where(eq(systemStateTable.key, "owner_clerk_id"))
-    .limit(1);
-  if (owner) {
-    ownerId = owner.value;
-  } else {
-    await db
-      .insert(systemStateTable)
-      .values({ key: "owner_clerk_id", value: ownerId });
-    createdOwnerRow = true;
-  }
-  authState.userId = ownerId;
+  vi.stubEnv("SESSION_SECRET", "connected-apps-route-test-secret");
+  const [workspace] = await db
+    .insert(workspacesTable)
+    .values({ clerkUserId: `connected-apps-route-${Date.now()}` })
+    .returning();
+  workspaceId = workspace.id;
+  authState.userId = workspace.clerkUserId;
+  await db.insert(googleAccountsTable).values({
+    workspaceId,
+    clerkUserId: workspace.clerkUserId,
+    googleSub: `google-${RUN_TAG}`,
+    email: "route-test@example.com",
+    refreshTokenEnc: encryptRefreshToken("test-refresh-token"),
+    scopes:
+      "openid email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/gmail.send",
+  });
 });
 
 afterAll(async () => {
@@ -121,14 +129,27 @@ afterAll(async () => {
   for (const [appId, original] of touchedSettings) {
     if (original === null) {
       await db
-        .delete(connectedAppSettingsTable)
-        .where(eq(connectedAppSettingsTable.app, appId));
+        .delete(workspaceConnectedAppsTable)
+        .where(
+          and(
+            eq(workspaceConnectedAppsTable.workspaceId, workspaceId),
+            eq(workspaceConnectedAppsTable.app, appId),
+          ),
+        );
     } else {
       await db
-        .insert(connectedAppSettingsTable)
-        .values({ app: appId, enabled: original.enabled, updatedAt: new Date() })
+        .insert(workspaceConnectedAppsTable)
+        .values({
+          workspaceId,
+          app: appId,
+          enabled: original.enabled,
+          updatedAt: new Date(),
+        })
         .onConflictDoUpdate({
-          target: connectedAppSettingsTable.app,
+          target: [
+            workspaceConnectedAppsTable.workspaceId,
+            workspaceConnectedAppsTable.app,
+          ],
           set: { enabled: original.enabled, updatedAt: new Date() },
         });
     }
@@ -144,11 +165,8 @@ afterAll(async () => {
       .delete(agentsTable)
       .where(inArray(agentsTable.id, createdAgentIds));
   }
-  if (createdOwnerRow) {
-    await db
-      .delete(systemStateTable)
-      .where(eq(systemStateTable.key, "owner_clerk_id"));
-  }
+  await db.delete(workspacesTable).where(eq(workspacesTable.id, workspaceId));
+  vi.unstubAllEnvs();
 });
 
 describe("action block parser", () => {
@@ -361,6 +379,46 @@ describe("connected-apps routes", () => {
       expect(
         entry.accountLabel === null || typeof entry.accountLabel === "string",
       ).toBe(true);
+    }
+    const gmail = res.body.apps.find(
+      (entry: { app: string }) => entry.app === "gmail",
+    );
+    expect(gmail).toMatchObject({
+      status: "connected",
+      accountLabel: "route-test@example.com",
+    });
+    for (const appId of ["google_drive", "github"]) {
+      expect(
+        res.body.apps.find((entry: { app: string }) => entry.app === appId),
+      ).toMatchObject({
+        status: "not_connected",
+        accountLabel: null,
+      });
+    }
+  });
+
+  it("reports Gmail as expired when its workspace account lacks required scopes", async () => {
+    await db
+      .update(googleAccountsTable)
+      .set({ scopes: "openid email" })
+      .where(eq(googleAccountsTable.workspaceId, workspaceId));
+    try {
+      const res = await request(app).get("/api/connected-apps");
+      expect(res.status).toBe(200);
+      const gmail = res.body.apps.find(
+        (entry: { app: string }) => entry.app === "gmail",
+      );
+      expect(gmail.status).toBe("expired");
+      expect(gmail.accountLabel).toBe("route-test@example.com");
+      expect(gmail.statusDetail).toMatch(/missing required Gmail permissions/i);
+    } finally {
+      await db
+        .update(googleAccountsTable)
+        .set({
+          scopes:
+            "openid email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/gmail.send",
+        })
+        .where(eq(googleAccountsTable.workspaceId, workspaceId));
     }
   });
 

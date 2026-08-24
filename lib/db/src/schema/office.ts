@@ -57,6 +57,12 @@ export const agentsTable = pgTable(
   "agents",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    // Nullable only for pre-workspace legacy rows; the startup migration
+    // backfills them to the original owner's workspace. Every code path
+    // scopes by this column.
+    workspaceId: uuid("workspace_id").references(() => workspacesTable.id, {
+      onDelete: "cascade",
+    }),
     name: text("name").notNull(),
     title: text("title").notNull(),
     mission: text("mission").notNull(),
@@ -101,9 +107,12 @@ export const agentsTable = pgTable(
       .defaultNow(),
   },
   (table) => [
-    // One name per workforce, case-insensitively, across active, archived,
-    // and retired agents.
-    uniqueIndex("agents_name_lower_unique").on(sql`lower(${table.name})`),
+    // One name per workspace's workforce, case-insensitively, across active,
+    // archived, and retired agents.
+    uniqueIndex("agents_ws_name_lower_unique").on(
+      table.workspaceId,
+      sql`lower(${table.name})`,
+    ),
   ],
 );
 
@@ -116,6 +125,9 @@ export const teamsTable = pgTable(
   "teams",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id").references(() => workspacesTable.id, {
+      onDelete: "cascade",
+    }),
     name: text("name").notNull(),
     mission: text("mission"),
     leadAgentId: uuid("lead_agent_id").references(() => agentsTable.id, {
@@ -125,7 +137,12 @@ export const teamsTable = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (table) => [uniqueIndex("teams_name_lower_unique").on(sql`lower(${table.name})`)],
+  (table) => [
+    uniqueIndex("teams_ws_name_lower_unique").on(
+      table.workspaceId,
+      sql`lower(${table.name})`,
+    ),
+  ],
 );
 
 export const teamMembersTable = pgTable(
@@ -162,6 +179,15 @@ export type TaskSource = {
 // tasks carry an errorKind/errorMessage explaining why and can be retried.
 export const tasksTable = pgTable("tasks", {
   id: uuid("id").primaryKey().defaultRandom(),
+  /**
+   * The durable owner of this task's work. Stamped from the agent's
+   * workspace at creation and never changed: background execution, approval
+   * continuations, retries, and crash recovery all resolve credentials from
+   * this column, never from a browser session.
+   */
+  workspaceId: uuid("workspace_id").references(() => workspacesTable.id, {
+    onDelete: "cascade",
+  }),
   agentId: uuid("agent_id")
     .notNull()
     .references(() => agentsTable.id),
@@ -260,6 +286,9 @@ export const schedulesTable = pgTable(
   "schedules",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id").references(() => workspacesTable.id, {
+      onDelete: "cascade",
+    }),
     name: text("name").notNull(),
     agentId: uuid("agent_id")
       .notNull()
@@ -309,6 +338,9 @@ export const notificationsTable = pgTable(
   "notifications",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id").references(() => workspacesTable.id, {
+      onDelete: "cascade",
+    }),
     // task_completed | task_failed | task_blocked | approval_needed | schedule_error
     kind: text("kind").notNull(),
     title: text("title").notNull(),
@@ -466,6 +498,11 @@ export const approvalsTable = pgTable("approvals", {
 // verification of every later event. seq gives the chain a total order.
 export const auditEventsTable = pgTable("audit_events", {
   id: uuid("id").primaryKey().defaultRandom(),
+  // Chain scope: each workspace has its own hash chain. Legacy rows are
+  // backfilled to the original owner's workspace, preserving one chain.
+  workspaceId: uuid("workspace_id").references(() => workspacesTable.id, {
+    onDelete: "cascade",
+  }),
   seq: bigserial("seq", { mode: "number" }).notNull().unique(),
   kind: text("kind").notNull(),
   summary: text("summary").notNull(),
@@ -516,6 +553,9 @@ export const memoriesTable = pgTable(
   "memories",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id").references(() => workspacesTable.id, {
+      onDelete: "cascade",
+    }),
     agentId: uuid("agent_id").references(() => agentsTable.id, {
       onDelete: "cascade",
     }),
@@ -548,6 +588,9 @@ export const knowledgeFilesTable = pgTable(
   "knowledge_files",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id").references(() => workspacesTable.id, {
+      onDelete: "cascade",
+    }),
     name: text("name").notNull(),
     mimeType: text("mime_type").notNull(),
     description: text("description"),
@@ -616,9 +659,9 @@ export const agentAppGrantsTable = pgTable(
 );
 
 /**
- * Workspace-level switch per app. A missing row means enabled: the switch
- * exists so the owner can cut every agent off from an app at once without
- * touching individual grants.
+ * DEPRECATED global switch table from the single-owner era. Kept only so the
+ * startup migration can copy its rows into workspace-scoped settings; no
+ * production code path reads or writes it anymore.
  */
 export const connectedAppSettingsTable = pgTable("connected_app_settings", {
   app: text("app").primaryKey(),
@@ -628,6 +671,25 @@ export const connectedAppSettingsTable = pgTable("connected_app_settings", {
     .defaultNow(),
 });
 
+/**
+ * Per-workspace switch per app. A missing row means enabled: the switch
+ * exists so a user can cut every one of their agents off from an app at
+ * once without touching individual grants.
+ */
+export const workspaceConnectedAppsTable = pgTable(
+  "workspace_connected_apps",
+  {
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspacesTable.id, { onDelete: "cascade" }),
+    app: text("app").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.workspaceId, table.app] })],
+);
 /**
  * Durable record of every connected-app action an agent requested. The status
  * column doubles as the exactly-once fence for externally visible writes:
@@ -726,6 +788,115 @@ export type AgentAppGrantRecord = typeof agentAppGrantsTable.$inferSelect;
 export type ConnectedAppSettingRecord =
   typeof connectedAppSettingsTable.$inferSelect;
 export type AppActionRecord = typeof appActionsTable.$inferSelect;
+
+export type WorkspaceRecord = typeof workspacesTable.$inferSelect;
 export type InsertAgent = z.infer<typeof insertAgentSchema>;
 export type InsertTask = z.infer<typeof insertTaskSchema>;
 export type InsertApproval = z.infer<typeof insertApprovalSchema>;
+
+/**
+ * One personal workspace per Clerk user. Every user-owned root row carries a
+ * workspace_id; a user can only ever see or act on rows in their own
+ * workspace. The row is created on a user's first authenticated request.
+ */
+export const workspacesTable = pgTable(
+  "workspaces",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** The Clerk account this workspace belongs to. */
+    clerkUserId: text("clerk_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [uniqueIndex("workspaces_clerk_user_unique").on(table.clerkUserId)],
+);
+
+export type GoogleAccountRecord = typeof googleAccountsTable.$inferSelect;
+
+/**
+ * One personal Google (Gmail) connection per workspace, created through the
+ * in-app OAuth flow. Only the encrypted refresh token is stored; access
+ * tokens live in memory for minutes and are never persisted. The row is
+ * bound to both the Clerk user and the immutable Google account id (`sub`),
+ * so a credential can never silently start serving a different mailbox.
+ */
+export const googleAccountsTable = pgTable("google_accounts", {
+  workspaceId: uuid("workspace_id")
+    .primaryKey()
+    .references(() => workspacesTable.id, { onDelete: "cascade" }),
+  clerkUserId: text("clerk_user_id").notNull(),
+  /** Immutable Google account id from the verified ID token. */
+  googleSub: text("google_sub").notNull(),
+  /** Safe display label (the Gmail address); never a credential. */
+  email: text("email").notNull(),
+  /** AES-256-GCM ciphertext of the refresh token. Never logged/returned. */
+  refreshTokenEnc: text("refresh_token_enc").notNull(),
+  /** Space-separated scopes actually granted at consent time. */
+  scopes: text("scopes").notNull(),
+  /**
+   * Changes on every credential write. Refresh rotation folds a new token
+   * back only when the revision still matches what the refresh started
+   * from, so a concurrent reconnect/disconnect is never undone.
+   */
+  revision: text("revision")
+    .notNull()
+    .default(sql`gen_random_uuid()::text`),
+  connectedAt: timestamp("connected_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type GoogleOauthStateRecord =
+  typeof googleOauthStatesTable.$inferSelect;
+
+/**
+ * Per-workspace key/value preferences (emergency stop, voice transcripts,
+ * provider routing settings). Replaces the formerly global system_state keys
+ * for anything a user controls; system_state remains for true globals.
+ */
+export const workspaceSettingsTable = pgTable(
+  "workspace_settings",
+  {
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspacesTable.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    value: text("value").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.workspaceId, table.key] })],
+);
+
+export type WorkspaceSettingRecord = typeof workspaceSettingsTable.$inferSelect;
+
+/**
+ * Single-use OAuth authorization states. A row proves HomardClaw started
+ * the flow for this workspace/session; the callback consumes it exactly
+ * once (guarded UPDATE on used_at) and rejects expired or replayed states.
+ */
+export const googleOauthStatesTable = pgTable("google_oauth_states", {
+  /** Random URL-safe state token; primary key so replays collide. */
+  state: text("state").primaryKey(),
+  workspaceId: uuid("workspace_id")
+    .notNull()
+    .references(() => workspacesTable.id, { onDelete: "cascade" }),
+  /** The Clerk session user that started the flow; must match at callback. */
+  clerkUserId: text("clerk_user_id").notNull(),
+  /** PKCE code verifier (server-held; useless without the client secret). */
+  codeVerifier: text("code_verifier").notNull(),
+  /** Nonce echoed inside the Google ID token. */
+  nonce: text("nonce").notNull(),
+  /** Exact redirect URI the flow started with; token exchange reuses it. */
+  redirectUri: text("redirect_uri").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+});
+
+export type WorkspaceConnectedAppRecord =
+  typeof workspaceConnectedAppsTable.$inferSelect;

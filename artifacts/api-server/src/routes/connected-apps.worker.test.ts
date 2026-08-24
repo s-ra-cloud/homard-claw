@@ -28,12 +28,13 @@ import {
   agentsTable,
   appActionsTable,
   approvalsTable,
-  connectedAppSettingsTable,
   db,
+  googleAccountsTable,
   pool,
-  systemStateTable,
   taskLogsTable,
   tasksTable,
+  workspaceConnectedAppsTable,
+  workspacesTable,
 } from "@workspace/db";
 import { and, eq, inArray } from "drizzle-orm";
 
@@ -69,6 +70,10 @@ vi.mock("../connected-apps/connections", async (importOriginal) => {
 import officeRouter from "./office";
 import { claimNextTask, runTask } from "../worker";
 import { claimApprovedAction, executeClaimedAction } from "../connected-apps/actions";
+import {
+  clearGoogleTokenCache,
+  encryptRefreshToken,
+} from "../google/credentials";
 import { clearProviderCaches } from "../providers";
 
 const app = express();
@@ -81,8 +86,7 @@ app.use("/api", officeRouter);
 
 const RUN_TAG = `HC AppsWorker ${Date.now()}`;
 const createdAgentIds: string[] = [];
-let createdOwnerRow = false;
-let ownerId = "hc-apps-worker-owner";
+let workspaceId: string;
 /** app → original settings row (or null when there was none) to restore. */
 const touchedSettings = new Map<string, { enabled: boolean } | null>();
 
@@ -138,6 +142,7 @@ async function insertRunningTask(
     .insert(tasksTable)
     .values({
       agentId,
+      workspaceId,
       objective: `${RUN_TAG} handle the kelp correspondence`,
       provider: "openrouter",
       model: "test-vendor/test-model",
@@ -283,27 +288,34 @@ async function approve(approvalId: string) {
 }
 
 beforeAll(async () => {
-  const [owner] = await db
-    .select()
-    .from(systemStateTable)
-    .where(eq(systemStateTable.key, "owner_clerk_id"))
-    .limit(1);
-  if (owner) {
-    ownerId = owner.value;
-  } else {
-    await db
-      .insert(systemStateTable)
-      .values({ key: "owner_clerk_id", value: ownerId });
-    createdOwnerRow = true;
-  }
-  authState.userId = ownerId;
+  vi.stubEnv("SESSION_SECRET", "connected-apps-worker-test-secret");
+  const [workspace] = await db
+    .insert(workspacesTable)
+    .values({ clerkUserId: `connected-apps-worker-${Date.now()}` })
+    .returning();
+  workspaceId = workspace.id;
+  authState.userId = workspace.clerkUserId;
+  await db.insert(googleAccountsTable).values({
+    workspaceId,
+    clerkUserId: workspace.clerkUserId,
+    googleSub: `google-${RUN_TAG}`,
+    email: "worker-test@example.com",
+    refreshTokenEnc: encryptRefreshToken("test-refresh-token"),
+    scopes:
+      "openid email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/gmail.send",
+  });
 
   // Gmail must be enabled workspace-wide for grants to take effect;
   // remember whatever the row was so teardown restores it exactly.
   const [existing] = await db
     .select()
-    .from(connectedAppSettingsTable)
-    .where(eq(connectedAppSettingsTable.app, "gmail"))
+    .from(workspaceConnectedAppsTable)
+    .where(
+      and(
+        eq(workspaceConnectedAppsTable.workspaceId, workspaceId),
+        eq(workspaceConnectedAppsTable.app, "gmail"),
+      ),
+    )
     .limit(1);
   touchedSettings.set("gmail", existing ? { enabled: existing.enabled } : null);
   const enable = await request(app)
@@ -323,6 +335,9 @@ beforeEach(() => {
     summary: "Message sent (id msg-123).",
   });
   vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
+  vi.stubEnv("GOOGLE_OAUTH_CLIENT_ID", "test-client-id");
+  vi.stubEnv("GOOGLE_OAUTH_CLIENT_SECRET", "test-client-secret");
+  clearGoogleTokenCache();
   clearProviderCaches();
 });
 
@@ -331,14 +346,27 @@ afterAll(async () => {
   for (const [appId, original] of touchedSettings) {
     if (original === null) {
       await db
-        .delete(connectedAppSettingsTable)
-        .where(eq(connectedAppSettingsTable.app, appId));
+        .delete(workspaceConnectedAppsTable)
+        .where(
+          and(
+            eq(workspaceConnectedAppsTable.workspaceId, workspaceId),
+            eq(workspaceConnectedAppsTable.app, appId),
+          ),
+        );
     } else {
       await db
-        .insert(connectedAppSettingsTable)
-        .values({ app: appId, enabled: original.enabled, updatedAt: new Date() })
+        .insert(workspaceConnectedAppsTable)
+        .values({
+          workspaceId,
+          app: appId,
+          enabled: original.enabled,
+          updatedAt: new Date(),
+        })
         .onConflictDoUpdate({
-          target: connectedAppSettingsTable.app,
+          target: [
+            workspaceConnectedAppsTable.workspaceId,
+            workspaceConnectedAppsTable.app,
+          ],
           set: { enabled: original.enabled, updatedAt: new Date() },
         });
     }
@@ -355,17 +383,9 @@ afterAll(async () => {
       .where(inArray(tasksTable.agentId, createdAgentIds));
     await db.delete(agentsTable).where(inArray(agentsTable.id, createdAgentIds));
   }
-  // Audit rows are hash-chained and append-only; never delete them.
-  if (createdOwnerRow) {
-    await db
-      .delete(systemStateTable)
-      .where(
-        and(
-          eq(systemStateTable.key, "owner_clerk_id"),
-          eq(systemStateTable.value, ownerId),
-        ),
-      );
-  }
+  // Audit rows are hash-chained and append-only; deleting the isolated test
+  // workspace removes its whole chain without touching another workspace.
+  await db.delete(workspacesTable).where(eq(workspacesTable.id, workspaceId));
   await pool.end();
 });
 
@@ -393,9 +413,10 @@ describe("approval-gated write, end to end", () => {
 
     // The stored action — operation, params and all — ran exactly once.
     expect(executeMock).toHaveBeenCalledTimes(1);
-    const [opArg, paramsArg] = executeMock.mock.calls[0]!;
+    const [opArg, paramsArg, contextArg] = executeMock.mock.calls[0]!;
     expect((opArg as { name: string }).name).toBe("gmail.send_email");
     expect(paramsArg).toEqual(SEND_EMAIL_PARAMS);
+    expect(contextArg).toEqual({ actionId: action.id, workspaceId });
 
     const [executed] = await getActions(task.id);
     expect(executed?.id).toBe(action.id);
@@ -435,7 +456,7 @@ describe("approval-gated write, end to end", () => {
     expect(winners[0]!.params).toEqual(SEND_EMAIL_PARAMS);
 
     // The winner executes; a third claim attempt gets nothing.
-    await executeClaimedAction(winners[0]!, "Racer");
+    await executeClaimedAction(winners[0]!, "Racer", workspaceId);
     expect(executeMock).toHaveBeenCalledTimes(1);
     expect(await claimApprovedAction(action.id)).toBeNull();
 

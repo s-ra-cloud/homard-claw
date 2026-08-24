@@ -1,5 +1,5 @@
-import { db, systemStateTable } from "@workspace/db";
-import { eq, inArray } from "drizzle-orm";
+import { db, workspaceSettingsTable } from "@workspace/db";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   codexDefaultModel,
   codexDefaultReasoning,
@@ -504,11 +504,18 @@ function parseFallbackOrder(raw: string | undefined): ProviderId[] {
     .filter((entry): entry is ProviderId => isProviderId(entry));
 }
 
-export async function getProviderSettings(): Promise<ProviderSettings> {
+export async function getProviderSettings(
+  workspaceId: string,
+): Promise<ProviderSettings> {
   const rows = await db
     .select()
-    .from(systemStateTable)
-    .where(inArray(systemStateTable.key, Object.values(SETTINGS_KEYS)));
+    .from(workspaceSettingsTable)
+    .where(
+      and(
+        eq(workspaceSettingsTable.workspaceId, workspaceId),
+        inArray(workspaceSettingsTable.key, Object.values(SETTINGS_KEYS)),
+      ),
+    );
   const byKey = new Map(rows.map((row) => [row.key, row.value]));
   const rawDefault = byKey.get(SETTINGS_KEYS.defaultProvider);
   // A stored default pointing at a provider that is currently switched off
@@ -536,16 +543,34 @@ export async function getProviderSettings(): Promise<ProviderSettings> {
   };
 }
 
-async function upsertSetting(key: string, value: string): Promise<void> {
+async function upsertSetting(
+  workspaceId: string,
+  key: string,
+  value: string,
+): Promise<void> {
   await db
-    .insert(systemStateTable)
-    .values({ key, value })
-    .onConflictDoUpdate({ target: systemStateTable.key, set: { value } });
+    .insert(workspaceSettingsTable)
+    .values({ workspaceId, key, value })
+    .onConflictDoUpdate({
+      target: [workspaceSettingsTable.workspaceId, workspaceSettingsTable.key],
+      set: { value },
+    });
+}
+
+async function deleteSetting(workspaceId: string, key: string): Promise<void> {
+  await db
+    .delete(workspaceSettingsTable)
+    .where(
+      and(
+        eq(workspaceSettingsTable.workspaceId, workspaceId),
+        eq(workspaceSettingsTable.key, key),
+      ),
+    );
 }
 
 export class ProviderSettingsError extends Error {}
 
-export async function updateProviderSettings(input: {
+export async function updateProviderSettings(workspaceId: string, input: {
   defaultProvider?: ProviderId;
   claudeModel?: string | null;
   openrouterModel?: string | null;
@@ -565,7 +590,11 @@ export async function updateProviderSettings(input: {
         `${providerLabel(input.defaultProvider)} is not available in this workspace.`,
       );
     }
-    await upsertSetting(SETTINGS_KEYS.defaultProvider, input.defaultProvider);
+    await upsertSetting(
+      workspaceId,
+      SETTINGS_KEYS.defaultProvider,
+      input.defaultProvider,
+    );
   }
   if (input.codexModel !== undefined && input.codexModel !== null) {
     const trimmed = input.codexModel.trim();
@@ -592,23 +621,24 @@ export async function updateProviderSettings(input: {
       }
     }
     await upsertSetting(
+      workspaceId,
       SETTINGS_KEYS.fallbackOrder,
       input.fallbackOrder.join(","),
     );
   }
   if (input.paidFallbackConsent !== undefined) {
     await upsertSetting(
+      workspaceId,
       SETTINGS_KEYS.paidFallbackConsent,
       input.paidFallbackConsent ? "true" : "false",
     );
   }
   if (input.paidFallbackLimitCents !== undefined) {
     if (input.paidFallbackLimitCents === null) {
-      await db
-        .delete(systemStateTable)
-        .where(eq(systemStateTable.key, SETTINGS_KEYS.paidFallbackLimitCents));
+      await deleteSetting(workspaceId, SETTINGS_KEYS.paidFallbackLimitCents);
     } else {
       await upsertSetting(
+        workspaceId,
         SETTINGS_KEYS.paidFallbackLimitCents,
         String(input.paidFallbackLimitCents),
       );
@@ -623,12 +653,12 @@ export async function updateProviderSettings(input: {
   for (const [key, value] of modelUpdates) {
     if (value === undefined) continue;
     if (value === null || value.trim() === "") {
-      await db.delete(systemStateTable).where(eq(systemStateTable.key, key));
+      await deleteSetting(workspaceId, key);
     } else {
-      await upsertSetting(key, value.trim());
+      await upsertSetting(workspaceId, key, value.trim());
     }
   }
-  return getProviderSettings();
+  return getProviderSettings(workspaceId);
 }
 
 // ---------------------------------------------------------------------------
@@ -663,12 +693,13 @@ export class RoutingError extends Error {}
  * model is rejected rather than quietly corrected.
  */
 export async function resolveRouting(
+  workspaceId: string,
   agent: AgentRouting,
   providerOverride?: ProviderId,
   modelOverride?: string,
   reasoningOverride?: string,
 ): Promise<ResolvedRouting> {
-  const settings = await getProviderSettings();
+  const settings = await getProviderSettings(workspaceId);
   const available = availableProviderIds();
   if (providerOverride && !available.includes(providerOverride)) {
     throw new RoutingError(

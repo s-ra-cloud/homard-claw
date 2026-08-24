@@ -14,7 +14,7 @@ import {
   tasksTable,
   type NotifyPrefs,
 } from "@workspace/db";
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { Router, type IRouter } from "express";
 import { recordAudit } from "../audit";
 import { publish } from "../events";
@@ -78,11 +78,12 @@ function recurrenceSpec(row: {
   };
 }
 
-router.get("/schedules", async (_req, res): Promise<void> => {
+router.get("/schedules", async (req, res): Promise<void> => {
   const rows = await db
     .select({ schedule: schedulesTable, agentName: agentsTable.name })
     .from(schedulesTable)
     .innerJoin(agentsTable, eq(schedulesTable.agentId, agentsTable.id))
+    .where(eq(schedulesTable.workspaceId, req.workspaceId!))
     .orderBy(desc(schedulesTable.createdAt));
   const lastTaskIds = rows
     .map((row) => row.schedule.lastTaskId)
@@ -125,7 +126,12 @@ router.post("/schedules", async (req, res): Promise<void> => {
   const [agent] = await db
     .select()
     .from(agentsTable)
-    .where(eq(agentsTable.id, parsed.data.agentId))
+    .where(
+      and(
+        eq(agentsTable.id, parsed.data.agentId),
+        eq(agentsTable.workspaceId, req.workspaceId!),
+      ),
+    )
     .limit(1);
   if (!agent) {
     res.status(404).json({ error: "Agent not found" });
@@ -152,6 +158,7 @@ router.post("/schedules", async (req, res): Promise<void> => {
   const [schedule] = await db
     .insert(schedulesTable)
     .values({
+      workspaceId: req.workspaceId!,
       name: parsed.data.name,
       agentId: parsed.data.agentId,
       objective: parsed.data.objective,
@@ -170,10 +177,11 @@ router.post("/schedules", async (req, res): Promise<void> => {
     })
     .returning();
   await recordAudit(
+    req.workspaceId!,
     "schedule.created",
     `A ${schedule.cadence} schedule "${schedule.name}" was created for ${agent.name}.`,
   );
-  publish("schedules");
+  publish(req.workspaceId!, "schedules");
   res
     .status(201)
     .json(CreateScheduleResponse.parse(toScheduleJson(schedule, agent.name, null)));
@@ -199,7 +207,12 @@ router.patch("/schedules/:scheduleId", async (req, res): Promise<void> => {
       const [existing] = await tx
         .select()
         .from(schedulesTable)
-        .where(eq(schedulesTable.id, params.data.scheduleId))
+        .where(
+          and(
+            eq(schedulesTable.id, params.data.scheduleId),
+            eq(schedulesTable.workspaceId, req.workspaceId!),
+          ),
+        )
         .limit(1)
         .for("update");
       if (!existing) {
@@ -281,7 +294,7 @@ router.patch("/schedules/:scheduleId", async (req, res): Promise<void> => {
     .from(agentsTable)
     .where(eq(agentsTable.id, schedule.agentId))
     .limit(1);
-  publish("schedules");
+  publish(req.workspaceId!, "schedules");
   const lastTaskStatus = schedule.lastTaskId
     ? ((
         await db
@@ -306,14 +319,23 @@ router.delete("/schedules/:scheduleId", async (req, res): Promise<void> => {
   }
   const [deleted] = await db
     .delete(schedulesTable)
-    .where(eq(schedulesTable.id, params.data.scheduleId))
+    .where(
+      and(
+        eq(schedulesTable.id, params.data.scheduleId),
+        eq(schedulesTable.workspaceId, req.workspaceId!),
+      ),
+    )
     .returning();
   if (!deleted) {
     res.status(404).json({ error: "Schedule not found" });
     return;
   }
-  await recordAudit("schedule.deleted", `Schedule "${deleted.name}" was deleted.`);
-  publish("schedules");
+  await recordAudit(
+    req.workspaceId!,
+    "schedule.deleted",
+    `Schedule "${deleted.name}" was deleted.`,
+  );
+  publish(req.workspaceId!, "schedules");
   res.status(204).end();
 });
 

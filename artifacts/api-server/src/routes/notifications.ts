@@ -5,7 +5,7 @@ import {
   MarkNotificationsReadResponse,
 } from "@workspace/api-zod";
 import { db, notificationsTable } from "@workspace/db";
-import { and, desc, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { Router, type IRouter } from "express";
 import { publish } from "../events";
 
@@ -18,17 +18,22 @@ router.get("/notifications", async (req, res): Promise<void> => {
     return;
   }
   const limit = query.data.limit ?? 50;
+  const wsScope = eq(notificationsTable.workspaceId, req.workspaceId!);
   const [rows, [unread]] = await Promise.all([
     db
       .select()
       .from(notificationsTable)
-      .where(query.data.unreadOnly ? isNull(notificationsTable.readAt) : undefined)
+      .where(
+        query.data.unreadOnly
+          ? and(wsScope, isNull(notificationsTable.readAt))
+          : wsScope,
+      )
       .orderBy(desc(notificationsTable.createdAt))
       .limit(limit),
     db
       .select({ count: sql<number>`count(*)::int` })
       .from(notificationsTable)
-      .where(isNull(notificationsTable.readAt)),
+      .where(and(wsScope, isNull(notificationsTable.readAt))),
   ]);
   res.json(
     ListNotificationsResponse.parse({
@@ -53,15 +58,16 @@ router.post("/notifications/read", async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
+  const wsScope = eq(notificationsTable.workspaceId, req.workspaceId!);
   const scope = parsed.data.ids?.length
-    ? and(isNull(notificationsTable.readAt), inArray(notificationsTable.id, parsed.data.ids))
-    : isNull(notificationsTable.readAt);
+    ? and(wsScope, isNull(notificationsTable.readAt), inArray(notificationsTable.id, parsed.data.ids))
+    : and(wsScope, isNull(notificationsTable.readAt));
   const updated = await db
     .update(notificationsTable)
     .set({ readAt: new Date() })
     .where(scope)
     .returning({ id: notificationsTable.id });
-  if (updated.length > 0) publish("notifications");
+  if (updated.length > 0) publish(req.workspaceId!, "notifications");
   res.json(MarkNotificationsReadResponse.parse({ updated: updated.length }));
 });
 

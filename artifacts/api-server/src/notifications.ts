@@ -52,7 +52,7 @@ export async function notifyTaskEvent(
   kind: TaskNotifyKind,
   task: Pick<
     typeof tasksTable.$inferSelect,
-    "id" | "agentId" | "scheduleId" | "objective"
+    "id" | "agentId" | "scheduleId" | "objective" | "workspaceId"
   >,
   detail?: string | null,
 ): Promise<void> {
@@ -76,13 +76,14 @@ export async function notifyTaskEvent(
       ? `${who} — "${clip(task.objective, 140)}": ${clip(detail, 300)}`
       : `${who} — "${clip(task.objective, 140)}"`;
     await db.insert(notificationsTable).values({
+      workspaceId: task.workspaceId,
       kind,
       title: TITLE_FOR_KIND[kind],
       body,
       taskId: task.id,
       agentId: task.agentId,
     });
-    publish("notifications");
+    if (task.workspaceId) publish(task.workspaceId, "notifications");
   } catch (error) {
     logger.warn({ error, taskId: task.id, kind }, "Could not record notification");
   }
@@ -90,18 +91,20 @@ export async function notifyTaskEvent(
 
 /** A schedule-level problem the owner should know about (e.g. dispatch failed). */
 export async function notifyScheduleIssue(
+  workspaceId: string | null,
   scheduleName: string,
   agentId: string | null,
   detail: string,
 ): Promise<void> {
   try {
     await db.insert(notificationsTable).values({
+      workspaceId,
       kind: "schedule_error",
       title: "Schedule needs attention",
       body: `"${clip(scheduleName, 80)}": ${clip(detail, 300)}`,
       agentId,
     });
-    publish("notifications");
+    if (workspaceId) publish(workspaceId, "notifications");
   } catch (error) {
     logger.warn({ error, scheduleName }, "Could not record schedule notification");
   }

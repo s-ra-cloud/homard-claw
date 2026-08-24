@@ -11,7 +11,8 @@ const router: IRouter = Router();
  * never estimates, so an unpriced model contributes zero cost while its
  * token counts still show.
  */
-router.get("/reports/usage", async (_req, res): Promise<void> => {
+router.get("/reports/usage", async (req, res): Promise<void> => {
+  const ws = eq(tasksTable.workspaceId, req.workspaceId!);
   const now = new Date();
   const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
   const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -32,21 +33,27 @@ router.get("/reports/usage", async (_req, res): Promise<void> => {
     providerRows,
     blockerRows,
   ] = await Promise.all([
-    db.select({ cost }).from(tasksTable).where(gte(tasksTable.createdAt, dayAgo)),
-    db.select({ cost }).from(tasksTable).where(gte(tasksTable.createdAt, weekAgo)),
+    db.select({ cost }).from(tasksTable).where(and(ws, gte(tasksTable.createdAt, dayAgo))),
+    db.select({ cost }).from(tasksTable).where(and(ws, gte(tasksTable.createdAt, weekAgo))),
     db
       .select({ cost, inputTokens, outputTokens })
       .from(tasksTable)
-      .where(gte(tasksTable.createdAt, monthStart)),
+      .where(and(ws, gte(tasksTable.createdAt, monthStart))),
     db
       .select({ status: tasksTable.status, count: sql<number>`count(*)::int` })
       .from(tasksTable)
-      .where(gte(tasksTable.createdAt, thirtyDaysAgo))
+      .where(and(ws, gte(tasksTable.createdAt, thirtyDaysAgo)))
       .groupBy(tasksTable.status),
     db
       .select({ id: agentsTable.id, name: agentsTable.name, status: agentsTable.status })
       .from(agentsTable)
-      .where(and(eq(agentsTable.retired, false), eq(agentsTable.archived, false)))
+      .where(
+        and(
+          eq(agentsTable.workspaceId, req.workspaceId!),
+          eq(agentsTable.retired, false),
+          eq(agentsTable.archived, false),
+        ),
+      )
       .orderBy(agentsTable.name),
     db
       .select({
@@ -58,7 +65,7 @@ router.get("/reports/usage", async (_req, res): Promise<void> => {
         cost,
       })
       .from(tasksTable)
-      .where(gte(tasksTable.createdAt, thirtyDaysAgo))
+      .where(and(ws, gte(tasksTable.createdAt, thirtyDaysAgo)))
       .groupBy(tasksTable.agentId),
     db
       .select({
@@ -69,7 +76,7 @@ router.get("/reports/usage", async (_req, res): Promise<void> => {
         cost,
       })
       .from(tasksTable)
-      .where(gte(tasksTable.createdAt, thirtyDaysAgo))
+      .where(and(ws, gte(tasksTable.createdAt, thirtyDaysAgo)))
       .groupBy(tasksTable.provider),
     db
       .select({
@@ -82,7 +89,7 @@ router.get("/reports/usage", async (_req, res): Promise<void> => {
       })
       .from(tasksTable)
       .innerJoin(agentsTable, eq(tasksTable.agentId, agentsTable.id))
-      .where(inArray(tasksTable.status, ["blocked", "waiting_approval"]))
+      .where(and(ws, inArray(tasksTable.status, ["blocked", "waiting_approval"])))
       .orderBy(desc(tasksTable.createdAt))
       .limit(20),
   ]);

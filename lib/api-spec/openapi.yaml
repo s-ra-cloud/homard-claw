@@ -1198,6 +1198,32 @@ paths:
                 $ref: "#/components/schemas/ConnectedApp"
         "404":
           description: Unknown app
+  /google/oauth/start:
+    post:
+      operationId: startGoogleOauth
+      tags: [office]
+      summary: Begin the in-app Google OAuth consent flow for Gmail
+      responses:
+        "200":
+          description: Consent URL for the browser to visit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GoogleOauthStart"
+        "503":
+          description: Google OAuth is not configured on this server
+  /google/oauth/disconnect:
+    post:
+      operationId: disconnectGoogleAccount
+      tags: [office]
+      summary: Disconnect the workspace's Gmail account and revoke its credential
+      responses:
+        "200":
+          description: Disconnect result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GoogleOauthDisconnect"
 components:
   parameters:
     AgentId:
@@ -1435,6 +1461,18 @@ components:
       properties:
         app: { type: string, enum: [gmail, google_drive, github] }
         accessLevel: { type: string, enum: [read, draft, write] }
+    GoogleOauthStart:
+      type: object
+      required: [authUrl]
+      properties:
+        authUrl:
+          type: string
+          description: Google consent URL the browser should navigate to.
+    GoogleOauthDisconnect:
+      type: object
+      required: [disconnected]
+      properties:
+        disconnected: { type: boolean }
     ConnectedApp:
       type: object
       required: [app, displayName, enabled, status, statusDetail, accountLabel, grantedAgents]

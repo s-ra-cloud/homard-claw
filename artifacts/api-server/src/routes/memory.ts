@@ -64,7 +64,13 @@ async function listMemoriesWithAgents(where?: ReturnType<typeof and>) {
   const rows = await db
     .select({ memory: memoriesTable, agentName: agentsTable.name })
     .from(memoriesTable)
-    .leftJoin(agentsTable, eq(agentsTable.id, memoriesTable.agentId))
+    .leftJoin(
+      agentsTable,
+      and(
+        eq(agentsTable.id, memoriesTable.agentId),
+        eq(agentsTable.workspaceId, memoriesTable.workspaceId),
+      ),
+    )
     .where(where)
     .orderBy(
       desc(memoriesTable.pinned),
@@ -80,12 +86,12 @@ router.get("/memories", async (req, res): Promise<void> => {
     return;
   }
   const { agentId, q } = query.data;
-  const conditions = [];
+  const conditions = [eq(memoriesTable.workspaceId, req.workspaceId!)];
   if (agentId === "shared") {
     conditions.push(isNull(memoriesTable.agentId));
   } else if (agentId) {
     conditions.push(
-      or(eq(memoriesTable.agentId, agentId), isNull(memoriesTable.agentId)),
+      or(eq(memoriesTable.agentId, agentId), isNull(memoriesTable.agentId))!,
     );
   }
   if (q && q.trim() !== "") {
@@ -96,12 +102,10 @@ router.get("/memories", async (req, res): Promise<void> => {
       or(
         sql`${memoriesTable.content} ILIKE ${"%" + needle + "%"}`,
         sql`to_tsvector('english', ${memoriesTable.content}) @@ websearch_to_tsquery('english', ${needle})`,
-      ),
+      )!,
     );
   }
-  const memories = await listMemoriesWithAgents(
-    conditions.length > 0 ? and(...conditions) : undefined,
-  );
+  const memories = await listMemoriesWithAgents(and(...conditions));
   res.json(ListMemoriesResponse.parse({ memories, total: memories.length }));
 });
 
@@ -116,7 +120,12 @@ router.post("/memories", async (req, res): Promise<void> => {
     const [agent] = await db
       .select({ id: agentsTable.id, name: agentsTable.name })
       .from(agentsTable)
-      .where(eq(agentsTable.id, agentId))
+      .where(
+        and(
+          eq(agentsTable.id, agentId),
+          eq(agentsTable.workspaceId, req.workspaceId!),
+        ),
+      )
       .limit(1);
     if (!agent) {
       res.status(404).json({ error: "Agent not found" });
@@ -128,6 +137,7 @@ router.post("/memories", async (req, res): Promise<void> => {
     const inserted = await insertMemoryEnforcingCap(
       {
         agentId,
+        workspaceId: req.workspaceId!,
         kind: body.data.kind ?? "fact",
         content: body.data.content,
         pinned: body.data.pinned ?? false,
@@ -148,7 +158,12 @@ router.post("/memories", async (req, res): Promise<void> => {
         await db
           .select({ name: agentsTable.name })
           .from(agentsTable)
-          .where(eq(agentsTable.id, agentId))
+          .where(
+            and(
+              eq(agentsTable.id, agentId),
+              eq(agentsTable.workspaceId, req.workspaceId!),
+            ),
+          )
           .limit(1)
       )[0]?.name ?? null
     : null;
@@ -164,10 +179,16 @@ router.delete("/memories", async (req, res): Promise<void> => {
   const deleted = await db
     .delete(memoriesTable)
     .where(
-      query.data.agentId ? eq(memoriesTable.agentId, query.data.agentId) : undefined,
+      query.data.agentId
+        ? and(
+            eq(memoriesTable.workspaceId, req.workspaceId!),
+            eq(memoriesTable.agentId, query.data.agentId),
+          )
+        : eq(memoriesTable.workspaceId, req.workspaceId!),
     )
     .returning({ id: memoriesTable.id });
   await recordAudit(
+      req.workspaceId!,
       "memory.cleared",
       query.data.agentId
       ? `${deleted.length} memories were cleared for one agent.`
@@ -176,8 +197,10 @@ router.delete("/memories", async (req, res): Promise<void> => {
   res.json(ClearMemoriesResponse.parse({ deleted: deleted.length }));
 });
 
-router.get("/memories/export", async (_req, res): Promise<void> => {
-  const memories = await listMemoriesWithAgents();
+router.get("/memories/export", async (req, res): Promise<void> => {
+  const memories = await listMemoriesWithAgents(
+    and(eq(memoriesTable.workspaceId, req.workspaceId!)),
+  );
   res.json(ExportMemoriesResponse.parse({ memories, total: memories.length }));
 });
 
@@ -199,7 +222,12 @@ router.patch("/memories/:memoryId", async (req, res): Promise<void> => {
     const [agent] = await db
       .select({ id: agentsTable.id })
       .from(agentsTable)
-      .where(eq(agentsTable.id, updates.agentId))
+      .where(
+        and(
+          eq(agentsTable.id, updates.agentId),
+          eq(agentsTable.workspaceId, req.workspaceId!),
+        ),
+      )
       .limit(1);
     if (!agent) {
       res.status(404).json({ error: "Agent not found" });
@@ -219,7 +247,12 @@ router.patch("/memories/:memoryId", async (req, res): Promise<void> => {
       })
       .from(memoriesTable)
       .leftJoin(agentsTable, eq(agentsTable.id, memoriesTable.agentId))
-      .where(eq(memoriesTable.id, params.data.memoryId))
+      .where(
+        and(
+          eq(memoriesTable.id, params.data.memoryId),
+          eq(memoriesTable.workspaceId, req.workspaceId!),
+        ),
+      )
       .limit(1);
     if (!current) {
       res.status(404).json({ error: "Memory not found" });
@@ -236,7 +269,12 @@ router.patch("/memories/:memoryId", async (req, res): Promise<void> => {
   const [memory] = await db
     .update(memoriesTable)
     .set({ ...updates, updatedAt: new Date() })
-    .where(eq(memoriesTable.id, params.data.memoryId))
+    .where(
+      and(
+        eq(memoriesTable.id, params.data.memoryId),
+        eq(memoriesTable.workspaceId, req.workspaceId!),
+      ),
+    )
     .returning();
   if (!memory) {
     res.status(404).json({ error: "Memory not found" });
@@ -247,7 +285,12 @@ router.patch("/memories/:memoryId", async (req, res): Promise<void> => {
         await db
           .select({ name: agentsTable.name })
           .from(agentsTable)
-          .where(eq(agentsTable.id, memory.agentId))
+          .where(
+            and(
+              eq(agentsTable.id, memory.agentId),
+              eq(agentsTable.workspaceId, req.workspaceId!),
+            ),
+          )
           .limit(1)
       )[0]?.name ?? null
     : null;
@@ -262,7 +305,12 @@ router.delete("/memories/:memoryId", async (req, res): Promise<void> => {
   }
   const deleted = await db
     .delete(memoriesTable)
-    .where(eq(memoriesTable.id, params.data.memoryId))
+    .where(
+      and(
+        eq(memoriesTable.id, params.data.memoryId),
+        eq(memoriesTable.workspaceId, req.workspaceId!),
+      ),
+    )
     .returning({ id: memoriesTable.id });
   if (deleted.length === 0) {
     res.status(404).json({ error: "Memory not found" });
@@ -282,7 +330,7 @@ const TEXT_MIME_ALLOWLIST = [
 ];
 
 function toKnowledgeJson(
-  file: Omit<typeof knowledgeFilesTable.$inferSelect, "content">,
+  file: Omit<typeof knowledgeFilesTable.$inferSelect, "content" | "workspaceId">,
   agentIds: string[],
 ) {
   return {
@@ -297,8 +345,18 @@ function toKnowledgeJson(
   };
 }
 
-async function assignmentsByFile(): Promise<Map<string, string[]>> {
-  const rows = await db.select().from(agentKnowledgeTable);
+async function assignmentsByFile(workspaceId: string): Promise<Map<string, string[]>> {
+  const rows = await db
+    .select({
+      fileId: agentKnowledgeTable.fileId,
+      agentId: agentKnowledgeTable.agentId,
+    })
+    .from(agentKnowledgeTable)
+    .innerJoin(
+      knowledgeFilesTable,
+      eq(knowledgeFilesTable.id, agentKnowledgeTable.fileId),
+    )
+    .where(eq(knowledgeFilesTable.workspaceId, workspaceId));
   const map = new Map<string, string[]>();
   for (const row of rows) {
     map.set(row.fileId, [...(map.get(row.fileId) ?? []), row.agentId]);
@@ -306,7 +364,7 @@ async function assignmentsByFile(): Promise<Map<string, string[]>> {
   return map;
 }
 
-router.get("/knowledge", async (_req, res): Promise<void> => {
+router.get("/knowledge", async (req, res): Promise<void> => {
   const [files, assignments] = await Promise.all([
     db
       .select({
@@ -319,8 +377,9 @@ router.get("/knowledge", async (_req, res): Promise<void> => {
         createdAt: knowledgeFilesTable.createdAt,
       })
       .from(knowledgeFilesTable)
+      .where(eq(knowledgeFilesTable.workspaceId, req.workspaceId!))
       .orderBy(desc(knowledgeFilesTable.createdAt)),
-    assignmentsByFile(),
+    assignmentsByFile(req.workspaceId!),
   ]);
   res.json(
     ListKnowledgeFilesResponse.parse(
@@ -353,13 +412,16 @@ router.post("/knowledge", async (req, res): Promise<void> => {
   let file: typeof knowledgeFilesTable.$inferSelect | null = null;
   let quotaError: string | null = null;
   await db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(${KNOWLEDGE_QUOTA_LOCK})`);
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(${KNOWLEDGE_QUOTA_LOCK}, hashtext(${req.workspaceId!}))`,
+    );
     const [stats] = await tx
       .select({
         count: sql<number>`count(*)::int`,
         totalBytes: sql<number>`coalesce(sum(${knowledgeFilesTable.sizeBytes}), 0)::int`,
       })
-      .from(knowledgeFilesTable);
+      .from(knowledgeFilesTable)
+      .where(eq(knowledgeFilesTable.workspaceId, req.workspaceId!));
     if ((stats?.count ?? 0) >= MAX_KNOWLEDGE_FILES) {
       quotaError = `File limit reached (${MAX_KNOWLEDGE_FILES}). Delete a file before uploading more.`;
       return;
@@ -371,6 +433,7 @@ router.post("/knowledge", async (req, res): Promise<void> => {
     const [inserted] = await tx
       .insert(knowledgeFilesTable)
       .values({
+        workspaceId: req.workspaceId!,
         name,
         mimeType,
         description: description ?? null,
@@ -386,6 +449,7 @@ router.post("/knowledge", async (req, res): Promise<void> => {
     return;
   }
   await recordAudit(
+      req.workspaceId!,
       "knowledge.uploaded",
       `Knowledge file "${name}" was uploaded (${wordCount} words).`,
     );
@@ -400,13 +464,19 @@ router.delete("/knowledge/:fileId", async (req, res): Promise<void> => {
   }
   const deleted = await db
     .delete(knowledgeFilesTable)
-    .where(eq(knowledgeFilesTable.id, params.data.fileId))
+    .where(
+      and(
+        eq(knowledgeFilesTable.id, params.data.fileId),
+        eq(knowledgeFilesTable.workspaceId, req.workspaceId!),
+      ),
+    )
     .returning({ name: knowledgeFilesTable.name });
   if (deleted.length === 0) {
     res.status(404).json({ error: "File not found" });
     return;
   }
   await recordAudit(
+      req.workspaceId!,
       "knowledge.deleted",
       `Knowledge file "${deleted[0].name}" was deleted.`,
     );
@@ -432,7 +502,12 @@ router.put("/knowledge/:fileId/assignments", async (req, res): Promise<void> => 
       createdAt: knowledgeFilesTable.createdAt,
     })
     .from(knowledgeFilesTable)
-    .where(eq(knowledgeFilesTable.id, params.data.fileId))
+    .where(
+      and(
+        eq(knowledgeFilesTable.id, params.data.fileId),
+        eq(knowledgeFilesTable.workspaceId, req.workspaceId!),
+      ),
+    )
     .limit(1);
   if (!file) {
     res.status(404).json({ error: "File not found" });
@@ -442,7 +517,12 @@ router.put("/knowledge/:fileId/assignments", async (req, res): Promise<void> => 
     const agents = await db
       .select({ id: agentsTable.id })
       .from(agentsTable)
-      .where(inArray(agentsTable.id, agentIds));
+      .where(
+        and(
+          eq(agentsTable.workspaceId, req.workspaceId!),
+          inArray(agentsTable.id, agentIds),
+        ),
+      );
     if (agents.length !== agentIds.length) {
       res.status(404).json({ error: "One or more agents were not found" });
       return;

@@ -29,7 +29,7 @@ router.get("/events", (req, res): void => {
     pending.clear();
     res.write(`data: ${JSON.stringify({ topics })}\n\n`);
   };
-  const unsubscribe = subscribe((topics) => {
+  const unsubscribe = subscribe(req.workspaceId!, (topics) => {
     for (const topic of topics) pending.add(topic);
     if (!flushTimer) {
       flushTimer = setTimeout(flush, 250);

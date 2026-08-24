@@ -81,7 +81,7 @@ export default function PublicWelcome() {
         </h2>
         
         <p className="font-mono text-muted-foreground text-lg md:text-xl max-w-2xl mb-10 leading-relaxed">
-          A secure, single-owner facility for autonomous digital crustaceans. Dispatch tasks, monitor approvals, and maintain operational superiority.
+          A secure, private workspace for autonomous digital crustaceans — every account gets its own. Dispatch tasks, monitor approvals, and maintain operational superiority.
         </p>
 
         {isSignedIn ? (

@@ -61,6 +61,8 @@ export * from './delegationInput';
 export * from './delegationInputPriority';
 export * from './emergencyStop';
 export * from './emergencyStopInput';
+export * from './googleOauthDisconnect';
+export * from './googleOauthStart';
 export * from './healthStatus';
 export * from './knowledgeAssignmentsInput';
 export * from './knowledgeFile';

@@ -707,6 +707,10 @@ export interface AgentUpdate {
   avatar?: AvatarConfig;
 }
 
+export interface GoogleOauthStart {
+  /** Google consent URL the browser should navigate to. */
+  authUrl: string;
+}
 export type ConnectedAppApp = typeof ConnectedAppApp[keyof typeof ConnectedAppApp];
 
 
@@ -1887,3 +1891,7 @@ export type MarkNotificationsRead200 = {
   updated: number;
 };
 
+
+export interface GoogleOauthDisconnect {
+  disconnected: boolean;
+}

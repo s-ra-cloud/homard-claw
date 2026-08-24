@@ -15,6 +15,8 @@ import {
   db,
   pool,
   systemStateTable,
+  workspaceSettingsTable,
+  workspacesTable,
 } from "@workspace/db";
 import { and, eq, inArray, or } from "drizzle-orm";
 
@@ -42,6 +44,7 @@ const RUN_TAG = `HC Voice ${Date.now()}`;
 const createdAgentIds: string[] = [];
 let createdOwnerRow = false;
 let priorTranscriptsValue: string | null | undefined;
+let wsId = "";
 
 /** Minimal RIFF/WAVE header so format detection skips ffmpeg conversion. */
 const FAKE_WAV_BASE64 = Buffer.concat([
@@ -157,10 +160,23 @@ beforeAll(async () => {
   } else {
     createdOwnerRow = true;
   }
+  const boot = await request(app).get("/api/agents");
+  expect(boot.status).toBe(200);
+  const [ws] = await db
+    .select({ id: workspacesTable.id })
+    .from(workspacesTable)
+    .where(eq(workspacesTable.clerkUserId, authState.userId))
+    .limit(1);
+  wsId = ws.id;
   const [transcripts] = await db
     .select()
-    .from(systemStateTable)
-    .where(eq(systemStateTable.key, "voice_transcripts_enabled"))
+    .from(workspaceSettingsTable)
+    .where(
+      and(
+        eq(workspaceSettingsTable.workspaceId, wsId),
+        eq(workspaceSettingsTable.key, "voice_transcripts_enabled"),
+      ),
+    )
     .limit(1);
   priorTranscriptsValue = transcripts?.value ?? null;
 });
@@ -193,13 +209,23 @@ afterAll(async () => {
   // Restore the transcript toggle exactly as we found it.
   if (priorTranscriptsValue === null) {
     await db
-      .delete(systemStateTable)
-      .where(eq(systemStateTable.key, "voice_transcripts_enabled"));
+      .delete(workspaceSettingsTable)
+      .where(
+        and(
+          eq(workspaceSettingsTable.workspaceId, wsId),
+          eq(workspaceSettingsTable.key, "voice_transcripts_enabled"),
+        ),
+      );
   } else if (priorTranscriptsValue !== undefined) {
     await db
-      .update(systemStateTable)
+      .update(workspaceSettingsTable)
       .set({ value: priorTranscriptsValue })
-      .where(eq(systemStateTable.key, "voice_transcripts_enabled"));
+      .where(
+        and(
+          eq(workspaceSettingsTable.workspaceId, wsId),
+          eq(workspaceSettingsTable.key, "voice_transcripts_enabled"),
+        ),
+      );
   }
   if (createdOwnerRow) {
     // Only remove the owner row if it still holds OUR test identity — a
@@ -384,13 +410,21 @@ describe("text conversations", () => {
     const agent = await createAgent(`${RUN_TAG} Stopped`);
     const [prior] = await db
       .select()
-      .from(systemStateTable)
-      .where(eq(systemStateTable.key, "emergency_stop"))
+      .from(workspaceSettingsTable)
+      .where(
+        and(
+          eq(workspaceSettingsTable.workspaceId, wsId),
+          eq(workspaceSettingsTable.key, "emergency_stop"),
+        ),
+      )
       .limit(1);
     await db
-      .insert(systemStateTable)
-      .values({ key: "emergency_stop", value: "true" })
-      .onConflictDoUpdate({ target: systemStateTable.key, set: { value: "true" } });
+      .insert(workspaceSettingsTable)
+      .values({ workspaceId: wsId, key: "emergency_stop", value: "true" })
+      .onConflictDoUpdate({
+        target: [workspaceSettingsTable.workspaceId, workspaceSettingsTable.key],
+        set: { value: "true" },
+      });
     try {
       const res = await request(app)
         .post(`/api/agents/${agent.id}/converse`)
@@ -400,13 +434,25 @@ describe("text conversations", () => {
     } finally {
       if (prior) {
         await db
-          .update(systemStateTable)
-          .set({ value: prior.value })
-          .where(eq(systemStateTable.key, "emergency_stop"));
+          .update(workspaceSettingsTable)
+          // Never leave the shared development workspace stopped, even if a
+          // stale true row predated this test.
+          .set({ value: "false" })
+          .where(
+            and(
+              eq(workspaceSettingsTable.workspaceId, wsId),
+              eq(workspaceSettingsTable.key, "emergency_stop"),
+            ),
+          );
       } else {
         await db
-          .delete(systemStateTable)
-          .where(eq(systemStateTable.key, "emergency_stop"));
+          .delete(workspaceSettingsTable)
+          .where(
+            and(
+              eq(workspaceSettingsTable.workspaceId, wsId),
+              eq(workspaceSettingsTable.key, "emergency_stop"),
+            ),
+          );
       }
     }
   });

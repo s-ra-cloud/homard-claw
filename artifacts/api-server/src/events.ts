@@ -8,6 +8,10 @@ import { EventEmitter } from "node:events";
  * that forward topic invalidation hints to the browser; the client then
  * refetches through the normal REST endpoints, so the bus never carries
  * payloads — only "something under this topic changed".
+ *
+ * Every announcement is tagged with the workspace whose data changed, and
+ * each SSE subscriber only receives announcements for its own workspace, so
+ * one user's activity is never observable from another user's browser.
  */
 
 export type LiveTopic =
@@ -20,17 +24,37 @@ export type LiveTopic =
 
 const bus = new EventEmitter();
 // Many concurrent dashboard tabs each hold one listener.
-bus.setMaxListeners(100);
+bus.setMaxListeners(200);
 
 const EVENT = "topics";
 
-/** Announce that data under the given topics changed. Never throws. */
-export function publish(...topics: LiveTopic[]): void {
-  if (topics.length > 0) bus.emit(EVENT, topics);
+type Announcement = { workspaceId: string; topics: LiveTopic[] };
+
+/**
+ * Announce that a workspace's data under the given topics changed. A null
+ * workspace (a legacy row the startup backfill has not stamped yet) is a
+ * no-op rather than a broadcast: no other user should see the hint.
+ */
+export function publish(
+  workspaceId: string | null | undefined,
+  ...topics: LiveTopic[]
+): void {
+  if (workspaceId && topics.length > 0)
+    bus.emit(EVENT, { workspaceId, topics } satisfies Announcement);
 }
 
-/** Subscribe to topic announcements; returns an unsubscribe function. */
-export function subscribe(listener: (topics: LiveTopic[]) => void): () => void {
-  bus.on(EVENT, listener);
-  return () => bus.off(EVENT, listener);
+/**
+ * Subscribe to topic announcements for one workspace only; returns an
+ * unsubscribe function.
+ */
+export function subscribe(
+  workspaceId: string,
+  listener: (topics: LiveTopic[]) => void,
+): () => void {
+  const wrapped = (announcement: Announcement): void => {
+    if (announcement.workspaceId === workspaceId)
+      listener(announcement.topics);
+  };
+  bus.on(EVENT, wrapped);
+  return () => bus.off(EVENT, wrapped);
 }

@@ -2,6 +2,7 @@ import { pool } from "@workspace/db";
 import app from "./app";
 import { logger } from "./lib/logger";
 import { abortAllInFlight, startWorker, stopWorker } from "./worker";
+import { ensureWorkspaceBackfill } from "./workspace";
 
 const rawPort = process.env["PORT"];
 
@@ -25,10 +26,19 @@ const server = app.listen(port, (err) => {
 
   logger.info({ port }, "Server listening");
 
-  // The task queue lives in Postgres. The worker acquires a cluster-wide
-  // lease, recovers anything that was mid-flight when the previous holder
-  // died, then starts claiming work.
-  startWorker();
+  // Legacy single-owner data must belong to the owner's workspace before
+  // any request or worker claim can rely on workspace scoping. Fail loudly
+  // but keep serving: the backfill is idempotent and retried on next boot.
+  ensureWorkspaceBackfill()
+    .catch((err) => {
+      logger.error({ err }, "Workspace backfill failed");
+    })
+    .finally(() => {
+      // The task queue lives in Postgres. The worker acquires a cluster-wide
+      // lease, recovers anything that was mid-flight when the previous holder
+      // died, then starts claiming work.
+      startWorker();
+    });
 });
 
 /**

@@ -2,6 +2,8 @@ import React from "react";
 import {
   useListConnectedApps,
   useUpdateConnectedApp,
+  useStartGoogleOauth,
+  useDisconnectGoogleAccount,
   getListConnectedAppsQueryKey,
   type ConnectedApp,
 } from "@workspace/api-client-react";
@@ -26,13 +28,6 @@ const APP_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   github: Github,
 };
 
-/** Connector names as Replit's Integrations panel lists them. */
-const CONNECTOR_PANEL_NAMES: Record<string, string> = {
-  gmail: "Google Mail",
-  google_drive: "Google Drive",
-  github: "GitHub",
-};
-
 function StatusBadge({ app }: { app: ConnectedApp }) {
   if (app.status === "connected") return <Badge variant="success">Connected</Badge>;
   if (app.status === "expired") return <Badge variant="destructive">Reconnect Needed</Badge>;
@@ -40,36 +35,115 @@ function StatusBadge({ app }: { app: ConnectedApp }) {
   return <Badge variant="outline">Status Unknown</Badge>;
 }
 
-/**
- * Where authorization actually happens: Replit's own Integrations panel.
- * HomardClaw never sees credentials, so the honest affordance is precise
- * directions plus a status refresh for when the owner comes back.
- */
-function ConnectHelp({ app }: { app: ConnectedApp }) {
-  const connectorName = CONNECTOR_PANEL_NAMES[app.app] ?? app.displayName;
+/** Human messages for the ?gmail= callback results the API redirects with. */
+const GMAIL_CALLBACK_MESSAGES: Record<string, { title: string; description: string; ok?: boolean }> = {
+  connected: {
+    ok: true,
+    title: "Gmail connected",
+    description: "Your Gmail account is now connected to your workspace.",
+  },
+  "error:denied": {
+    title: "Consent declined",
+    description:
+      "You declined Google's consent screen, so nothing was connected. You can try again any time.",
+  },
+  "error:scopes": {
+    title: "Missing permissions",
+    description:
+      "Google reported that not all requested Gmail permissions were granted. Reconnect and allow all requested access.",
+  },
+  "error:expired": {
+    title: "The sign-in took too long",
+    description: "The connection attempt expired. Start again and finish within a few minutes.",
+  },
+  "error:not_configured": {
+    title: "Google sign-in unavailable",
+    description: "Google OAuth is not configured on this server yet.",
+  },
+};
+
+function gmailCallbackMessage(code: string) {
   return (
-    <div className="border-2 border-dashed border-border bg-muted/20 p-3 mt-3 text-[11px] text-muted-foreground space-y-1">
-      <p className="font-bold uppercase text-foreground">
-        {app.status === "connected"
-          ? "Manage this account"
-          : app.status === "expired"
-            ? "Reconnect this account"
-            : "Connect this account"}
-      </p>
-      <p>
-        Authorization happens in Replit, not here: open this workspace on
-        Replit and choose <span className="font-bold">Integrations</span> (the
-        plug icon / "All tools" menu), then{" "}
-        {app.status === "connected"
-          ? `find "${connectorName}" to switch or disconnect the account.`
-          : `connect "${connectorName}" and sign in with the account your agents should use.`}
-      </p>
-      <p>
-        This connects your owner account once, for the whole workspace — it is
-        separate from the per-agent Read / Draft / Write grants, which you set
-        on each agent's file. When you're done, come back and hit{" "}
-        <span className="font-bold uppercase">Refresh Status</span>.
-      </p>
+    GMAIL_CALLBACK_MESSAGES[code] ?? {
+      title: "Gmail connection failed",
+      description:
+        "Something went wrong while connecting your Google account. Please try again.",
+    }
+  );
+}
+
+/** Gmail connects right here, with the signed-in user's own Google account. */
+function GmailActions({ app }: { app: ConnectedApp }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const start = useStartGoogleOauth({
+    mutation: {
+      onSuccess: (data) => {
+        window.location.assign(data.authUrl);
+      },
+      onError: () => {
+        toast({
+          variant: "destructive",
+          title: "Could not start Google sign-in",
+          description:
+            "Google OAuth may not be configured on this server yet. Try again in a moment.",
+        });
+      },
+    },
+  });
+  const disconnect = useDisconnectGoogleAccount({
+    mutation: {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getListConnectedAppsQueryKey() });
+        toast({
+          title: "Gmail disconnected",
+          description:
+            "The credential was removed. Agents can no longer act on this account — including actions you had already approved.",
+        });
+      },
+      onError: (error) => {
+        toast({
+          variant: "destructive",
+          title: "Disconnect failed",
+          description: error.message,
+        });
+      },
+    },
+  });
+  return (
+    <div className="flex gap-2 flex-wrap">
+      <Button
+        variant={app.status === "connected" ? "outline" : "primary"}
+        size="sm"
+        disabled={start.isPending}
+        onClick={() => start.mutate()}
+      >
+        {start.isPending
+          ? "..."
+          : app.status === "connected"
+            ? "RECONNECT"
+            : app.status === "expired"
+              ? "RECONNECT"
+              : "CONNECT GMAIL"}
+      </Button>
+      {app.status === "connected" || app.status === "expired" ? (
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={disconnect.isPending}
+          onClick={() => {
+            if (
+              window.confirm(
+                "Disconnect Gmail? Agents immediately lose access to this account, including actions you already approved.",
+              )
+            ) {
+              disconnect.mutate();
+            }
+          }}
+        >
+          {disconnect.isPending ? "..." : "DISCONNECT"}
+        </Button>
+      ) : null}
     </div>
   );
 }
@@ -77,7 +151,6 @@ function ConnectHelp({ app }: { app: ConnectedApp }) {
 function AppCard({ app }: { app: ConnectedApp }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [helpOpen, setHelpOpen] = React.useState(false);
   const update = useUpdateConnectedApp({
     mutation: {
       onSuccess: () => {
@@ -93,12 +166,6 @@ function AppCard({ app }: { app: ConnectedApp }) {
     },
   });
   const Icon = APP_ICONS[app.app] ?? Plug;
-  const connectLabel =
-    app.status === "connected"
-      ? "MANAGE ACCOUNT"
-      : app.status === "expired"
-        ? "RECONNECT"
-        : "CONNECT";
 
   return (
     <PixelCard>
@@ -117,7 +184,7 @@ function AppCard({ app }: { app: ConnectedApp }) {
               {app.status === "connected"
                 ? app.accountLabel
                   ? `Account: ${app.accountLabel}`
-                  : "Account connected (name not shared by the platform)"
+                  : "Account connected"
                 : app.status === "expired"
                   ? "Account authorization expired — reconnect to resume"
                   : app.status === "not_connected"
@@ -136,15 +203,8 @@ function AppCard({ app }: { app: ConnectedApp }) {
             ) : null}
           </div>
         </div>
-        <div className="flex gap-2 shrink-0 flex-wrap">
-          <Button
-            variant={app.status === "connected" ? "outline" : "primary"}
-            size="sm"
-            aria-expanded={helpOpen}
-            onClick={() => setHelpOpen((open) => !open)}
-          >
-            {connectLabel}
-          </Button>
+        <div className="flex gap-2 shrink-0 flex-wrap items-start">
+          {app.app === "gmail" ? <GmailActions app={app} /> : null}
           <Button
             variant={app.enabled ? "outline" : "primary"}
             size="sm"
@@ -157,13 +217,40 @@ function AppCard({ app }: { app: ConnectedApp }) {
           </Button>
         </div>
       </div>
-      {helpOpen ? <ConnectHelp app={app} /> : null}
+      {app.app !== "gmail" && app.status === "not_connected" ? (
+        <p className="text-[11px] text-muted-foreground mt-3 border-2 border-dashed border-border bg-muted/20 p-3">
+          Personal {app.displayName} connections aren't available yet — each
+          user will be able to connect their own account here in a future
+          update.
+        </p>
+      ) : null}
     </PixelCard>
   );
 }
 
 export default function ConnectedAppsPage() {
   const { data, isLoading, error, refetch, isFetching } = useListConnectedApps();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  // Surface the OAuth callback result exactly once, then clean the URL.
+  React.useEffect(() => {
+    const url = new URL(window.location.href);
+    const result = url.searchParams.get("gmail");
+    if (!result) return;
+    url.searchParams.delete("gmail");
+    window.history.replaceState(null, "", url.pathname + url.search);
+    const message = gmailCallbackMessage(result);
+    toast({
+      variant: message.ok ? "default" : "destructive",
+      title: message.title,
+      description: message.description,
+    });
+    if (message.ok) {
+      queryClient.invalidateQueries({ queryKey: getListConnectedAppsQueryKey() });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <Shell>
@@ -174,7 +261,8 @@ export default function ConnectedAppsPage() {
               Connected Apps
             </h1>
             <p className="text-muted-foreground text-sm">
-              External accounts your agents can be granted access to.
+              Your own external accounts, connected privately to your
+              workspace, that your agents can be granted access to.
             </p>
           </div>
           <Button
@@ -194,12 +282,12 @@ export default function ConnectedAppsPage() {
             <div className="text-xs text-muted-foreground space-y-1">
               <p>
                 Connecting an account and granting an agent access are two
-                different things. You connect each account{" "}
-                <span className="font-bold">once</span>, as the owner, through
-                Replit's Integrations panel (use the Connect button on a card
-                below for directions) — agents never see credentials. Then, on
-                each agent's personnel file, you choose what that agent may do
-                with it: <span className="font-bold uppercase">read</span>{" "}
+                different things. You connect{" "}
+                <span className="font-bold">your own account</span> right here
+                — it belongs to your workspace alone, other users can never
+                see or use it, and agents never see credentials. Then, on each
+                agent's personnel file, you choose what that agent may do with
+                it: <span className="font-bold uppercase">read</span>{" "}
                 (search and read), <span className="font-bold uppercase">draft</span>{" "}
                 (prepare drafts nobody outside sees), or{" "}
                 <span className="font-bold uppercase">write</span> — and every
@@ -207,7 +295,9 @@ export default function ConnectedAppsPage() {
               </p>
               <p>
                 Disabling an app here blocks it for every agent at once,
-                whatever their individual grants say.
+                whatever their individual grants say. Disconnecting Gmail
+                removes the credential immediately — even already-approved
+                actions can no longer run against it.
               </p>
             </div>
           </div>

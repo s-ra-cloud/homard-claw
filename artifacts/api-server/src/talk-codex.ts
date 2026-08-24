@@ -125,6 +125,7 @@ function toTalkError(error: unknown): CodexTalkError {
 
 export type CodexTalkAgent = {
   id: string;
+  workspaceId: string;
   securityPreset: string;
   autonomy: string;
   sensitiveDataSandbox: boolean;
@@ -251,7 +252,9 @@ export async function runCodexTalkTurn(
     // the agent row's own persisted flag.
     let sensitiveDataSandbox = input.agent.sensitiveDataSandbox;
     try {
-      sensitiveDataSandbox = (await loadAgentAppAccess(input.agent.id))
+      sensitiveDataSandbox = (
+        await loadAgentAppAccess(input.agent.id, input.agent.workspaceId)
+      )
         .sensitiveDataSandbox;
     } catch (error) {
       logger.warn(

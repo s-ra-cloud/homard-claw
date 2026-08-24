@@ -23,6 +23,8 @@ import {
   systemStateTable,
   taskLogsTable,
   tasksTable,
+  workspaceSettingsTable,
+  workspacesTable,
 } from "@workspace/db";
 import { and, eq, inArray } from "drizzle-orm";
 
@@ -83,16 +85,17 @@ app.use("/api", officeRouter);
 const RUN_TAG = `HC Codex ${Date.now()}`;
 const createdAgentIds: string[] = [];
 let createdOwnerRow = false;
+let wsId = "";
 
 const SETTINGS_KEYS = [
   "provider.default",
   "provider.codex_chatgpt.default_model",
   "provider.codex_chatgpt.default_reasoning",
-  "provider.fallback_order",
-  "provider.paid_fallback_consent",
-  "provider.paid_fallback_limit_cents",
+  "provider.fallback.order",
+  "provider.fallback.paid_consent",
+  "provider.fallback.paid_limit_cents",
 ];
-let savedSettings: Array<{ key: string; value: string }> = [];
+let savedSettings: Array<{ workspaceId: string; key: string; value: string }> = [];
 
 /** Directory used as the private CODEX_HOME for the whole file. */
 let codexHome = "";
@@ -250,6 +253,7 @@ async function createAgent(name: string, extra: Record<string, unknown> = {}) {
     });
   if (res.status === 201) createdAgentIds.push(res.body.id);
   expect(res.status).toBe(201);
+  await request(app).post(`/api/agents/${res.body.id}/pause`).send({ paused: true });
   return res.body as { id: string; name: string };
 }
 
@@ -260,6 +264,7 @@ async function insertTask(
   const [task] = await db
     .insert(tasksTable)
     .values({
+      workspaceId: wsId,
       agentId,
       objective: `${RUN_TAG} scripted objective`,
       provider: "codex_chatgpt",
@@ -291,7 +296,7 @@ async function getLogs(taskId: string) {
 
 /** Claim and run one task scoped to this file's agents only. */
 async function drainOne(agentIds: string[]): Promise<boolean> {
-  const claimed = await claimNextTask({ agentIds });
+  const claimed = await claimNextTask({ agentIds, includePausedAgents: true });
   if (!claimed) return false;
   await runTask(claimed);
   return true;
@@ -308,10 +313,23 @@ beforeAll(async () => {
   } else {
     createdOwnerRow = true;
   }
+  const boot = await request(app).get("/api/agents");
+  expect(boot.status).toBe(200);
+  const [ws] = await db
+    .select({ id: workspacesTable.id })
+    .from(workspacesTable)
+    .where(eq(workspacesTable.clerkUserId, authState.userId))
+    .limit(1);
+  wsId = ws.id;
   savedSettings = await db
     .select()
-    .from(systemStateTable)
-    .where(inArray(systemStateTable.key, SETTINGS_KEYS));
+    .from(workspaceSettingsTable)
+    .where(
+      and(
+        eq(workspaceSettingsTable.workspaceId, wsId),
+        inArray(workspaceSettingsTable.key, SETTINGS_KEYS),
+      ),
+    );
 
   // Deliberately NOT under the OS temp dir: the runtime refuses scratch
   // storage outright, so a fixture there would test the rejection path
@@ -380,10 +398,15 @@ afterAll(async () => {
   }
   // Audit rows are append-only and hash-chained; they are left in place.
   await db
-    .delete(systemStateTable)
-    .where(inArray(systemStateTable.key, SETTINGS_KEYS));
+    .delete(workspaceSettingsTable)
+    .where(
+      and(
+        eq(workspaceSettingsTable.workspaceId, wsId),
+        inArray(workspaceSettingsTable.key, SETTINGS_KEYS),
+      ),
+    );
   for (const row of savedSettings) {
-    await db.insert(systemStateTable).values(row);
+    await db.insert(workspaceSettingsTable).values(row);
   }
   if (createdOwnerRow) {
     await db
@@ -1250,7 +1273,10 @@ describe("Codex serialization and recovery", () => {
     turnScript = [{ events: [], hangUntilAborted: true }];
     const task = await insertTask(agent.id);
 
-    const claimed = await claimNextTask({ agentIds: [agent.id] });
+    const claimed = await claimNextTask({
+      agentIds: [agent.id],
+      includePausedAgents: true,
+    });
     expect(claimed).not.toBeNull();
     const running = runTask(claimed!);
     // Cancel while the turn is still streaming.
@@ -1279,7 +1305,10 @@ describe("Codex serialization and recovery", () => {
     // several times inside the test rather than being taken on trust.
     setCodexLeaseHeartbeatMs(25);
     try {
-      const claimed = await claimNextTask({ agentIds: [agent.id] });
+      const claimed = await claimNextTask({
+        agentIds: [agent.id],
+        includePausedAgents: true,
+      });
       expect(claimed).not.toBeNull();
       const running = runTask(claimed!);
       // Poll rather than sleep a fixed span: under a loaded suite a DB
@@ -1317,7 +1346,10 @@ describe("Codex serialization and recovery", () => {
     const fingerprint = (await codexAuthFingerprint())!;
     setCodexLeaseHeartbeatMs(25);
     try {
-      const claimed = await claimNextTask({ agentIds: [agent.id] });
+      const claimed = await claimNextTask({
+        agentIds: [agent.id],
+        includePausedAgents: true,
+      });
       expect(claimed).not.toBeNull();
       const running = runTask(claimed!);
       await new Promise((resolve) => setTimeout(resolve, 60));
@@ -1726,16 +1758,28 @@ describe("Codex Talk conversations", () => {
     const agent = await createAgent(`${RUN_TAG} Archivist`);
     const [prior] = await db
       .select()
-      .from(systemStateTable)
-      .where(eq(systemStateTable.key, "voice_transcripts_enabled"))
+      .from(workspaceSettingsTable)
+      .where(
+        and(
+          eq(workspaceSettingsTable.workspaceId, wsId),
+          eq(workspaceSettingsTable.key, "voice_transcripts_enabled"),
+        ),
+      )
       .limit(1);
     try {
       // Off: nothing stored.
       await db
-        .insert(systemStateTable)
-        .values({ key: "voice_transcripts_enabled", value: "false" })
+        .insert(workspaceSettingsTable)
+        .values({
+          workspaceId: wsId,
+          key: "voice_transcripts_enabled",
+          value: "false",
+        })
         .onConflictDoUpdate({
-          target: systemStateTable.key,
+          target: [
+            workspaceSettingsTable.workspaceId,
+            workspaceSettingsTable.key,
+          ],
           set: { value: "false" },
         });
       turnScript = [talkTurn()];
@@ -1751,9 +1795,14 @@ describe("Codex Talk conversations", () => {
 
       // On: both sides stored.
       await db
-        .update(systemStateTable)
+        .update(workspaceSettingsTable)
         .set({ value: "true" })
-        .where(eq(systemStateTable.key, "voice_transcripts_enabled"));
+        .where(
+          and(
+            eq(workspaceSettingsTable.workspaceId, wsId),
+            eq(workspaceSettingsTable.key, "voice_transcripts_enabled"),
+          ),
+        );
       turnScript = [talkTurn()];
       res = await request(app)
         .post(`/api/agents/${agent.id}/converse`)
@@ -1767,13 +1816,23 @@ describe("Codex Talk conversations", () => {
     } finally {
       if (prior) {
         await db
-          .update(systemStateTable)
+          .update(workspaceSettingsTable)
           .set({ value: prior.value })
-          .where(eq(systemStateTable.key, "voice_transcripts_enabled"));
+          .where(
+            and(
+              eq(workspaceSettingsTable.workspaceId, wsId),
+              eq(workspaceSettingsTable.key, "voice_transcripts_enabled"),
+            ),
+          );
       } else {
         await db
-          .delete(systemStateTable)
-          .where(eq(systemStateTable.key, "voice_transcripts_enabled"));
+          .delete(workspaceSettingsTable)
+          .where(
+            and(
+              eq(workspaceSettingsTable.workspaceId, wsId),
+              eq(workspaceSettingsTable.key, "voice_transcripts_enabled"),
+            ),
+          );
       }
       await db
         .delete(agentMessagesTable)

@@ -1,11 +1,11 @@
 import {
   agentsTable,
   db,
-  systemStateTable,
   taskLogsTable,
   tasksTable,
+  workspaceSettingsTable,
 } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { recordAudit } from "./audit";
 import { publish } from "./events";
 import { notifyTaskEvent } from "./notifications";
@@ -40,6 +40,12 @@ export function agentPromptContext(agent: {
 
 export type DispatchInput = {
   agentId: string;
+  /**
+   * When set, the agent must belong to this workspace; a mismatched or
+   * foreign agent id resolves to 404 so callers cannot dispatch across
+   * tenant boundaries with a guessed id.
+   */
+  workspaceId?: string;
   objective: string;
   priority?: string;
   budgetCents?: number | null;
@@ -77,7 +83,11 @@ export async function dispatchTask(input: DispatchInput): Promise<DispatchOutcom
       .from(agentsTable)
       .where(eq(agentsTable.id, input.agentId))
       .limit(1);
-    if (!preview) {
+    if (
+      !preview ||
+      (input.workspaceId !== undefined &&
+        preview.workspaceId !== input.workspaceId)
+    ) {
       outcome = { status: 404 };
       break;
     }
@@ -88,6 +98,7 @@ export async function dispatchTask(input: DispatchInput): Promise<DispatchOutcom
     let routing;
     try {
       routing = await resolveRouting(
+        preview.workspaceId ?? "",
         preview,
         input.providerOverride,
         input.modelOverride,
@@ -127,11 +138,18 @@ export async function dispatchTask(input: DispatchInput): Promise<DispatchOutcom
         // Routing config changed between preview and lock; retry.
         return { status: 425 };
       }
-      const [stop] = await tx
-        .select()
-        .from(systemStateTable)
-        .where(eq(systemStateTable.key, "emergency_stop"))
-        .limit(1);
+      const [stop] = agent.workspaceId
+        ? await tx
+            .select()
+            .from(workspaceSettingsTable)
+            .where(
+              and(
+                eq(workspaceSettingsTable.workspaceId, agent.workspaceId),
+                eq(workspaceSettingsTable.key, "emergency_stop"),
+              ),
+            )
+            .limit(1)
+        : [undefined];
       const configured = isConfigured(routing.provider);
       // Unconfigured providers and the emergency stop block explicitly, with
       // a reason the owner can act on; a paused agent's tasks simply wait in
@@ -148,6 +166,9 @@ export async function dispatchTask(input: DispatchInput): Promise<DispatchOutcom
       const [task] = await tx
         .insert(tasksTable)
         .values({
+          // The task's durable owner: always the agent's workspace, never
+          // anything the client could supply.
+          workspaceId: agent.workspaceId,
           agentId: agent.id,
           objective: input.objective,
           priority: input.priority ?? "normal",
@@ -172,18 +193,22 @@ export async function dispatchTask(input: DispatchInput): Promise<DispatchOutcom
           ? `Task created but blocked: ${blockReason.errorMessage}`
           : `Task created and queued for ${agent.name} (priority ${task.priority}).`,
       });
-      await recordAudit(
-        "task.created",
-        blockReason
-          ? `A task for ${agent.name} was blocked: ${blockReason.errorMessage}`
-          : `A task was queued for ${agent.name}.`,
-        tx,
-      );
+      if (agent.workspaceId) {
+        await recordAudit(
+          agent.workspaceId,
+          "task.created",
+          blockReason
+            ? `A task for ${agent.name} was blocked: ${blockReason.errorMessage}`
+            : `A task was queued for ${agent.name}.`,
+          tx,
+        );
+      }
       return { status: 201, task, agentName: agent.name };
     });
   }
   if (outcome.status === 201) {
-    publish("tasks", "overview");
+    if (outcome.task.workspaceId)
+      publish(outcome.task.workspaceId, "tasks", "overview");
     // A task blocked at creation never reaches the worker's transition
     // hooks, so its notification must be emitted here.
     if (outcome.task.status === "blocked") {

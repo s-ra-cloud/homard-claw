@@ -10,6 +10,7 @@ import {
   tasksTable,
   teamMembersTable,
   teamsTable,
+  workspacesTable,
 } from "@workspace/db";
 import { and, eq, inArray } from "drizzle-orm";
 
@@ -39,6 +40,7 @@ const RUN_TAG = `HC Teams ${Date.now()}`;
 const createdAgentIds: string[] = [];
 const createdTeamIds: string[] = [];
 let createdOwnerRow = false;
+let wsId: string;
 
 /** Paused agents keep the live development worker away from test tasks. */
 async function createAgent(name: string, extra: Record<string, unknown> = {}) {
@@ -75,6 +77,7 @@ async function insertTask(
   const [task] = await db
     .insert(tasksTable)
     .values({
+      workspaceId: wsId,
       agentId,
       objective: `${RUN_TAG} parent objective`,
       provider: "openrouter",
@@ -147,6 +150,14 @@ beforeAll(async () => {
   } else {
     createdOwnerRow = true;
   }
+  const boot = await request(app).get("/api/agents");
+  expect(boot.status).toBe(200);
+  const [ws] = await db
+    .select({ id: workspacesTable.id })
+    .from(workspacesTable)
+    .where(eq(workspacesTable.clerkUserId, authState.userId))
+    .limit(1);
+  wsId = ws.id;
 });
 
 beforeEach(() => {

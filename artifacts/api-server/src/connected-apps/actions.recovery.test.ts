@@ -19,8 +19,10 @@ import {
   appActionsTable,
   approvalsTable,
   db,
+  googleAccountsTable,
   pool,
   tasksTable,
+  workspacesTable,
   type AppActionRecord,
 } from "@workspace/db";
 import { eq } from "drizzle-orm";
@@ -78,6 +80,54 @@ vi.mock("@replit/connectors-sdk", () => ({
   },
 }));
 
+// Drive/GitHub still ride the workspace connector, which is restricted to
+// the legacy workspace; pin the legacy id to this test's workspace so those
+// executors run. Everything else in the module stays real.
+const legacyState = vi.hoisted(() => ({ id: null as string | null }));
+vi.mock("../workspace", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../workspace")>()),
+  legacyWorkspaceId: async () => legacyState.id,
+}));
+
+// Gmail now talks to Google directly as the workspace's own account. Route
+// its HTTP through the same proxyState the connector mock uses, so every
+// existing handler keeps working; token refreshes are answered locally.
+const realFetch = globalThis.fetch;
+vi.stubGlobal(
+  "fetch",
+  async (
+    input: string | URL | Request,
+    init?: RequestInit,
+  ): Promise<Response> => {
+    const url = String(input);
+    if (url.startsWith("https://oauth2.googleapis.com/token")) {
+      return new Response(
+        JSON.stringify({ access_token: "test-access", expires_in: 3600 }),
+        { status: 200 },
+      );
+    }
+    if (url.startsWith("https://gmail.googleapis.com")) {
+      const path = url.slice("https://gmail.googleapis.com".length);
+      const call = {
+        connector: "gmail",
+        path,
+        method: init?.method ?? "GET",
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      };
+      proxyState.calls.push(call);
+      const res = proxyState.handler?.(call) ?? {
+        status: 500,
+        body: { error: "no handler installed" },
+      };
+      return new Response(
+        typeof res.body === "string" ? res.body : JSON.stringify(res.body),
+        { status: res.status },
+      );
+    }
+    return realFetch(input, init);
+  },
+);
+
 import {
   claimApprovedAction,
   executeClaimedAction,
@@ -85,10 +135,15 @@ import {
 } from "./actions";
 import { executeOperation } from "./connections";
 import { findOperation } from "./catalog";
+import {
+  clearGoogleTokenCache,
+  encryptRefreshToken,
+} from "../google/credentials";
 
 const RUN_TAG = `HC Recovery Test ${Date.now()}`;
 let agentId: string;
 let taskId: string;
+let workspaceId: string;
 
 function sendCalls(): ProxyCall[] {
   return proxyState.calls.filter(
@@ -151,9 +206,25 @@ async function reloadAction(id: string): Promise<AppActionRecord> {
 }
 
 beforeAll(async () => {
+  const [workspace] = await db
+    .insert(workspacesTable)
+    .values({ clerkUserId: `recovery-test-${Date.now()}` })
+    .returning();
+  workspaceId = workspace.id;
+  legacyState.id = workspaceId;
+  await db.insert(googleAccountsTable).values({
+    workspaceId,
+    clerkUserId: workspace.clerkUserId,
+    googleSub: "test-sub",
+    email: "tester@example.com",
+    refreshTokenEnc: encryptRefreshToken("test-refresh-token"),
+    scopes:
+      "openid email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/gmail.send",
+  });
   const [agent] = await db
     .insert(agentsTable)
     .values({
+      workspaceId,
       name: RUN_TAG,
       title: "Recovery Tester",
       mission: "Exercise crash recovery of connected-app writes.",
@@ -167,6 +238,7 @@ beforeAll(async () => {
     .insert(tasksTable)
     .values({
       agentId,
+      workspaceId,
       objective: `Recovery fixture ${RUN_TAG}`,
       status: "cancelled", // inert: never claimable by the live worker
       provider: "claude_max",
@@ -178,6 +250,9 @@ beforeAll(async () => {
 beforeEach(() => {
   proxyState.calls = [];
   proxyState.handler = null;
+  vi.stubEnv("GOOGLE_OAUTH_CLIENT_ID", "test-client-id");
+  vi.stubEnv("GOOGLE_OAUTH_CLIENT_SECRET", "test-client-secret");
+  clearGoogleTokenCache();
 });
 
 afterAll(async () => {
@@ -185,6 +260,10 @@ afterAll(async () => {
   await db.delete(approvalsTable).where(eq(approvalsTable.taskId, taskId));
   await db.delete(tasksTable).where(eq(tasksTable.id, taskId));
   await db.delete(agentsTable).where(eq(agentsTable.id, agentId));
+  await db
+    .delete(workspacesTable)
+    .where(eq(workspacesTable.id, workspaceId));
+  vi.unstubAllGlobals();
   await pool.end();
 });
 
@@ -196,7 +275,7 @@ describe("idempotency markers on write executors", () => {
     const outcome = await executeOperation(
       op!,
       { to: "a@b.c", subject: "Hi", body: "Hello" },
-      { actionId: "11111111-2222-3333-4444-555555555555" },
+      { actionId: "11111111-2222-3333-4444-555555555555", workspaceId },
     );
     expect(outcome.ok).toBe(true);
     const raw = (sendCalls()[0].body as { raw: string }).raw;
@@ -215,7 +294,7 @@ describe("idempotency markers on write executors", () => {
     const outcome = await executeOperation(
       op!,
       { owner: "x", repo: "y", issueNumber: 1, body: "LGTM" },
-      { actionId: "aaaa" },
+      { actionId: "aaaa", workspaceId },
     );
     expect(outcome.ok).toBe(true);
     const body = (proxyState.calls[0].body as { body: string }).body;
@@ -241,7 +320,7 @@ describe("reconcileStaleExecutingActions", () => {
       }
       throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
     };
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester");
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
     expect(resolved.resolution).toBe("confirmed");
     const row = await reloadAction(action.id);
     expect(row.status).toBe("executed");
@@ -266,7 +345,7 @@ describe("reconcileStaleExecutingActions", () => {
       }
       throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
     };
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester");
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
     expect(resolved.resolution).toBe("requeued");
     expect((await reloadAction(action.id)).status).toBe("approved");
     expect(sendCalls()).toHaveLength(0);
@@ -279,7 +358,7 @@ describe("reconcileStaleExecutingActions", () => {
     expect(claimed).not.toBeNull();
     expect(claimed!.executingAt).not.toBeNull();
     expect(await claimApprovedAction(action.id)).toBeNull();
-    const { action: finalized } = await executeClaimedAction(claimed!, "Tester");
+    const { action: finalized } = await executeClaimedAction(claimed!, "Tester", workspaceId);
     expect(finalized.status).toBe("executed");
     expect(sendCalls()).toHaveLength(1);
     const raw = (sendCalls()[0].body as { raw: string }).raw;
@@ -297,7 +376,7 @@ describe("reconcileStaleExecutingActions", () => {
       approvalId,
     });
     proxyState.handler = () => ({ status: 503, body: "provider down" });
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester");
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
     expect(resolved.resolution).toBe("unknown");
     const row = await reloadAction(action.id);
     expect(row.status).toBe("failed");
@@ -320,7 +399,7 @@ describe("reconcileStaleExecutingActions", () => {
       }
       throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
     };
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester");
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
     expect(resolved.resolution).toBe("unknown");
     const row = await reloadAction(action.id);
     expect(row.status).toBe("failed");
@@ -343,7 +422,7 @@ describe("reconcileStaleExecutingActions", () => {
       }
       throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
     };
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester");
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
     expect(resolved.resolution).toBe("unknown");
     const row = await reloadAction(action.id);
     expect(row.status).toBe("failed");
@@ -371,7 +450,7 @@ describe("reconcileStaleExecutingActions", () => {
       }
       throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
     };
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester");
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
     expect(resolved.resolution).toBe("confirmed");
     const row = await reloadAction(action.id);
     expect(row.status).toBe("executed");
@@ -392,7 +471,7 @@ describe("reconcileStaleExecutingActions", () => {
     proxyState.handler = (call) => {
       throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
     };
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester");
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
     expect(resolved.resolution).toBe("unknown");
     expect((await reloadAction(action.id)).status).toBe("failed");
     expect(proxyState.calls).toHaveLength(0);
@@ -411,7 +490,7 @@ describe("reconcileStaleExecutingActions", () => {
       }
       throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
     };
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester");
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
     expect(resolved.resolution).toBe("not_executed");
     const row = await reloadAction(action.id);
     expect(row.status).toBe("failed");
@@ -444,7 +523,7 @@ describe("reconcileStaleExecutingActions", () => {
       }
       throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
     };
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester");
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
     expect(resolved.resolution).toBe("confirmed");
     const row = await reloadAction(action.id);
     expect(row.status).toBe("executed");
