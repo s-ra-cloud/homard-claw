@@ -63,6 +63,7 @@ import {
 import {
   agentAppGrantsTable,
   agentsTable,
+  appActionsTable,
   approvalsTable,
   auditEventsTable,
   db,
@@ -116,7 +117,11 @@ import {
   queueHealth,
 } from "../runtime";
 import { abortRunningTask, getWorkerStatus } from "../worker";
-import { settleActionForApproval } from "../connected-apps/actions";
+import {
+  listRecentAgentActions,
+  listTaskActions,
+  settleActionForApproval,
+} from "../connected-apps/actions";
 import connectedAppsRouter from "./connected-apps";
 import eventsRouter from "./events";
 import memoryRouter from "./memory";
@@ -384,6 +389,28 @@ function toTaskJson(
   };
 }
 
+/** Serialize a durable app_actions row for the API contract. */
+function toAppActionJson(
+  action: typeof appActionsTable.$inferSelect & { taskObjective?: string | null },
+) {
+  return {
+    id: action.id,
+    taskId: action.taskId,
+    agentId: action.agentId,
+    app: action.app,
+    operation: action.operation,
+    targetSummary: action.targetSummary,
+    status: action.status,
+    approvalId: action.approvalId,
+    resultSummary: action.resultSummary,
+    errorMessage: action.errorMessage,
+    taskObjective: action.taskObjective ?? null,
+    decidedAt: action.decidedAt ? action.decidedAt.toISOString() : null,
+    executedAt: action.executedAt ? action.executedAt.toISOString() : null,
+    createdAt: action.createdAt.toISOString(),
+  };
+}
+
 /** Statuses the owner may cancel from; everything else is already final. */
 const CANCELLABLE_STATUSES = ["queued", "running", "waiting_approval", "blocked"];
 /** Statuses eligible for a fresh retry attempt. */
@@ -555,13 +582,16 @@ router.get("/agents/:agentId", async (req, res): Promise<void> => {
     res.status(404).json({ error: "Agent not found" });
     return;
   }
-  const tasks = await db
-    .select()
-    .from(tasksTable)
-    .where(eq(tasksTable.agentId, agent.id))
-    .orderBy(desc(tasksTable.createdAt))
-    .limit(50);
-  const agentGrants = await grantsByAgent([agent.id]);
+  const [tasks, agentGrants, recentActions] = await Promise.all([
+    db
+      .select()
+      .from(tasksTable)
+      .where(eq(tasksTable.agentId, agent.id))
+      .orderBy(desc(tasksTable.createdAt))
+      .limit(50),
+    grantsByAgent([agent.id]),
+    listRecentAgentActions(agent.id, 20),
+  ]);
   res.json(
     GetAgentResponse.parse({
       agent: toAgent(agent, agentGrants.get(agent.id) ?? []),
@@ -570,6 +600,7 @@ router.get("/agents/:agentId", async (req, res): Promise<void> => {
         agentName: agent.name,
         createdAt: task.createdAt.toISOString(),
       })),
+      recentActions: recentActions.map((action) => toAppActionJson(action)),
     }),
   );
 });
@@ -1129,11 +1160,14 @@ router.get("/tasks/:taskId", async (req, res): Promise<void> => {
     res.status(404).json({ error: "Task not found" });
     return;
   }
-  const logs = await db
-    .select()
-    .from(taskLogsTable)
-    .where(eq(taskLogsTable.taskId, row.task.id))
-    .orderBy(taskLogsTable.createdAt);
+  const [logs, actions] = await Promise.all([
+    db
+      .select()
+      .from(taskLogsTable)
+      .where(eq(taskLogsTable.taskId, row.task.id))
+      .orderBy(taskLogsTable.createdAt),
+    listTaskActions(row.task.id),
+  ]);
   res.json(
     GetTaskResponse.parse({
       task: toTaskJson(row.task, row.agentName, {
@@ -1144,6 +1178,7 @@ router.get("/tasks/:taskId", async (req, res): Promise<void> => {
         ...log,
         createdAt: log.createdAt.toISOString(),
       })),
+      actions: actions.map((action) => toAppActionJson(action)),
     }),
   );
 });

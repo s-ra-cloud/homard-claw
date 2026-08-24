@@ -6,9 +6,11 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { Agent } from './agent';
+import type { AppAction } from './appAction';
 import type { Task } from './task';
 
 export interface AgentDetail {
   agent: Agent;
   tasks: Task[];
+  recentActions: AppAction[];
 }

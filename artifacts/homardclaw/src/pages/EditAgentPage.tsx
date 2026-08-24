@@ -3,6 +3,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useGetAgent, useUpdateAgent } from "@workspace/api-client-react";
 import { Shell } from "@/components/layout/Shell";
+import { AppActionList } from "@/components/app-action-list";
 import { PixelCard } from "@/components/ui/pixel-card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -194,6 +195,10 @@ export default function EditAgentPage() {
                     </div>
                   </form>
                 </Form>
+              </PixelCard>
+
+              <PixelCard title="Recent Connected-App Actions">
+                <AppActionList actions={detail.recentActions} showTaskObjective />
               </PixelCard>
 
               <PixelCard title="Task History">

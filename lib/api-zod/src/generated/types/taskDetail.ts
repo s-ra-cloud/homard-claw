@@ -5,10 +5,12 @@
  * HomardClaw private agent office API
  * OpenAPI spec version: 0.1.0
  */
+import type { AppAction } from './appAction';
 import type { Task } from './task';
 import type { TaskLog } from './taskLog';
 
 export interface TaskDetail {
   task: Task;
   logs: TaskLog[];
+  actions: AppAction[];
 }

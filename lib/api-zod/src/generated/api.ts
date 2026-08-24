@@ -468,6 +468,22 @@ export const GetAgentResponse = zod.object({
   "startedAt": zod.coerce.date().nullish(),
   "finishedAt": zod.coerce.date().nullish(),
   "createdAt": zod.coerce.date()
+})),
+  "recentActions": zod.array(zod.object({
+  "id": zod.string(),
+  "taskId": zod.string(),
+  "agentId": zod.string(),
+  "app": zod.string(),
+  "operation": zod.string(),
+  "targetSummary": zod.string(),
+  "status": zod.enum(['waiting_approval', 'approved', 'executing', 'executed', 'failed', 'denied', 'rejected', 'expired']),
+  "approvalId": zod.string().nullish(),
+  "resultSummary": zod.string().nullish(),
+  "errorMessage": zod.string().nullish(),
+  "taskObjective": zod.string().nullish(),
+  "decidedAt": zod.coerce.date().nullish(),
+  "executedAt": zod.coerce.date().nullish(),
+  "createdAt": zod.coerce.date()
 }))
 })
 
@@ -1885,6 +1901,22 @@ export const GetTaskResponse = zod.object({
   "id": zod.string(),
   "level": zod.enum(['info', 'warn', 'error']),
   "message": zod.string(),
+  "createdAt": zod.coerce.date()
+})),
+  "actions": zod.array(zod.object({
+  "id": zod.string(),
+  "taskId": zod.string(),
+  "agentId": zod.string(),
+  "app": zod.string(),
+  "operation": zod.string(),
+  "targetSummary": zod.string(),
+  "status": zod.enum(['waiting_approval', 'approved', 'executing', 'executed', 'failed', 'denied', 'rejected', 'expired']),
+  "approvalId": zod.string().nullish(),
+  "resultSummary": zod.string().nullish(),
+  "errorMessage": zod.string().nullish(),
+  "taskObjective": zod.string().nullish(),
+  "decidedAt": zod.coerce.date().nullish(),
+  "executedAt": zod.coerce.date().nullish(),
   "createdAt": zod.coerce.date()
 }))
 })

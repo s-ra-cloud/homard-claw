@@ -3,6 +3,7 @@ import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   agentsTable,
+  appActionsTable,
   db,
   pool,
   systemStateTable,
@@ -664,11 +665,62 @@ describe("task lifecycle routes", () => {
       "first entry",
       "second entry",
     ]);
+    expect(res.body.actions).toEqual([]);
 
     const missing = await request(app).get(
       "/api/tasks/00000000-0000-4000-8000-000000000000",
     );
     expect(missing.status).toBe(404);
+  });
+
+  it("returns connected-app actions on task detail and a rollup on agent detail", async () => {
+    const agent = await createAgent(`${RUN_TAG} AppActor`);
+    const task = await insertTask(agent.id, { status: "completed" });
+    await db.insert(appActionsTable).values([
+      {
+        taskId: task.id,
+        agentId: agent.id,
+        app: "gmail",
+        operation: "gmail.search",
+        targetSummary: `${RUN_TAG} search inbox for invoices`,
+        status: "executed",
+        resultSummary: "3 threads found",
+        executedAt: new Date(),
+        createdAt: new Date(Date.now() - 2000),
+      },
+      {
+        taskId: task.id,
+        agentId: agent.id,
+        app: "github",
+        operation: "github.create_issue",
+        targetSummary: `${RUN_TAG} open issue in owner/repo`,
+        status: "waiting_approval",
+        createdAt: new Date(Date.now() - 1000),
+      },
+    ]);
+
+    const detail = await request(app).get(`/api/tasks/${task.id}`);
+    expect(detail.status).toBe(200);
+    // Oldest first on the task timeline.
+    expect(
+      detail.body.actions.map((a: { operation: string; status: string }) => [
+        a.operation,
+        a.status,
+      ]),
+    ).toEqual([
+      ["gmail.search", "executed"],
+      ["github.create_issue", "waiting_approval"],
+    ]);
+    expect(detail.body.actions[0].resultSummary).toBe("3 threads found");
+    expect(detail.body.actions[0].executedAt).toBeTruthy();
+
+    const agentDetail = await request(app).get(`/api/agents/${agent.id}`);
+    expect(agentDetail.status).toBe(200);
+    // Newest first on the agent rollup, with the owning task's objective.
+    expect(
+      agentDetail.body.recentActions.map((a: { operation: string }) => a.operation),
+    ).toEqual(["github.create_issue", "gmail.search"]);
+    expect(agentDetail.body.recentActions[0].taskObjective).toBe(task.objective);
   });
 
   it("cancels queued work and rejects cancelling finished work", async () => {

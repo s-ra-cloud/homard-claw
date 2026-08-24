@@ -25,10 +25,11 @@ import {
   type TaskLog,
 } from "@workspace/api-client-react";
 import { Shell } from "@/components/layout/Shell";
+import { AppActionList } from "@/components/app-action-list";
 import { PixelCard } from "@/components/ui/pixel-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Activity, Play, Clock, AlertTriangle, CheckCircle, Calculator, Ban, RotateCcw, ScrollText, XCircle, Network } from "lucide-react";
+import { Activity, Play, Clock, AlertTriangle, CheckCircle, Calculator, Ban, RotateCcw, ScrollText, XCircle, Network, AppWindow } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
@@ -547,6 +548,16 @@ function TaskDetailDialog({
             </div>
 
             <DelegationSection task={task} />
+
+            {(detail?.actions?.length ?? 0) > 0 && (
+              <div>
+                <div className="flex items-center gap-2 text-[10px] font-bold uppercase text-muted-foreground mb-1">
+                  <AppWindow className="w-3 h-3" />
+                  Connected-App Actions
+                </div>
+                <AppActionList actions={detail?.actions ?? []} />
+              </div>
+            )}
 
             <div>
               <div className="flex items-center gap-2 text-[10px] font-bold uppercase text-muted-foreground mb-1">

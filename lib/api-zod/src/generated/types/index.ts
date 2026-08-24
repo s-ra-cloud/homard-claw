@@ -27,6 +27,8 @@ export * from './agentUpdateAutonomy';
 export * from './agentUpdateCodexReasoning';
 export * from './agentUpdateProvider';
 export * from './agentUpdateSecurityPreset';
+export * from './appAction';
+export * from './appActionStatus';
 export * from './appGrant';
 export * from './appGrantAccessLevel';
 export * from './appGrantApp';

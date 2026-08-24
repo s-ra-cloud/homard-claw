@@ -1,9 +1,10 @@
 import {
   appActionsTable,
   db,
+  tasksTable,
   type AppActionRecord,
 } from "@workspace/db";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { recordAudit } from "../audit";
 import { APP_CATALOG, findOperation, type ConnectedAppId } from "./catalog";
 import { executeOperation, type ExecutionOutcome } from "./connections";
@@ -20,6 +21,24 @@ export async function listTaskActions(
     .from(appActionsTable)
     .where(eq(appActionsTable.taskId, taskId))
     .orderBy(asc(appActionsTable.createdAt));
+}
+
+/** Most recent actions across all of an agent's tasks, newest first. */
+export async function listRecentAgentActions(
+  agentId: string,
+  limit = 20,
+): Promise<Array<AppActionRecord & { taskObjective: string | null }>> {
+  const rows = await db
+    .select({
+      action: appActionsTable,
+      taskObjective: tasksTable.objective,
+    })
+    .from(appActionsTable)
+    .leftJoin(tasksTable, eq(appActionsTable.taskId, tasksTable.id))
+    .where(eq(appActionsTable.agentId, agentId))
+    .orderBy(desc(appActionsTable.createdAt))
+    .limit(limit);
+  return rows.map((row) => ({ ...row.action, taskObjective: row.taskObjective }));
 }
 
 /** Record a denied request durably, with its reason, inside the audit chain. */

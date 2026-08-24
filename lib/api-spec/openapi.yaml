@@ -1325,13 +1325,17 @@ components:
         maxSubtasksPerTask: { type: [number, "null"], minimum: 0 }
     AgentDetail:
       type: object
-      required: [agent, tasks]
+      required: [agent, tasks, recentActions]
       properties:
         agent: { $ref: "#/components/schemas/Agent" }
         tasks:
           type: array
           items:
             $ref: "#/components/schemas/Task"
+        recentActions:
+          type: array
+          items:
+            $ref: "#/components/schemas/AppAction"
     RetiredAgent:
       type: object
       required: [id, name, title, mission, provider, securityPreset, avatar, createdAt, retiredAt]
@@ -1744,9 +1748,39 @@ components:
         level: { type: string, enum: [info, warn, error] }
         message: { type: string }
         createdAt: { type: string, format: date-time }
+    AppAction:
+      type: object
+      required: [id, taskId, agentId, app, operation, targetSummary, status, createdAt]
+      properties:
+        id: { type: string }
+        taskId: { type: string }
+        agentId: { type: string }
+        app: { type: string }
+        operation: { type: string }
+        targetSummary: { type: string }
+        status:
+          type: string
+          enum:
+            [
+              waiting_approval,
+              approved,
+              executing,
+              executed,
+              failed,
+              denied,
+              rejected,
+              expired,
+            ]
+        approvalId: { type: [string, "null"] }
+        resultSummary: { type: [string, "null"] }
+        errorMessage: { type: [string, "null"] }
+        taskObjective: { type: [string, "null"] }
+        decidedAt: { type: [string, "null"], format: date-time }
+        executedAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
     TaskDetail:
       type: object
-      required: [task, logs]
+      required: [task, logs, actions]
       properties:
         task:
           $ref: "#/components/schemas/Task"
@@ -1754,6 +1788,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/TaskLog"
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/AppAction"
     TaskInput:
       type: object
       required: [agentId, objective]

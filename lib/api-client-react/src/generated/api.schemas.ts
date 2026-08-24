@@ -426,9 +426,47 @@ export interface Task {
   createdAt: string;
 }
 
+export type AppActionStatus = typeof AppActionStatus[keyof typeof AppActionStatus];
+
+
+export const AppActionStatus = {
+  waiting_approval: 'waiting_approval',
+  approved: 'approved',
+  executing: 'executing',
+  executed: 'executed',
+  failed: 'failed',
+  denied: 'denied',
+  rejected: 'rejected',
+  expired: 'expired',
+} as const;
+
+export interface AppAction {
+  id: string;
+  taskId: string;
+  agentId: string;
+  app: string;
+  operation: string;
+  targetSummary: string;
+  status: AppActionStatus;
+  /** @nullable */
+  approvalId?: string | null;
+  /** @nullable */
+  resultSummary?: string | null;
+  /** @nullable */
+  errorMessage?: string | null;
+  /** @nullable */
+  taskObjective?: string | null;
+  /** @nullable */
+  decidedAt?: string | null;
+  /** @nullable */
+  executedAt?: string | null;
+  createdAt: string;
+}
+
 export interface AgentDetail {
   agent: Agent;
   tasks: Task[];
+  recentActions: AppAction[];
 }
 
 /**
@@ -975,6 +1013,7 @@ export interface TaskLog {
 export interface TaskDetail {
   task: Task;
   logs: TaskLog[];
+  actions: AppAction[];
 }
 
 export type TaskInputPriority = typeof TaskInputPriority[keyof typeof TaskInputPriority];
