@@ -43,7 +43,8 @@ import { logger } from "./lib/logger";
  */
 
 const MAX_ATTEMPTS = 3;
-const RATE_LIMIT_BACKOFF_MS = 30_000;
+/** Base delay for retryable provider failures; multiplied by the attempt. */
+const RETRY_BACKOFF_MS = 30_000;
 const CALL_TIMEOUT_MS = 180_000;
 const POLL_INTERVAL_MS = 3_000;
 const APPROVAL_TTL_MS = 24 * 60 * 60 * 1000;
@@ -724,8 +725,11 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
       await addTaskLog(task.id, "warn", "Provider call aborted by cancellation.");
       return;
     }
+    // Rate limits and transient provider outages (5xx, dropped connections)
+    // get another attempt under the same ceiling; auth failures, policy
+    // blocks, and timeouts fall through to a terminal failure.
     if (callError.retryable && task.attempts < maxAttempts) {
-      const backoffMs = RATE_LIMIT_BACKOFF_MS * task.attempts;
+      const backoffMs = RETRY_BACKOFF_MS * task.attempts;
       await db
         .update(tasksTable)
         .set({
@@ -744,7 +748,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
       await addTaskLog(
         task.id,
         "warn",
-        `${callError.message} Retrying in ${Math.round(backoffMs / 1000)}s (attempt ${task.attempts} of ${MAX_ATTEMPTS}).`,
+        `${callError.message} Retrying in ${Math.round(backoffMs / 1000)}s (attempt ${task.attempts} of ${maxAttempts}).`,
       );
       publish("tasks");
       return;

@@ -293,6 +293,11 @@ function providerErrorMessage(err: unknown): { status: number; message: string }
           status: 503,
           message: "The response provider is rate limiting; try again in a moment.",
         };
+      case "transient":
+        return {
+          status: 503,
+          message: "The response provider is temporarily unavailable. Try again.",
+        };
       case "timeout":
         return { status: 503, message: "The response provider timed out. Try again." };
       default:

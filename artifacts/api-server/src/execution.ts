@@ -10,20 +10,33 @@ export type ProviderCallErrorKind =
   | "not_configured"
   | "auth"
   | "rate_limit"
+  /** Provider 5xx or a dropped/refused connection: worth another attempt. */
+  | "transient"
   | "timeout"
   | "cancelled"
   | "provider_error";
 
+/** Kinds the worker may retry with backoff; everything else is terminal. */
+const RETRYABLE_KINDS: ReadonlySet<ProviderCallErrorKind> = new Set([
+  "rate_limit",
+  "transient",
+]);
+
 export class ProviderCallError extends Error {
   readonly kind: ProviderCallErrorKind;
-  /** Rate limits are retryable with backoff; everything else is terminal. */
+  /**
+   * Rate limits and transient outages are retryable with backoff. Auth
+   * failures, policy blocks, timeouts, and malformed responses are not:
+   * repeating them would just burn attempts on a problem that needs a
+   * human.
+   */
   readonly retryable: boolean;
 
   constructor(kind: ProviderCallErrorKind, message: string) {
     super(message);
     this.name = "ProviderCallError";
     this.kind = kind;
-    this.retryable = kind === "rate_limit";
+    this.retryable = RETRYABLE_KINDS.has(kind);
   }
 }
 
@@ -79,6 +92,16 @@ function mapHttpError(status: number): ProviderCallError {
       "The provider is rate limiting requests.",
     );
   }
+  // 5xx means the provider itself is unhealthy (502/503 behind a load
+  // balancer, 500 from an overloaded backend). Those clear on their own far
+  // more often than not, so they are worth another attempt rather than a
+  // failure the owner has to notice and retry by hand.
+  if (status >= 500) {
+    return new ProviderCallError(
+      "transient",
+      `The provider returned HTTP ${status}.`,
+    );
+  }
   return new ProviderCallError(
     "provider_error",
     `The provider returned HTTP ${status}.`,
@@ -86,6 +109,48 @@ function mapHttpError(status: number): ProviderCallError {
 }
 
 import { sanitizeErrorMessage } from "./lib/sanitize";
+
+/**
+ * Connection-level failures that say nothing about the request itself:
+ * dropped or refused sockets, DNS hiccups, and undici's own connect/socket
+ * timeouts. They are safe to repeat because the provider never processed
+ * the call. The worker's deliberate per-call abort is NOT in here — that is
+ * a `timeout`, and it stays terminal.
+ */
+const TRANSIENT_NETWORK_CODES: ReadonlySet<string> = new Set([
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "ECONNABORTED",
+  "EPIPE",
+  "ETIMEDOUT",
+  "ENETDOWN",
+  "ENETRESET",
+  "ENETUNREACH",
+  "EHOSTUNREACH",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
+  "UND_ERR_SOCKET",
+]);
+
+/**
+ * `fetch` reports these as a generic TypeError with the real code buried on
+ * the cause chain, so walk it. Returns the matching code, which is a fixed
+ * identifier and therefore safe to persist verbatim.
+ */
+function transientNetworkCode(error: unknown): string | null {
+  let current: unknown = error;
+  for (let depth = 0; current != null && depth < 5; depth += 1) {
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === "string" && TRANSIENT_NETWORK_CODES.has(code)) {
+      return code;
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+  return null;
+}
 
 function mapNetworkError(error: unknown, signal: AbortSignal): ProviderCallError {
   if (error instanceof Error && error.name === "AbortError") {
@@ -95,6 +160,13 @@ function mapNetworkError(error: unknown, signal: AbortSignal): ProviderCallError
     return signal.reason === "timeout"
       ? new ProviderCallError("timeout", "The provider call timed out.")
       : new ProviderCallError("cancelled", "The call was aborted.");
+  }
+  const transientCode = transientNetworkCode(error);
+  if (transientCode) {
+    return new ProviderCallError(
+      "transient",
+      `The connection to the provider failed (${transientCode}).`,
+    );
   }
   // Network/SDK error messages are arbitrary and can echo request material
   // (proxies sometimes include the failing request's headers). Scrub them

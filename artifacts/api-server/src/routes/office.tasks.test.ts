@@ -339,6 +339,99 @@ describe("worker execution", () => {
     expect(failed?.errorKind).toBe("rate_limit");
   });
 
+  it("requeues a provider 503 and completes on the next attempt", async () => {
+    const agent = await createAgent(`${RUN_TAG} Flaky`);
+    const task = await insertTask(agent.id, { status: "running", attempts: 1 });
+    fetchMock.mockResolvedValueOnce(jsonResponse({ error: "unavailable" }, 503));
+
+    await runTask({ task, agent: await loadAgent(agent.id) });
+    const requeued = await getTaskRow(task.id);
+    expect(requeued?.status).toBe("queued");
+    expect(requeued?.errorKind).toBe("transient");
+    expect(requeued?.notBefore && requeued.notBefore > new Date()).toBe(true);
+    expect((await getLogs(task.id)).some((l) => l.message.match(/Retrying in/))).toBe(
+      true,
+    );
+
+    // The blip clears: the next attempt runs and the task finishes normally.
+    // Mirrors what claimNextTask does when the backoff expires — it clears
+    // the previous attempt's error as it takes the task.
+    const [second] = await db
+      .update(tasksTable)
+      .set({
+        status: "running",
+        attempts: 2,
+        notBefore: null,
+        errorKind: null,
+        errorMessage: null,
+      })
+      .where(eq(tasksTable.id, task.id))
+      .returning();
+    fetchMock.mockResolvedValueOnce(jsonResponse(OPENROUTER_SUCCESS));
+    await runTask({ task: second!, agent: await loadAgent(agent.id) });
+
+    const done = await getTaskRow(task.id);
+    expect(done?.status).toBe("completed");
+    expect(done?.output).toBe("Here is the finished work.");
+    expect(done?.errorKind).toBeNull();
+  });
+
+  it("requeues transient network failures, then fails cleanly at the ceiling", async () => {
+    const agent = await createAgent(`${RUN_TAG} Dropped`);
+    const task = await insertTask(agent.id, { status: "running", attempts: 1 });
+    // What undici throws when the socket dies mid-request: a generic
+    // TypeError with the real code buried on the cause chain.
+    fetchMock.mockImplementation(async () => {
+      throw Object.assign(new TypeError("fetch failed"), {
+        cause: Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }),
+      });
+    });
+
+    await runTask({ task, agent: await loadAgent(agent.id) });
+    const requeued = await getTaskRow(task.id);
+    expect(requeued?.status).toBe("queued");
+    expect(requeued?.errorKind).toBe("transient");
+    expect(requeued?.errorMessage).toMatch(/ECONNRESET/);
+
+    // The ceiling still applies: the last attempt fails terminally.
+    const [lastAttempt] = await db
+      .update(tasksTable)
+      .set({ status: "running", attempts: 3, notBefore: null })
+      .where(eq(tasksTable.id, task.id))
+      .returning();
+    await runTask({ task: lastAttempt!, agent: await loadAgent(agent.id) });
+    const failed = await getTaskRow(task.id);
+    expect(failed?.status).toBe("failed");
+    expect(failed?.errorKind).toBe("transient");
+    expect(failed?.finishedAt).toBeTruthy();
+  });
+
+  it("keeps the per-call timeout terminal rather than retrying it", async () => {
+    const agent = await createAgent(`${RUN_TAG} Slow`, {
+      permissionOverrides: {
+        maxTaskBudgetCents: null,
+        dailyBudgetCents: null,
+        maxTasksPerDay: null,
+        // One second of wall clock: the worker aborts its own call.
+        maxRunSeconds: 1,
+      },
+    });
+    const task = await insertTask(agent.id, { status: "running", attempts: 1 });
+    fetchMock.mockImplementationOnce(
+      (_url: unknown, init?: { signal?: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" })),
+          );
+        }),
+    );
+
+    await runTask({ task, agent: await loadAgent(agent.id) });
+    const failed = await getTaskRow(task.id);
+    expect(failed?.status).toBe("failed");
+    expect(failed?.errorKind).toBe("timeout");
+  });
+
   it("handles malformed provider payloads as explicit failures", async () => {
     const agent = await createAgent(`${RUN_TAG} Garbled`);
     const task = await insertTask(agent.id, { status: "running", attempts: 1 });
