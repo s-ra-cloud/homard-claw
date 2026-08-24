@@ -27,6 +27,8 @@ import type {
   Approval,
   ApprovalDecision,
   ArchiveInput,
+  AuditPage,
+  AuditVerification,
   ClearMemoriesParams,
   ClearMemoriesResult,
   EmergencyStop,
@@ -47,6 +49,7 @@ import type {
   ProviderSettingsInput,
   ProviderStatus,
   RetiredAgent,
+  SearchAuditParams,
   Task,
   TaskDetail,
   TaskEstimate,
@@ -1335,6 +1338,167 @@ export const useDecideApproval = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getDecideApprovalMutationOptions(options));
     }
+
+export const getSearchAuditUrl = (params?: SearchAuditParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/audit?${stringifiedParams}` : `/api/audit`
+}
+
+/**
+ * @summary Search the audit history
+ */
+export const searchAudit = async (params?: SearchAuditParams, options?: Parameters<typeof customFetch>[1]): Promise<AuditPage> => {
+
+  return customFetch<AuditPage>(getSearchAuditUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getSearchAuditQueryKey = (params?: SearchAuditParams,) => {
+    return [
+    `/api/audit`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getSearchAuditQueryOptions = <TData = Awaited<ReturnType<typeof searchAudit>>, TError = ErrorType<unknown>>(params?: SearchAuditParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof searchAudit>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getSearchAuditQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof searchAudit>>> = ({ signal }) => searchAudit(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof searchAudit>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type SearchAuditQueryResult = NonNullable<Awaited<ReturnType<typeof searchAudit>>>
+export type SearchAuditQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Search the audit history
+ */
+
+export function useSearchAudit<TData = Awaited<ReturnType<typeof searchAudit>>, TError = ErrorType<unknown>>(
+ params?: SearchAuditParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof searchAudit>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getSearchAuditQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getVerifyAuditUrl = () => {
+
+
+
+
+  return `/api/audit/verify`
+}
+
+/**
+ * @summary Verify the tamper-evident audit chain
+ */
+export const verifyAudit = async ( options?: Parameters<typeof customFetch>[1]): Promise<AuditVerification> => {
+
+  return customFetch<AuditVerification>(getVerifyAuditUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getVerifyAuditQueryKey = () => {
+    return [
+    `/api/audit/verify`
+    ] as const;
+    }
+
+
+export const getVerifyAuditQueryOptions = <TData = Awaited<ReturnType<typeof verifyAudit>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof verifyAudit>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getVerifyAuditQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof verifyAudit>>> = ({ signal }) => verifyAudit({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof verifyAudit>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type VerifyAuditQueryResult = NonNullable<Awaited<ReturnType<typeof verifyAudit>>>
+export type VerifyAuditQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Verify the tamper-evident audit chain
+ */
+
+export function useVerifyAudit<TData = Awaited<ReturnType<typeof verifyAudit>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof verifyAudit>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getVerifyAuditQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetProvidersUrl = () => {
 

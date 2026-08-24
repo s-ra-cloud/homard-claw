@@ -5,11 +5,9 @@
  * HomardClaw private agent office API
  * OpenAPI spec version: 0.1.0
  */
+import type { AuditEvent } from './auditEvent';
 
-export interface AuditEvent {
-  id: string;
-  kind: string;
-  summary: string;
-  chained?: boolean;
-  createdAt: Date;
+export interface AuditPage {
+  events: AuditEvent[];
+  total: number;
 }

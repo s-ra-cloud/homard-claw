@@ -35,6 +35,42 @@ export const VOICE_OPTIONS = [
   { value: "bubbly", label: "Bubbly" },
 ] as const;
 
+export const AUTONOMY_OPTIONS = [
+  {
+    value: "supervised",
+    label: "Supervised (Approve Everything)",
+    blurb: "Every task waits for your sign-off before it runs.",
+  },
+  {
+    value: "limited",
+    label: "Limited (Approve Expensive)",
+    blurb: "Runs freely; costly or unpriced tasks wait for sign-off.",
+  },
+  {
+    value: "autonomous",
+    label: "Autonomous (Within Limits)",
+    blurb: "Runs without sign-off, still inside the hard limits below.",
+  },
+] as const;
+
+// Mirrors the server-side PERMISSION_PROFILES so blank fields can show the
+// profile default they fall back to. Cosmetic only — the server enforces.
+const PROFILE_DEFAULTS: Record<
+  string,
+  { maxTaskBudgetCents: number; dailyBudgetCents: number; maxTasksPerDay: number; approvalThresholdCents: number }
+> = {
+  observer: { maxTaskBudgetCents: 5, dailyBudgetCents: 25, maxTasksPerDay: 10, approvalThresholdCents: 0 },
+  assistant: { maxTaskBudgetCents: 50, dailyBudgetCents: 250, maxTasksPerDay: 50, approvalThresholdCents: 20 },
+  operator: { maxTaskBudgetCents: 250, dailyBudgetCents: 1000, maxTasksPerDay: 200, approvalThresholdCents: 100 },
+};
+
+const limitField = z
+  .string()
+  .refine(
+    (v) => v.trim() === "" || (Number.isFinite(Number(v)) && Number(v) >= 0),
+    "Must be a non-negative number",
+  );
+
 export const agentFormSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters").max(60),
   title: z.string().min(2).max(80),
@@ -55,10 +91,36 @@ export const agentFormSchema = z.object({
     AgentSecurityPreset.assistant,
     AgentSecurityPreset.operator,
   ]),
+  autonomy: z.enum(["supervised", "limited", "autonomous"]),
+  maxTaskBudgetCents: limitField,
+  dailyBudgetCents: limitField,
+  maxTasksPerDay: limitField,
+  approvalThresholdCents: limitField,
   shellColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/, "Must be a valid hex color"),
 });
 
 export type AgentFormValues = z.infer<typeof agentFormSchema>;
+
+/**
+ * Custom limits typed into the form, or null when every field is blank
+ * (blank means "use the clearance profile default").
+ */
+export function permissionOverridesPayload(data: AgentFormValues): {
+  maxTaskBudgetCents?: number;
+  dailyBudgetCents?: number;
+  maxTasksPerDay?: number;
+  approvalThresholdCents?: number;
+} | null {
+  const num = (v: string): number | undefined =>
+    v.trim() === "" ? undefined : Number(v);
+  const entries = Object.entries({
+    maxTaskBudgetCents: num(data.maxTaskBudgetCents),
+    dailyBudgetCents: num(data.dailyBudgetCents),
+    maxTasksPerDay: num(data.maxTasksPerDay),
+    approvalThresholdCents: num(data.approvalThresholdCents),
+  }).filter(([, v]) => v !== undefined);
+  return entries.length > 0 ? Object.fromEntries(entries) : null;
+}
 
 const inputClass =
   "font-mono bg-background border-4 border-border rounded-none focus-visible:ring-0 focus-visible:border-primary";
@@ -292,6 +354,37 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
 
       <FormField
         control={form.control}
+        name="autonomy"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel className="uppercase font-bold text-xs">Autonomy Level</FormLabel>
+            <Select onValueChange={field.onChange} value={field.value}>
+              <FormControl>
+                <SelectTrigger className={selectTriggerClass}>
+                  <SelectValue placeholder="Select autonomy" />
+                </SelectTrigger>
+              </FormControl>
+              <SelectContent className={selectContentClass}>
+                {AUTONOMY_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value} className={selectItemClass}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <FormDescription className="text-[10px] uppercase">
+              {AUTONOMY_OPTIONS.find((o) => o.value === field.value)?.blurb ??
+                "How much this agent may do without your sign-off."}
+            </FormDescription>
+            <FormMessage className={messageClass} />
+          </FormItem>
+        )}
+      />
+
+      <CustomLimitsFields form={form} />
+
+      <FormField
+        control={form.control}
         name="shellColor"
         render={({ field }) => (
           <FormItem>
@@ -326,6 +419,55 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
         )}
       />
     </>
+  );
+}
+
+/**
+ * Custom budget/limit overrides. Blank fields fall back to the selected
+ * clearance profile; the placeholder shows that fallback value.
+ */
+function CustomLimitsFields({ form }: { form: UseFormReturn<AgentFormValues> }) {
+  const preset = form.watch("securityPreset");
+  const defaults = PROFILE_DEFAULTS[preset] ?? PROFILE_DEFAULTS.assistant;
+  const limits = [
+    { name: "maxTaskBudgetCents", label: "Per-Task Cap (¢)", hint: "Tasks estimated above this are blocked" },
+    { name: "dailyBudgetCents", label: "Daily Budget (¢)", hint: "Spending stops here each day" },
+    { name: "maxTasksPerDay", label: "Tasks / Day", hint: "Daily run limit" },
+    { name: "approvalThresholdCents", label: "Approval Above (¢)", hint: "Costlier tasks ask first" },
+  ] as const;
+  return (
+    <div className="border-4 border-border bg-muted/20 p-4 space-y-3">
+      <div>
+        <div className="uppercase font-bold text-xs">Custom Limits</div>
+        <p className="text-[10px] text-muted-foreground uppercase font-bold">
+          Optional. Blank fields use the {preset} clearance defaults.
+        </p>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {limits.map((limit) => (
+          <FormField
+            key={limit.name}
+            control={form.control}
+            name={limit.name}
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel className="uppercase font-bold text-[10px]">{limit.label}</FormLabel>
+                <FormControl>
+                  <Input
+                    {...field}
+                    inputMode="decimal"
+                    placeholder={String(defaults[limit.name])}
+                    className={inputClass}
+                  />
+                </FormControl>
+                <FormDescription className="text-[9px] uppercase">{limit.hint}</FormDescription>
+                <FormMessage className={messageClass} />
+              </FormItem>
+            )}
+          />
+        ))}
+      </div>
+    </div>
   );
 }
 

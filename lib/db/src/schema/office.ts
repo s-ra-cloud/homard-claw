@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  bigserial,
   boolean,
   doublePrecision,
   index,
@@ -22,6 +23,26 @@ export type AvatarConfig = {
   expression?: string;
 };
 
+/**
+ * Budgets and limits governing what an agent may do. All costs are in
+ * cents; null means "no limit" for caps and "any" for providers.
+ */
+export type AgentPermissions = {
+  /** Hard per-task spending cap; tasks estimated above it are denied. */
+  maxTaskBudgetCents: number | null;
+  /** Rolling per-day spending cap across the agent's tasks. */
+  dailyBudgetCents: number | null;
+  /** Maximum task attempts the agent may start per day. */
+  maxTasksPerDay: number | null;
+  /** Estimated cost above which a task needs owner approval (limited autonomy). */
+  approvalThresholdCents: number | null;
+  /** Providers the agent may use; null allows any configured provider. */
+  allowedProviders: string[] | null;
+};
+
+/** Owner-set overrides on top of the security-preset profile. */
+export type AgentPermissionOverrides = Partial<AgentPermissions>;
+
 export const agentsTable = pgTable(
   "agents",
   {
@@ -39,6 +60,13 @@ export const agentsTable = pgTable(
     voiceStyle: text("voice_style"),
     status: text("status").notNull().default("idle"),
     securityPreset: text("security_preset").notNull(),
+    // supervised: every task needs approval. limited: tasks above the
+    // approval threshold (or with unknown cost) need approval. autonomous:
+    // runs anything within its hard budget limits.
+    autonomy: text("autonomy").notNull().default("limited"),
+    // Custom budgets/limits overriding the securityPreset profile.
+    permissionOverrides: jsonb("permission_overrides")
+      .$type<AgentPermissionOverrides>(),
     avatar: jsonb("avatar").$type<AvatarConfig>().notNull(),
     paused: boolean("paused").notNull().default(false),
     archived: boolean("archived").notNull().default(false),
@@ -123,19 +151,31 @@ export const approvalsTable = pgTable("approvals", {
   agentId: uuid("agent_id")
     .notNull()
     .references(() => agentsTable.id),
+  // The real task waiting on this approval; the task resumes or cancels
+  // when the approval is decided. Null on legacy rows only.
+  taskId: uuid("task_id").references(() => tasksTable.id, {
+    onDelete: "cascade",
+  }),
   action: text("action").notNull(),
   details: text("details").notNull(),
   status: text("status").notNull().default("pending"),
+  decidedAt: timestamp("decided_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
 });
 
+// Tamper-evident audit log: each event is hash-chained to its predecessor
+// (hash = sha256 over prevHash + fields), so any edit or deletion breaks
+// verification of every later event. seq gives the chain a total order.
 export const auditEventsTable = pgTable("audit_events", {
   id: uuid("id").primaryKey().defaultRandom(),
+  seq: bigserial("seq", { mode: "number" }).notNull().unique(),
   kind: text("kind").notNull(),
   summary: text("summary").notNull(),
+  prevHash: text("prev_hash"),
+  hash: text("hash"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

@@ -37,6 +37,9 @@ import {
   RetireAgentResponse,
   RetryTaskParams,
   RetryTaskResponse,
+  SearchAuditQueryParams,
+  SearchAuditResponse,
+  VerifyAuditResponse,
   SetAgentArchivedBody,
   SetAgentArchivedParams,
   SetAgentArchivedResponse,
@@ -57,7 +60,7 @@ import {
   taskLogsTable,
   tasksTable,
 } from "@workspace/db";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import {
   Router,
   type IRouter,
@@ -77,6 +80,8 @@ import {
   updateProviderSettings,
   type ProviderId,
 } from "../providers";
+import { recordAudit, verifyAuditChain } from "../audit";
+import { effectivePermissions } from "../policy";
 import { abortRunningTask } from "../worker";
 import memoryRouter from "./memory";
 
@@ -130,6 +135,9 @@ function toAgent(agent: typeof agentsTable.$inferSelect) {
     voiceStyle: agent.voiceStyle,
     status: agent.status,
     securityPreset: agent.securityPreset,
+    autonomy: agent.autonomy,
+    permissions: effectivePermissions(agent),
+    permissionOverrides: agent.permissionOverrides ?? null,
     avatar: agent.avatar,
     archived: agent.archived,
     archivedAt: agent.archivedAt ? agent.archivedAt.toISOString() : null,
@@ -284,10 +292,10 @@ router.post("/agents", async (req, res): Promise<void> => {
       .insert(agentsTable)
       .values({ ...parsed.data, avatar, status: "idle" })
       .returning();
-    await db.insert(auditEventsTable).values({
-      kind: "agent.created",
-      summary: `${agent.name} joined the office as ${agent.title}.`,
-    });
+    await recordAudit(
+      "agent.created",
+      `${agent.name} joined the office as ${agent.title}.`,
+    );
     res.status(201).json(CreateAgentResponse.parse(toAgent(agent)));
   } catch (error) {
     if (isUniqueViolation(error)) {
@@ -368,10 +376,11 @@ router.patch("/agents/:agentId", async (req, res): Promise<void> => {
         .set(updates)
         .where(eq(agentsTable.id, existing.id))
         .returning();
-      await tx.insert(auditEventsTable).values({
-        kind: "agent.updated",
-        summary: `${agent.name}'s profile was updated.`,
-      });
+      await recordAudit(
+      "agent.updated",
+      `${agent.name}'s profile was updated.`,
+      tx,
+    );
       return { status: 200 as const, agent };
     });
     if (outcome.status === 404) {
@@ -427,14 +436,17 @@ async function duplicateAgentOnce(agentId: string) {
         model: source.model,
         voiceStyle: source.voiceStyle,
         securityPreset: source.securityPreset,
+        autonomy: source.autonomy,
+        permissionOverrides: source.permissionOverrides,
         avatar: source.avatar,
         status: "idle",
       })
       .returning();
-    await tx.insert(auditEventsTable).values({
-      kind: "agent.duplicated",
-      summary: `${agent.name} was recruited as a copy of ${source.name}.`,
-    });
+    await recordAudit(
+      "agent.duplicated",
+      `${agent.name} was recruited as a copy of ${source.name}.`,
+      tx,
+    );
     return { status: 201 as const, agent };
   });
 }
@@ -537,12 +549,13 @@ router.post("/agents/:agentId/archive", async (req, res): Promise<void> => {
         )
         .returning({ id: tasksTable.id });
     }
-    await tx.insert(auditEventsTable).values({
-      kind: archived ? "agent.archived" : "agent.restored",
-      summary: archived
+    await recordAudit(
+      archived ? "agent.archived" : "agent.restored",
+      archived
         ? `${agent.name} was archived and stepped away from the office.`
         : `${agent.name} was restored to the active roster.`,
-    });
+      tx,
+    );
     return { status: 200 as const, agent, interrupted };
   });
   if (outcome.status === 200 && "interrupted" in outcome) {
@@ -593,10 +606,11 @@ router.delete("/agents/:agentId", async (req, res): Promise<void> => {
       );
     await tx.delete(tasksTable).where(eq(tasksTable.agentId, agent.id));
     await tx.delete(agentsTable).where(eq(agentsTable.id, agent.id));
-    await tx.insert(auditEventsTable).values({
-      kind: "agent.deleted",
-      summary: `${agent.name} and their task history were permanently deleted.`,
-    });
+    await recordAudit(
+      "agent.deleted",
+      `${agent.name} and their task history were permanently deleted.`,
+      tx,
+    );
     return { status: 204 as const, active };
   });
   if (outcome.status === 204 && "active" in outcome) {
@@ -653,10 +667,10 @@ router.post("/agents/:agentId/pause", async (req, res): Promise<void> => {
     res.status(404).json({ error: "Agent not found" });
     return;
   }
-  await db.insert(auditEventsTable).values({
-    kind: body.data.paused ? "agent.paused" : "agent.resumed",
-    summary: `${agent.name} was ${body.data.paused ? "paused" : "resumed"}.`,
-  });
+  await recordAudit(
+      body.data.paused ? "agent.paused" : "agent.resumed",
+      `${agent.name} was ${body.data.paused ? "paused" : "resumed"}.`,
+    );
   res.json(PauseAgentResponse.parse(toAgent(agent)));
 });
 
@@ -722,10 +736,11 @@ router.post("/agents/:agentId/retire", async (req, res): Promise<void> => {
         ),
       )
       .returning({ id: tasksTable.id });
-    await tx.insert(auditEventsTable).values({
-      kind: "agent.retired",
-      summary: `${agent.name} retired to the island after honorable service.`,
-    });
+    await recordAudit(
+      "agent.retired",
+      `${agent.name} retired to the island after honorable service.`,
+      tx,
+    );
     return { status: 200 as const, agent, interrupted };
   });
   if (outcome.status === 200 && "interrupted" in outcome) {
@@ -871,12 +886,13 @@ router.post("/tasks", async (req, res): Promise<void> => {
           ? `Task created but blocked: ${blockReason.errorMessage}`
           : `Task created and queued for ${agent.name} (priority ${task.priority}).`,
       });
-      await tx.insert(auditEventsTable).values({
-        kind: "task.created",
-        summary: blockReason
+      await recordAudit(
+      "task.created",
+      blockReason
           ? `A task for ${agent.name} was blocked: ${blockReason.errorMessage}`
           : `A task was queued for ${agent.name}.`,
-      });
+      tx,
+    );
       return { status: 201, task, agentName: agent.name };
     });
   }
@@ -956,15 +972,27 @@ router.post("/tasks/:taskId/cancel", async (req, res): Promise<void> => {
       .set({ status: "cancelled", finishedAt: new Date() })
       .where(eq(tasksTable.id, row.task.id))
       .returning();
+    // A cancelled task's approval request must die with it, or it could be
+    // approved later and resurrect work the owner explicitly stopped.
+    await tx
+      .update(approvalsTable)
+      .set({ status: "cancelled", decidedAt: new Date() })
+      .where(
+        and(
+          eq(approvalsTable.taskId, task.id),
+          eq(approvalsTable.status, "pending"),
+        ),
+      );
     await tx.insert(taskLogsTable).values({
       taskId: task.id,
       level: "warn",
       message: "Cancelled by the owner.",
     });
-    await tx.insert(auditEventsTable).values({
-      kind: "task.cancelled",
-      summary: `A task for ${row.agentName} was cancelled.`,
-    });
+    await recordAudit(
+      "task.cancelled",
+      `A task for ${row.agentName} was cancelled.`,
+      tx,
+    );
     return { status: 200 as const, task, agentName: row.agentName };
   });
   if (outcome.status === 404) {
@@ -1020,10 +1048,11 @@ router.post("/tasks/:taskId/retry", async (req, res): Promise<void> => {
       level: "info",
       message: "Retried by the owner; requeued for a fresh attempt.",
     });
-    await tx.insert(auditEventsTable).values({
-      kind: "task.retried",
-      summary: `A task for ${row.agentName} was requeued.`,
-    });
+    await recordAudit(
+      "task.retried",
+      `A task for ${row.agentName} was requeued.`,
+      tx,
+    );
     return { status: 200 as const, task, agentName: row.agentName };
   });
   if (outcome.status === 404) {
@@ -1129,36 +1158,50 @@ router.post("/emergency-stop", async (req, res): Promise<void> => {
       .returning({ id: tasksTable.id });
     for (const task of interrupted) abortRunningTask(task.id);
   }
-  await db.insert(auditEventsTable).values({
-    kind: parsed.data.active ? "system.stopped" : "system.resumed",
-    summary: parsed.data.active
+  await recordAudit(
+      parsed.data.active ? "system.stopped" : "system.resumed",
+      parsed.data.active
       ? "Global emergency stop was engaged."
       : "Global emergency stop was released.",
-  });
+    );
   res.json(SetEmergencyStopResponse.parse(parsed.data));
 });
+
+function toApprovalJson(
+  approval: typeof approvalsTable.$inferSelect,
+  agentName: string,
+  taskObjective: string | null,
+) {
+  return {
+    id: approval.id,
+    agentName,
+    taskId: approval.taskId,
+    taskObjective,
+    action: approval.action,
+    details: approval.details,
+    status: approval.status,
+    decidedAt: approval.decidedAt ? approval.decidedAt.toISOString() : null,
+    createdAt: approval.createdAt.toISOString(),
+    expiresAt: approval.expiresAt.toISOString(),
+  };
+}
 
 router.get("/approvals", async (_req, res): Promise<void> => {
   const rows = await db
     .select({
-      id: approvalsTable.id,
+      approval: approvalsTable,
       agentName: agentsTable.name,
-      action: approvalsTable.action,
-      details: approvalsTable.details,
-      status: approvalsTable.status,
-      createdAt: approvalsTable.createdAt,
-      expiresAt: approvalsTable.expiresAt,
+      taskObjective: tasksTable.objective,
     })
     .from(approvalsTable)
     .innerJoin(agentsTable, eq(approvalsTable.agentId, agentsTable.id))
+    .leftJoin(tasksTable, eq(approvalsTable.taskId, tasksTable.id))
     .orderBy(desc(approvalsTable.createdAt));
   res.json(
     ListApprovalsResponse.parse(
-      rows.map((row) => ({
-        ...row,
-        createdAt: row.createdAt.toISOString(),
-        expiresAt: row.expiresAt.toISOString(),
-      })),
+      rows.map((row) =>
+        toApprovalJson(row.approval, row.agentName, row.taskObjective),
+      ),
     ),
   );
 });
@@ -1170,37 +1213,142 @@ router.patch("/approvals/:approvalId", async (req, res): Promise<void> => {
     res.status(400).json({ error: "Invalid approval decision" });
     return;
   }
-  const [approval] = await db
-    .update(approvalsTable)
-    .set({ status: body.data.decision })
-    .where(
-      and(
-        eq(approvalsTable.id, params.data.approvalId),
-        eq(approvalsTable.status, "pending"),
-      ),
-    )
-    .returning();
-  if (!approval) {
+  // Decision and task transition commit atomically: an approved task
+  // requeues (the worker re-checks policy and honors the approval), a
+  // rejected task cancels. Expired approvals cannot be decided.
+  const outcome = await db.transaction(async (tx) => {
+    const [approval] = await tx
+      .update(approvalsTable)
+      .set({ status: body.data.decision, decidedAt: new Date() })
+      .where(
+        and(
+          eq(approvalsTable.id, params.data.approvalId),
+          eq(approvalsTable.status, "pending"),
+          sql`${approvalsTable.expiresAt} > now()`,
+        ),
+      )
+      .returning();
+    if (!approval) return null;
+    const [agent] = await tx
+      .select({ name: agentsTable.name })
+      .from(agentsTable)
+      .where(eq(agentsTable.id, approval.agentId))
+      .limit(1);
+    let taskObjective: string | null = null;
+    if (approval.taskId) {
+      if (body.data.decision === "approved") {
+        const [task] = await tx
+          .update(tasksTable)
+          .set({ status: "queued", notBefore: null })
+          .where(
+            and(
+              eq(tasksTable.id, approval.taskId),
+              eq(tasksTable.status, "waiting_approval"),
+            ),
+          )
+          .returning({ objective: tasksTable.objective });
+        taskObjective = task?.objective ?? null;
+        if (task) {
+          await tx.insert(taskLogsTable).values({
+            taskId: approval.taskId,
+            level: "info",
+            message: "Approved by the owner; requeued to run.",
+          });
+        }
+      } else {
+        const [task] = await tx
+          .update(tasksTable)
+          .set({
+            status: "cancelled",
+            finishedAt: new Date(),
+            errorKind: "approval_rejected",
+            errorMessage: "The owner rejected this task's approval request.",
+          })
+          .where(
+            and(
+              eq(tasksTable.id, approval.taskId),
+              eq(tasksTable.status, "waiting_approval"),
+            ),
+          )
+          .returning({ objective: tasksTable.objective });
+        taskObjective = task?.objective ?? null;
+        if (task) {
+          await tx.insert(taskLogsTable).values({
+            taskId: approval.taskId,
+            level: "warn",
+            message: "Rejected by the owner; task cancelled.",
+          });
+        }
+      }
+    }
+    await recordAudit(
+      `approval.${body.data.decision}`,
+      `${approval.action} was ${body.data.decision} by the owner.`,
+      tx,
+    );
+    return { approval, agentName: agent?.name ?? "Unknown agent", taskObjective };
+  });
+  if (!outcome) {
     res.status(404).json({ error: "Pending approval not found" });
     return;
   }
-  const [agent] = await db
-    .select()
-    .from(agentsTable)
-    .where(eq(agentsTable.id, approval.agentId))
-    .limit(1);
-  await db.insert(auditEventsTable).values({
-    kind: `approval.${body.data.decision}`,
-    summary: `${approval.action} was ${body.data.decision}.`,
-  });
   res.json(
-    DecideApprovalResponse.parse({
-      ...approval,
-      agentName: agent?.name ?? "Unknown agent",
-      createdAt: approval.createdAt.toISOString(),
-      expiresAt: approval.expiresAt.toISOString(),
+    DecideApprovalResponse.parse(
+      toApprovalJson(outcome.approval, outcome.agentName, outcome.taskObjective),
+    ),
+  );
+});
+
+router.get("/audit", async (req, res): Promise<void> => {
+  const query = SearchAuditQueryParams.safeParse(req.query);
+  if (!query.success) {
+    res.status(400).json({ error: "Invalid audit query" });
+    return;
+  }
+  const limit = Math.min(Math.max(Math.trunc(query.data.limit ?? 50), 1), 200);
+  const offset = Math.max(Math.trunc(query.data.offset ?? 0), 0);
+  const term = query.data.q?.trim();
+  const conditions = [
+    term
+      ? or(
+          sql`${auditEventsTable.summary} ilike ${`%${term}%`}`,
+          sql`${auditEventsTable.kind} ilike ${`%${term}%`}`,
+        )
+      : undefined,
+    query.data.kind
+      ? sql`${auditEventsTable.kind} like ${`${query.data.kind}%`}`
+      : undefined,
+  ].filter((c) => c !== undefined);
+  const where = conditions.length > 0 ? and(...conditions) : undefined;
+  const [events, [total]] = await Promise.all([
+    db
+      .select()
+      .from(auditEventsTable)
+      .where(where)
+      .orderBy(desc(auditEventsTable.seq))
+      .limit(limit)
+      .offset(offset),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(auditEventsTable)
+      .where(where),
+  ]);
+  res.json(
+    SearchAuditResponse.parse({
+      events: events.map((event) => ({
+        id: event.id,
+        kind: event.kind,
+        summary: event.summary,
+        chained: event.hash !== null,
+        createdAt: event.createdAt.toISOString(),
+      })),
+      total: total?.count ?? 0,
     }),
   );
+});
+
+router.get("/audit/verify", async (_req, res): Promise<void> => {
+  res.json(VerifyAuditResponse.parse(await verifyAuditChain()));
 });
 
 router.get("/providers", async (_req, res): Promise<void> => {
@@ -1225,10 +1373,10 @@ router.put("/providers/settings", async (req, res): Promise<void> => {
     claudeModel: parsed.data.claudeModel,
     openrouterModel: parsed.data.openrouterModel,
   });
-  await db.insert(auditEventsTable).values({
-    kind: "providers.settings_updated",
-    summary: `Provider routing defaults were updated (default: ${settings.defaultProvider}).`,
-  });
+  await recordAudit(
+      "providers.settings_updated",
+      `Provider routing defaults were updated (default: ${settings.defaultProvider}).`,
+    );
   res.json(UpdateProviderSettingsResponse.parse(settings));
 });
 

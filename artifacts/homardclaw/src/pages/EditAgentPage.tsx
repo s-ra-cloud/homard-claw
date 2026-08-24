@@ -16,6 +16,7 @@ import {
   AgentPreviewCard,
   agentFormSchema,
   type AgentFormValues,
+  permissionOverridesPayload,
 } from "@/components/agent-form";
 
 function taskStatusBadge(status: string) {
@@ -58,6 +59,23 @@ export default function EditAgentPage() {
           model: agent.model ?? "",
           voiceStyle: agent.voiceStyle ?? "none",
           securityPreset: agent.securityPreset,
+          autonomy: agent.autonomy,
+          maxTaskBudgetCents:
+            agent.permissionOverrides?.maxTaskBudgetCents != null
+              ? String(agent.permissionOverrides.maxTaskBudgetCents)
+              : "",
+          dailyBudgetCents:
+            agent.permissionOverrides?.dailyBudgetCents != null
+              ? String(agent.permissionOverrides.dailyBudgetCents)
+              : "",
+          maxTasksPerDay:
+            agent.permissionOverrides?.maxTasksPerDay != null
+              ? String(agent.permissionOverrides.maxTasksPerDay)
+              : "",
+          approvalThresholdCents:
+            agent.permissionOverrides?.approvalThresholdCents != null
+              ? String(agent.permissionOverrides.approvalThresholdCents)
+              : "",
           shellColor: agent.avatar.shellColor,
         }
       : undefined,
@@ -102,6 +120,8 @@ export default function EditAgentPage() {
         model: data.model.trim() || null,
         voiceStyle: data.voiceStyle && data.voiceStyle !== "none" ? data.voiceStyle : null,
         securityPreset: data.securityPreset,
+        autonomy: data.autonomy,
+        permissionOverrides: permissionOverridesPayload(data),
         avatar: {
           ...agent.avatar,
           shellColor: data.shellColor,

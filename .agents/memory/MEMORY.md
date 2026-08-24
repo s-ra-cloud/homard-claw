@@ -2,3 +2,4 @@
 - [Pixel character sprites](pixel-character-components.md) — Never hand-code a character that exists in scene art; generate a sprite and bake recoloured variants at build time.
 - [API server test conventions](api-server-test-conventions.md) — Integration tests hit the dev Postgres; impersonate the existing owner, tag+clean up all rows, never clobber owner_clerk_id.
 - [OpenAPI codegen quirks](openapi-codegen-quirks.md) — Spec must use type: number (never integer) and union-type nullable enums, or Orval's generated Zod fails to compile.
+- [Postgres advisory locks](postgres-advisory-locks.md) — Key registry; the worker lease holds 0x484f4d41 forever, so new xact locks need distinct keys or everything hangs.

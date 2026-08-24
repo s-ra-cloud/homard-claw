@@ -14,4 +14,5 @@ export const ApprovalStatus = {
   approved: 'approved',
   rejected: 'rejected',
   expired: 'expired',
+  cancelled: 'cancelled',
 } as const;

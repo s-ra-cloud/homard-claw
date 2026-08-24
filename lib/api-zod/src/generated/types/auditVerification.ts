@@ -6,10 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface AuditEvent {
-  id: string;
-  kind: string;
-  summary: string;
-  chained?: boolean;
-  createdAt: Date;
+export interface AuditVerification {
+  valid: boolean;
+  checked: number;
+  /** @nullable */
+  firstInvalidId: string | null;
 }

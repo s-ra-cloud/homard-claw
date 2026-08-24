@@ -4,7 +4,6 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   agentsTable,
   approvalsTable,
-  auditEventsTable,
   db,
   pool,
   systemStateTable,
@@ -75,9 +74,8 @@ afterAll(async () => {
       .where(inArray(tasksTable.agentId, createdAgentIds));
     await db.delete(agentsTable).where(inArray(agentsTable.id, createdAgentIds));
   }
-  await db
-    .delete(auditEventsTable)
-    .where(like(auditEventsTable.summary, `%${RUN_TAG}%`));
+  // Audit rows are intentionally left in place: the log is hash-chained
+  // and append-only, so deleting rows would break chain verification.
   if (createdOwnerRow) {
     // Only remove the owner row if it still holds the exact identity this
     // suite created — never touch a real owner's row.

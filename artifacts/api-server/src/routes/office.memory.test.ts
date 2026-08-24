@@ -4,7 +4,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import {
   agentKnowledgeTable,
   agentsTable,
-  auditEventsTable,
   db,
   knowledgeFilesTable,
   memoriesTable,
@@ -55,6 +54,15 @@ async function createAgent(name: string) {
       mission: "Exercise memory and knowledge retrieval.",
       provider: "openrouter",
       securityPreset: "assistant",
+      // Memory tests exercise retrieval mechanics, not policy: run fully
+      // autonomous with unlimited caps (explicit null overrides) so the
+      // spend-ceiling gate only engages when a test sets a task budget.
+      autonomy: "autonomous",
+      permissionOverrides: {
+        maxTaskBudgetCents: null,
+        dailyBudgetCents: null,
+        maxTasksPerDay: null,
+      },
       avatar: { shellColor: "#C34428", deskStyle: "standard", accessory: "none" },
     });
   expect(res.status).toBe(201);
@@ -108,9 +116,8 @@ afterAll(async () => {
       .where(inArray(memoriesTable.agentId, createdAgentIds));
     await db.delete(agentsTable).where(inArray(agentsTable.id, createdAgentIds));
   }
-  await db
-    .delete(auditEventsTable)
-    .where(like(auditEventsTable.summary, `%${RUN_TAG}%`));
+  // Audit rows are intentionally left in place: the log is hash-chained
+  // and append-only, so deleting rows would break chain verification.
   if (createdOwnerRow) {
     await db
       .delete(systemStateTable)
@@ -423,6 +430,9 @@ describe("task context retrieval", () => {
         status: "running",
         attempts: 1,
         startedAt: new Date(),
+        // A priced task: metered tasks with no estimate AND no budget park
+        // for approval instead of running.
+        estimatedCostCents: 1,
       })
       .returning();
     const [agentRow] = await db

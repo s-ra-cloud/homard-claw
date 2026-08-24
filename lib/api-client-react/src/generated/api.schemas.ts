@@ -43,6 +43,69 @@ export const AgentSecurityPreset = {
   operator: 'operator',
 } as const;
 
+export type AgentAutonomy = typeof AgentAutonomy[keyof typeof AgentAutonomy];
+
+
+export const AgentAutonomy = {
+  supervised: 'supervised',
+  limited: 'limited',
+  autonomous: 'autonomous',
+} as const;
+
+/**
+ * Effective budgets and limits after overrides are applied. Null means no limit.
+ */
+export interface AgentPermissions {
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  maxTaskBudgetCents: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  dailyBudgetCents: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  maxTasksPerDay: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  approvalThresholdCents: number | null;
+  allowedProviders: ('claude_max' | 'openrouter')[] | null;
+}
+
+/**
+ * Custom limits overriding the security preset profile. Omitted fields fall back to the profile.
+ */
+export interface AgentPermissionOverrides {
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  maxTaskBudgetCents?: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  dailyBudgetCents?: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  maxTasksPerDay?: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  approvalThresholdCents?: number | null;
+  allowedProviders?: ('claude_max' | 'openrouter')[] | null;
+}
+
 export interface AvatarConfig {
   shellColor: string;
   deskStyle: string;
@@ -71,6 +134,9 @@ export interface Agent {
   voiceStyle?: string | null;
   status: AgentStatus;
   securityPreset: AgentSecurityPreset;
+  autonomy: AgentAutonomy;
+  permissions: AgentPermissions;
+  permissionOverrides?: AgentPermissionOverrides | null;
   avatar: AvatarConfig;
   archived: boolean;
   /** @nullable */
@@ -227,6 +293,15 @@ export const AgentInputSecurityPreset = {
   operator: 'operator',
 } as const;
 
+export type AgentInputAutonomy = typeof AgentInputAutonomy[keyof typeof AgentInputAutonomy];
+
+
+export const AgentInputAutonomy = {
+  supervised: 'supervised',
+  limited: 'limited',
+  autonomous: 'autonomous',
+} as const;
+
 export interface AgentInput {
   /**
      * @minLength 2
@@ -258,6 +333,8 @@ export interface AgentInput {
   /** @maxLength 60 */
   voiceStyle?: string;
   securityPreset: AgentInputSecurityPreset;
+  autonomy?: AgentInputAutonomy;
+  permissionOverrides?: AgentPermissionOverrides | null;
   avatar?: AvatarConfig;
 }
 
@@ -279,6 +356,15 @@ export const AgentUpdateSecurityPreset = {
   observer: 'observer',
   assistant: 'assistant',
   operator: 'operator',
+} as const;
+
+export type AgentUpdateAutonomy = typeof AgentUpdateAutonomy[keyof typeof AgentUpdateAutonomy];
+
+
+export const AgentUpdateAutonomy = {
+  supervised: 'supervised',
+  limited: 'limited',
+  autonomous: 'autonomous',
 } as const;
 
 export interface AgentUpdate {
@@ -330,6 +416,8 @@ export interface AgentUpdate {
      */
   voiceStyle?: string | null;
   securityPreset?: AgentUpdateSecurityPreset;
+  autonomy?: AgentUpdateAutonomy;
+  permissionOverrides?: AgentPermissionOverrides | null;
   avatar?: AvatarConfig;
 }
 
@@ -454,14 +542,21 @@ export const ApprovalStatus = {
   approved: 'approved',
   rejected: 'rejected',
   expired: 'expired',
+  cancelled: 'cancelled',
 } as const;
 
 export interface Approval {
   id: string;
   agentName: string;
+  /** @nullable */
+  taskId?: string | null;
+  /** @nullable */
+  taskObjective?: string | null;
   action: string;
   details?: string;
   status: ApprovalStatus;
+  /** @nullable */
+  decidedAt?: string | null;
   createdAt: string;
   expiresAt: string;
 }
@@ -570,6 +665,7 @@ export interface AuditEvent {
   id: string;
   kind: string;
   summary: string;
+  chained?: boolean;
   createdAt: string;
 }
 
@@ -580,6 +676,18 @@ export interface OfficeOverview {
   emergencyStop: boolean;
   monthlyCostCents: number;
   recentEvents: AuditEvent[];
+}
+
+export interface AuditPage {
+  events: AuditEvent[];
+  total: number;
+}
+
+export interface AuditVerification {
+  valid: boolean;
+  checked: number;
+  /** @nullable */
+  firstInvalidId: string | null;
 }
 
 export type MemoryKind = typeof MemoryKind[keyof typeof MemoryKind];
@@ -697,6 +805,13 @@ export interface KnowledgeFileInput {
 export interface KnowledgeAssignmentsInput {
   agentIds: string[];
 }
+
+export type SearchAuditParams = {
+q?: string;
+kind?: string;
+limit?: number;
+offset?: number;
+};
 
 export type ListMemoriesParams = {
 /**

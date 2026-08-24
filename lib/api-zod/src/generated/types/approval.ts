@@ -10,9 +10,15 @@ import type { ApprovalStatus } from './approvalStatus';
 export interface Approval {
   id: string;
   agentName: string;
+  /** @nullable */
+  taskId?: string | null;
+  /** @nullable */
+  taskObjective?: string | null;
   action: string;
   details?: string;
   status: ApprovalStatus;
+  /** @nullable */
+  decidedAt?: string | null;
   createdAt: Date;
   expiresAt: Date;
 }

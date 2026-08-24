@@ -30,6 +30,7 @@ export const GetOfficeOverviewResponse = zod.object({
   "id": zod.string(),
   "kind": zod.string(),
   "summary": zod.string(),
+  "chained": zod.boolean().optional(),
   "createdAt": zod.coerce.date()
 }))
 })
@@ -38,6 +39,24 @@ export const GetOfficeOverviewResponse = zod.object({
 /**
  * @summary List agent profiles
  */
+export const listAgentsResponsePermissionsMaxTaskBudgetCentsMin = 0;
+
+export const listAgentsResponsePermissionsDailyBudgetCentsMin = 0;
+
+export const listAgentsResponsePermissionsMaxTasksPerDayMin = 0;
+
+export const listAgentsResponsePermissionsApprovalThresholdCentsMin = 0;
+
+export const listAgentsResponsePermissionOverridesOneMaxTaskBudgetCentsMin = 0;
+
+export const listAgentsResponsePermissionOverridesOneDailyBudgetCentsMin = 0;
+
+export const listAgentsResponsePermissionOverridesOneMaxTasksPerDayMin = 0;
+
+export const listAgentsResponsePermissionOverridesOneApprovalThresholdCentsMin = 0;
+
+
+
 export const ListAgentsResponseItem = zod.object({
   "id": zod.string(),
   "name": zod.string(),
@@ -52,6 +71,21 @@ export const ListAgentsResponseItem = zod.object({
   "voiceStyle": zod.string().nullish(),
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
+  "autonomy": zod.enum(['supervised', 'limited', 'autonomous']),
+  "permissions": zod.object({
+  "maxTaskBudgetCents": zod.number().min(listAgentsResponsePermissionsMaxTaskBudgetCentsMin).nullable(),
+  "dailyBudgetCents": zod.number().min(listAgentsResponsePermissionsDailyBudgetCentsMin).nullable(),
+  "maxTasksPerDay": zod.number().min(listAgentsResponsePermissionsMaxTasksPerDayMin).nullable(),
+  "approvalThresholdCents": zod.number().min(listAgentsResponsePermissionsApprovalThresholdCentsMin).nullable(),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()])
+}).describe('Effective budgets and limits after overrides are applied. Null means no limit.'),
+  "permissionOverrides": zod.union([zod.object({
+  "maxTaskBudgetCents": zod.number().min(listAgentsResponsePermissionOverridesOneMaxTaskBudgetCentsMin).nullish(),
+  "dailyBudgetCents": zod.number().min(listAgentsResponsePermissionOverridesOneDailyBudgetCentsMin).nullish(),
+  "maxTasksPerDay": zod.number().min(listAgentsResponsePermissionOverridesOneMaxTasksPerDayMin).nullish(),
+  "approvalThresholdCents": zod.number().min(listAgentsResponsePermissionOverridesOneApprovalThresholdCentsMin).nullish(),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional()
+}).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),
@@ -89,6 +123,14 @@ export const createAgentBodyModelMax = 180;
 
 export const createAgentBodyVoiceStyleMax = 60;
 
+export const createAgentBodyPermissionOverridesOneMaxTaskBudgetCentsMin = 0;
+
+export const createAgentBodyPermissionOverridesOneDailyBudgetCentsMin = 0;
+
+export const createAgentBodyPermissionOverridesOneMaxTasksPerDayMin = 0;
+
+export const createAgentBodyPermissionOverridesOneApprovalThresholdCentsMin = 0;
+
 
 
 export const CreateAgentBody = zod.object({
@@ -103,6 +145,14 @@ export const CreateAgentBody = zod.object({
   "model": zod.string().max(createAgentBodyModelMax).optional(),
   "voiceStyle": zod.string().max(createAgentBodyVoiceStyleMax).optional(),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
+  "autonomy": zod.enum(['supervised', 'limited', 'autonomous']).optional(),
+  "permissionOverrides": zod.union([zod.object({
+  "maxTaskBudgetCents": zod.number().min(createAgentBodyPermissionOverridesOneMaxTaskBudgetCentsMin).nullish(),
+  "dailyBudgetCents": zod.number().min(createAgentBodyPermissionOverridesOneDailyBudgetCentsMin).nullish(),
+  "maxTasksPerDay": zod.number().min(createAgentBodyPermissionOverridesOneMaxTasksPerDayMin).nullish(),
+  "approvalThresholdCents": zod.number().min(createAgentBodyPermissionOverridesOneApprovalThresholdCentsMin).nullish(),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional()
+}).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),
@@ -110,6 +160,24 @@ export const CreateAgentBody = zod.object({
   "expression": zod.string().optional()
 }).optional()
 })
+
+export const createAgentResponsePermissionsMaxTaskBudgetCentsMin = 0;
+
+export const createAgentResponsePermissionsDailyBudgetCentsMin = 0;
+
+export const createAgentResponsePermissionsMaxTasksPerDayMin = 0;
+
+export const createAgentResponsePermissionsApprovalThresholdCentsMin = 0;
+
+export const createAgentResponsePermissionOverridesOneMaxTaskBudgetCentsMin = 0;
+
+export const createAgentResponsePermissionOverridesOneDailyBudgetCentsMin = 0;
+
+export const createAgentResponsePermissionOverridesOneMaxTasksPerDayMin = 0;
+
+export const createAgentResponsePermissionOverridesOneApprovalThresholdCentsMin = 0;
+
+
 
 export const CreateAgentResponse = zod.object({
   "id": zod.string(),
@@ -125,6 +193,21 @@ export const CreateAgentResponse = zod.object({
   "voiceStyle": zod.string().nullish(),
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
+  "autonomy": zod.enum(['supervised', 'limited', 'autonomous']),
+  "permissions": zod.object({
+  "maxTaskBudgetCents": zod.number().min(createAgentResponsePermissionsMaxTaskBudgetCentsMin).nullable(),
+  "dailyBudgetCents": zod.number().min(createAgentResponsePermissionsDailyBudgetCentsMin).nullable(),
+  "maxTasksPerDay": zod.number().min(createAgentResponsePermissionsMaxTasksPerDayMin).nullable(),
+  "approvalThresholdCents": zod.number().min(createAgentResponsePermissionsApprovalThresholdCentsMin).nullable(),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()])
+}).describe('Effective budgets and limits after overrides are applied. Null means no limit.'),
+  "permissionOverrides": zod.union([zod.object({
+  "maxTaskBudgetCents": zod.number().min(createAgentResponsePermissionOverridesOneMaxTaskBudgetCentsMin).nullish(),
+  "dailyBudgetCents": zod.number().min(createAgentResponsePermissionOverridesOneDailyBudgetCentsMin).nullish(),
+  "maxTasksPerDay": zod.number().min(createAgentResponsePermissionOverridesOneMaxTasksPerDayMin).nullish(),
+  "approvalThresholdCents": zod.number().min(createAgentResponsePermissionOverridesOneApprovalThresholdCentsMin).nullish(),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional()
+}).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),
@@ -144,6 +227,24 @@ export const GetAgentParams = zod.object({
   "agentId": zod.coerce.string()
 })
 
+export const getAgentResponseAgentPermissionsMaxTaskBudgetCentsMin = 0;
+
+export const getAgentResponseAgentPermissionsDailyBudgetCentsMin = 0;
+
+export const getAgentResponseAgentPermissionsMaxTasksPerDayMin = 0;
+
+export const getAgentResponseAgentPermissionsApprovalThresholdCentsMin = 0;
+
+export const getAgentResponseAgentPermissionOverridesOneMaxTaskBudgetCentsMin = 0;
+
+export const getAgentResponseAgentPermissionOverridesOneDailyBudgetCentsMin = 0;
+
+export const getAgentResponseAgentPermissionOverridesOneMaxTasksPerDayMin = 0;
+
+export const getAgentResponseAgentPermissionOverridesOneApprovalThresholdCentsMin = 0;
+
+
+
 export const GetAgentResponse = zod.object({
   "agent": zod.object({
   "id": zod.string(),
@@ -159,6 +260,21 @@ export const GetAgentResponse = zod.object({
   "voiceStyle": zod.string().nullish(),
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
+  "autonomy": zod.enum(['supervised', 'limited', 'autonomous']),
+  "permissions": zod.object({
+  "maxTaskBudgetCents": zod.number().min(getAgentResponseAgentPermissionsMaxTaskBudgetCentsMin).nullable(),
+  "dailyBudgetCents": zod.number().min(getAgentResponseAgentPermissionsDailyBudgetCentsMin).nullable(),
+  "maxTasksPerDay": zod.number().min(getAgentResponseAgentPermissionsMaxTasksPerDayMin).nullable(),
+  "approvalThresholdCents": zod.number().min(getAgentResponseAgentPermissionsApprovalThresholdCentsMin).nullable(),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()])
+}).describe('Effective budgets and limits after overrides are applied. Null means no limit.'),
+  "permissionOverrides": zod.union([zod.object({
+  "maxTaskBudgetCents": zod.number().min(getAgentResponseAgentPermissionOverridesOneMaxTaskBudgetCentsMin).nullish(),
+  "dailyBudgetCents": zod.number().min(getAgentResponseAgentPermissionOverridesOneDailyBudgetCentsMin).nullish(),
+  "maxTasksPerDay": zod.number().min(getAgentResponseAgentPermissionOverridesOneMaxTasksPerDayMin).nullish(),
+  "approvalThresholdCents": zod.number().min(getAgentResponseAgentPermissionOverridesOneApprovalThresholdCentsMin).nullish(),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional()
+}).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),
@@ -233,6 +349,14 @@ export const updateAgentBodyModelMax = 180;
 
 export const updateAgentBodyVoiceStyleMax = 60;
 
+export const updateAgentBodyPermissionOverridesOneMaxTaskBudgetCentsMin = 0;
+
+export const updateAgentBodyPermissionOverridesOneDailyBudgetCentsMin = 0;
+
+export const updateAgentBodyPermissionOverridesOneMaxTasksPerDayMin = 0;
+
+export const updateAgentBodyPermissionOverridesOneApprovalThresholdCentsMin = 0;
+
 
 
 export const UpdateAgentBody = zod.object({
@@ -247,6 +371,14 @@ export const UpdateAgentBody = zod.object({
   "model": zod.string().max(updateAgentBodyModelMax).nullish(),
   "voiceStyle": zod.string().max(updateAgentBodyVoiceStyleMax).nullish(),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']).optional(),
+  "autonomy": zod.enum(['supervised', 'limited', 'autonomous']).optional(),
+  "permissionOverrides": zod.union([zod.object({
+  "maxTaskBudgetCents": zod.number().min(updateAgentBodyPermissionOverridesOneMaxTaskBudgetCentsMin).nullish(),
+  "dailyBudgetCents": zod.number().min(updateAgentBodyPermissionOverridesOneDailyBudgetCentsMin).nullish(),
+  "maxTasksPerDay": zod.number().min(updateAgentBodyPermissionOverridesOneMaxTasksPerDayMin).nullish(),
+  "approvalThresholdCents": zod.number().min(updateAgentBodyPermissionOverridesOneApprovalThresholdCentsMin).nullish(),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional()
+}).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),
@@ -254,6 +386,24 @@ export const UpdateAgentBody = zod.object({
   "expression": zod.string().optional()
 }).optional()
 })
+
+export const updateAgentResponsePermissionsMaxTaskBudgetCentsMin = 0;
+
+export const updateAgentResponsePermissionsDailyBudgetCentsMin = 0;
+
+export const updateAgentResponsePermissionsMaxTasksPerDayMin = 0;
+
+export const updateAgentResponsePermissionsApprovalThresholdCentsMin = 0;
+
+export const updateAgentResponsePermissionOverridesOneMaxTaskBudgetCentsMin = 0;
+
+export const updateAgentResponsePermissionOverridesOneDailyBudgetCentsMin = 0;
+
+export const updateAgentResponsePermissionOverridesOneMaxTasksPerDayMin = 0;
+
+export const updateAgentResponsePermissionOverridesOneApprovalThresholdCentsMin = 0;
+
+
 
 export const UpdateAgentResponse = zod.object({
   "id": zod.string(),
@@ -269,6 +419,21 @@ export const UpdateAgentResponse = zod.object({
   "voiceStyle": zod.string().nullish(),
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
+  "autonomy": zod.enum(['supervised', 'limited', 'autonomous']),
+  "permissions": zod.object({
+  "maxTaskBudgetCents": zod.number().min(updateAgentResponsePermissionsMaxTaskBudgetCentsMin).nullable(),
+  "dailyBudgetCents": zod.number().min(updateAgentResponsePermissionsDailyBudgetCentsMin).nullable(),
+  "maxTasksPerDay": zod.number().min(updateAgentResponsePermissionsMaxTasksPerDayMin).nullable(),
+  "approvalThresholdCents": zod.number().min(updateAgentResponsePermissionsApprovalThresholdCentsMin).nullable(),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()])
+}).describe('Effective budgets and limits after overrides are applied. Null means no limit.'),
+  "permissionOverrides": zod.union([zod.object({
+  "maxTaskBudgetCents": zod.number().min(updateAgentResponsePermissionOverridesOneMaxTaskBudgetCentsMin).nullish(),
+  "dailyBudgetCents": zod.number().min(updateAgentResponsePermissionOverridesOneDailyBudgetCentsMin).nullish(),
+  "maxTasksPerDay": zod.number().min(updateAgentResponsePermissionOverridesOneMaxTasksPerDayMin).nullish(),
+  "approvalThresholdCents": zod.number().min(updateAgentResponsePermissionOverridesOneApprovalThresholdCentsMin).nullish(),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional()
+}).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),
@@ -298,6 +463,24 @@ export const DuplicateAgentParams = zod.object({
   "agentId": zod.coerce.string()
 })
 
+export const duplicateAgentResponsePermissionsMaxTaskBudgetCentsMin = 0;
+
+export const duplicateAgentResponsePermissionsDailyBudgetCentsMin = 0;
+
+export const duplicateAgentResponsePermissionsMaxTasksPerDayMin = 0;
+
+export const duplicateAgentResponsePermissionsApprovalThresholdCentsMin = 0;
+
+export const duplicateAgentResponsePermissionOverridesOneMaxTaskBudgetCentsMin = 0;
+
+export const duplicateAgentResponsePermissionOverridesOneDailyBudgetCentsMin = 0;
+
+export const duplicateAgentResponsePermissionOverridesOneMaxTasksPerDayMin = 0;
+
+export const duplicateAgentResponsePermissionOverridesOneApprovalThresholdCentsMin = 0;
+
+
+
 export const DuplicateAgentResponse = zod.object({
   "id": zod.string(),
   "name": zod.string(),
@@ -312,6 +495,21 @@ export const DuplicateAgentResponse = zod.object({
   "voiceStyle": zod.string().nullish(),
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
+  "autonomy": zod.enum(['supervised', 'limited', 'autonomous']),
+  "permissions": zod.object({
+  "maxTaskBudgetCents": zod.number().min(duplicateAgentResponsePermissionsMaxTaskBudgetCentsMin).nullable(),
+  "dailyBudgetCents": zod.number().min(duplicateAgentResponsePermissionsDailyBudgetCentsMin).nullable(),
+  "maxTasksPerDay": zod.number().min(duplicateAgentResponsePermissionsMaxTasksPerDayMin).nullable(),
+  "approvalThresholdCents": zod.number().min(duplicateAgentResponsePermissionsApprovalThresholdCentsMin).nullable(),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()])
+}).describe('Effective budgets and limits after overrides are applied. Null means no limit.'),
+  "permissionOverrides": zod.union([zod.object({
+  "maxTaskBudgetCents": zod.number().min(duplicateAgentResponsePermissionOverridesOneMaxTaskBudgetCentsMin).nullish(),
+  "dailyBudgetCents": zod.number().min(duplicateAgentResponsePermissionOverridesOneDailyBudgetCentsMin).nullish(),
+  "maxTasksPerDay": zod.number().min(duplicateAgentResponsePermissionOverridesOneMaxTasksPerDayMin).nullish(),
+  "approvalThresholdCents": zod.number().min(duplicateAgentResponsePermissionOverridesOneApprovalThresholdCentsMin).nullish(),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional()
+}).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),
@@ -335,6 +533,24 @@ export const SetAgentArchivedBody = zod.object({
   "archived": zod.boolean()
 })
 
+export const setAgentArchivedResponsePermissionsMaxTaskBudgetCentsMin = 0;
+
+export const setAgentArchivedResponsePermissionsDailyBudgetCentsMin = 0;
+
+export const setAgentArchivedResponsePermissionsMaxTasksPerDayMin = 0;
+
+export const setAgentArchivedResponsePermissionsApprovalThresholdCentsMin = 0;
+
+export const setAgentArchivedResponsePermissionOverridesOneMaxTaskBudgetCentsMin = 0;
+
+export const setAgentArchivedResponsePermissionOverridesOneDailyBudgetCentsMin = 0;
+
+export const setAgentArchivedResponsePermissionOverridesOneMaxTasksPerDayMin = 0;
+
+export const setAgentArchivedResponsePermissionOverridesOneApprovalThresholdCentsMin = 0;
+
+
+
 export const SetAgentArchivedResponse = zod.object({
   "id": zod.string(),
   "name": zod.string(),
@@ -349,6 +565,21 @@ export const SetAgentArchivedResponse = zod.object({
   "voiceStyle": zod.string().nullish(),
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
+  "autonomy": zod.enum(['supervised', 'limited', 'autonomous']),
+  "permissions": zod.object({
+  "maxTaskBudgetCents": zod.number().min(setAgentArchivedResponsePermissionsMaxTaskBudgetCentsMin).nullable(),
+  "dailyBudgetCents": zod.number().min(setAgentArchivedResponsePermissionsDailyBudgetCentsMin).nullable(),
+  "maxTasksPerDay": zod.number().min(setAgentArchivedResponsePermissionsMaxTasksPerDayMin).nullable(),
+  "approvalThresholdCents": zod.number().min(setAgentArchivedResponsePermissionsApprovalThresholdCentsMin).nullable(),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()])
+}).describe('Effective budgets and limits after overrides are applied. Null means no limit.'),
+  "permissionOverrides": zod.union([zod.object({
+  "maxTaskBudgetCents": zod.number().min(setAgentArchivedResponsePermissionOverridesOneMaxTaskBudgetCentsMin).nullish(),
+  "dailyBudgetCents": zod.number().min(setAgentArchivedResponsePermissionOverridesOneDailyBudgetCentsMin).nullish(),
+  "maxTasksPerDay": zod.number().min(setAgentArchivedResponsePermissionOverridesOneMaxTasksPerDayMin).nullish(),
+  "approvalThresholdCents": zod.number().min(setAgentArchivedResponsePermissionOverridesOneApprovalThresholdCentsMin).nullish(),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional()
+}).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),
@@ -372,6 +603,24 @@ export const PauseAgentBody = zod.object({
   "paused": zod.boolean()
 })
 
+export const pauseAgentResponsePermissionsMaxTaskBudgetCentsMin = 0;
+
+export const pauseAgentResponsePermissionsDailyBudgetCentsMin = 0;
+
+export const pauseAgentResponsePermissionsMaxTasksPerDayMin = 0;
+
+export const pauseAgentResponsePermissionsApprovalThresholdCentsMin = 0;
+
+export const pauseAgentResponsePermissionOverridesOneMaxTaskBudgetCentsMin = 0;
+
+export const pauseAgentResponsePermissionOverridesOneDailyBudgetCentsMin = 0;
+
+export const pauseAgentResponsePermissionOverridesOneMaxTasksPerDayMin = 0;
+
+export const pauseAgentResponsePermissionOverridesOneApprovalThresholdCentsMin = 0;
+
+
+
 export const PauseAgentResponse = zod.object({
   "id": zod.string(),
   "name": zod.string(),
@@ -386,6 +635,21 @@ export const PauseAgentResponse = zod.object({
   "voiceStyle": zod.string().nullish(),
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
+  "autonomy": zod.enum(['supervised', 'limited', 'autonomous']),
+  "permissions": zod.object({
+  "maxTaskBudgetCents": zod.number().min(pauseAgentResponsePermissionsMaxTaskBudgetCentsMin).nullable(),
+  "dailyBudgetCents": zod.number().min(pauseAgentResponsePermissionsDailyBudgetCentsMin).nullable(),
+  "maxTasksPerDay": zod.number().min(pauseAgentResponsePermissionsMaxTasksPerDayMin).nullable(),
+  "approvalThresholdCents": zod.number().min(pauseAgentResponsePermissionsApprovalThresholdCentsMin).nullable(),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()])
+}).describe('Effective budgets and limits after overrides are applied. Null means no limit.'),
+  "permissionOverrides": zod.union([zod.object({
+  "maxTaskBudgetCents": zod.number().min(pauseAgentResponsePermissionOverridesOneMaxTaskBudgetCentsMin).nullish(),
+  "dailyBudgetCents": zod.number().min(pauseAgentResponsePermissionOverridesOneDailyBudgetCentsMin).nullish(),
+  "maxTasksPerDay": zod.number().min(pauseAgentResponsePermissionOverridesOneMaxTasksPerDayMin).nullish(),
+  "approvalThresholdCents": zod.number().min(pauseAgentResponsePermissionOverridesOneApprovalThresholdCentsMin).nullish(),
+  "allowedProviders": zod.union([zod.array(zod.enum(['claude_max', 'openrouter'])),zod.null()]).optional()
+}).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),
@@ -561,9 +825,12 @@ export const SetEmergencyStopResponse = zod.object({
 export const ListApprovalsResponseItem = zod.object({
   "id": zod.string(),
   "agentName": zod.string(),
+  "taskId": zod.string().nullish(),
+  "taskObjective": zod.string().nullish(),
   "action": zod.string(),
   "details": zod.string().optional(),
-  "status": zod.enum(['pending', 'approved', 'rejected', 'expired']),
+  "status": zod.enum(['pending', 'approved', 'rejected', 'expired', 'cancelled']),
+  "decidedAt": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
   "expiresAt": zod.coerce.date()
 })
@@ -584,11 +851,46 @@ export const DecideApprovalBody = zod.object({
 export const DecideApprovalResponse = zod.object({
   "id": zod.string(),
   "agentName": zod.string(),
+  "taskId": zod.string().nullish(),
+  "taskObjective": zod.string().nullish(),
   "action": zod.string(),
   "details": zod.string().optional(),
-  "status": zod.enum(['pending', 'approved', 'rejected', 'expired']),
+  "status": zod.enum(['pending', 'approved', 'rejected', 'expired', 'cancelled']),
+  "decidedAt": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
   "expiresAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Search the audit history
+ */
+export const SearchAuditQueryParams = zod.object({
+  "q": zod.coerce.string().optional(),
+  "kind": zod.coerce.string().optional(),
+  "limit": zod.coerce.number().optional(),
+  "offset": zod.coerce.number().optional()
+})
+
+export const SearchAuditResponse = zod.object({
+  "events": zod.array(zod.object({
+  "id": zod.string(),
+  "kind": zod.string(),
+  "summary": zod.string(),
+  "chained": zod.boolean().optional(),
+  "createdAt": zod.coerce.date()
+})),
+  "total": zod.number()
+})
+
+
+/**
+ * @summary Verify the tamper-evident audit chain
+ */
+export const VerifyAuditResponse = zod.object({
+  "valid": zod.boolean(),
+  "checked": zod.number(),
+  "firstInvalidId": zod.string().nullable()
 })
 
 

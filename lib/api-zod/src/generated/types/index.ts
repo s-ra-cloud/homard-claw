@@ -7,14 +7,19 @@
  */
 
 export * from './agent';
+export * from './agentAutonomy';
 export * from './agentDetail';
 export * from './agentInput';
+export * from './agentInputAutonomy';
 export * from './agentInputProvider';
 export * from './agentInputSecurityPreset';
+export * from './agentPermissionOverrides';
+export * from './agentPermissions';
 export * from './agentProvider';
 export * from './agentSecurityPreset';
 export * from './agentStatus';
 export * from './agentUpdate';
+export * from './agentUpdateAutonomy';
 export * from './agentUpdateProvider';
 export * from './agentUpdateSecurityPreset';
 export * from './approval';
@@ -23,6 +28,8 @@ export * from './approvalDecisionDecision';
 export * from './approvalStatus';
 export * from './archiveInput';
 export * from './auditEvent';
+export * from './auditPage';
+export * from './auditVerification';
 export * from './avatarConfig';
 export * from './clearMemoriesParams';
 export * from './clearMemoriesResult';
@@ -54,6 +61,7 @@ export * from './providerStatusProvider';
 export * from './retiredAgent';
 export * from './retiredAgentProvider';
 export * from './retiredAgentSecurityPreset';
+export * from './searchAuditParams';
 export * from './task';
 export * from './taskDetail';
 export * from './taskEstimate';

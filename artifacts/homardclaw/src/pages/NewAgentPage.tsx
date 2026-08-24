@@ -15,6 +15,7 @@ import {
   AgentFormFields,
   AgentPreviewCard,
   agentFormSchema,
+  permissionOverridesPayload,
   type AgentFormValues,
 } from "@/components/agent-form";
 
@@ -37,6 +38,11 @@ export default function NewAgentPage() {
       model: "",
       voiceStyle: "none",
       securityPreset: AgentSecurityPreset.assistant,
+      autonomy: "limited",
+      maxTaskBudgetCents: "",
+      dailyBudgetCents: "",
+      maxTasksPerDay: "",
+      approvalThresholdCents: "",
       shellColor: LOBSTER_PRESETS[0].shellColor,
     },
   });
@@ -75,6 +81,10 @@ export default function NewAgentPage() {
         ...(data.model.trim() ? { model: data.model.trim() } : {}),
         ...(data.voiceStyle && data.voiceStyle !== "none" ? { voiceStyle: data.voiceStyle } : {}),
         securityPreset: data.securityPreset,
+        autonomy: data.autonomy,
+        ...(permissionOverridesPayload(data)
+          ? { permissionOverrides: permissionOverridesPayload(data) }
+          : {}),
         avatar: {
           shellColor: data.shellColor,
           deskStyle: "standard",

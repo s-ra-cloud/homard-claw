@@ -3,7 +3,6 @@ import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   agentsTable,
-  auditEventsTable,
   db,
   pool,
   systemStateTable,
@@ -53,6 +52,16 @@ async function createAgent(name: string, extra: Record<string, unknown> = {}) {
       mission: "Exercise the persistent task queue.",
       provider: "claude_max",
       securityPreset: "assistant",
+      // These tests exercise execution mechanics, not policy: run fully
+      // autonomous with unlimited caps (explicit null overrides) so the
+      // spend-ceiling gate only engages when a test sets its own task
+      // budget. Policy gating itself is covered in office.policy.test.ts.
+      autonomy: "autonomous",
+      permissionOverrides: {
+        maxTaskBudgetCents: null,
+        dailyBudgetCents: null,
+        maxTasksPerDay: null,
+      },
       avatar: { shellColor: "#C34428", deskStyle: "standard", accessory: "none" },
       ...extra,
     });
@@ -74,6 +83,9 @@ async function insertTask(
       provider: "openrouter",
       model: "test-vendor/test-model",
       status: "queued",
+      // A priced task by default: metered tasks with no estimate AND no
+      // budget park for approval instead of running.
+      estimatedCostCents: 1,
       ...overrides,
     })
     .returning();
@@ -179,9 +191,8 @@ afterAll(async () => {
       .where(inArray(tasksTable.agentId, createdAgentIds));
     await db.delete(agentsTable).where(inArray(agentsTable.id, createdAgentIds));
   }
-  await db
-    .delete(auditEventsTable)
-    .where(like(auditEventsTable.summary, `%${RUN_TAG}%`));
+  // Audit rows are intentionally left in place: the log is hash-chained
+  // and append-only, so deleting rows would break chain verification.
   if (createdOwnerRow) {
     await db
       .delete(systemStateTable)

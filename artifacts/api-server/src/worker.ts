@@ -1,6 +1,6 @@
 import {
   agentsTable,
-  auditEventsTable,
+  approvalsTable,
   db,
   pool,
   systemStateTable,
@@ -8,6 +8,12 @@ import {
   tasksTable,
 } from "@workspace/db";
 import { and, asc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { recordAudit } from "./audit";
+import {
+  effectivePermissions,
+  evaluateTaskPolicy,
+  meteredSpendTodayCents,
+} from "./policy";
 import {
   MAX_OUTPUT_TOKENS,
   ProviderCallError,
@@ -34,6 +40,7 @@ const MAX_ATTEMPTS = 3;
 const RATE_LIMIT_BACKOFF_MS = 30_000;
 const CALL_TIMEOUT_MS = 180_000;
 const POLL_INTERVAL_MS = 3_000;
+const APPROVAL_TTL_MS = 24 * 60 * 60 * 1000;
 
 const inFlight = new Map<string, AbortController>();
 
@@ -119,6 +126,52 @@ export async function recoverInterruptedTasks(): Promise<number> {
     logger.info({ count: recovered.length }, "Recovered interrupted tasks");
   }
   return recovered.length;
+}
+
+/**
+ * Expire pending approvals whose window has passed. Their tasks unblock as
+ * retryable failures so stale requests can never be approved and executed
+ * long after the context that produced them is gone.
+ */
+export async function expireStaleApprovals(): Promise<number> {
+  const expired = await db
+    .update(approvalsTable)
+    .set({ status: "expired", decidedAt: new Date() })
+    .where(
+      and(
+        eq(approvalsTable.status, "pending"),
+        lte(approvalsTable.expiresAt, new Date()),
+      ),
+    )
+    .returning();
+  for (const approval of expired) {
+    if (approval.taskId) {
+      await db
+        .update(tasksTable)
+        .set({
+          status: "blocked",
+          errorKind: "approval_expired",
+          errorMessage:
+            "The approval request expired before it was decided. Retry the task to ask again.",
+        })
+        .where(
+          and(
+            eq(tasksTable.id, approval.taskId),
+            eq(tasksTable.status, "waiting_approval"),
+          ),
+        );
+      await addTaskLog(
+        approval.taskId,
+        "warn",
+        "Approval expired without a decision; retry to request again.",
+      );
+    }
+    await recordAudit(
+      "approval.expired",
+      `An approval request expired undecided: ${approval.action}`,
+    );
+  }
+  return expired.length;
 }
 
 type ClaimedTask = {
@@ -238,9 +291,92 @@ async function settleAgentStatus(agentId: string): Promise<void> {
     .where(and(eq(agentsTable.id, agentId), eq(agentsTable.status, "working")));
 }
 
+/**
+ * Park a claimed task until the owner decides. Refunds the attempt the
+ * claim consumed (waiting is not a failure), reuses an existing pending
+ * approval when one survives from an earlier attempt, and records the
+ * request in the audit chain atomically with the state change.
+ */
+async function parkForApproval(
+  { task, agent }: ClaimedTask,
+  reason: string,
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(tasksTable)
+      .set({ status: "waiting_approval", attempts: task.attempts - 1 })
+      .where(
+        and(
+          eq(tasksTable.id, task.id),
+          eq(tasksTable.status, "running"),
+          eq(tasksTable.attempts, task.attempts),
+        ),
+      )
+      .returning({ id: tasksTable.id });
+    if (!updated) return;
+    const [pending] = await tx
+      .select({ id: approvalsTable.id })
+      .from(approvalsTable)
+      .where(
+        and(
+          eq(approvalsTable.taskId, task.id),
+          eq(approvalsTable.status, "pending"),
+        ),
+      )
+      .limit(1);
+    if (!pending) {
+      await tx.insert(approvalsTable).values({
+        agentId: agent.id,
+        taskId: task.id,
+        action: `Run task: ${task.objective.slice(0, 120)}`,
+        details: reason,
+        expiresAt: new Date(Date.now() + APPROVAL_TTL_MS),
+      });
+    }
+    await recordAudit(
+      "approval.requested",
+      `${agent.name} needs approval to run a task: ${reason}`,
+      tx,
+    );
+  });
+  await addTaskLog(task.id, "info", `Waiting for your approval: ${reason}`);
+}
+
 /** Execute one claimed task attempt end to end. */
 export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
   const provider = task.provider as ProviderId;
+
+  // Server-side policy gate: nothing reaches a provider without passing
+  // the agent's autonomy and permission checks, no matter how the task
+  // was created. Reload the agent first — the claim snapshot may predate
+  // an owner edit that tightened autonomy, providers, or limits.
+  const [freshAgent] = await db
+    .select()
+    .from(agentsTable)
+    .where(eq(agentsTable.id, agent.id))
+    .limit(1);
+  agent = freshAgent ?? agent;
+  const decision = await evaluateTaskPolicy(agent, task);
+  if (decision.kind === "deny") {
+    await finishIfStillRunning(task.id, task.attempts, {
+      status: "blocked",
+      errorKind: "policy",
+      errorMessage: decision.reason,
+    });
+    await addTaskLog(task.id, "error", `Blocked by policy: ${decision.reason}`);
+    await recordAudit(
+      "policy.denied",
+      `A task for ${agent.name} was blocked by policy: ${decision.reason}`,
+    );
+    await settleAgentStatus(agent.id);
+    return;
+  }
+  if (decision.kind === "needs_approval") {
+    await parkForApproval({ task, agent }, decision.reason);
+    await settleAgentStatus(agent.id);
+    return;
+  }
+
   await addTaskLog(
     task.id,
     "info",
@@ -293,53 +429,82 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
       return;
     }
 
-    // Hard budget gate: the budget is a spending cap, so it must hold for
-    // the worst case, not the estimate. Block when pricing is unknown, block
-    // when the prompt alone would exceed the cap, and clamp the completion
-    // to the tokens the remaining budget can actually pay for.
+    // Hard spend gate: every metered call runs under an enforceable
+    // ceiling — the tightest of the task's own budget, the agent's
+    // per-task cap, and what is left of the agent's daily budget. The
+    // ceiling must hold for the worst case, not the estimate: block when
+    // pricing is unknown, block when the prompt alone would exceed it,
+    // and clamp the completion to the tokens the ceiling can pay for.
+    // Approval never bypasses this — an approved task is still clamped.
     let maxOutputTokens = MAX_OUTPUT_TOKENS;
-    if (task.budgetCents != null && provider !== "claude_max") {
-      const block = async (message: string): Promise<void> => {
-        await finishIfStillRunning(task.id, task.attempts, {
-          status: "blocked",
-          errorKind: "budget",
-          errorMessage: message,
+    if (provider !== "claude_max") {
+      const perms = effectivePermissions(agent);
+      const bounds: Array<{ cents: number; label: string }> = [];
+      if (task.budgetCents != null) {
+        bounds.push({ cents: task.budgetCents, label: "task budget" });
+      }
+      if (perms.maxTaskBudgetCents !== null) {
+        bounds.push({
+          cents: perms.maxTaskBudgetCents,
+          label: `${agent.name}'s per-task cap`,
         });
-        await addTaskLog(task.id, "warn", message);
-      };
-      const pricing = await getModelPricing(provider, task.model ?? "");
-      if (
-        pricing.promptCentsPerMTok === null ||
-        pricing.completionCentsPerMTok === null
-      ) {
-        await block(
-          `Pricing for ${task.model ?? "this model"} is unknown, so the ${task.budgetCents.toFixed(2)}¢ budget cannot be enforced. Remove the budget or choose a model with known pricing, then retry.`,
-        );
-        return;
       }
-      const promptTokens = estimatePromptTokens(
-        system.length + task.objective.length,
-      );
-      const promptCostCents =
-        (promptTokens * pricing.promptCentsPerMTok) / 1_000_000;
-      const remainingCents = task.budgetCents - promptCostCents;
-      const affordableOutputTokens =
-        pricing.completionCentsPerMTok > 0
-          ? Math.floor((remainingCents * 1_000_000) / pricing.completionCentsPerMTok)
-          : MAX_OUTPUT_TOKENS;
-      if (remainingCents <= 0 || affordableOutputTokens < 1) {
-        await block(
-          `The prompt alone (~${promptTokens} tokens, ~${promptCostCents.toFixed(4)}¢) leaves no room for output within the ${task.budgetCents.toFixed(2)}¢ budget. Raise the budget and retry.`,
-        );
-        return;
+      if (perms.dailyBudgetCents !== null) {
+        const spent = await meteredSpendTodayCents(agent.id);
+        bounds.push({
+          cents: Math.max(perms.dailyBudgetCents - spent, 0),
+          label: `${agent.name}'s remaining daily budget`,
+        });
       }
-      if (affordableOutputTokens < maxOutputTokens) {
-        maxOutputTokens = affordableOutputTokens;
-        await addTaskLog(
-          task.id,
-          "info",
-          `Output capped at ${maxOutputTokens} tokens to stay within the ${task.budgetCents.toFixed(2)}¢ budget.`,
+      const ceiling = bounds.length
+        ? bounds.reduce((a, b) => (b.cents < a.cents ? b : a))
+        : null;
+      if (ceiling) {
+        const capText = `${ceiling.cents.toFixed(2)}¢ ${ceiling.label}`;
+        const block = async (message: string): Promise<void> => {
+          await finishIfStillRunning(task.id, task.attempts, {
+            status: "blocked",
+            errorKind: "budget",
+            errorMessage: message,
+          });
+          await addTaskLog(task.id, "warn", message);
+        };
+        const pricing = await getModelPricing(provider, task.model ?? "");
+        if (
+          pricing.promptCentsPerMTok === null ||
+          pricing.completionCentsPerMTok === null
+        ) {
+          await block(
+            `Pricing for ${task.model ?? "this model"} is unknown, so the ${capText} cannot be enforced. Choose a model with known pricing, then retry.`,
+          );
+          return;
+        }
+        const promptTokens = estimatePromptTokens(
+          system.length + task.objective.length,
         );
+        const promptCostCents =
+          (promptTokens * pricing.promptCentsPerMTok) / 1_000_000;
+        const remainingCents = ceiling.cents - promptCostCents;
+        const affordableOutputTokens =
+          pricing.completionCentsPerMTok > 0
+            ? Math.floor(
+                (remainingCents * 1_000_000) / pricing.completionCentsPerMTok,
+              )
+            : MAX_OUTPUT_TOKENS;
+        if (remainingCents <= 0 || affordableOutputTokens < 1) {
+          await block(
+            `The prompt alone (~${promptTokens} tokens, ~${promptCostCents.toFixed(4)}¢) leaves no room for output within the ${capText}. Raise the limit and retry.`,
+          );
+          return;
+        }
+        if (affordableOutputTokens < maxOutputTokens) {
+          maxOutputTokens = affordableOutputTokens;
+          await addTaskLog(
+            task.id,
+            "info",
+            `Output capped at ${maxOutputTokens} tokens to stay within the ${capText}.`,
+          );
+        }
       }
     }
 
@@ -383,10 +548,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         "info",
         `Completed: ${result.inputTokens} in / ${result.outputTokens} out tokens${costCents != null ? `, ${costCents.toFixed(4)}¢` : ""}.`,
       );
-      await db.insert(auditEventsTable).values({
-        kind: "task.completed",
-        summary: `${agent.name} completed a task.`,
-      });
+      await recordAudit("task.completed", `${agent.name} completed a task.`);
       // Retain the outcome as agent memory so future tasks can draw on it.
       try {
         const saved = await saveTaskOutcomeMemory({
@@ -465,10 +627,10 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     });
     await addTaskLog(task.id, "error", `Failed (${callError.kind}): ${callError.message}`);
     if (finished) {
-      await db.insert(auditEventsTable).values({
-        kind: "task.failed",
-        summary: `A task for ${agent.name} failed: ${callError.kind}.`,
-      });
+      await recordAudit(
+        "task.failed",
+        `A task for ${agent.name} failed: ${callError.kind}.`,
+      );
     }
   } finally {
     await settleAgentStatus(agent.id);
@@ -545,6 +707,7 @@ export function startWorker(intervalMs = POLL_INTERVAL_MS): void {
         await recoverInterruptedTasks();
         leaseRecovered = true;
       }
+      await expireStaleApprovals();
       // Drain the queue: keep claiming until nothing is runnable.
       while (await workOnce()) {
         /* claimed and ran one task */

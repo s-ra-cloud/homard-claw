@@ -1,0 +1,352 @@
+Continue building **HomardClaw** from the existing project. Preserve the current graphics, interface, Claude Code integration, and OpenRouter integration exactly as they are.
+
+Add **Codex via ChatGPT Plus** as a third AI provider.
+
+## 1. Provider architecture
+
+Refactor the backend into a shared provider interface if this abstraction does not already exist.
+
+Support these providers:
+
+1. `claude_code`
+2. `codex_plus`
+3. `openrouter`
+
+Each provider must expose a consistent execution interface for:
+
+* Starting a task
+* Continuing a conversation
+* Cancelling a task
+* Returning streamed progress when supported
+* Returning the final response
+* Reporting token usage
+* Reporting errors
+* Reporting authentication status
+
+Do not break or rewrite the existing Claude Code and OpenRouter implementations.
+
+## 2. Codex via ChatGPT Plus
+
+Use the official Codex SDK server-side.
+
+For a Node.js or TypeScript backend, install:
+
+```bash
+npm install @openai/codex-sdk
+```
+
+Use the existing project language when possible. If the backend is Python, use the official `openai-codex` Python package instead.
+
+This provider must use ChatGPT-managed Codex authentication so that tasks consume the user’s included ChatGPT Codex allowance. Do not route this mode through the OpenAI Responses API with an API key.
+
+Verify that the active Codex authentication mode is `chatgpt`. If Codex is authenticated using an API key, identify it as API-billed usage and never describe it as ChatGPT Plus usage.
+
+Consult the official documentation during implementation:
+
+* https://learn.chatgpt.com/docs/codex-sdk
+* https://learn.chatgpt.com/docs/auth/ci-cd-auth
+* https://learn.chatgpt.com/docs/pricing
+
+## 3. Provider selector
+
+Add a third option to the existing provider selector:
+
+* Claude Code
+* Codex via ChatGPT Plus
+* OpenRouter
+
+Do not redesign the selector. Connect the new option to the existing interface.
+
+Each agent can have:
+
+* A primary provider
+* A provider-specific model
+* A reasoning level when supported
+* An optional fallback provider
+* Permission to use a paid fallback
+
+Changing providers must preserve the agent’s memory, files, personality, specialization, goals, and previous task history.
+
+Never switch automatically from subscription usage to a paid provider unless the user has explicitly enabled paid fallback for that agent.
+
+## 4. Codex model selection
+
+Initially support:
+
+* `gpt-5.6-luna` for routine or high-volume work
+* `gpt-5.6-terra` as the default
+* `gpt-5.6-sol` for difficult tasks
+
+Allow the user to select the model and supported reasoning level in the agent settings.
+
+Keep the supported-model configuration server-side so it can be updated without changing the database schema.
+
+## 5. Authentication setup
+
+Do not create an unofficial “Sign in with ChatGPT” OAuth flow.
+
+Do not request or store the user’s ChatGPT password, browser cookies, session cookies, or manually copied web tokens.
+
+Use the official Codex CLI authentication flow:
+
+```bash
+codex login
+```
+
+Support a private owner-controlled setup process:
+
+1. The owner authenticates Codex on a trusted machine or through the Replit shell when the official login flow is available.
+2. Codex stores ChatGPT-managed authentication in `auth.json`.
+3. The file is transferred securely to the private Replit Reserved VM when necessary.
+4. The file remains server-side and is never sent to the browser.
+5. Codex automatically refreshes the authentication bundle.
+6. The refreshed file is preserved between runs.
+
+Configure file-backed credential storage:
+
+```toml
+cli_auth_credentials_store = "file"
+```
+
+Use a dedicated private `CODEX_HOME` directory outside public assets and source-controlled files.
+
+Apply restrictive filesystem permissions to the directory and authentication file.
+
+Allow `CODEX_AUTH_JSON` to be used only as an initial bootstrap secret. Write it to `auth.json` only when the file does not already exist. Never overwrite a refreshed authentication file with the original bootstrap value.
+
+Never log:
+
+* Authentication JSON
+* Access tokens
+* Refresh tokens
+* ID tokens
+* Authorization headers
+* Replit secrets
+
+If durable writable storage is unavailable in the deployment environment, display a clear limitation and provide a secure reauthentication procedure. Do not falsely report that authentication will survive redeployment.
+
+## 6. Private-use restriction
+
+Treat Codex via ChatGPT Plus as a private, single-owner provider.
+
+Add a server-side feature flag:
+
+```text
+CODEX_PLUS_ENABLED=true
+```
+
+When this flag is disabled, hide or disable the provider.
+
+Do not expose the owner’s ChatGPT Plus allowance to unauthorised users. If HomardClaw later becomes a public multi-user service, require each user to connect through a separately supported authentication method or use an API-based provider.
+
+## 7. Serialized Codex task queue
+
+Create a dedicated persistent queue for Codex Plus tasks.
+
+Only one Codex Plus task may execute at a time for a given ChatGPT authentication file.
+
+Multiple HomardClaw agents may use Codex Plus, although their tasks must be executed sequentially.
+
+Claude Code and OpenRouter tasks may continue using their existing concurrency rules.
+
+Display these Codex task states:
+
+* Queued
+* Starting
+* Running
+* Waiting for approval
+* Completed
+* Rate limited
+* Authentication required
+* Failed
+* Cancelled
+
+Allow the user to cancel queued and running jobs safely.
+
+## 8. Agent conversations and threads
+
+Store a Codex thread ID for each relevant agent conversation.
+
+When a new conversation begins:
+
+* Start a new Codex thread.
+* Save its thread ID in the database.
+* Associate it with the user, agent, and conversation.
+
+When the conversation continues:
+
+* Resume the saved thread.
+* Preserve the agent’s working context.
+* Inject only relevant long-term memories from HomardClaw.
+
+Do not rely exclusively on Codex thread history for persistent memory. HomardClaw’s database remains the authoritative source for agent identity, memory, permissions, tasks, and files.
+
+Create an isolated working directory for each agent. Prevent one agent from accessing another agent’s directory unless the permission system explicitly allows it.
+
+## 9. Usage reporting
+
+For Codex Plus tasks, record every usage field exposed by the SDK, including:
+
+* Input tokens
+* Cached input tokens
+* Output tokens
+* Reasoning tokens when available
+* Model
+* Reasoning level
+* Start time
+* End time
+* Execution duration
+
+In the interface, label this provider as:
+
+```text
+Uses ChatGPT Codex allowance
+```
+
+Do not display an invented monetary cost of `$0.00`.
+
+If the remaining ChatGPT allowance cannot be retrieved programmatically, display:
+
+```text
+Exact remaining allowance is unavailable. Check the ChatGPT usage dashboard.
+```
+
+Provide a link to the official usage dashboard when possible.
+
+## 10. Error handling
+
+Handle the following cases explicitly:
+
+### Authentication failure
+
+* Allow Codex’s built-in refresh mechanism to run.
+* Retry once after an authentication refresh.
+* If it still fails, mark the connection as requiring reauthentication.
+* Never silently switch providers.
+
+### Rate limit or allowance exhausted
+
+* Mark the task as rate limited.
+* Preserve it in the queue.
+* Display any available retry time.
+* Offer the user the choice to wait, cancel, or use an authorised fallback provider.
+
+### SDK or process failure
+
+* Capture a sanitised error message.
+* Retry only according to the existing retry policy.
+* Avoid repeated execution loops.
+* Preserve partial logs and task state.
+
+### Server restart
+
+* Recover queued tasks.
+* Reconnect resumable Codex threads.
+* Mark interrupted tasks accurately.
+* Never mark an interrupted task as completed.
+
+## 11. Connection management
+
+Add a Codex connection status to the existing provider settings:
+
+* Connected through ChatGPT
+* Connected through API billing
+* Authentication required
+* Authentication expired
+* Rate limited
+* SDK unavailable
+* Disabled
+
+Add a server-side “Test connection” action that runs the smallest practical Codex request and returns a sanitised result.
+
+Do not send authentication details in the connection-test response.
+
+## 12. Background authentication maintenance
+
+If appropriate for the existing job scheduler, add a lightweight private maintenance task that periodically checks whether Codex authentication still works.
+
+Use Codex’s built-in refresh process. Do not call undocumented OAuth endpoints directly.
+
+Do not run maintenance requests unnecessarily. Record only:
+
+* Check timestamp
+* Success or failure
+* Authentication mode
+* Sanitised failure category
+
+## 13. Provider fallback rules
+
+Allow users to configure a fallback order such as:
+
+```text
+Codex Plus → Claude Code → OpenRouter
+```
+
+Before using OpenRouter or another paid API as a fallback, require one of these:
+
+* Approval for the individual task
+* A previously configured spending limit
+* Explicit permission for automatic paid fallback
+
+Record every fallback event in the audit log, including its reason.
+
+## 14. Security requirements
+
+* Keep all provider execution server-side.
+* Validate agent permissions before every tool call.
+* Keep credentials outside prompts and agent memory.
+* Prevent prompt injection from exposing authentication data.
+* Never mount provider credentials inside agent-accessible workspaces.
+* Sanitise logs before storing or displaying them.
+* Restrict Codex Plus configuration routes to the owner or administrator.
+* Do not commit generated authentication files.
+* Add `auth.json` and the private Codex runtime directory to ignore rules where applicable.
+
+## 15. Tests
+
+Add automated tests covering:
+
+* Selection of all three providers
+* Persistence of the selected provider
+* Codex thread creation and resumption
+* Serial execution of Codex Plus tasks
+* Independent execution of Claude Code and OpenRouter tasks
+* Authentication bootstrap without overwriting refreshed credentials
+* Secret redaction
+* Authentication expiration
+* Rate-limit handling
+* Task cancellation
+* Server restart recovery
+* Paid fallback consent
+* Preservation of agent memory when switching providers
+
+Mock external provider execution in automated tests. Include one clearly identified manual integration test for a real Codex login.
+
+## 16. Completion requirements
+
+Before declaring the integration complete:
+
+1. Verify Claude Code still works.
+2. Verify OpenRouter still works.
+3. Verify Codex SDK installation.
+4. Verify ChatGPT-managed authentication.
+5. Verify the authentication mode is `chatgpt`.
+6. Verify two simultaneous Codex tasks are serialised.
+7. Verify separate agents preserve separate thread IDs.
+8. Verify secrets never appear in client responses or logs.
+9. Verify rate-limit and reauthentication messages.
+10. Verify provider switching preserves agent data.
+
+Do not create a fake Codex response or simulated connection.
+
+At the end, provide:
+
+* A list of modified files
+* Database migrations
+* Required Replit secrets
+* Manual authentication steps
+* Security limitations
+* Tests performed
+* Remaining blockers
+
+  For Codex Plus mode, fail closed unless the active Codex credentials report `auth_mode: "chatgpt"`. Remove `OPENAI_API_KEY` and `CODEX_API_KEY` from the Codex worker environment. Never fall back to API-key billing, OpenRouter, Claude, or purchased usage without explicit user approval. If the included Plus allowance is unavailable or exhausted, stop the task and display an error instructing the user to wait for the allowance to reset. Do not silently continue through another paid provider.

@@ -298,6 +298,47 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Approval"
+  /audit:
+    get:
+      operationId: searchAudit
+      tags: [office]
+      summary: Search the audit history
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema: { type: string }
+        - name: kind
+          in: query
+          required: false
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: number }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: number }
+      responses:
+        "200":
+          description: Matching audit events, newest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditPage"
+  /audit/verify:
+    get:
+      operationId: verifyAudit
+      tags: [office]
+      summary: Verify the tamper-evident audit chain
+      responses:
+        "200":
+          description: Chain verification result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditVerification"
   /providers:
     get:
       operationId: getProviders
@@ -665,7 +706,7 @@ components:
         - status
     Agent:
       type: object
-      required: [id, name, title, mission, provider, status, securityPreset, avatar, archived, createdAt]
+      required: [id, name, title, mission, provider, status, securityPreset, autonomy, permissions, avatar, archived, createdAt]
       properties:
         id: { type: string }
         name: { type: string }
@@ -680,10 +721,43 @@ components:
         voiceStyle: { type: ["string", "null"] }
         status: { type: string, enum: [idle, working, researching, waiting, paused, error, queued, complete] }
         securityPreset: { type: string, enum: [observer, assistant, operator] }
+        autonomy: { type: string, enum: [supervised, limited, autonomous] }
+        permissions: { $ref: "#/components/schemas/AgentPermissions" }
+        permissionOverrides:
+          oneOf:
+            - $ref: "#/components/schemas/AgentPermissionOverrides"
+            - type: "null"
         avatar: { $ref: "#/components/schemas/AvatarConfig" }
         archived: { type: boolean }
         archivedAt: { type: ["string", "null"] }
         createdAt: { type: string, format: date-time }
+    AgentPermissions:
+      type: object
+      description: Effective budgets and limits after overrides are applied. Null means no limit.
+      required: [maxTaskBudgetCents, dailyBudgetCents, maxTasksPerDay, approvalThresholdCents, allowedProviders]
+      properties:
+        maxTaskBudgetCents: { type: [number, "null"], minimum: 0 }
+        dailyBudgetCents: { type: [number, "null"], minimum: 0 }
+        maxTasksPerDay: { type: [number, "null"], minimum: 0 }
+        approvalThresholdCents: { type: [number, "null"], minimum: 0 }
+        allowedProviders:
+          oneOf:
+            - type: array
+              items: { type: string, enum: [claude_max, openrouter] }
+            - type: "null"
+    AgentPermissionOverrides:
+      type: object
+      description: Custom limits overriding the security preset profile. Omitted fields fall back to the profile.
+      properties:
+        maxTaskBudgetCents: { type: [number, "null"], minimum: 0 }
+        dailyBudgetCents: { type: [number, "null"], minimum: 0 }
+        maxTasksPerDay: { type: [number, "null"], minimum: 0 }
+        approvalThresholdCents: { type: [number, "null"], minimum: 0 }
+        allowedProviders:
+          oneOf:
+            - type: array
+              items: { type: string, enum: [claude_max, openrouter] }
+            - type: "null"
     AgentDetail:
       type: object
       required: [agent, tasks]
@@ -730,6 +804,11 @@ components:
         model: { type: string, maxLength: 180 }
         voiceStyle: { type: string, maxLength: 60 }
         securityPreset: { type: string, enum: [observer, assistant, operator] }
+        autonomy: { type: string, enum: [supervised, limited, autonomous] }
+        permissionOverrides:
+          oneOf:
+            - $ref: "#/components/schemas/AgentPermissionOverrides"
+            - type: "null"
         avatar: { $ref: "#/components/schemas/AvatarConfig" }
     AgentUpdate:
       type: object
@@ -745,6 +824,11 @@ components:
         model: { type: ["string", "null"], maxLength: 180 }
         voiceStyle: { type: ["string", "null"], maxLength: 60 }
         securityPreset: { type: string, enum: [observer, assistant, operator] }
+        autonomy: { type: string, enum: [supervised, limited, autonomous] }
+        permissionOverrides:
+          oneOf:
+            - $ref: "#/components/schemas/AgentPermissionOverrides"
+            - type: "null"
         avatar: { $ref: "#/components/schemas/AvatarConfig" }
     ArchiveInput:
       type: object
@@ -864,9 +948,12 @@ components:
       properties:
         id: { type: string }
         agentName: { type: string }
+        taskId: { type: [string, "null"] }
+        taskObjective: { type: [string, "null"] }
         action: { type: string }
         details: { type: string }
-        status: { type: string, enum: [pending, approved, rejected, expired] }
+        status: { type: string, enum: [pending, approved, rejected, expired, cancelled] }
+        decidedAt: { type: [string, "null"] }
         createdAt: { type: string, format: date-time }
         expiresAt: { type: string, format: date-time }
     ApprovalDecision:
@@ -945,7 +1032,24 @@ components:
         id: { type: string }
         kind: { type: string }
         summary: { type: string }
+        chained: { type: boolean }
         createdAt: { type: string, format: date-time }
+    AuditPage:
+      type: object
+      required: [events, total]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEvent"
+        total: { type: number }
+    AuditVerification:
+      type: object
+      required: [valid, checked, firstInvalidId]
+      properties:
+        valid: { type: boolean }
+        checked: { type: number }
+        firstInvalidId: { type: [string, "null"] }
     Memory:
       type: object
       required: [id, agentId, agentName, kind, content, pinned, disabled, sourceTaskId, createdAt, updatedAt]

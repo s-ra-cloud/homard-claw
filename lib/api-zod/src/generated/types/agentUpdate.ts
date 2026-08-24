@@ -5,6 +5,8 @@
  * HomardClaw private agent office API
  * OpenAPI spec version: 0.1.0
  */
+import type { AgentPermissionOverrides } from './agentPermissionOverrides';
+import type { AgentUpdateAutonomy } from './agentUpdateAutonomy';
 import type { AgentUpdateProvider } from './agentUpdateProvider';
 import type { AgentUpdateSecurityPreset } from './agentUpdateSecurityPreset';
 import type { AvatarConfig } from './avatarConfig';
@@ -58,5 +60,7 @@ export interface AgentUpdate {
      */
   voiceStyle?: string | null;
   securityPreset?: AgentUpdateSecurityPreset;
+  autonomy?: AgentUpdateAutonomy;
+  permissionOverrides?: AgentPermissionOverrides | null;
   avatar?: AvatarConfig;
 }

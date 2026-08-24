@@ -21,11 +21,11 @@ import {
 import {
   agentKnowledgeTable,
   agentsTable,
-  auditEventsTable,
   db,
   knowledgeFilesTable,
   memoriesTable,
 } from "@workspace/db";
+import { recordAudit } from "../audit";
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { Router, type IRouter } from "express";
 import {
@@ -167,12 +167,12 @@ router.delete("/memories", async (req, res): Promise<void> => {
       query.data.agentId ? eq(memoriesTable.agentId, query.data.agentId) : undefined,
     )
     .returning({ id: memoriesTable.id });
-  await db.insert(auditEventsTable).values({
-    kind: "memory.cleared",
-    summary: query.data.agentId
+  await recordAudit(
+      "memory.cleared",
+      query.data.agentId
       ? `${deleted.length} memories were cleared for one agent.`
       : `All ${deleted.length} memories were cleared.`,
-  });
+    );
   res.json(ClearMemoriesResponse.parse({ deleted: deleted.length }));
 });
 
@@ -358,10 +358,10 @@ router.post("/knowledge", async (req, res): Promise<void> => {
     res.status(409).json({ error: quotaError ?? "Upload failed" });
     return;
   }
-  await db.insert(auditEventsTable).values({
-    kind: "knowledge.uploaded",
-    summary: `Knowledge file "${name}" was uploaded (${wordCount} words).`,
-  });
+  await recordAudit(
+      "knowledge.uploaded",
+      `Knowledge file "${name}" was uploaded (${wordCount} words).`,
+    );
   res.status(201).json(UploadKnowledgeFileResponse.parse(toKnowledgeJson(file, [])));
 });
 
@@ -379,10 +379,10 @@ router.delete("/knowledge/:fileId", async (req, res): Promise<void> => {
     res.status(404).json({ error: "File not found" });
     return;
   }
-  await db.insert(auditEventsTable).values({
-    kind: "knowledge.deleted",
-    summary: `Knowledge file "${deleted[0].name}" was deleted.`,
-  });
+  await recordAudit(
+      "knowledge.deleted",
+      `Knowledge file "${deleted[0].name}" was deleted.`,
+    );
   res.status(204).end();
 });
 
