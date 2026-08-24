@@ -15,6 +15,7 @@ import {
   AgentFormFields,
   AgentPreviewCard,
   agentFormSchema,
+  emptyAgentFormValues,
   type AgentFormValues,
   permissionOverridesPayload,
 } from "@/components/agent-form";
@@ -46,6 +47,10 @@ export default function EditAgentPage() {
 
   const form = useForm<AgentFormValues>({
     resolver: zodResolver(agentFormSchema),
+    // The loaded agent arrives through `values`, which React Hook Form only
+    // applies in an effect. Without a full blank starting point the form
+    // renders once with no field values at all and the page crashes.
+    defaultValues: emptyAgentFormValues,
     values: agent
       ? {
           name: agent.name,

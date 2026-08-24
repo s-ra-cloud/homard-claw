@@ -107,6 +107,36 @@ export const agentFormSchema = z.object({
 export type AgentFormValues = z.infer<typeof agentFormSchema>;
 
 /**
+ * A complete, blank set of field values.
+ *
+ * Every form using these fields must start from a full object. React Hook
+ * Form applies its `values` prop in an effect, so a form that only supplies
+ * `values` renders once with no fields at all — and any field that reads its
+ * value directly (the shell picker compares colours) throws on that render.
+ */
+export const emptyAgentFormValues: AgentFormValues = {
+  name: "",
+  title: "",
+  mission: "",
+  specialization: "",
+  personality: "",
+  goals: "",
+  instructions: "",
+  provider: "workspace_default",
+  model: "",
+  codexModel: "",
+  codexReasoning: "",
+  voiceStyle: "none",
+  securityPreset: AgentSecurityPreset.assistant,
+  autonomy: "limited",
+  maxTaskBudgetCents: "",
+  dailyBudgetCents: "",
+  maxTasksPerDay: "",
+  approvalThresholdCents: "",
+  shellColor: LOBSTER_PRESETS[0].shellColor,
+};
+
+/**
  * Custom limits typed into the form, or null when every field is blank
  * (blank means "use the clearance profile default").
  */
@@ -409,7 +439,9 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
             <FormLabel className="uppercase font-bold text-xs">Issued Shell</FormLabel>
             <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
               {LOBSTER_PRESETS.map((preset) => {
-                const selected = preset.shellColor.toLowerCase() === field.value.toLowerCase();
+                const selected =
+                  preset.shellColor.toLowerCase() ===
+                  (field.value ?? "").toLowerCase();
                 return (
                   <button
                     key={preset.id}
