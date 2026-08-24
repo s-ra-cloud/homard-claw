@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useUser, useClerk } from "@clerk/react";
-import { LogOut, Home, Users, CheckSquare, Settings, Activity, Palmtree, Menu, X, Brain, Network, Phone, CalendarClock, Bell, BarChart3 } from "lucide-react";
+import { LogOut, Home, Users, CheckSquare, Settings, Activity, Palmtree, Menu, X, Brain, Network, Phone, CalendarClock, Bell, BarChart3, Maximize2 } from "lucide-react";
 import { useListNotifications } from "@workspace/api-client-react";
 import { useLiveUpdates } from "@/lib/useLiveUpdates";
 
@@ -24,8 +24,10 @@ interface ShellProps {
   children: React.ReactNode;
   /** When true, hides the sidebar and mobile header so the scene fills the viewport. */
   immersive?: boolean;
+  /** Called when the user activates the Fullscreen nav action. */
+  onEnterImmersive?: () => void;
 }
-export function Shell({ children, immersive = false }: ShellProps) {
+export function Shell({ children, immersive = false, onEnterImmersive }: ShellProps) {
   const [location] = useLocation();
   const { user } = useUser();
   const { signOut } = useClerk();
@@ -186,6 +188,22 @@ export function Shell({ children, immersive = false }: ShellProps) {
               </Link>
             );
           })}
+
+          {onEnterImmersive && (
+            <button
+              type="button"
+              onClick={() => {
+                setNavOpen(false);
+                onEnterImmersive();
+              }}
+              className="w-full flex items-center gap-3 px-4 py-3 text-foreground hover:bg-muted pixel-shadow transition-colors"
+              aria-label="Enter fullscreen office view"
+              title="Opens the immersive office scene — press Escape to exit"
+            >
+              <Maximize2 className="w-4 h-4 shrink-0" aria-hidden="true" />
+              <span className="font-bold text-sm tracking-wide uppercase">Fullscreen</span>
+            </button>
+          )}
         </nav>
 
         <div className="p-4 border-t-4 border-border bg-muted/30">

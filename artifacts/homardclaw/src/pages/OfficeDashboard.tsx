@@ -123,7 +123,7 @@ interface SceneHotspot {
   extraClass?: string;
 }
 export default function OfficeDashboard() {
-  const immersive = useImmersiveMode();
+  const { immersive, enterImmersive } = useImmersiveMode();
 
   const { data: overview, isLoading, isError } = useGetOfficeOverview();
   const {
@@ -276,7 +276,7 @@ export default function OfficeDashboard() {
   ];
 
   return (
-    <Shell immersive={immersive}>
+    <Shell immersive={immersive} onEnterImmersive={enterImmersive}>
       <section className={`iso-office${immersive ? " is-immersive" : ""}`}>
         <header className="iso-office__bar">
           <div className="iso-office__brand">

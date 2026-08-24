@@ -31,7 +31,7 @@ const SALUTES = [
 ];
 
 export default function IslandPage() {
-  const immersive = useImmersiveMode();
+  const { immersive } = useImmersiveMode();
   const { data: retired, isLoading, isError } = useListRetiredAgents();
   const [salute, setSalute] = useState<{ id: string; text: string } | null>(null);
 
