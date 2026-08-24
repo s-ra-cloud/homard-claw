@@ -32,10 +32,16 @@ import type {
   HealthStatus,
   OfficeOverview,
   PauseInput,
+  ProviderModels,
+  ProviderSettings,
+  ProviderSettingsInput,
   ProviderStatus,
   RetiredAgent,
   Task,
-  TaskInput
+  TaskEstimate,
+  TaskEstimateInput,
+  TaskInput,
+  TaskUsageInput
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -1395,4 +1401,372 @@ export function useGetProviders<TData = Awaited<ReturnType<typeof getProviders>>
 
 
 
+
+export const getGetProviderSettingsUrl = () => {
+
+
+
+
+  return `/api/providers/settings`
+}
+
+/**
+ * @summary Get workspace-level provider routing defaults
+ */
+export const getProviderSettings = async ( options?: Parameters<typeof customFetch>[1]): Promise<ProviderSettings> => {
+
+  return customFetch<ProviderSettings>(getGetProviderSettingsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetProviderSettingsQueryKey = () => {
+    return [
+    `/api/providers/settings`
+    ] as const;
+    }
+
+
+export const getGetProviderSettingsQueryOptions = <TData = Awaited<ReturnType<typeof getProviderSettings>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProviderSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetProviderSettingsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getProviderSettings>>> = ({ signal }) => getProviderSettings({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getProviderSettings>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetProviderSettingsQueryResult = NonNullable<Awaited<ReturnType<typeof getProviderSettings>>>
+export type GetProviderSettingsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get workspace-level provider routing defaults
+ */
+
+export function useGetProviderSettings<TData = Awaited<ReturnType<typeof getProviderSettings>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProviderSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetProviderSettingsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateProviderSettingsUrl = () => {
+
+
+
+
+  return `/api/providers/settings`
+}
+
+/**
+ * @summary Update workspace-level provider routing defaults
+ */
+export const updateProviderSettings = async (providerSettingsInput: ProviderSettingsInput, options?: Parameters<typeof customFetch>[1]): Promise<ProviderSettings> => {
+
+  return customFetch<ProviderSettings>(getUpdateProviderSettingsUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(providerSettingsInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateProviderSettingsMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateProviderSettings>>, TError,{data: BodyType<ProviderSettingsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateProviderSettings>>, TError,{data: BodyType<ProviderSettingsInput>}, TContext> => {
+
+const mutationKey = ['updateProviderSettings'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateProviderSettings>>, {data: BodyType<ProviderSettingsInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateProviderSettings(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateProviderSettingsMutationResult = NonNullable<Awaited<ReturnType<typeof updateProviderSettings>>>
+    export type UpdateProviderSettingsMutationBody = BodyType<ProviderSettingsInput>
+    export type UpdateProviderSettingsMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Update workspace-level provider routing defaults
+ */
+export const useUpdateProviderSettings = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateProviderSettings>>, TError,{data: BodyType<ProviderSettingsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateProviderSettings>>,
+        TError,
+        {data: BodyType<ProviderSettingsInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateProviderSettingsMutationOptions(options));
+    }
+
+export const getListProviderModelsUrl = (provider: 'claude_max' | 'openrouter',) => {
+
+
+
+
+  return `/api/providers/${provider}/models`
+}
+
+/**
+ * @summary List models available for a provider
+ */
+export const listProviderModels = async (provider: 'claude_max' | 'openrouter', options?: Parameters<typeof customFetch>[1]): Promise<ProviderModels> => {
+
+  return customFetch<ProviderModels>(getListProviderModelsUrl(provider),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListProviderModelsQueryKey = (provider: 'claude_max' | 'openrouter',) => {
+    return [
+    `/api/providers/${provider}/models`
+    ] as const;
+    }
+
+
+export const getListProviderModelsQueryOptions = <TData = Awaited<ReturnType<typeof listProviderModels>>, TError = ErrorType<unknown>>(provider: 'claude_max' | 'openrouter', options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listProviderModels>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListProviderModelsQueryKey(provider);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listProviderModels>>> = ({ signal }) => listProviderModels(provider, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: provider !== null && provider !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listProviderModels>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListProviderModelsQueryResult = NonNullable<Awaited<ReturnType<typeof listProviderModels>>>
+export type ListProviderModelsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List models available for a provider
+ */
+
+export function useListProviderModels<TData = Awaited<ReturnType<typeof listProviderModels>>, TError = ErrorType<unknown>>(
+ provider: 'claude_max' | 'openrouter', options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listProviderModels>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListProviderModelsQueryOptions(provider,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getEstimateTaskUrl = () => {
+
+
+
+
+  return `/api/tasks/estimate`
+}
+
+/**
+ * @summary Estimate provider, model, tokens, and cost for a task before dispatch
+ */
+export const estimateTask = async (taskEstimateInput: TaskEstimateInput, options?: Parameters<typeof customFetch>[1]): Promise<TaskEstimate> => {
+
+  return customFetch<TaskEstimate>(getEstimateTaskUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(taskEstimateInput)
+  }
+);}
+
+
+
+
+
+export const getEstimateTaskMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof estimateTask>>, TError,{data: BodyType<TaskEstimateInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof estimateTask>>, TError,{data: BodyType<TaskEstimateInput>}, TContext> => {
+
+const mutationKey = ['estimateTask'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof estimateTask>>, {data: BodyType<TaskEstimateInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  estimateTask(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type EstimateTaskMutationResult = NonNullable<Awaited<ReturnType<typeof estimateTask>>>
+    export type EstimateTaskMutationBody = BodyType<TaskEstimateInput>
+    export type EstimateTaskMutationError = ErrorType<void>
+
+    /**
+ * @summary Estimate provider, model, tokens, and cost for a task before dispatch
+ */
+export const useEstimateTask = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof estimateTask>>, TError,{data: BodyType<TaskEstimateInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof estimateTask>>,
+        TError,
+        {data: BodyType<TaskEstimateInput>},
+        TContext
+      > => {
+      return useMutation(getEstimateTaskMutationOptions(options));
+    }
+
+export const getRecordTaskUsageUrl = (taskId: string,) => {
+
+
+
+
+  return `/api/tasks/${taskId}/usage`
+}
+
+/**
+ * @summary Record actual token usage and cost after execution
+ */
+export const recordTaskUsage = async (taskId: string,
+    taskUsageInput: TaskUsageInput, options?: Parameters<typeof customFetch>[1]): Promise<Task> => {
+
+  return customFetch<Task>(getRecordTaskUsageUrl(taskId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(taskUsageInput)
+  }
+);}
+
+
+
+
+
+export const getRecordTaskUsageMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordTaskUsage>>, TError,{taskId: string;data: BodyType<TaskUsageInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof recordTaskUsage>>, TError,{taskId: string;data: BodyType<TaskUsageInput>}, TContext> => {
+
+const mutationKey = ['recordTaskUsage'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recordTaskUsage>>, {taskId: string;data: BodyType<TaskUsageInput>}> = (props) => {
+          const {taskId,data} = props ?? {};
+
+          return  recordTaskUsage(taskId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecordTaskUsageMutationResult = NonNullable<Awaited<ReturnType<typeof recordTaskUsage>>>
+    export type RecordTaskUsageMutationBody = BodyType<TaskUsageInput>
+    export type RecordTaskUsageMutationError = ErrorType<void>
+
+    /**
+ * @summary Record actual token usage and cost after execution
+ */
+export const useRecordTaskUsage = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordTaskUsage>>, TError,{taskId: string;data: BodyType<TaskUsageInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof recordTaskUsage>>,
+        TError,
+        {taskId: string;data: BodyType<TaskUsageInput>},
+        TContext
+      > => {
+      return useMutation(getRecordTaskUsageMutationOptions(options));
+    }
 

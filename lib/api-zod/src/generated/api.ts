@@ -47,7 +47,7 @@ export const ListAgentsResponseItem = zod.object({
   "personality": zod.string().nullish(),
   "goals": zod.string().nullish(),
   "instructions": zod.string().nullish(),
-  "provider": zod.enum(['claude_max', 'openrouter']),
+  "provider": zod.union([zod.literal('claude_max'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
   "model": zod.string().nullish(),
   "voiceStyle": zod.string().nullish(),
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
@@ -99,7 +99,7 @@ export const CreateAgentBody = zod.object({
   "personality": zod.string().max(createAgentBodyPersonalityMax).optional(),
   "goals": zod.string().max(createAgentBodyGoalsMax).optional(),
   "instructions": zod.string().max(createAgentBodyInstructionsMax).optional(),
-  "provider": zod.enum(['claude_max', 'openrouter']),
+  "provider": zod.union([zod.literal('claude_max'),zod.literal('openrouter'),zod.literal(null)]).nullish(),
   "model": zod.string().max(createAgentBodyModelMax).optional(),
   "voiceStyle": zod.string().max(createAgentBodyVoiceStyleMax).optional(),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
@@ -120,7 +120,7 @@ export const CreateAgentResponse = zod.object({
   "personality": zod.string().nullish(),
   "goals": zod.string().nullish(),
   "instructions": zod.string().nullish(),
-  "provider": zod.enum(['claude_max', 'openrouter']),
+  "provider": zod.union([zod.literal('claude_max'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
   "model": zod.string().nullish(),
   "voiceStyle": zod.string().nullish(),
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
@@ -154,7 +154,7 @@ export const GetAgentResponse = zod.object({
   "personality": zod.string().nullish(),
   "goals": zod.string().nullish(),
   "instructions": zod.string().nullish(),
-  "provider": zod.enum(['claude_max', 'openrouter']),
+  "provider": zod.union([zod.literal('claude_max'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
   "model": zod.string().nullish(),
   "voiceStyle": zod.string().nullish(),
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
@@ -176,6 +176,12 @@ export const GetAgentResponse = zod.object({
   "objective": zod.string(),
   "status": zod.enum(['queued', 'running', 'waiting_approval', 'paused', 'completed', 'failed']),
   "provider": zod.enum(['claude_max', 'openrouter']).optional(),
+  "model": zod.string().nullish(),
+  "estimatedTokens": zod.number().nullish(),
+  "estimatedCostCents": zod.number().nullish(),
+  "actualInputTokens": zod.number().nullish(),
+  "actualOutputTokens": zod.number().nullish(),
+  "actualCostCents": zod.number().nullish(),
   "createdAt": zod.coerce.date()
 }))
 })
@@ -219,7 +225,7 @@ export const UpdateAgentBody = zod.object({
   "personality": zod.string().max(updateAgentBodyPersonalityMax).nullish(),
   "goals": zod.string().max(updateAgentBodyGoalsMax).nullish(),
   "instructions": zod.string().max(updateAgentBodyInstructionsMax).nullish(),
-  "provider": zod.enum(['claude_max', 'openrouter']).optional(),
+  "provider": zod.union([zod.literal('claude_max'),zod.literal('openrouter'),zod.literal(null)]).nullish(),
   "model": zod.string().max(updateAgentBodyModelMax).nullish(),
   "voiceStyle": zod.string().max(updateAgentBodyVoiceStyleMax).nullish(),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']).optional(),
@@ -240,7 +246,7 @@ export const UpdateAgentResponse = zod.object({
   "personality": zod.string().nullish(),
   "goals": zod.string().nullish(),
   "instructions": zod.string().nullish(),
-  "provider": zod.enum(['claude_max', 'openrouter']),
+  "provider": zod.union([zod.literal('claude_max'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
   "model": zod.string().nullish(),
   "voiceStyle": zod.string().nullish(),
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
@@ -283,7 +289,7 @@ export const DuplicateAgentResponse = zod.object({
   "personality": zod.string().nullish(),
   "goals": zod.string().nullish(),
   "instructions": zod.string().nullish(),
-  "provider": zod.enum(['claude_max', 'openrouter']),
+  "provider": zod.union([zod.literal('claude_max'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
   "model": zod.string().nullish(),
   "voiceStyle": zod.string().nullish(),
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
@@ -320,7 +326,7 @@ export const SetAgentArchivedResponse = zod.object({
   "personality": zod.string().nullish(),
   "goals": zod.string().nullish(),
   "instructions": zod.string().nullish(),
-  "provider": zod.enum(['claude_max', 'openrouter']),
+  "provider": zod.union([zod.literal('claude_max'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
   "model": zod.string().nullish(),
   "voiceStyle": zod.string().nullish(),
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
@@ -357,7 +363,7 @@ export const PauseAgentResponse = zod.object({
   "personality": zod.string().nullish(),
   "goals": zod.string().nullish(),
   "instructions": zod.string().nullish(),
-  "provider": zod.enum(['claude_max', 'openrouter']),
+  "provider": zod.union([zod.literal('claude_max'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
   "model": zod.string().nullish(),
   "voiceStyle": zod.string().nullish(),
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
@@ -386,7 +392,7 @@ export const RetireAgentResponse = zod.object({
   "name": zod.string(),
   "title": zod.string(),
   "mission": zod.string(),
-  "provider": zod.enum(['claude_max', 'openrouter']),
+  "provider": zod.union([zod.literal('claude_max'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
   "model": zod.string().nullish(),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
   "avatar": zod.object({
@@ -408,7 +414,7 @@ export const ListRetiredAgentsResponseItem = zod.object({
   "name": zod.string(),
   "title": zod.string(),
   "mission": zod.string(),
-  "provider": zod.enum(['claude_max', 'openrouter']),
+  "provider": zod.union([zod.literal('claude_max'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
   "model": zod.string().nullish(),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
   "avatar": zod.object({
@@ -433,6 +439,12 @@ export const ListTasksResponseItem = zod.object({
   "objective": zod.string(),
   "status": zod.enum(['queued', 'running', 'waiting_approval', 'paused', 'completed', 'failed']),
   "provider": zod.enum(['claude_max', 'openrouter']).optional(),
+  "model": zod.string().nullish(),
+  "estimatedTokens": zod.number().nullish(),
+  "estimatedCostCents": zod.number().nullish(),
+  "actualInputTokens": zod.number().nullish(),
+  "actualOutputTokens": zod.number().nullish(),
+  "actualCostCents": zod.number().nullish(),
   "createdAt": zod.coerce.date()
 })
 export const ListTasksResponse = zod.array(ListTasksResponseItem)
@@ -444,12 +456,15 @@ export const ListTasksResponse = zod.array(ListTasksResponseItem)
 export const createTaskBodyObjectiveMin = 3;
 export const createTaskBodyObjectiveMax = 5000;
 
+export const createTaskBodyModelOverrideMax = 200;
+
 
 
 export const CreateTaskBody = zod.object({
   "agentId": zod.string(),
   "objective": zod.string().min(createTaskBodyObjectiveMin).max(createTaskBodyObjectiveMax),
-  "providerOverride": zod.enum(['claude_max', 'openrouter']).optional()
+  "providerOverride": zod.enum(['claude_max', 'openrouter']).optional(),
+  "modelOverride": zod.string().max(createTaskBodyModelOverrideMax).optional()
 })
 
 export const CreateTaskResponse = zod.object({
@@ -459,6 +474,12 @@ export const CreateTaskResponse = zod.object({
   "objective": zod.string(),
   "status": zod.enum(['queued', 'running', 'waiting_approval', 'paused', 'completed', 'failed']),
   "provider": zod.enum(['claude_max', 'openrouter']).optional(),
+  "model": zod.string().nullish(),
+  "estimatedTokens": zod.number().nullish(),
+  "estimatedCostCents": zod.number().nullish(),
+  "actualInputTokens": zod.number().nullish(),
+  "actualOutputTokens": zod.number().nullish(),
+  "actualCostCents": zod.number().nullish(),
   "createdAt": zod.coerce.date()
 })
 
@@ -522,5 +543,125 @@ export const GetProvidersResponseItem = zod.object({
   "message": zod.string().optional()
 })
 export const GetProvidersResponse = zod.array(GetProvidersResponseItem)
+
+
+/**
+ * @summary Get workspace-level provider routing defaults
+ */
+export const GetProviderSettingsResponse = zod.object({
+  "defaultProvider": zod.enum(['claude_max', 'openrouter']),
+  "claudeModel": zod.string().nullable(),
+  "openrouterModel": zod.string().nullable()
+})
+
+
+/**
+ * @summary Update workspace-level provider routing defaults
+ */
+export const updateProviderSettingsBodyClaudeModelMax = 200;
+
+export const updateProviderSettingsBodyOpenrouterModelMax = 200;
+
+
+
+export const UpdateProviderSettingsBody = zod.object({
+  "defaultProvider": zod.enum(['claude_max', 'openrouter']).optional(),
+  "claudeModel": zod.string().max(updateProviderSettingsBodyClaudeModelMax).nullish(),
+  "openrouterModel": zod.string().max(updateProviderSettingsBodyOpenrouterModelMax).nullish()
+})
+
+export const UpdateProviderSettingsResponse = zod.object({
+  "defaultProvider": zod.enum(['claude_max', 'openrouter']),
+  "claudeModel": zod.string().nullable(),
+  "openrouterModel": zod.string().nullable()
+})
+
+
+/**
+ * @summary List models available for a provider
+ */
+export const ListProviderModelsParams = zod.object({
+  "provider": zod.enum(['claude_max', 'openrouter'])
+})
+
+export const ListProviderModelsResponse = zod.object({
+  "provider": zod.enum(['claude_max', 'openrouter']),
+  "available": zod.boolean(),
+  "message": zod.string().nullish(),
+  "models": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "contextLength": zod.number().nullish(),
+  "promptCentsPerMTok": zod.number().nullish(),
+  "completionCentsPerMTok": zod.number().nullish()
+}))
+})
+
+
+/**
+ * @summary Estimate provider, model, tokens, and cost for a task before dispatch
+ */
+export const estimateTaskBodyObjectiveMin = 3;
+export const estimateTaskBodyObjectiveMax = 5000;
+
+export const estimateTaskBodyModelOverrideMax = 200;
+
+
+
+export const EstimateTaskBody = zod.object({
+  "agentId": zod.string(),
+  "objective": zod.string().min(estimateTaskBodyObjectiveMin).max(estimateTaskBodyObjectiveMax),
+  "providerOverride": zod.enum(['claude_max', 'openrouter']).optional(),
+  "modelOverride": zod.string().max(estimateTaskBodyModelOverrideMax).optional()
+})
+
+export const EstimateTaskResponse = zod.object({
+  "provider": zod.enum(['claude_max', 'openrouter']),
+  "model": zod.string(),
+  "estimatedInputTokens": zod.number(),
+  "estimatedOutputTokens": zod.number(),
+  "estimatedTokens": zod.number(),
+  "estimatedCostCents": zod.number(),
+  "costKnown": zod.boolean(),
+  "note": zod.string().nullish()
+})
+
+
+/**
+ * @summary Record actual token usage and cost after execution
+ */
+export const RecordTaskUsageParams = zod.object({
+  "taskId": zod.coerce.string()
+})
+
+export const recordTaskUsageBodyInputTokensMin = 0;
+
+export const recordTaskUsageBodyOutputTokensMin = 0;
+
+export const recordTaskUsageBodyCostCentsMin = 0;
+
+
+
+export const RecordTaskUsageBody = zod.object({
+  "inputTokens": zod.number().min(recordTaskUsageBodyInputTokensMin),
+  "outputTokens": zod.number().min(recordTaskUsageBodyOutputTokensMin),
+  "costCents": zod.number().min(recordTaskUsageBodyCostCentsMin).optional()
+})
+
+export const RecordTaskUsageResponse = zod.object({
+  "id": zod.string(),
+  "agentId": zod.string(),
+  "agentName": zod.string(),
+  "objective": zod.string(),
+  "status": zod.enum(['queued', 'running', 'waiting_approval', 'paused', 'completed', 'failed']),
+  "provider": zod.enum(['claude_max', 'openrouter']).optional(),
+  "model": zod.string().nullish(),
+  "estimatedTokens": zod.number().nullish(),
+  "estimatedCostCents": zod.number().nullish(),
+  "actualInputTokens": zod.number().nullish(),
+  "actualOutputTokens": zod.number().nullish(),
+  "actualCostCents": zod.number().nullish(),
+  "createdAt": zod.coerce.date()
+})
 
 

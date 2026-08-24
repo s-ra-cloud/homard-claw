@@ -6,7 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type AgentInputProvider = typeof AgentInputProvider[keyof typeof AgentInputProvider];
+/**
+ * @nullable
+ */
+export type AgentInputProvider = typeof AgentInputProvider[keyof typeof AgentInputProvider] | null;
 
 
 export const AgentInputProvider = {

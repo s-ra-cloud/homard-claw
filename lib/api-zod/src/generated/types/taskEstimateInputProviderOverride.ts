@@ -6,13 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-/**
- * @nullable
- */
-export type AgentUpdateProvider = typeof AgentUpdateProvider[keyof typeof AgentUpdateProvider] | null;
+export type TaskEstimateInputProviderOverride = typeof TaskEstimateInputProviderOverride[keyof typeof TaskEstimateInputProviderOverride];
 
 
-export const AgentUpdateProvider = {
+export const TaskEstimateInputProviderOverride = {
   claude_max: 'claude_max',
   openrouter: 'openrouter',
 } as const;

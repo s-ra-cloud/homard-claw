@@ -15,5 +15,17 @@ export interface Task {
   objective: string;
   status: TaskStatus;
   provider?: TaskProvider;
+  /** @nullable */
+  model?: string | null;
+  /** @nullable */
+  estimatedTokens?: number | null;
+  /** @nullable */
+  estimatedCostCents?: number | null;
+  /** @nullable */
+  actualInputTokens?: number | null;
+  /** @nullable */
+  actualOutputTokens?: number | null;
+  /** @nullable */
+  actualCostCents?: number | null;
   createdAt: Date;
 }

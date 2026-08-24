@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  doublePrecision,
+  integer,
   jsonb,
   pgTable,
   text,
@@ -29,7 +31,8 @@ export const agentsTable = pgTable(
     personality: text("personality"),
     goals: text("goals"),
     instructions: text("instructions"),
-    provider: text("provider").notNull(),
+    // Null means "follow the workspace default provider".
+    provider: text("provider"),
     model: text("model"),
     voiceStyle: text("voice_style"),
     status: text("status").notNull().default("idle"),
@@ -59,6 +62,12 @@ export const tasksTable = pgTable("tasks", {
   objective: text("objective").notNull(),
   status: text("status").notNull().default("queued"),
   provider: text("provider").notNull(),
+  model: text("model"),
+  estimatedTokens: integer("estimated_tokens"),
+  estimatedCostCents: doublePrecision("estimated_cost_cents"),
+  actualInputTokens: integer("actual_input_tokens"),
+  actualOutputTokens: integer("actual_output_tokens"),
+  actualCostCents: doublePrecision("actual_cost_cents"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

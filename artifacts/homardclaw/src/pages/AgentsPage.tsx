@@ -241,7 +241,7 @@ export default function AgentsPage() {
                       <div className="flex flex-wrap gap-2">
                         <div className="flex items-center gap-1 text-[10px] bg-muted px-2 py-1 uppercase font-bold text-muted-foreground border-2 border-border/50">
                           <Server className="w-3 h-3" />
-                          {agent.provider}
+                          {agent.provider ?? "default"}
                         </div>
                         <div className="flex items-center gap-1 text-[10px] bg-muted px-2 py-1 uppercase font-bold text-muted-foreground border-2 border-border/50">
                           <Shield className="w-3 h-3" />

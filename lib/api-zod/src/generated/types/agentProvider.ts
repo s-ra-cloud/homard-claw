@@ -6,7 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type AgentProvider = typeof AgentProvider[keyof typeof AgentProvider];
+/**
+ * @nullable
+ */
+export type AgentProvider = typeof AgentProvider[keyof typeof AgentProvider] | null;
 
 
 export const AgentProvider = {

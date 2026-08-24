@@ -10,17 +10,25 @@ import {
   DeleteAgentParams,
   DuplicateAgentParams,
   DuplicateAgentResponse,
+  EstimateTaskBody,
+  EstimateTaskResponse,
   GetAgentParams,
   GetAgentResponse,
   GetOfficeOverviewResponse,
+  GetProviderSettingsResponse,
   GetProvidersResponse,
   ListAgentsResponse,
   ListApprovalsResponse,
+  ListProviderModelsParams,
+  ListProviderModelsResponse,
   ListRetiredAgentsResponse,
   ListTasksResponse,
   PauseAgentBody,
   PauseAgentParams,
   PauseAgentResponse,
+  RecordTaskUsageBody,
+  RecordTaskUsageParams,
+  RecordTaskUsageResponse,
   RetireAgentParams,
   RetireAgentResponse,
   SetAgentArchivedBody,
@@ -31,6 +39,8 @@ import {
   UpdateAgentBody,
   UpdateAgentParams,
   UpdateAgentResponse,
+  UpdateProviderSettingsBody,
+  UpdateProviderSettingsResponse,
 } from "@workspace/api-zod";
 import {
   agentsTable,
@@ -48,6 +58,18 @@ import {
   type Request,
   type Response,
 } from "express";
+import {
+  PROVIDER_IDS,
+  computeUsageCostCents,
+  estimateTask,
+  getModelCatalog,
+  getProviderHealth,
+  getProviderSettings,
+  isConfigured,
+  resolveRouting,
+  updateProviderSettings,
+  type ProviderId,
+} from "../providers";
 
 const router: IRouter = Router();
 
@@ -106,6 +128,36 @@ function toAgent(agent: typeof agentsTable.$inferSelect) {
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
+function toTaskJson(
+  task: typeof tasksTable.$inferSelect,
+  agentName: string,
+) {
+  return {
+    ...task,
+    agentName,
+    createdAt: task.createdAt.toISOString(),
+  };
+}
+
+/** Prompt-relevant agent configuration used for token estimation. */
+function agentPromptContext(agent: {
+  mission: string;
+  specialization: string | null;
+  personality: string | null;
+  goals: string | null;
+  instructions: string | null;
+}): string {
+  return [
+    agent.mission,
+    agent.specialization,
+    agent.personality,
+    agent.goals,
+    agent.instructions,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 /** Case-insensitive name collision check across every agent, any lifecycle state. */
 async function findNameConflict(
   tx: Tx | typeof db,
@@ -130,7 +182,7 @@ function isUniqueViolation(error: unknown): boolean {
 }
 
 router.get("/office/overview", async (_req, res): Promise<void> => {
-  const [[agentCount], [activeCount], [approvalCount], [stop], events] =
+  const [[agentCount], [activeCount], [approvalCount], [stop], events, [spend]] =
     await Promise.all([
       db
         .select({ count: sql<number>`count(*)::int` })
@@ -156,6 +208,14 @@ router.get("/office/overview", async (_req, res): Promise<void> => {
         .from(auditEventsTable)
         .orderBy(desc(auditEventsTable.createdAt))
         .limit(8),
+      db
+        .select({
+          cents: sql<number>`coalesce(sum(${tasksTable.actualCostCents}), 0)::float`,
+        })
+        .from(tasksTable)
+        .where(
+          sql`${tasksTable.createdAt} >= date_trunc('month', now())`,
+        ),
     ]);
 
   res.json(
@@ -164,7 +224,7 @@ router.get("/office/overview", async (_req, res): Promise<void> => {
       activeTasks: activeCount?.count ?? 0,
       pendingApprovals: approvalCount?.count ?? 0,
       emergencyStop: stop?.value === "true",
-      monthlyCostCents: 0,
+      monthlyCostCents: Math.round((spend?.cents ?? 0) * 100) / 100,
       recentEvents: events.map((event) => ({
         ...event,
         createdAt: event.createdAt.toISOString(),
@@ -644,23 +704,15 @@ router.get("/island/agents", async (_req, res): Promise<void> => {
 router.get("/tasks", async (_req, res): Promise<void> => {
   const rows = await db
     .select({
-      id: tasksTable.id,
-      agentId: tasksTable.agentId,
+      task: tasksTable,
       agentName: agentsTable.name,
-      objective: tasksTable.objective,
-      status: tasksTable.status,
-      provider: tasksTable.provider,
-      createdAt: tasksTable.createdAt,
     })
     .from(tasksTable)
     .innerJoin(agentsTable, eq(tasksTable.agentId, agentsTable.id))
     .orderBy(desc(tasksTable.createdAt));
   res.json(
     ListTasksResponse.parse(
-      rows.map((row) => ({
-        ...row,
-        createdAt: row.createdAt.toISOString(),
-      })),
+      rows.map((row) => toTaskJson(row.task, row.agentName)),
     ),
   );
 });
@@ -671,48 +723,95 @@ router.post("/tasks", async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-  const outcome = await db.transaction(async (tx) => {
-    // Lock the agent row so a concurrent retirement cannot slip in between
-    // the check and the task insert.
-    const [agent] = await tx
+  type CreateOutcome =
+    | { status: 404 }
+    | { status: 409 }
+    | { status: 425 } // internal marker: routing went stale, retry
+    | {
+        status: 201;
+        task: typeof tasksTable.$inferSelect;
+        agentName: string;
+      };
+  // Resolve routing and pricing before opening the transaction: pricing may
+  // hit the provider's (cached) model catalog and must not run while a row
+  // lock is held. If the agent's routing configuration changes concurrently,
+  // the transaction detects it against the locked row and we re-resolve.
+  let outcome: CreateOutcome = { status: 425 };
+  for (let attempt = 0; attempt < 2 && outcome.status === 425; attempt += 1) {
+    const [preview] = await db
       .select()
       .from(agentsTable)
       .where(eq(agentsTable.id, parsed.data.agentId))
-      .limit(1)
-      .for("update");
-    if (!agent) return { status: 404 as const };
-    if (agent.retired || agent.archived) return { status: 409 as const };
-    const [stop] = await tx
-      .select()
-      .from(systemStateTable)
-      .where(eq(systemStateTable.key, "emergency_stop"))
       .limit(1);
-    const provider = parsed.data.providerOverride ?? agent.provider;
-    const configured =
-      provider === "claude_max"
-        ? Boolean(process.env.CLAUDE_CODE_OAUTH_TOKEN)
-        : Boolean(process.env.OPENROUTER_API_KEY);
-    const status =
-      stop?.value === "true" || agent.paused || !configured
-        ? "paused"
-        : "queued";
-    const [task] = await tx
-      .insert(tasksTable)
-      .values({
-        agentId: agent.id,
-        objective: parsed.data.objective,
-        provider,
-        status,
-      })
-      .returning();
-    await tx.insert(auditEventsTable).values({
-      kind: "task.created",
-      summary: configured
-        ? `A task was queued for ${agent.name}.`
-        : `A task for ${agent.name} was paused because ${provider} is not configured.`,
+    if (!preview) {
+      outcome = { status: 404 };
+      break;
+    }
+    if (preview.retired || preview.archived) {
+      outcome = { status: 409 };
+      break;
+    }
+    const routing = await resolveRouting(
+      preview,
+      parsed.data.providerOverride as ProviderId | undefined,
+      parsed.data.modelOverride,
+    );
+    const estimate = await estimateTask(
+      agentPromptContext(preview),
+      parsed.data.objective,
+      routing,
+    );
+    outcome = await db.transaction(async (tx): Promise<CreateOutcome> => {
+      // Lock the agent row so a concurrent retirement cannot slip in between
+      // the check and the task insert.
+      const [agent] = await tx
+        .select()
+        .from(agentsTable)
+        .where(eq(agentsTable.id, parsed.data.agentId))
+        .limit(1)
+        .for("update");
+      if (!agent) return { status: 404 };
+      if (agent.retired || agent.archived) return { status: 409 };
+      if (
+        agent.provider !== preview.provider ||
+        agent.model !== preview.model
+      ) {
+        // Routing config changed between preview and lock; retry.
+        return { status: 425 };
+      }
+      const [stop] = await tx
+        .select()
+        .from(systemStateTable)
+        .where(eq(systemStateTable.key, "emergency_stop"))
+        .limit(1);
+      const configured = isConfigured(routing.provider);
+      const status =
+        stop?.value === "true" || agent.paused || !configured
+          ? "paused"
+          : "queued";
+      const [task] = await tx
+        .insert(tasksTable)
+        .values({
+          agentId: agent.id,
+          objective: parsed.data.objective,
+          provider: routing.provider,
+          model: routing.model,
+          estimatedTokens: estimate.estimatedTokens,
+          estimatedCostCents: estimate.costKnown
+            ? estimate.estimatedCostCents
+            : null,
+          status,
+        })
+        .returning();
+      await tx.insert(auditEventsTable).values({
+        kind: "task.created",
+        summary: configured
+          ? `A task was queued for ${agent.name}.`
+          : `A task for ${agent.name} was paused because ${routing.provider} is not configured.`,
+      });
+      return { status: 201, task, agentName: agent.name };
     });
-    return { status: 201 as const, task, agentName: agent.name };
-  });
+  }
   if (outcome.status === 404) {
     res.status(404).json({ error: "Agent not found" });
     return;
@@ -723,13 +822,80 @@ router.post("/tasks", async (req, res): Promise<void> => {
     });
     return;
   }
-  res.status(201).json(
-    CreateTaskResponse.parse({
-      ...outcome.task,
-      agentName: outcome.agentName,
-      createdAt: outcome.task.createdAt.toISOString(),
-    }),
+  if (outcome.status === 425) {
+    res.status(503).json({
+      error: "Agent configuration is changing; please retry the dispatch",
+    });
+    return;
+  }
+  res
+    .status(201)
+    .json(CreateTaskResponse.parse(toTaskJson(outcome.task, outcome.agentName)));
+});
+
+router.post("/tasks/estimate", async (req, res): Promise<void> => {
+  const parsed = EstimateTaskBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const [agent] = await db
+    .select()
+    .from(agentsTable)
+    .where(eq(agentsTable.id, parsed.data.agentId))
+    .limit(1);
+  if (!agent) {
+    res.status(404).json({ error: "Agent not found" });
+    return;
+  }
+  const routing = await resolveRouting(
+    agent,
+    parsed.data.providerOverride as ProviderId | undefined,
+    parsed.data.modelOverride,
   );
+  const estimate = await estimateTask(
+    agentPromptContext(agent),
+    parsed.data.objective,
+    routing,
+  );
+  res.json(EstimateTaskResponse.parse(estimate));
+});
+
+router.post("/tasks/:taskId/usage", async (req, res): Promise<void> => {
+  const params = RecordTaskUsageParams.safeParse(req.params);
+  const body = RecordTaskUsageBody.safeParse(req.body);
+  if (!params.success || !body.success) {
+    res.status(400).json({ error: "Invalid usage record" });
+    return;
+  }
+  const [existing] = await db
+    .select({ task: tasksTable, agentName: agentsTable.name })
+    .from(tasksTable)
+    .innerJoin(agentsTable, eq(tasksTable.agentId, agentsTable.id))
+    .where(eq(tasksTable.id, params.data.taskId))
+    .limit(1);
+  if (!existing) {
+    res.status(404).json({ error: "Task not found" });
+    return;
+  }
+  const costCents =
+    body.data.costCents ??
+    (await computeUsageCostCents(
+      existing.task.provider as ProviderId,
+      existing.task.model,
+      body.data.inputTokens,
+      body.data.outputTokens,
+    ));
+  const [task] = await db
+    .update(tasksTable)
+    .set({
+      actualInputTokens: Math.round(body.data.inputTokens),
+      actualOutputTokens: Math.round(body.data.outputTokens),
+      actualCostCents: costCents,
+    })
+    .where(eq(tasksTable.id, existing.task.id))
+    .returning();
+  res.json(RecordTaskUsageResponse.parse(toTaskJson(task, existing.agentName)));
 });
 
 router.post("/emergency-stop", async (req, res): Promise<void> => {
@@ -826,28 +992,42 @@ router.patch("/approvals/:approvalId", async (req, res): Promise<void> => {
 });
 
 router.get("/providers", async (_req, res): Promise<void> => {
-  const claudeConfigured = Boolean(process.env.CLAUDE_CODE_OAUTH_TOKEN);
-  const openRouterConfigured = Boolean(process.env.OPENROUTER_API_KEY);
-  res.json(
-    GetProvidersResponse.parse([
-      {
-        provider: "claude_max",
-        configured: claudeConfigured,
-        healthy: claudeConfigured,
-        message: claudeConfigured
-          ? "Credential available; live health check pending."
-          : "Add CLAUDE_CODE_OAUTH_TOKEN to enable execution.",
-      },
-      {
-        provider: "openrouter",
-        configured: openRouterConfigured,
-        healthy: openRouterConfigured,
-        message: openRouterConfigured
-          ? "Credential available; live health check pending."
-          : "Add OPENROUTER_API_KEY to enable execution.",
-      },
-    ]),
+  const statuses = await Promise.all(
+    PROVIDER_IDS.map((provider) => getProviderHealth(provider)),
   );
+  res.json(GetProvidersResponse.parse(statuses));
+});
+
+router.get("/providers/settings", async (_req, res): Promise<void> => {
+  res.json(GetProviderSettingsResponse.parse(await getProviderSettings()));
+});
+
+router.put("/providers/settings", async (req, res): Promise<void> => {
+  const parsed = UpdateProviderSettingsBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const settings = await updateProviderSettings({
+    defaultProvider: parsed.data.defaultProvider as ProviderId | undefined,
+    claudeModel: parsed.data.claudeModel,
+    openrouterModel: parsed.data.openrouterModel,
+  });
+  await db.insert(auditEventsTable).values({
+    kind: "providers.settings_updated",
+    summary: `Provider routing defaults were updated (default: ${settings.defaultProvider}).`,
+  });
+  res.json(UpdateProviderSettingsResponse.parse(settings));
+});
+
+router.get("/providers/:provider/models", async (req, res): Promise<void> => {
+  const params = ListProviderModelsParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: "Unknown provider" });
+    return;
+  }
+  const catalog = await getModelCatalog(params.data.provider as ProviderId);
+  res.json(ListProviderModelsResponse.parse(catalog));
 });
 
 export default router;

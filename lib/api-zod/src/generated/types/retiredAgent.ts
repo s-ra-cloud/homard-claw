@@ -14,6 +14,7 @@ export interface RetiredAgent {
   name: string;
   title: string;
   mission: string;
+  /** @nullable */
   provider: RetiredAgentProvider;
   /** @nullable */
   model?: string | null;

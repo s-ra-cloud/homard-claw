@@ -9,7 +9,10 @@ export interface HealthStatus {
   status: string;
 }
 
-export type AgentProvider = typeof AgentProvider[keyof typeof AgentProvider];
+/**
+ * @nullable
+ */
+export type AgentProvider = typeof AgentProvider[keyof typeof AgentProvider] | null;
 
 
 export const AgentProvider = {
@@ -60,6 +63,7 @@ export interface Agent {
   goals?: string | null;
   /** @nullable */
   instructions?: string | null;
+  /** @nullable */
   provider: AgentProvider;
   /** @nullable */
   model?: string | null;
@@ -101,6 +105,18 @@ export interface Task {
   objective: string;
   status: TaskStatus;
   provider?: TaskProvider;
+  /** @nullable */
+  model?: string | null;
+  /** @nullable */
+  estimatedTokens?: number | null;
+  /** @nullable */
+  estimatedCostCents?: number | null;
+  /** @nullable */
+  actualInputTokens?: number | null;
+  /** @nullable */
+  actualOutputTokens?: number | null;
+  /** @nullable */
+  actualCostCents?: number | null;
   createdAt: string;
 }
 
@@ -109,7 +125,10 @@ export interface AgentDetail {
   tasks: Task[];
 }
 
-export type RetiredAgentProvider = typeof RetiredAgentProvider[keyof typeof RetiredAgentProvider];
+/**
+ * @nullable
+ */
+export type RetiredAgentProvider = typeof RetiredAgentProvider[keyof typeof RetiredAgentProvider] | null;
 
 
 export const RetiredAgentProvider = {
@@ -131,6 +150,7 @@ export interface RetiredAgent {
   name: string;
   title: string;
   mission: string;
+  /** @nullable */
   provider: RetiredAgentProvider;
   /** @nullable */
   model?: string | null;
@@ -140,7 +160,10 @@ export interface RetiredAgent {
   retiredAt: string;
 }
 
-export type AgentInputProvider = typeof AgentInputProvider[keyof typeof AgentInputProvider];
+/**
+ * @nullable
+ */
+export type AgentInputProvider = typeof AgentInputProvider[keyof typeof AgentInputProvider] | null;
 
 
 export const AgentInputProvider = {
@@ -181,7 +204,8 @@ export interface AgentInput {
   goals?: string;
   /** @maxLength 4000 */
   instructions?: string;
-  provider: AgentInputProvider;
+  /** @nullable */
+  provider?: AgentInputProvider;
   /** @maxLength 180 */
   model?: string;
   /** @maxLength 60 */
@@ -190,7 +214,10 @@ export interface AgentInput {
   avatar?: AvatarConfig;
 }
 
-export type AgentUpdateProvider = typeof AgentUpdateProvider[keyof typeof AgentUpdateProvider];
+/**
+ * @nullable
+ */
+export type AgentUpdateProvider = typeof AgentUpdateProvider[keyof typeof AgentUpdateProvider] | null;
 
 
 export const AgentUpdateProvider = {
@@ -243,6 +270,7 @@ export interface AgentUpdate {
      * @nullable
      */
   instructions?: string | null;
+  /** @nullable */
   provider?: AgentUpdateProvider;
   /**
      * @maxLength 180
@@ -282,6 +310,57 @@ export interface TaskInput {
      */
   objective: string;
   providerOverride?: TaskInputProviderOverride;
+  /** @maxLength 200 */
+  modelOverride?: string;
+}
+
+export type TaskEstimateInputProviderOverride = typeof TaskEstimateInputProviderOverride[keyof typeof TaskEstimateInputProviderOverride];
+
+
+export const TaskEstimateInputProviderOverride = {
+  claude_max: 'claude_max',
+  openrouter: 'openrouter',
+} as const;
+
+export interface TaskEstimateInput {
+  agentId: string;
+  /**
+     * @minLength 3
+     * @maxLength 5000
+     */
+  objective: string;
+  providerOverride?: TaskEstimateInputProviderOverride;
+  /** @maxLength 200 */
+  modelOverride?: string;
+}
+
+export type TaskEstimateProvider = typeof TaskEstimateProvider[keyof typeof TaskEstimateProvider];
+
+
+export const TaskEstimateProvider = {
+  claude_max: 'claude_max',
+  openrouter: 'openrouter',
+} as const;
+
+export interface TaskEstimate {
+  provider: TaskEstimateProvider;
+  model: string;
+  estimatedInputTokens: number;
+  estimatedOutputTokens: number;
+  estimatedTokens: number;
+  estimatedCostCents: number;
+  costKnown: boolean;
+  /** @nullable */
+  note?: string | null;
+}
+
+export interface TaskUsageInput {
+  /** @minimum 0 */
+  inputTokens: number;
+  /** @minimum 0 */
+  outputTokens: number;
+  /** @minimum 0 */
+  costCents?: number;
 }
 
 export type ApprovalStatus = typeof ApprovalStatus[keyof typeof ApprovalStatus];
@@ -329,6 +408,71 @@ export interface ProviderStatus {
   configured: boolean;
   healthy: boolean;
   message?: string;
+}
+
+export type ProviderSettingsDefaultProvider = typeof ProviderSettingsDefaultProvider[keyof typeof ProviderSettingsDefaultProvider];
+
+
+export const ProviderSettingsDefaultProvider = {
+  claude_max: 'claude_max',
+  openrouter: 'openrouter',
+} as const;
+
+export interface ProviderSettings {
+  defaultProvider: ProviderSettingsDefaultProvider;
+  /** @nullable */
+  claudeModel: string | null;
+  /** @nullable */
+  openrouterModel: string | null;
+}
+
+export type ProviderSettingsInputDefaultProvider = typeof ProviderSettingsInputDefaultProvider[keyof typeof ProviderSettingsInputDefaultProvider];
+
+
+export const ProviderSettingsInputDefaultProvider = {
+  claude_max: 'claude_max',
+  openrouter: 'openrouter',
+} as const;
+
+export interface ProviderSettingsInput {
+  defaultProvider?: ProviderSettingsInputDefaultProvider;
+  /**
+     * @maxLength 200
+     * @nullable
+     */
+  claudeModel?: string | null;
+  /**
+     * @maxLength 200
+     * @nullable
+     */
+  openrouterModel?: string | null;
+}
+
+export interface ProviderModel {
+  id: string;
+  name: string;
+  /** @nullable */
+  contextLength?: number | null;
+  /** @nullable */
+  promptCentsPerMTok?: number | null;
+  /** @nullable */
+  completionCentsPerMTok?: number | null;
+}
+
+export type ProviderModelsProvider = typeof ProviderModelsProvider[keyof typeof ProviderModelsProvider];
+
+
+export const ProviderModelsProvider = {
+  claude_max: 'claude_max',
+  openrouter: 'openrouter',
+} as const;
+
+export interface ProviderModels {
+  provider: ProviderModelsProvider;
+  available: boolean;
+  /** @nullable */
+  message?: string | null;
+  models: ProviderModel[];
 }
 
 export interface EmergencyStop {

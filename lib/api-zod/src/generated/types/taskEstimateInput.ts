@@ -5,16 +5,16 @@
  * HomardClaw private agent office API
  * OpenAPI spec version: 0.1.0
  */
-import type { TaskInputProviderOverride } from './taskInputProviderOverride';
+import type { TaskEstimateInputProviderOverride } from './taskEstimateInputProviderOverride';
 
-export interface TaskInput {
+export interface TaskEstimateInput {
   agentId: string;
   /**
      * @minLength 3
      * @maxLength 5000
      */
   objective: string;
-  providerOverride?: TaskInputProviderOverride;
+  providerOverride?: TaskEstimateInputProviderOverride;
   /** @maxLength 200 */
   modelOverride?: string;
 }

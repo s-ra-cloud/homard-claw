@@ -6,7 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type RetiredAgentProvider = typeof RetiredAgentProvider[keyof typeof RetiredAgentProvider];
+/**
+ * @nullable
+ */
+export type RetiredAgentProvider = typeof RetiredAgentProvider[keyof typeof RetiredAgentProvider] | null;
 
 
 export const RetiredAgentProvider = {

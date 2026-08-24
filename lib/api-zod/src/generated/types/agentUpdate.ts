@@ -45,6 +45,7 @@ export interface AgentUpdate {
      * @nullable
      */
   instructions?: string | null;
+  /** @nullable */
   provider?: AgentUpdateProvider;
   /**
      * @maxLength 180

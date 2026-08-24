@@ -312,6 +312,97 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/ProviderStatus"
+  /providers/settings:
+    get:
+      operationId: getProviderSettings
+      tags: [office]
+      summary: Get workspace-level provider routing defaults
+      responses:
+        "200":
+          description: Provider settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderSettings"
+    put:
+      operationId: updateProviderSettings
+      tags: [office]
+      summary: Update workspace-level provider routing defaults
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderSettingsInput"
+      responses:
+        "200":
+          description: Updated provider settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderSettings"
+  /providers/{provider}/models:
+    get:
+      operationId: listProviderModels
+      tags: [office]
+      summary: List models available for a provider
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema: { type: string, enum: [claude_max, openrouter] }
+      responses:
+        "200":
+          description: Provider model catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderModels"
+  /tasks/estimate:
+    post:
+      operationId: estimateTask
+      tags: [office]
+      summary: Estimate provider, model, tokens, and cost for a task before dispatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskEstimateInput"
+      responses:
+        "200":
+          description: Task estimate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskEstimate"
+        "404":
+          description: Agent not found
+  /tasks/{taskId}/usage:
+    post:
+      operationId: recordTaskUsage
+      tags: [office]
+      summary: Record actual token usage and cost after execution
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskUsageInput"
+      responses:
+        "200":
+          description: Task with recorded usage
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "404":
+          description: Task not found
 components:
   parameters:
     AgentId:
@@ -344,7 +435,7 @@ components:
         personality: { type: ["string", "null"] }
         goals: { type: ["string", "null"] }
         instructions: { type: ["string", "null"] }
-        provider: { type: string, enum: [claude_max, openrouter] }
+        provider: { type: ["string", "null"], enum: [claude_max, openrouter, null] }
         model: { type: ["string", "null"] }
         voiceStyle: { type: ["string", "null"] }
         status: { type: string, enum: [idle, working, researching, waiting, paused, error, queued, complete] }
@@ -370,7 +461,7 @@ components:
         name: { type: string }
         title: { type: string }
         mission: { type: string }
-        provider: { type: string, enum: [claude_max, openrouter] }
+        provider: { type: ["string", "null"], enum: [claude_max, openrouter, null] }
         model: { type: ["string", "null"] }
         securityPreset: { type: string, enum: [observer, assistant, operator] }
         avatar: { $ref: "#/components/schemas/AvatarConfig" }
@@ -386,7 +477,7 @@ components:
         expression: { type: string }
     AgentInput:
       type: object
-      required: [name, title, mission, provider, securityPreset]
+      required: [name, title, mission, securityPreset]
       properties:
         name: { type: string, minLength: 2, maxLength: 60 }
         title: { type: string, minLength: 2, maxLength: 80 }
@@ -395,7 +486,7 @@ components:
         personality: { type: string, maxLength: 2000 }
         goals: { type: string, maxLength: 4000 }
         instructions: { type: string, maxLength: 4000 }
-        provider: { type: string, enum: [claude_max, openrouter] }
+        provider: { type: ["string", "null"], enum: [claude_max, openrouter, null] }
         model: { type: string, maxLength: 180 }
         voiceStyle: { type: string, maxLength: 60 }
         securityPreset: { type: string, enum: [observer, assistant, operator] }
@@ -410,7 +501,7 @@ components:
         personality: { type: ["string", "null"], maxLength: 2000 }
         goals: { type: ["string", "null"], maxLength: 4000 }
         instructions: { type: ["string", "null"], maxLength: 4000 }
-        provider: { type: string, enum: [claude_max, openrouter] }
+        provider: { type: ["string", "null"], enum: [claude_max, openrouter, null] }
         model: { type: ["string", "null"], maxLength: 180 }
         voiceStyle: { type: ["string", "null"], maxLength: 60 }
         securityPreset: { type: string, enum: [observer, assistant, operator] }
@@ -435,6 +526,12 @@ components:
         objective: { type: string }
         status: { type: string, enum: [queued, running, waiting_approval, paused, completed, failed] }
         provider: { type: string, enum: [claude_max, openrouter] }
+        model: { type: [string, "null"] }
+        estimatedTokens: { type: [number, "null"] }
+        estimatedCostCents: { type: [number, "null"] }
+        actualInputTokens: { type: [number, "null"] }
+        actualOutputTokens: { type: [number, "null"] }
+        actualCostCents: { type: [number, "null"] }
         createdAt: { type: string, format: date-time }
     TaskInput:
       type: object
@@ -443,6 +540,34 @@ components:
         agentId: { type: string }
         objective: { type: string, minLength: 3, maxLength: 5000 }
         providerOverride: { type: string, enum: [claude_max, openrouter] }
+        modelOverride: { type: string, maxLength: 200 }
+    TaskEstimateInput:
+      type: object
+      required: [agentId, objective]
+      properties:
+        agentId: { type: string }
+        objective: { type: string, minLength: 3, maxLength: 5000 }
+        providerOverride: { type: string, enum: [claude_max, openrouter] }
+        modelOverride: { type: string, maxLength: 200 }
+    TaskEstimate:
+      type: object
+      required: [provider, model, estimatedInputTokens, estimatedOutputTokens, estimatedTokens, estimatedCostCents, costKnown]
+      properties:
+        provider: { type: string, enum: [claude_max, openrouter] }
+        model: { type: string }
+        estimatedInputTokens: { type: number }
+        estimatedOutputTokens: { type: number }
+        estimatedTokens: { type: number }
+        estimatedCostCents: { type: number }
+        costKnown: { type: boolean }
+        note: { type: [string, "null"] }
+    TaskUsageInput:
+      type: object
+      required: [inputTokens, outputTokens]
+      properties:
+        inputTokens: { type: number, minimum: 0 }
+        outputTokens: { type: number, minimum: 0 }
+        costCents: { type: number, minimum: 0 }
     Approval:
       type: object
       required: [id, agentName, action, status, createdAt, expiresAt]
@@ -467,6 +592,39 @@ components:
         configured: { type: boolean }
         healthy: { type: boolean }
         message: { type: string }
+    ProviderSettings:
+      type: object
+      required: [defaultProvider, claudeModel, openrouterModel]
+      properties:
+        defaultProvider: { type: string, enum: [claude_max, openrouter] }
+        claudeModel: { type: [string, "null"] }
+        openrouterModel: { type: [string, "null"] }
+    ProviderSettingsInput:
+      type: object
+      properties:
+        defaultProvider: { type: string, enum: [claude_max, openrouter] }
+        claudeModel: { type: [string, "null"], maxLength: 200 }
+        openrouterModel: { type: [string, "null"], maxLength: 200 }
+    ProviderModel:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        contextLength: { type: [number, "null"] }
+        promptCentsPerMTok: { type: [number, "null"] }
+        completionCentsPerMTok: { type: [number, "null"] }
+    ProviderModels:
+      type: object
+      required: [provider, available, models]
+      properties:
+        provider: { type: string, enum: [claude_max, openrouter] }
+        available: { type: boolean }
+        message: { type: [string, "null"] }
+        models:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProviderModel"
     EmergencyStop:
       type: object
       required: [active]

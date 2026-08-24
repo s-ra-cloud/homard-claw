@@ -33,7 +33,8 @@ export interface AgentInput {
   goals?: string;
   /** @maxLength 4000 */
   instructions?: string;
-  provider: AgentInputProvider;
+  /** @nullable */
+  provider?: AgentInputProvider;
   /** @maxLength 180 */
   model?: string;
   /** @maxLength 60 */

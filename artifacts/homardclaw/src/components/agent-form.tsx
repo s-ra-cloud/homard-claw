@@ -1,7 +1,12 @@
 import React from "react";
 import type { UseFormReturn } from "react-hook-form";
 import * as z from "zod";
-import { AgentProvider, AgentSecurityPreset } from "@workspace/api-client-react";
+import {
+  AgentProvider,
+  AgentSecurityPreset,
+  useGetProviderSettings,
+  useListProviderModels,
+} from "@workspace/api-client-react";
 import { LOBSTER_PRESETS, MarlowLobster } from "@/components/ui/marlow-lobster";
 import {
   FormControl,
@@ -38,7 +43,11 @@ export const agentFormSchema = z.object({
   personality: z.string().max(2000),
   goals: z.string().max(4000),
   instructions: z.string().max(4000),
-  provider: z.enum([AgentProvider.claude_max, AgentProvider.openrouter]),
+  provider: z.enum([
+    "workspace_default",
+    AgentProvider.claude_max,
+    AgentProvider.openrouter,
+  ]),
   model: z.string().max(180),
   voiceStyle: z.string().max(60),
   securityPreset: z.enum([
@@ -215,6 +224,7 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
                   </SelectTrigger>
                 </FormControl>
                 <SelectContent className={selectContentClass}>
+                  <SelectItem value="workspace_default" className={selectItemClass}>Workspace Default</SelectItem>
                   <SelectItem value={AgentProvider.claude_max} className={selectItemClass}>Claude Max</SelectItem>
                   <SelectItem value={AgentProvider.openrouter} className={selectItemClass}>OpenRouter</SelectItem>
                 </SelectContent>
@@ -224,26 +234,7 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
           )}
         />
 
-        <FormField
-          control={form.control}
-          name="model"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel className="uppercase font-bold text-xs">Preferred Model</FormLabel>
-              <FormControl>
-                <Input
-                  {...field}
-                  placeholder="Provider default"
-                  className={inputClass}
-                />
-              </FormControl>
-              <FormDescription className="text-[10px] uppercase">
-                Optional. Leave blank for provider default.
-              </FormDescription>
-              <FormMessage className={messageClass} />
-            </FormItem>
-          )}
-        />
+        <ModelField form={form} />
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -338,6 +329,83 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
   );
 }
 
+const DEFAULT_MODEL_SENTINEL = "__workspace_default__";
+
+/**
+ * Model preference picker. Uses the live provider catalog when it is
+ * available and degrades to a free-text input (with the availability
+ * message) when it is not, so configuration is never lost.
+ */
+function ModelField({ form }: { form: UseFormReturn<AgentFormValues> }) {
+  const providerChoice = form.watch("provider");
+  const { data: settings } = useGetProviderSettings();
+  // Agents following the workspace default pick models against the
+  // effective (workspace-configured) provider.
+  const provider =
+    providerChoice === "workspace_default"
+      ? (settings?.defaultProvider ?? AgentProvider.claude_max)
+      : providerChoice;
+  const { data: catalog, isLoading } = useListProviderModels(provider);
+  const hasCatalog = Boolean(catalog?.available && catalog.models.length > 0);
+
+  return (
+    <FormField
+      control={form.control}
+      name="model"
+      render={({ field }) => (
+        <FormItem>
+          <FormLabel className="uppercase font-bold text-xs">Preferred Model</FormLabel>
+          {hasCatalog ? (
+            <Select
+              onValueChange={(val) =>
+                field.onChange(val === DEFAULT_MODEL_SENTINEL ? "" : val)
+              }
+              value={field.value || DEFAULT_MODEL_SENTINEL}
+            >
+              <FormControl>
+                <SelectTrigger className={selectTriggerClass}>
+                  <SelectValue placeholder="Workspace default" />
+                </SelectTrigger>
+              </FormControl>
+              <SelectContent className={`${selectContentClass} max-h-72`}>
+                <SelectItem value={DEFAULT_MODEL_SENTINEL} className={selectItemClass}>
+                  Workspace Default
+                </SelectItem>
+                {field.value &&
+                  !catalog!.models.some((m) => m.id === field.value) && (
+                    <SelectItem value={field.value} className={selectItemClass}>
+                      {field.value} (current)
+                    </SelectItem>
+                  )}
+                {catalog!.models.map((model) => (
+                  <SelectItem key={model.id} value={model.id} className={selectItemClass}>
+                    {model.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <FormControl>
+              <Input
+                {...field}
+                placeholder={isLoading ? "Loading models..." : "Workspace default"}
+                className={inputClass}
+              />
+            </FormControl>
+          )}
+          <FormDescription className="text-[10px] uppercase">
+            {hasCatalog
+              ? "Optional. Workspace default applies when unset."
+              : (catalog?.message ??
+                "Optional. Leave blank for the workspace default.")}
+          </FormDescription>
+          <FormMessage className={messageClass} />
+        </FormItem>
+      )}
+    />
+  );
+}
+
 export function AgentPreviewCard({ form }: { form: UseFormReturn<AgentFormValues> }) {
   const shellColor = form.watch("shellColor");
   return (
@@ -367,7 +435,11 @@ export function AgentPreviewCard({ form }: { form: UseFormReturn<AgentFormValues
           </div>
           <div>
             <div className="text-[10px] text-muted-foreground uppercase font-bold mb-1">Provider</div>
-            <Badge variant="outline">{form.watch("provider")}</Badge>
+            <Badge variant="outline">
+              {form.watch("provider") === "workspace_default"
+                ? "default"
+                : form.watch("provider")}
+            </Badge>
           </div>
         </div>
       </div>

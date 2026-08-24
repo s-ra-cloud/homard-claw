@@ -6,13 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-/**
- * @nullable
- */
-export type AgentUpdateProvider = typeof AgentUpdateProvider[keyof typeof AgentUpdateProvider] | null;
+export type ProviderSettingsDefaultProvider = typeof ProviderSettingsDefaultProvider[keyof typeof ProviderSettingsDefaultProvider];
 
 
-export const AgentUpdateProvider = {
+export const ProviderSettingsDefaultProvider = {
   claude_max: 'claude_max',
   openrouter: 'openrouter',
 } as const;

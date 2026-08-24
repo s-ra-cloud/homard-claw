@@ -23,6 +23,7 @@ export interface Agent {
   goals?: string | null;
   /** @nullable */
   instructions?: string | null;
+  /** @nullable */
   provider: AgentProvider;
   /** @nullable */
   model?: string | null;
