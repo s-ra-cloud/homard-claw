@@ -1,5 +1,6 @@
 - [HomardClaw art direction](homardclaw-art-direction.md) — Favor dense, cozy isometric pixel dioramas with one expressive lobster at a lived-in workstation.
 - [Scene sprite placement](homardclaw-scene-placement.md) — Size room sprites as a % of the scene and tune seats by compositing PNGs, not by eyeballing the app.
+- [Office exterior bake](office-exterior-bake.md) — The garden/road landscape is baked around the untouched office PNG at a fixed offset; rebakes must keep the .room-scene inset in lockstep.
 - [Pixel character sprites](pixel-character-components.md) — Never hand-code a character that exists in scene art; generate a sprite and bake recoloured variants at build time.
 - [Composite lobster animation](lobster-sprite-animation.md) — Furniture-bearing poses animate frame strips, never transforms; derive frames from shipped sprites, never rebuild them.
 - [API server test conventions](api-server-test-conventions.md) — Integration tests hit the dev Postgres; impersonate the existing owner, tag+clean up all rows, never clobber owner_clerk_id.

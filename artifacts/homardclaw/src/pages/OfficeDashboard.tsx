@@ -20,8 +20,16 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useImmersiveMode } from "@/hooks/useImmersiveMode";
 import "./office-dashboard.css";
 
-// Use the server-rack edition if available, fall back to the original.
-const officeArt = `${import.meta.env.BASE_URL}images/four-desk-office-server.png`;
+/**
+ * Baked exterior landscape: the untouched pixels of
+ * `four-desk-office-server.png` composited onto a garden-and-road ground
+ * plane at exactly (256, 0) on a 1536x1024 canvas. The interior artwork is
+ * therefore identical to the original file, and `.room-scene` (which owns
+ * every percentage coordinate below) is pinned to that same footprint —
+ * left 16.6667%, width 66.6667%, full height — so no seat, tag, or hotspot
+ * coordinate changed.
+ */
+const officeArt = `${import.meta.env.BASE_URL}images/four-desk-office-exterior.png`;
 
 // Chair centres in the original office scene, measured from the artwork: each
 // seat sits in the middle of its desk's knee space, between the two drawer
@@ -301,9 +309,14 @@ export default function OfficeDashboard() {
                 +{overflowCount} agent{overflowCount !== 1 ? "s" : ""} in roster — room holds 8 · <Link href="/agents">view all</Link>
               </div>
             )}
-            <div className="room-art">
-              <div className="room-scene">
-                <img src={officeArt} alt="Isometric pixel-art HomardClaw office with four desks and an open central floor" />
+            <div
+              className="room-art"
+              /* Feeds the blurred fill-backdrop; keeps the URL on BASE_URL. */
+              style={{ "--exterior-art": `url("${officeArt}")` } as React.CSSProperties}
+            >
+              <div className="room-landscape">
+                <img src={officeArt} alt="Isometric pixel-art HomardClaw office with four desks, surrounded by a garden and a road" />
+                <div className="room-scene">
 
                 {/* ── Static scene navigation hotspots ── */}
                 {SCENE_HOTSPOTS.map((spot) => (
@@ -374,6 +387,7 @@ export default function OfficeDashboard() {
                     {agent.name}
                   </Link>
                 ))}
+                </div>
               </div>
             </div>
           </section>
