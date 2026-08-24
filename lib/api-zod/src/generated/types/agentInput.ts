@@ -54,5 +54,6 @@ export interface AgentInput {
   autonomy?: AgentInputAutonomy;
   permissionOverrides?: AgentPermissionOverrides | null;
   appGrants?: AppGrant[];
+  sensitiveDataSandbox?: boolean;
   avatar?: AvatarConfig;
 }

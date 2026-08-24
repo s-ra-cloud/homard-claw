@@ -402,6 +402,37 @@ afterAll(async () => {
 
 /* ------------------------------------------------------------------ */
 
+// eslint-disable-next-line import/order -- test-only import for the pure sandbox mapper
+import { codexSandboxFor } from "../codex/execute";
+
+describe("Codex sandbox derivation", () => {
+  it("forces the strictest sandbox for a sensitive-data agent, beating preset, autonomy, and the network env flag", () => {
+    // The most permissive combination possible: trusted operator, fully
+    // autonomous, with CODEX_ALLOW_NETWORK opted in — the sandbox still wins.
+    const profile = codexSandboxFor({
+      securityPreset: "operator",
+      autonomy: "autonomous",
+      allowNetwork: true,
+      sensitiveDataSandbox: true,
+    });
+    expect(profile).toEqual({
+      sandboxMode: "read-only",
+      networkAccessEnabled: false,
+      webSearchMode: "disabled",
+      approvalPolicy: "never",
+    });
+    // Sanity: without the flag, the same trusted combination gets network.
+    const open = codexSandboxFor({
+      securityPreset: "operator",
+      autonomy: "autonomous",
+      allowNetwork: true,
+      sensitiveDataSandbox: false,
+    });
+    expect(open.networkAccessEnabled).toBe(true);
+    expect(open.webSearchMode).toBe("live");
+  });
+});
+
 describe("Codex credential storage", () => {
   it("reports the ChatGPT allowance only for a chatgpt-mode credential", async () => {
     const state = await codexRuntimeState();

@@ -181,8 +181,12 @@ describe("action block parser", () => {
 describe("authorization deny matrix", () => {
   const grants = (
     entries: [ConnectedAppId, AppAccessLevel][],
-  ): { grants: Map<ConnectedAppId, AppAccessLevel> } => ({
+  ): {
+    grants: Map<ConnectedAppId, AppAccessLevel>;
+    sensitiveDataSandbox: boolean;
+  } => ({
     grants: new Map(entries),
+    sensitiveDataSandbox: false,
   });
 
   it("denies unknown operations", () => {
@@ -454,6 +458,58 @@ describe("agent grant lifecycle", () => {
       .send({ appGrants: [] });
     expect(revoke.status).toBe(200);
     expect(revoke.body.appGrants).toEqual([]);
+  });
+
+  it("caps a sandboxed agent at read regardless of the stored grant level", () => {
+    const sandboxed = (
+      entries: [ConnectedAppId, AppAccessLevel][],
+    ) => ({ grants: new Map(entries), sensitiveDataSandbox: true });
+
+    // Reads still work — that is the whole point of the sandbox.
+    const read = authorizeAppAction(
+      sandboxed([["gmail", "write"]]),
+      "gmail.search",
+      { query: "from:alice" },
+    );
+    expect(read.kind).toBe("allow");
+
+    // Drafts are denied even though the grant says write.
+    const draft = authorizeAppAction(
+      sandboxed([["gmail", "write"]]),
+      "gmail.create_draft",
+      { to: "a@b.c", subject: "s", body: "b" },
+    );
+    expect(draft.kind).toBe("deny");
+    if (draft.kind === "deny") {
+      expect(draft.reason).toMatch(/sensitive data sandbox/i);
+    }
+
+    // Writes never even reach the approval queue.
+    const write = authorizeAppAction(
+      sandboxed([["gmail", "write"]]),
+      "gmail.send_email",
+      { to: "a@b.c", subject: "s", body: "b" },
+    );
+    expect(write.kind).toBe("deny");
+  });
+
+  it("shows a sandboxed agent only read operations, framed as read-only", () => {
+    const grants = new Map<"gmail" | "google_drive" | "github", "read" | "draft" | "write">([
+      ["gmail", "write"],
+      ["github", "write"],
+    ]);
+    const prompt = buildAppsPromptSection(grants, { sensitiveDataSandbox: true });
+    expect(prompt).toBeTruthy();
+    expect(prompt!).toMatch(/sensitive data sandbox/i);
+    expect(prompt!).toContain("gmail.search");
+    expect(prompt!).not.toContain("gmail.send_email");
+    expect(prompt!).not.toContain("gmail.create_draft");
+    // Untrusted-data framing is present for everyone.
+    expect(prompt!).toMatch(/UNTRUSTED EXTERNAL DATA/);
+    // A sandboxed agent with only write-level operations available at its
+    // grant sees a read list, never an empty write list.
+    const unsandboxed = buildAppsPromptSection(grants);
+    expect(unsandboxed!).toContain("gmail.send_email");
   });
 
   it("never copies grants when duplicating an agent", async () => {

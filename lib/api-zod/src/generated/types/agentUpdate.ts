@@ -72,5 +72,6 @@ export interface AgentUpdate {
   autonomy?: AgentUpdateAutonomy;
   permissionOverrides?: AgentPermissionOverrides | null;
   appGrants?: AppGrant[];
+  sensitiveDataSandbox?: boolean;
   avatar?: AvatarConfig;
 }

@@ -91,7 +91,16 @@ export type ProviderCallRequest = {
   /** Isolated working directory for providers that execute in a sandbox. */
   workingDirectory?: string | null;
   /** Agent trust inputs used to derive a restrictive sandbox. */
-  sandbox?: { securityPreset: string; autonomy: string } | null;
+  sandbox?: {
+    securityPreset: string;
+    autonomy: string;
+    /**
+     * Persisted sensitive-data sandbox flag. When true it overrides the
+     * preset/autonomy/environment combination and forces the strictest
+     * available Codex sandbox: read-only, no network, no web search.
+     */
+    sensitiveDataSandbox?: boolean;
+  } | null;
   onPhase?: (phase: ProviderPhase) => void | Promise<void>;
   onProgress?: (progress: { level: "info" | "warn" | "error"; message: string }) => void | Promise<void>;
   onThreadId?: (threadId: string) => void | Promise<void>;
@@ -403,6 +412,8 @@ const codexAdapter: ProviderAdapter = {
           securityPreset: req.sandbox?.securityPreset ?? "observer",
           autonomy: req.sandbox?.autonomy ?? "supervised",
           allowNetwork: process.env.CODEX_ALLOW_NETWORK === "true",
+          // Missing sandbox inputs fail closed to isolated.
+          sensitiveDataSandbox: req.sandbox?.sensitiveDataSandbox ?? true,
         }),
         signal: req.signal,
         onThreadId: req.onThreadId,

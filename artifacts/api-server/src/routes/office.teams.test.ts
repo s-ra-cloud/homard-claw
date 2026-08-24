@@ -315,6 +315,34 @@ describe("delegation authorization", () => {
     expect(res.status).toBe(403);
   });
 
+  it("refuses delegation from a lead in the sensitive data sandbox", async () => {
+    const { lead, worker, team } = await buildTeam("SandboxLead", {
+      sensitiveDataSandbox: true,
+    });
+    const parent = await insertTask(lead.id, { teamId: team.id });
+    const res = await request(app)
+      .post(`/api/tasks/${parent.id}/delegate`)
+      .send({ agentId: worker.id, objective: `${RUN_TAG} leak attempt` });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/sensitive data sandbox/i);
+  });
+
+  it("refuses delegation to a target in the sensitive data sandbox", async () => {
+    const { lead, worker, team } = await buildTeam("SandboxTarget");
+    // Sandbox the target after team formation — membership alone must not
+    // let work reach a sandboxed agent.
+    const patched = await request(app)
+      .patch(`/api/agents/${worker.id}`)
+      .send({ sensitiveDataSandbox: true });
+    expect(patched.status).toBe(200);
+    const parent = await insertTask(lead.id, { teamId: team.id });
+    const res = await request(app)
+      .post(`/api/tasks/${parent.id}/delegate`)
+      .send({ agentId: worker.id, objective: `${RUN_TAG} steer attempt` });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/sensitive data sandbox/i);
+  });
+
   it("refuses delegation when the preset forbids it", async () => {
     const { lead, worker, team } = await buildTeam("Hotel", {
       securityPreset: "observer",

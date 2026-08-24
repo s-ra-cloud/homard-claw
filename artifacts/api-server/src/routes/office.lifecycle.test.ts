@@ -112,6 +112,48 @@ describe("agent lifecycle", () => {
     expect(res.body.status).toBe("idle");
   });
 
+  it("persists the sensitive data sandbox flag across create, update, and detail", async () => {
+    // Default off, for new and existing agents alike.
+    const plain = await createAgent(`${RUN_TAG} Sandbox Default`);
+    expect(plain.status).toBe(201);
+    expect(plain.body.sensitiveDataSandbox).toBe(false);
+
+    const created = await createAgent(`${RUN_TAG} Sandboxed`, {
+      sensitiveDataSandbox: true,
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.sensitiveDataSandbox).toBe(true);
+
+    const detail = await request(app).get(`/api/agents/${created.body.id}`);
+    expect(detail.status).toBe(200);
+    expect(detail.body.agent.sensitiveDataSandbox).toBe(true);
+
+    const list = await request(app).get("/api/agents");
+    const listed = (list.body as { id: string; sensitiveDataSandbox: boolean }[]).find(
+      (a) => a.id === created.body.id,
+    );
+    expect(listed?.sensitiveDataSandbox).toBe(true);
+
+    const off = await request(app)
+      .patch(`/api/agents/${created.body.id}`)
+      .send({ sensitiveDataSandbox: false });
+    expect(off.status).toBe(200);
+    expect(off.body.sensitiveDataSandbox).toBe(false);
+
+    const on = await request(app)
+      .patch(`/api/agents/${created.body.id}`)
+      .send({ sensitiveDataSandbox: true });
+    expect(on.status).toBe(200);
+    expect(on.body.sensitiveDataSandbox).toBe(true);
+
+    // Duplication never inherits the sandbox: the copy starts with no
+    // grants, so it starts un-sandboxed too, like any fresh agent.
+    const dup = await request(app).post(`/api/agents/${created.body.id}/duplicate`);
+    expect(dup.status).toBe(201);
+    createdAgentIds.push(dup.body.id);
+    expect(dup.body.sensitiveDataSandbox).toBe(false);
+  });
+
   it("rejects duplicate names case-insensitively", async () => {
     const res = await createAgent(`${RUN_TAG.toUpperCase()} ALPHA`);
     expect(res.status).toBe(409);

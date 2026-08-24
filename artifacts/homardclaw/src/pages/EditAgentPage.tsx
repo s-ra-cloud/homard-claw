@@ -88,6 +88,7 @@ export default function EditAgentPage() {
               : "",
           shellColor: agent.avatar.shellColor,
           appGrants: appGrantsFormValue(agent.appGrants),
+          sensitiveDataSandbox: agent.sensitiveDataSandbox,
         }
       : undefined,
   });
@@ -142,6 +143,7 @@ export default function EditAgentPage() {
         // Always sent: the payload is the complete grant set, so clearing
         // every app back to "No Access" revokes everything.
         appGrants: appGrantsPayload(data),
+        sensitiveDataSandbox: data.sensitiveDataSandbox,
         avatar: {
           ...agent.avatar,
           shellColor: data.shellColor,

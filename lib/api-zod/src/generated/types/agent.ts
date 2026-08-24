@@ -47,6 +47,8 @@ export interface Agent {
   permissions: AgentPermissions;
   permissionOverrides?: AgentPermissionOverrides | null;
   appGrants: AppGrant[];
+  /** Sensitive data sandbox. When true the server keeps this agent's granted read-only app operations but denies connected-app drafts and writes, blocks internet/web access for Codex runs, forbids delegating or receiving delegated work, and excludes shared memories and knowledge from its prompts. */
+  sensitiveDataSandbox: boolean;
   avatar: AvatarConfig;
   archived: boolean;
   /** @nullable */

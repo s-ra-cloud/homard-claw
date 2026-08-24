@@ -83,6 +83,14 @@ export const agentsTable = pgTable(
     permissionOverrides: jsonb("permission_overrides")
       .$type<AgentPermissionOverrides>(),
     avatar: jsonb("avatar").$type<AvatarConfig>().notNull(),
+    // Sensitive-data sandbox: a server-enforced isolation mode for agents
+    // that read confidential email/files. When true the agent keeps its
+    // granted READ operations but loses connected-app drafts/writes, all
+    // network access under Codex, delegation in both directions, and any
+    // shared/global memory or knowledge in its prompt. Always opt-in.
+    sensitiveDataSandbox: boolean("sensitive_data_sandbox")
+      .notNull()
+      .default(false),
     paused: boolean("paused").notNull().default(false),
     archived: boolean("archived").notNull().default(false),
     archivedAt: timestamp("archived_at", { withTimezone: true }),

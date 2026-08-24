@@ -303,6 +303,107 @@ describe("task context retrieval", () => {
     expect(context.promptSection).toContain("[M1]");
   });
 
+  it("gives a sandboxed agent only its own private memories — no shared memories, no knowledge files", async () => {
+    const agent = await createAgent(`${RUN_TAG} Vault`);
+    await db
+      .update(agentsTable)
+      .set({ sensitiveDataSandbox: true })
+      .where(eq(agentsTable.id, agent.id));
+
+    const insert = (values: Partial<typeof memoriesTable.$inferInsert> & { content: string }) =>
+      db.insert(memoriesTable).values({ kind: "fact", ...values }).returning();
+
+    const [privatePinned] = await insert({
+      content: taggedMemory("Private plankton ledger procedure."),
+      agentId: agent.id,
+      pinned: true,
+    });
+    const [sharedPinned] = await insert({
+      content: taggedMemory("Office-wide plankton motto everyone repeats."),
+      pinned: true, // pinned shared memories are the easiest leak path
+    });
+    const [sharedRelevant] = await insert({
+      content: taggedMemory("Shared plankton ledger trivia."),
+    });
+
+    // An assigned, relevant knowledge file must also stay out.
+    const upload = await request(app)
+      .post("/api/knowledge")
+      .send({
+        name: `${RUN_TAG} plankton-ledger.md`,
+        mimeType: "text/markdown",
+        content: `${RUN_TAG} The plankton ledger reconciliation steps.`,
+      });
+    expect(upload.status).toBe(201);
+    const assign = await request(app)
+      .put(`/api/knowledge/${upload.body.id}/assignments`)
+      .send({ agentIds: [agent.id] });
+    expect(assign.status).toBe(200);
+
+    const context = await buildTaskContext(
+      agent.id,
+      "Reconcile the plankton ledger",
+      { sensitiveDataSandbox: true },
+    );
+    const ids = context.sources.map((s) => s.id);
+    expect(ids).toContain(privatePinned.id);
+    expect(ids).not.toContain(sharedPinned.id);
+    expect(ids).not.toContain(sharedRelevant.id);
+    expect(context.sources.every((s) => s.type === "memory")).toBe(true);
+    expect(context.promptSection ?? "").not.toContain("motto");
+
+    // Un-sandboxed retrieval for the same agent does see the shared rows,
+    // proving the option (not the data) makes the difference.
+    const open = await buildTaskContext(agent.id, "Reconcile the plankton ledger");
+    expect(open.sources.map((s) => s.id)).toContain(sharedPinned.id);
+  });
+
+  it("refuses to publish a sandboxed agent's private memory office-wide", async () => {
+    const agent = await createAgent(`${RUN_TAG} Keeper`);
+    await db
+      .update(agentsTable)
+      .set({ sensitiveDataSandbox: true })
+      .where(eq(agentsTable.id, agent.id));
+    const [memory] = await db
+      .insert(memoriesTable)
+      .values({
+        kind: "fact",
+        agentId: agent.id,
+        content: taggedMemory("Confidential payroll detail."),
+      })
+      .returning();
+
+    // Re-scoping to shared (agentId: null) is refused while sandboxed.
+    const publish = await request(app)
+      .patch(`/api/memories/${memory.id}`)
+      .send({ agentId: null });
+    expect(publish.status).toBe(409);
+    expect(publish.body.error).toMatch(/sensitive data sandbox/i);
+
+    // Moving it to a different agent is refused too.
+    const other = await createAgent(`${RUN_TAG} Bystander`);
+    const move = await request(app)
+      .patch(`/api/memories/${memory.id}`)
+      .send({ agentId: other.id });
+    expect(move.status).toBe(409);
+
+    // Content edits that keep the memory private remain allowed.
+    const edit = await request(app)
+      .patch(`/api/memories/${memory.id}`)
+      .send({ content: taggedMemory("Confidential payroll detail, amended.") });
+    expect(edit.status).toBe(200);
+
+    // Once the sandbox is off, the owner may publish again.
+    await db
+      .update(agentsTable)
+      .set({ sensitiveDataSandbox: false })
+      .where(eq(agentsTable.id, agent.id));
+    const publishNow = await request(app)
+      .patch(`/api/memories/${memory.id}`)
+      .send({ agentId: null });
+    expect(publishNow.status).toBe(200);
+  });
+
   it("wraps retrieved content as untrusted reference data, never as instructions", async () => {
     const agent = await createAgent(`${RUN_TAG} Guard`);
     await db.insert(memoriesTable).values({

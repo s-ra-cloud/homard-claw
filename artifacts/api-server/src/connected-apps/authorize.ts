@@ -1,5 +1,6 @@
 import {
   agentAppGrantsTable,
+  agentsTable,
   connectedAppSettingsTable,
   db,
   type AppAccessLevel,
@@ -23,6 +24,14 @@ export type AgentAppAccess = {
   grants: Map<ConnectedAppId, AppAccessLevel>;
   /** System-prompt section, or null when the agent can use nothing. */
   promptSection: string | null;
+  /**
+   * Sensitive-data sandbox flag, loaded fresh alongside the grants so a
+   * toggle applies to the very next authorization decision. When true,
+   * only read-level operations survive — drafts and writes are denied
+   * even if the stored grant is broader, and even for actions the owner
+   * approved before the sandbox was switched on.
+   */
+  sensitiveDataSandbox: boolean;
 };
 
 /**
@@ -33,7 +42,7 @@ export type AgentAppAccess = {
 export async function loadAgentAppAccess(
   agentId: string,
 ): Promise<AgentAppAccess> {
-  const [grantRows, settingRows] = await Promise.all([
+  const [grantRows, settingRows, agentRows] = await Promise.all([
     db
       .select()
       .from(agentAppGrantsTable)
@@ -44,7 +53,14 @@ export async function loadAgentAppAccess(
       .where(
         inArray(connectedAppSettingsTable.app, [...CONNECTED_APP_IDS]),
       ),
+    db
+      .select({ sensitiveDataSandbox: agentsTable.sensitiveDataSandbox })
+      .from(agentsTable)
+      .where(eq(agentsTable.id, agentId))
+      .limit(1),
   ]);
+  // Fail closed: an agent row we cannot read is treated as sandboxed.
+  const sensitiveDataSandbox = agentRows[0]?.sensitiveDataSandbox ?? true;
   const disabled = new Set(
     settingRows.filter((row) => !row.enabled).map((row) => row.app),
   );
@@ -54,7 +70,11 @@ export async function loadAgentAppAccess(
     if (disabled.has(row.app)) continue;
     grants.set(row.app, row.accessLevel as AppAccessLevel);
   }
-  return { grants, promptSection: buildAppsPromptSection(grants) };
+  return {
+    grants,
+    promptSection: buildAppsPromptSection(grants, { sensitiveDataSandbox }),
+    sensitiveDataSandbox,
+  };
 }
 
 export type AppActionDecision =
@@ -74,7 +94,7 @@ export type AppActionDecision =
  * only as approval requests.
  */
 export function authorizeAppAction(
-  access: Pick<AgentAppAccess, "grants">,
+  access: Pick<AgentAppAccess, "grants" | "sensitiveDataSandbox">,
   operationName: string,
   rawParams: unknown,
 ): AppActionDecision {
@@ -90,6 +110,17 @@ export function authorizeAppAction(
     return {
       kind: "deny",
       reason: `This agent has no access to ${APP_CATALOG[op.app].displayName}. The owner must grant it (and the app must be enabled) first.`,
+    };
+  }
+  // The sensitive-data sandbox caps every grant at read, regardless of the
+  // stored level and regardless of any prior approval: this check runs both
+  // when a request first arrives and when the worker re-authorizes an
+  // approved action just before execution, so enabling the sandbox stops
+  // pending drafts/writes too.
+  if (access.sensitiveDataSandbox && op.level !== "read") {
+    return {
+      kind: "deny",
+      reason: `This agent is in the sensitive data sandbox: it may only read from connected apps, and ${op.name} would ${op.level === "write" ? "take an external action" : "create content"}.`,
     };
   }
   if (!levelAllows(granted, op.level)) {

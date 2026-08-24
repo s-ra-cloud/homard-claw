@@ -328,6 +328,15 @@ export async function evaluateDelegation({
   if (targetAgentId === lead.id) {
     return { kind: "deny", reason: `${lead.name} cannot delegate to itself.` };
   }
+  // The sensitive-data sandbox severs delegation in both directions: a
+  // sandboxed lead cannot push what it read outward through teammates, and
+  // a sandboxed target cannot be steered by content another agent absorbed.
+  if (lead.sensitiveDataSandbox) {
+    return {
+      kind: "deny",
+      reason: `${lead.name} is in the sensitive data sandbox and cannot delegate work to other agents.`,
+    };
+  }
 
   // The lead must actually lead a team that contains the target.
   const [team] = await conn
@@ -359,6 +368,12 @@ export async function evaluateDelegation({
     return {
       kind: "deny",
       reason: `${target.name} is no longer working in the office.`,
+    };
+  }
+  if (target.sensitiveDataSandbox) {
+    return {
+      kind: "deny",
+      reason: `${target.name} is in the sensitive data sandbox and cannot receive delegated work.`,
     };
   }
 

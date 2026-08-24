@@ -539,6 +539,125 @@ describe("approval-gated write, end to end", () => {
   });
 });
 
+describe("sensitive data sandbox at the worker boundary", () => {
+  it("lets a sandboxed agent read but denies its draft/write requests, executing nothing external", async () => {
+    const agent = await createAgent("Vaulted", [
+      { app: "gmail", accessLevel: "write" },
+    ]);
+    const patched = await request(app)
+      .patch(`/api/agents/${agent.id}`)
+      .send({ sensitiveDataSandbox: true });
+    expect(patched.status).toBe(200);
+    expect(patched.body.sensitiveDataSandbox).toBe(true);
+
+    const task = await insertRunningTask(agent.id);
+    const readBlock = `Reading first.\n<app_action>${JSON.stringify(
+      { operation: "gmail.search", params: { query: "from:alice" } },
+    )}</app_action>`;
+    executeMock.mockResolvedValue({ ok: true, summary: "2 messages found." });
+    queueCompletions([
+      completion(readBlock),
+      completion(SEND_EMAIL_BLOCK),
+      completion("Understood; here is my summary instead."),
+    ]);
+
+    await runTask({ task, agent: await loadAgent(agent.id) });
+
+    // The read ran; the send was denied without ever parking for approval.
+    expect(executeMock).toHaveBeenCalledTimes(1);
+    const actions = await getActions(task.id);
+    const read = actions.find((a) => a.operation === "gmail.search");
+    const send = actions.find((a) => a.operation === "gmail.send_email");
+    expect(read?.status).toBe("executed");
+    expect(send?.status).toBe("denied");
+    expect(send?.errorMessage).toMatch(/sensitive data sandbox/i);
+    expect(await getPendingApproval(task.id)).toBeFalsy();
+    expect((await getTaskRow(task.id))?.status).toBe("completed");
+  });
+
+  it("denies a write when the sandbox is enabled while the model is mid-run", async () => {
+    const agent = await createAgent("Flipped Midrun", [
+      { app: "gmail", accessLevel: "write" },
+    ]);
+    const task = await insertRunningTask(agent.id);
+
+    // The attempt starts with the sandbox OFF: the agent snapshot and the
+    // grants loaded at attempt start would both allow the send. The owner
+    // flips the sandbox ON while the provider is producing the round that
+    // requests the write — modelled by toggling the flag inside the fetch
+    // mock, before the completion carrying the action block is returned.
+    const bodies = [completion(SEND_EMAIL_BLOCK), completion("Understood.")];
+    let flipped = false;
+    fetchMock.mockImplementation(async (url: unknown) => {
+      if (String(url).includes("/models")) {
+        return new Response(JSON.stringify(PRICING_CATALOG), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (!flipped) {
+        flipped = true;
+        await db
+          .update(agentsTable)
+          .set({ sensitiveDataSandbox: true })
+          .where(eq(agentsTable.id, agent.id));
+      }
+      const next = bodies.shift();
+      if (next === undefined) throw new Error("unexpected fetch in test");
+      return new Response(JSON.stringify(next), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    await runTask({ task, agent: await loadAgent(agent.id) });
+
+    // The per-round refresh caught the toggle: nothing external ran and
+    // the write never even parked for approval.
+    expect(executeMock).not.toHaveBeenCalled();
+    const [action] = await getActions(task.id);
+    expect(action?.operation).toBe("gmail.send_email");
+    expect(action?.status).toBe("denied");
+    expect(action?.errorMessage).toMatch(/sensitive data sandbox/i);
+    expect(await getPendingApproval(task.id)).toBeFalsy();
+    const logs = await getLogs(task.id);
+    expect(
+      logs.some((l) => l.message.includes("enabled mid-run")),
+    ).toBe(true);
+    expect((await getTaskRow(task.id))?.status).toBe("completed");
+  });
+
+  it("denies a previously approved write once the sandbox is switched on", async () => {
+    const agent = await createAgent("Locked Later", [
+      { app: "gmail", accessLevel: "write" },
+    ]);
+    const { task, approval, action } = await parkOnWrite(agent.id);
+    await approve(approval.id);
+
+    // The owner flips the sandbox on while the approved task sits queued.
+    const lockdown = await request(app)
+      .patch(`/api/agents/${agent.id}`)
+      .send({ sensitiveDataSandbox: true });
+    expect(lockdown.status).toBe(200);
+
+    const claimed = await claimNextTask({
+      agentIds: [agent.id],
+      includePausedAgents: true,
+    });
+    expect(claimed?.task.id).toBe(task.id);
+    queueCompletions([completion("Understood, I will not send it.")]);
+    await runTask(claimed!);
+
+    // Fresh re-authorization wins over the stale approval.
+    expect(executeMock).not.toHaveBeenCalled();
+    const [denied] = await getActions(task.id);
+    expect(denied?.id).toBe(action.id);
+    expect(denied?.status).toBe("denied");
+    expect(denied?.errorMessage).toMatch(/sensitive data sandbox/i);
+    const logs = await getLogs(task.id);
+    expect(logs.some((l) => l.message.includes("was NOT run"))).toBe(true);
+    expect((await getTaskRow(task.id))?.status).toBe("completed");
+  });
+});
+
 describe("multi-round budget ceiling", () => {
   it("stops a follow-up action round before dispatch once the ceiling is spent", async () => {
     const agent = await createAgent("Frugal", [

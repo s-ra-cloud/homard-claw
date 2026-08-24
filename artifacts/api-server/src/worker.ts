@@ -601,7 +601,13 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
   // Connected apps: grants are loaded fresh on every attempt so a revoked
   // or downgraded grant applies to the very next action. A load failure
   // fails closed — the run proceeds with no app access at all.
-  let appAccess: AgentAppAccess = { grants: new Map(), promptSection: null };
+  // The fallback fails closed on the sandbox flag: if grants cannot be
+  // loaded, the agent row's own persisted flag still governs this attempt.
+  let appAccess: AgentAppAccess = {
+    grants: new Map(),
+    promptSection: null,
+    sensitiveDataSandbox: agent.sensitiveDataSandbox,
+  };
   try {
     appAccess = await loadAgentAppAccess(agent.id);
   } catch (error) {
@@ -730,7 +736,9 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     sources: [],
   };
   try {
-    context = await buildTaskContext(agent.id, task.objective);
+    context = await buildTaskContext(agent.id, task.objective, {
+      sensitiveDataSandbox: appAccess.sensitiveDataSandbox,
+    });
   } catch (error) {
     logger.warn({ taskId: task.id, error }, "Memory retrieval failed");
     await addTaskLog(
@@ -753,13 +761,13 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     );
   }
 
-  const system = [
-    buildSystemPrompt(agent),
-    context.promptSection,
-    appAccess.promptSection,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  // Rebuilt whenever grants/sandbox state is refreshed mid-run, so every
+  // provider round is prompted with the access it actually has.
+  const buildSystem = () =>
+    [buildSystemPrompt(agent), context.promptSection, appAccess.promptSection]
+      .filter(Boolean)
+      .join("\n\n");
+  let system = buildSystem();
 
   // Codex serializes per authentication file; the lease is released in the
   // outer `finally` so a crash mid-run cannot hold it past its expiry.
@@ -1124,6 +1132,10 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
           sandbox: {
             securityPreset: agent.securityPreset,
             autonomy: agent.autonomy,
+            // Freshly loaded with the grants, so toggling the sandbox on
+            // applies to the very next provider round, and no environment
+            // flag can re-open the network for a sandboxed agent.
+            sensitiveDataSandbox: appAccess.sensitiveDataSandbox,
           },
           onPhase: (phase) => setTaskPhase(task.id, task.attempts, phase),
           onProgress: (progress) =>
@@ -1231,6 +1243,46 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
             }
           }
         }
+
+        // The model may have run for minutes since access was last loaded.
+        // Re-load grants and the sandbox flag before authorizing anything
+        // it asked for, so an owner revoking a grant or enabling the
+        // sensitive data sandbox mid-run applies to this very round — and,
+        // because the refreshed state also feeds the next dispatch, to
+        // every later provider round (including Codex's network profile).
+        // A refresh failure fails closed: full sandbox, no grants at all.
+        const wasSandboxed = appAccess.sensitiveDataSandbox;
+        try {
+          appAccess = await loadAgentAppAccess(agent.id);
+        } catch (error) {
+          logger.warn(
+            { taskId: task.id, error },
+            "Could not refresh connected-app access mid-run",
+          );
+          appAccess = {
+            grants: new Map(),
+            promptSection: null,
+            sensitiveDataSandbox: true,
+          };
+        }
+        if (!wasSandboxed && appAccess.sensitiveDataSandbox) {
+          // The sandbox came on mid-run: shared memories and knowledge
+          // files must not feed any further round either. If the rebuild
+          // fails, run the rest of the task with no stored context at all.
+          try {
+            context = await buildTaskContext(agent.id, task.objective, {
+              sensitiveDataSandbox: true,
+            });
+          } catch {
+            context = { promptSection: null, sources: [] };
+          }
+          await addTaskLog(
+            task.id,
+            "warn",
+            "The sensitive data sandbox was enabled mid-run: drafts and external changes are refused and shared context was withdrawn from this task.",
+          );
+        }
+        system = buildSystem();
 
         let parkedForApproval = false;
         for (const request of requests.slice(0, MAX_ACTIONS_PER_ROUND)) {
@@ -1387,13 +1439,35 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
       // Delegated work reports back to whoever handed it over, so the
       // lead's thread shows the outcome without polling the task tree.
       if (task.delegatedByAgentId) {
-        await db.insert(agentMessagesTable).values({
-          fromAgentId: agent.id,
-          toAgentId: task.delegatedByAgentId,
-          taskId: task.id,
-          kind: "result",
-          body: `Finished "${task.objective.slice(0, 160)}": ${finalOutput.slice(0, 400)}`,
-        });
+        // Sandboxed agents exchange no delegated-result messages: a task
+        // delegated before the sandbox was switched on (delegation itself
+        // is denied for sandboxed agents) must not relay what a sensitive
+        // agent read to another agent, in either direction.
+        const [parent] = await db
+          .select({
+            sensitiveDataSandbox: agentsTable.sensitiveDataSandbox,
+          })
+          .from(agentsTable)
+          .where(eq(agentsTable.id, task.delegatedByAgentId))
+          .limit(1);
+        const eitherSandboxed =
+          appAccess.sensitiveDataSandbox ||
+          (parent?.sensitiveDataSandbox ?? true);
+        if (eitherSandboxed) {
+          await addTaskLog(
+            task.id,
+            "info",
+            "The result was not relayed to the delegating agent: the sensitive data sandbox blocks agent-to-agent messages.",
+          );
+        } else {
+          await db.insert(agentMessagesTable).values({
+            fromAgentId: agent.id,
+            toAgentId: task.delegatedByAgentId,
+            taskId: task.id,
+            kind: "result",
+            body: `Finished "${task.objective.slice(0, 160)}": ${finalOutput.slice(0, 400)}`,
+          });
+        }
       }
       // Retain the outcome as agent memory so future tasks can draw on it.
       try {

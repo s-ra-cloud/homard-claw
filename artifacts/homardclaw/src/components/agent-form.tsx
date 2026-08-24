@@ -29,6 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 
 export const VOICE_OPTIONS = [
   { value: "none", label: "None (Text Only)" },
@@ -109,6 +110,12 @@ export const agentFormSchema = z.object({
    * sent — access to the owner's external accounts is always opt-in.
    */
   appGrants: z.record(z.string(), z.enum(["none", "read", "draft", "write"])),
+  /**
+   * Sensitive data sandbox: server-enforced isolation for agents reading
+   * confidential email/files. Read-only apps, no internet, no delegation,
+   * no shared memory/knowledge.
+   */
+  sensitiveDataSandbox: z.boolean(),
 });
 
 export type AgentFormValues = z.infer<typeof agentFormSchema>;
@@ -161,6 +168,7 @@ export const emptyAgentFormValues: AgentFormValues = {
   approvalThresholdCents: "",
   shellColor: LOBSTER_PRESETS[0].shellColor,
   appGrants: defaultAppGrants(),
+  sensitiveDataSandbox: false,
 };
 
 /** Convert the form's app→level map into the API's grant list. */
@@ -488,6 +496,8 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
 
       <ConnectedAppsFields form={form} />
 
+      <SensitiveDataSandboxField form={form} />
+
       <FormField
         control={form.control}
         name="shellColor"
@@ -681,6 +691,48 @@ function ConnectedAppsFields({ form }: { form: UseFormReturn<AgentFormValues> })
         ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * Sensitive data sandbox toggle. Placed right after the app grants because
+ * the two decisions belong together: an agent trusted to read confidential
+ * email/files can be locked down so nothing it reads can leave — read-only
+ * apps, no internet for its tools, no delegation, no shared memory.
+ */
+function SensitiveDataSandboxField({ form }: { form: UseFormReturn<AgentFormValues> }) {
+  return (
+    <FormField
+      control={form.control}
+      name="sensitiveDataSandbox"
+      render={({ field }) => (
+        <FormItem className="border-4 border-border bg-muted/20 p-4 flex flex-row items-start justify-between gap-4">
+          <div className="space-y-1">
+            <FormLabel className="uppercase font-bold text-xs">
+              Sensitive Data Sandbox
+            </FormLabel>
+            <p className="text-[10px] text-muted-foreground uppercase font-bold">
+              For agents that read confidential email or files.
+            </p>
+            <p className="text-[10px] text-muted-foreground">
+              When on, the server locks this agent down: connected apps become
+              read-only (no drafts, no sends), its tools get no internet or web
+              search, it cannot delegate work or receive delegated work or
+              message other agents, and shared memories and knowledge files
+              stay out of its context. You still see its task results and
+              action history.
+            </p>
+          </div>
+          <FormControl>
+            <Switch
+              checked={field.value}
+              onCheckedChange={field.onChange}
+              aria-label="Sensitive data sandbox"
+            />
+          </FormControl>
+        </FormItem>
+      )}
+    />
   );
 }
 

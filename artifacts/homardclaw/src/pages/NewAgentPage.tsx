@@ -51,6 +51,7 @@ export default function NewAgentPage() {
       // Every supported app must start at an explicit "none" — an undefined
       // entry fails validation with a misleading red "Required" error.
       appGrants: defaultAppGrants(),
+      sensitiveDataSandbox: false,
     },
   });
 
@@ -103,6 +104,7 @@ export default function NewAgentPage() {
         ...(appGrantsPayload(data).length > 0
           ? { appGrants: appGrantsPayload(data) }
           : {}),
+        sensitiveDataSandbox: data.sensitiveDataSandbox,
         avatar: {
           shellColor: data.shellColor,
           deskStyle: "standard",

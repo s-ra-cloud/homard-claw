@@ -122,6 +122,7 @@ export const ListAgentsResponseItem = zod.object({
   "app": zod.enum(['gmail', 'google_drive', 'github']),
   "accessLevel": zod.enum(['read', 'draft', 'write'])
 }).describe('Explicit permission for one agent to use one connected app. \"read\" only looks, \"draft\" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), \"write\" may take externally visible actions — those always pass through the approval desk before running.')),
+  "sensitiveDataSandbox": zod.boolean().describe('Sensitive data sandbox. When true the server keeps this agent\'s granted read-only app operations but denies connected-app drafts and writes, blocks internet\/web access for Codex runs, forbids delegating or receiving delegated work, and excludes shared memories and knowledge from its prompts.'),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),
@@ -212,6 +213,7 @@ export const CreateAgentBody = zod.object({
   "app": zod.enum(['gmail', 'google_drive', 'github']),
   "accessLevel": zod.enum(['read', 'draft', 'write'])
 }).describe('Explicit permission for one agent to use one connected app. \"read\" only looks, \"draft\" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), \"write\" may take externally visible actions — those always pass through the approval desk before running.')).optional(),
+  "sensitiveDataSandbox": zod.boolean().optional(),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),
@@ -303,6 +305,7 @@ export const CreateAgentResponse = zod.object({
   "app": zod.enum(['gmail', 'google_drive', 'github']),
   "accessLevel": zod.enum(['read', 'draft', 'write'])
 }).describe('Explicit permission for one agent to use one connected app. \"read\" only looks, \"draft\" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), \"write\" may take externally visible actions — those always pass through the approval desk before running.')),
+  "sensitiveDataSandbox": zod.boolean().describe('Sensitive data sandbox. When true the server keeps this agent\'s granted read-only app operations but denies connected-app drafts and writes, blocks internet\/web access for Codex runs, forbids delegating or receiving delegated work, and excludes shared memories and knowledge from its prompts.'),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),
@@ -406,6 +409,7 @@ export const GetAgentResponse = zod.object({
   "app": zod.enum(['gmail', 'google_drive', 'github']),
   "accessLevel": zod.enum(['read', 'draft', 'write'])
 }).describe('Explicit permission for one agent to use one connected app. \"read\" only looks, \"draft\" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), \"write\" may take externally visible actions — those always pass through the approval desk before running.')),
+  "sensitiveDataSandbox": zod.boolean().describe('Sensitive data sandbox. When true the server keeps this agent\'s granted read-only app operations but denies connected-app drafts and writes, blocks internet\/web access for Codex runs, forbids delegating or receiving delegated work, and excludes shared memories and knowledge from its prompts.'),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),
@@ -569,6 +573,7 @@ export const UpdateAgentBody = zod.object({
   "app": zod.enum(['gmail', 'google_drive', 'github']),
   "accessLevel": zod.enum(['read', 'draft', 'write'])
 }).describe('Explicit permission for one agent to use one connected app. \"read\" only looks, \"draft\" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), \"write\" may take externally visible actions — those always pass through the approval desk before running.')).optional(),
+  "sensitiveDataSandbox": zod.boolean().optional(),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),
@@ -660,6 +665,7 @@ export const UpdateAgentResponse = zod.object({
   "app": zod.enum(['gmail', 'google_drive', 'github']),
   "accessLevel": zod.enum(['read', 'draft', 'write'])
 }).describe('Explicit permission for one agent to use one connected app. \"read\" only looks, \"draft\" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), \"write\" may take externally visible actions — those always pass through the approval desk before running.')),
+  "sensitiveDataSandbox": zod.boolean().describe('Sensitive data sandbox. When true the server keeps this agent\'s granted read-only app operations but denies connected-app drafts and writes, blocks internet\/web access for Codex runs, forbids delegating or receiving delegated work, and excludes shared memories and knowledge from its prompts.'),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),
@@ -772,6 +778,7 @@ export const DuplicateAgentResponse = zod.object({
   "app": zod.enum(['gmail', 'google_drive', 'github']),
   "accessLevel": zod.enum(['read', 'draft', 'write'])
 }).describe('Explicit permission for one agent to use one connected app. \"read\" only looks, \"draft\" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), \"write\" may take externally visible actions — those always pass through the approval desk before running.')),
+  "sensitiveDataSandbox": zod.boolean().describe('Sensitive data sandbox. When true the server keeps this agent\'s granted read-only app operations but denies connected-app drafts and writes, blocks internet\/web access for Codex runs, forbids delegating or receiving delegated work, and excludes shared memories and knowledge from its prompts.'),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),
@@ -878,6 +885,7 @@ export const SetAgentArchivedResponse = zod.object({
   "app": zod.enum(['gmail', 'google_drive', 'github']),
   "accessLevel": zod.enum(['read', 'draft', 'write'])
 }).describe('Explicit permission for one agent to use one connected app. \"read\" only looks, \"draft\" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), \"write\" may take externally visible actions — those always pass through the approval desk before running.')),
+  "sensitiveDataSandbox": zod.boolean().describe('Sensitive data sandbox. When true the server keeps this agent\'s granted read-only app operations but denies connected-app drafts and writes, blocks internet\/web access for Codex runs, forbids delegating or receiving delegated work, and excludes shared memories and knowledge from its prompts.'),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),
@@ -984,6 +992,7 @@ export const PauseAgentResponse = zod.object({
   "app": zod.enum(['gmail', 'google_drive', 'github']),
   "accessLevel": zod.enum(['read', 'draft', 'write'])
 }).describe('Explicit permission for one agent to use one connected app. \"read\" only looks, \"draft\" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), \"write\" may take externally visible actions — those always pass through the approval desk before running.')),
+  "sensitiveDataSandbox": zod.boolean().describe('Sensitive data sandbox. When true the server keeps this agent\'s granted read-only app operations but denies connected-app drafts and writes, blocks internet\/web access for Codex runs, forbids delegating or receiving delegated work, and excludes shared memories and knowledge from its prompts.'),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),

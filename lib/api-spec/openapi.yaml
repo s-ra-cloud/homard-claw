@@ -1240,7 +1240,7 @@ components:
         - status
     Agent:
       type: object
-      required: [id, name, title, mission, provider, status, securityPreset, autonomy, permissions, appGrants, avatar, archived, createdAt]
+      required: [id, name, title, mission, provider, status, securityPreset, autonomy, permissions, appGrants, sensitiveDataSandbox, avatar, archived, createdAt]
       properties:
         id: { type: string }
         name: { type: string }
@@ -1270,6 +1270,14 @@ components:
         appGrants:
           type: array
           items: { $ref: "#/components/schemas/AppGrant" }
+        sensitiveDataSandbox:
+          type: boolean
+          description: >-
+            Sensitive data sandbox. When true the server keeps this agent's
+            granted read-only app operations but denies connected-app drafts
+            and writes, blocks internet/web access for Codex runs, forbids
+            delegating or receiving delegated work, and excludes shared
+            memories and knowledge from its prompts.
         avatar: { $ref: "#/components/schemas/AvatarConfig" }
         archived: { type: boolean }
         archivedAt: { type: ["string", "null"] }
@@ -1385,6 +1393,7 @@ components:
         appGrants:
           type: array
           items: { $ref: "#/components/schemas/AppGrant" }
+        sensitiveDataSandbox: { type: boolean }
         avatar: { $ref: "#/components/schemas/AvatarConfig" }
     AgentUpdate:
       type: object
@@ -1412,6 +1421,7 @@ components:
         appGrants:
           type: array
           items: { $ref: "#/components/schemas/AppGrant" }
+        sensitiveDataSandbox: { type: boolean }
         avatar: { $ref: "#/components/schemas/AvatarConfig" }
     AppGrant:
       type: object

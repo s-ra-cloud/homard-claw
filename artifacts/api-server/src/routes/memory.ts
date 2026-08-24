@@ -206,6 +206,33 @@ router.patch("/memories/:memoryId", async (req, res): Promise<void> => {
       return;
     }
   }
+  // A sandboxed agent's private memories may never be published office-wide
+  // (or handed to another agent): re-scoping is the one path that would let
+  // sensitive-task residue reach other agents' prompts, so it is refused
+  // while the owning agent is in the sensitive data sandbox.
+  if ("agentId" in updates) {
+    const [current] = await db
+      .select({
+        agentId: memoriesTable.agentId,
+        sandboxed: agentsTable.sensitiveDataSandbox,
+        agentName: agentsTable.name,
+      })
+      .from(memoriesTable)
+      .leftJoin(agentsTable, eq(agentsTable.id, memoriesTable.agentId))
+      .where(eq(memoriesTable.id, params.data.memoryId))
+      .limit(1);
+    if (!current) {
+      res.status(404).json({ error: "Memory not found" });
+      return;
+    }
+    const moving = updates.agentId !== current.agentId;
+    if (moving && current.agentId && current.sandboxed) {
+      res.status(409).json({
+        error: `${current.agentName ?? "This agent"} is in the sensitive data sandbox; its private memories cannot be shared office-wide or moved to another agent.`,
+      });
+      return;
+    }
+  }
   const [memory] = await db
     .update(memoriesTable)
     .set({ ...updates, updatedAt: new Date() })

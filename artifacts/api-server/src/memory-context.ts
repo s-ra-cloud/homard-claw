@@ -50,11 +50,20 @@ function memoryRank(query: string) {
 export async function buildTaskContext(
   agentId: string,
   objective: string,
+  options?: {
+    /**
+     * Sensitive-data sandbox: restrict retrieval to the agent's own private
+     * memories. Shared/global memories and assigned knowledge files are
+     * never injected, so nothing office-wide leaks into (or gets shaped by)
+     * a sandboxed agent's context.
+     */
+    sensitiveDataSandbox?: boolean;
+  },
 ): Promise<TaskContext> {
-  const scope = or(
-    eq(memoriesTable.agentId, agentId),
-    isNull(memoriesTable.agentId),
-  );
+  const sandboxed = options?.sensitiveDataSandbox === true;
+  const scope = sandboxed
+    ? eq(memoriesTable.agentId, agentId)
+    : or(eq(memoriesTable.agentId, agentId), isNull(memoriesTable.agentId));
   const rank = memoryRank(objective);
 
   const [pinned, relevant, files] = await Promise.all([
@@ -83,29 +92,36 @@ export async function buildTaskContext(
       )
       .orderBy(desc(rank))
       .limit(MAX_RELEVANT_MEMORIES),
-    db
-      .select({
-        id: knowledgeFilesTable.id,
-        name: knowledgeFilesTable.name,
-        content: knowledgeFilesTable.content,
-      })
-      .from(knowledgeFilesTable)
-      .innerJoin(
-        agentKnowledgeTable,
-        eq(agentKnowledgeTable.fileId, knowledgeFilesTable.id),
-      )
-      .where(
-        and(
-          eq(agentKnowledgeTable.agentId, agentId),
-          sql`ts_rank(to_tsvector('english', ${knowledgeFilesTable.content}), websearch_to_tsquery('english', ${objective})) > ${RELEVANCE_FLOOR}`,
-        ),
-      )
-      .orderBy(
-        desc(
-          sql`ts_rank(to_tsvector('english', ${knowledgeFilesTable.content}), websearch_to_tsquery('english', ${objective}))`,
-        ),
-      )
-      .limit(MAX_RELEVANT_FILES),
+    // Sandboxed agents get no knowledge files at all: knowledge is a
+    // shared, owner-curated corpus, and the sandbox promises that nothing
+    // office-wide reaches a sensitive-data agent's prompt.
+    sandboxed
+      ? Promise.resolve(
+          [] as { id: string; name: string; content: string }[],
+        )
+      : db
+          .select({
+            id: knowledgeFilesTable.id,
+            name: knowledgeFilesTable.name,
+            content: knowledgeFilesTable.content,
+          })
+          .from(knowledgeFilesTable)
+          .innerJoin(
+            agentKnowledgeTable,
+            eq(agentKnowledgeTable.fileId, knowledgeFilesTable.id),
+          )
+          .where(
+            and(
+              eq(agentKnowledgeTable.agentId, agentId),
+              sql`ts_rank(to_tsvector('english', ${knowledgeFilesTable.content}), websearch_to_tsquery('english', ${objective})) > ${RELEVANCE_FLOOR}`,
+            ),
+          )
+          .orderBy(
+            desc(
+              sql`ts_rank(to_tsvector('english', ${knowledgeFilesTable.content}), websearch_to_tsquery('english', ${objective}))`,
+            ),
+          )
+          .limit(MAX_RELEVANT_FILES),
   ]);
 
   const memories = [

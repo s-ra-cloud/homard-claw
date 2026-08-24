@@ -360,6 +360,7 @@ function toAgent(
     autonomy: agent.autonomy,
     permissions: effectivePermissions(agent),
     permissionOverrides: agent.permissionOverrides ?? null,
+    sensitiveDataSandbox: agent.sensitiveDataSandbox,
     avatar: agent.avatar,
     archived: agent.archived,
     archivedAt: agent.archivedAt ? agent.archivedAt.toISOString() : null,
@@ -742,8 +743,11 @@ async function duplicateAgentOnce(agentId: string) {
         status: "idle",
       })
       .returning();
-    // Deliberately NOT copied: connected-app grants. External account access
-    // is granted per agent by the owner, never inherited through duplication.
+    // Deliberately NOT copied: connected-app grants and the sensitive-data
+    // sandbox flag (the insert above omits sensitiveDataSandbox, so the copy
+    // defaults to false). External account access is granted per agent by
+    // the owner, never inherited through duplication — and a copy without
+    // grants has nothing sensitive to sandbox until the owner sets it up.
     await recordAudit(
       "agent.duplicated",
       `${agent.name} was recruited as a copy of ${source.name}. Connected-app access was not copied.`,

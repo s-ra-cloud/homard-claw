@@ -103,7 +103,21 @@ export function codexSandboxFor(input: {
   securityPreset: string;
   autonomy: string;
   allowNetwork: boolean;
+  /**
+   * Sensitive-data sandbox: an owner-persisted isolation flag that beats
+   * everything else here. No preset, autonomy level, or environment
+   * variable may re-open the network or filesystem for such an agent.
+   */
+  sensitiveDataSandbox?: boolean;
 }): CodexSandboxProfile {
+  if (input.sensitiveDataSandbox) {
+    return {
+      sandboxMode: "read-only",
+      networkAccessEnabled: false,
+      webSearchMode: "disabled",
+      approvalPolicy: "never",
+    };
+  }
   const trusted =
     input.securityPreset === "operator" && input.autonomy === "autonomous";
   const readOnly = input.securityPreset === "observer";
