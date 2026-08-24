@@ -1427,19 +1427,25 @@ components:
         accessLevel: { type: string, enum: [read, draft, write] }
     ConnectedApp:
       type: object
-      required: [app, displayName, enabled, status, statusDetail, grantedAgents]
+      required: [app, displayName, enabled, status, statusDetail, accountLabel, grantedAgents]
       properties:
         app: { type: string, enum: [gmail, google_drive, github] }
         displayName: { type: string }
         enabled: { type: boolean }
         status:
           type: string
-          enum: [connected, not_connected, unavailable]
+          enum: [connected, expired, not_connected, unavailable]
           description: >-
             Live connection state of the workspace owner's account:
-            "unavailable" means the connector service itself could not be
-            reached, not that the account is disconnected.
+            "expired" means the account was connected but its authorization
+            must be renewed; "unavailable" means the connector service itself
+            could not be reached, not that the account is disconnected.
         statusDetail: { type: ["string", "null"] }
+        accountLabel:
+          type: ["string", "null"]
+          description: >-
+            Human-readable identity of the connected account (email or
+            login) when the platform exposes one. Never a credential.
         grantedAgents: { type: number }
     ConnectedAppList:
       type: object

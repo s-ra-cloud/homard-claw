@@ -2728,8 +2728,9 @@ export const ListConnectedAppsResponse = zod.object({
   "app": zod.enum(['gmail', 'google_drive', 'github']),
   "displayName": zod.string(),
   "enabled": zod.boolean(),
-  "status": zod.enum(['connected', 'not_connected', 'unavailable']).describe('Live connection state of the workspace owner\'s account: \"unavailable\" means the connector service itself could not be reached, not that the account is disconnected.'),
+  "status": zod.enum(['connected', 'expired', 'not_connected', 'unavailable']).describe('Live connection state of the workspace owner\'s account: \"expired\" means the account was connected but its authorization must be renewed; \"unavailable\" means the connector service itself could not be reached, not that the account is disconnected.'),
   "statusDetail": zod.string().nullable(),
+  "accountLabel": zod.string().nullable().describe('Human-readable identity of the connected account (email or login) when the platform exposes one. Never a credential.'),
   "grantedAgents": zod.number()
 }))
 })
@@ -2750,8 +2751,9 @@ export const UpdateConnectedAppResponse = zod.object({
   "app": zod.enum(['gmail', 'google_drive', 'github']),
   "displayName": zod.string(),
   "enabled": zod.boolean(),
-  "status": zod.enum(['connected', 'not_connected', 'unavailable']).describe('Live connection state of the workspace owner\'s account: \"unavailable\" means the connector service itself could not be reached, not that the account is disconnected.'),
+  "status": zod.enum(['connected', 'expired', 'not_connected', 'unavailable']).describe('Live connection state of the workspace owner\'s account: \"expired\" means the account was connected but its authorization must be renewed; \"unavailable\" means the connector service itself could not be reached, not that the account is disconnected.'),
   "statusDetail": zod.string().nullable(),
+  "accountLabel": zod.string().nullable().describe('Human-readable identity of the connected account (email or login) when the platform exposes one. Never a credential.'),
   "grantedAgents": zod.number()
 })
 

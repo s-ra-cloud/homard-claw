@@ -12,9 +12,72 @@ import {
  * never reads as "the owner disconnected this app".
  */
 export type ConnectionStatus = {
-  status: "connected" | "not_connected" | "unavailable";
+  status: "connected" | "expired" | "not_connected" | "unavailable";
   detail: string | null;
+  /**
+   * A human-readable label for the connected account (an email address or
+   * login) when the platform exposes one — never a credential, token, or
+   * raw connector metadata. Null when no safe label is available.
+   */
+  accountLabel: string | null;
 };
+
+/**
+ * The only connector-metadata keys ever surfaced to the UI. Everything else
+ * (tokens, scopes, raw settings) stays server-side. Order is preference.
+ */
+const ACCOUNT_LABEL_KEYS = [
+  "email",
+  "account_email",
+  "user_email",
+  "emailAddress",
+  "login",
+  "username",
+  "user_name",
+  "account_name",
+  "handle",
+] as const;
+
+function pickLabel(source: unknown): string | null {
+  if (typeof source !== "object" || source === null) return null;
+  const record = source as Record<string, unknown>;
+  for (const key of ACCOUNT_LABEL_KEYS) {
+    const value = record[key];
+    if (
+      typeof value === "string" &&
+      value.trim().length > 0 &&
+      value.length <= 120
+    ) {
+      return value.trim();
+    }
+  }
+  return null;
+}
+
+/** Connector status strings that mean "the owner must re-authorize". */
+const EXPIRED_STATUS = /expire|revok|invalid|reauth|disconnect|error|fail/i;
+
+/**
+ * Map one raw connector listing (or its absence) to the state the UI shows.
+ * Pure and exported for tests: this is where "no credential ever leaks" and
+ * "expired is not the same as never connected" are pinned down.
+ */
+export function describeConnection(
+  match: Record<string, unknown> | undefined,
+): ConnectionStatus {
+  if (!match) return { status: "not_connected", detail: null, accountLabel: null };
+  const accountLabel =
+    pickLabel(match.metadata) ?? pickLabel(match.integration) ?? pickLabel(match);
+  const rawStatus = typeof match.status === "string" ? match.status : "";
+  const detail =
+    typeof match.status_message === "string" && match.status_message.trim()
+      ? match.status_message
+      : null;
+  if (EXPIRED_STATUS.test(rawStatus) || EXPIRED_STATUS.test(detail ?? "")) {
+    return { status: "expired", detail, accountLabel };
+  }
+  return { status: "connected", detail, accountLabel };
+}
 
 /**
  * A fresh client per call, never cached: the SDK resolves and refreshes
@@ -36,13 +99,13 @@ export async function connectionStatus(
     const match = connections.find(
       (item) => item.connector_name === connectorName,
     );
-    if (!match) return { status: "not_connected", detail: null };
-    return { status: "connected", detail: match.status_message ?? null };
+    return describeConnection(match);
   } catch (error) {
     return {
       status: "unavailable",
       detail:
         error instanceof Error ? error.message : "Connector service unreachable",
+      accountLabel: null,
     };
   }
 }

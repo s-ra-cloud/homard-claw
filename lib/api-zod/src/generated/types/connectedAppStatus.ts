@@ -7,13 +7,14 @@
  */
 
 /**
- * Live connection state of the workspace owner's account: "unavailable" means the connector service itself could not be reached, not that the account is disconnected.
+ * Live connection state of the workspace owner's account: "expired" means the account was connected but its authorization must be renewed; "unavailable" means the connector service itself could not be reached, not that the account is disconnected.
  */
 export type ConnectedAppStatus = typeof ConnectedAppStatus[keyof typeof ConnectedAppStatus];
 
 
 export const ConnectedAppStatus = {
   connected: 'connected',
+  expired: 'expired',
   not_connected: 'not_connected',
   unavailable: 'unavailable',
 } as const;

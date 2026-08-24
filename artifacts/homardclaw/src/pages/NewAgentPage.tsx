@@ -16,6 +16,7 @@ import {
   AgentPreviewCard,
   agentFormSchema,
   appGrantsPayload,
+  defaultAppGrants,
   permissionOverridesPayload,
   type AgentFormValues,
 } from "@/components/agent-form";
@@ -47,7 +48,9 @@ export default function NewAgentPage() {
       maxTasksPerDay: "",
       approvalThresholdCents: "",
       shellColor: LOBSTER_PRESETS[0].shellColor,
-      appGrants: {},
+      // Every supported app must start at an explicit "none" — an undefined
+      // entry fails validation with a misleading red "Required" error.
+      appGrants: defaultAppGrants(),
     },
   });
 

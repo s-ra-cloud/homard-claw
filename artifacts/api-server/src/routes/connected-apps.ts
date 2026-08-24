@@ -59,6 +59,7 @@ router.get("/connected-apps", async (_req, res): Promise<void> => {
         enabled: enabledByApp.get(app) ?? true,
         status: statuses[index].status,
         statusDetail: statuses[index].detail,
+        accountLabel: statuses[index].accountLabel,
         grantedAgents: countByApp.get(app) ?? 0,
       })),
     }),
@@ -110,6 +111,7 @@ router.patch("/connected-apps/:app", async (req, res): Promise<void> => {
       enabled,
       status: status.status,
       statusDetail: status.detail,
+      accountLabel: status.accountLabel,
       grantedAgents: grantCount[0]?.count ?? 0,
     }),
   );

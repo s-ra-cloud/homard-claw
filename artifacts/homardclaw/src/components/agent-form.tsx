@@ -1,4 +1,5 @@
 import React from "react";
+import { Link } from "wouter";
 import type { UseFormReturn } from "react-hook-form";
 import * as z from "zod";
 import {
@@ -112,6 +113,25 @@ export const agentFormSchema = z.object({
 
 export type AgentFormValues = z.infer<typeof agentFormSchema>;
 
+/** Every app the workspace supports; mirrors the API's ConnectedApp enum. */
+export const SUPPORTED_CONNECTED_APPS = [
+  "gmail",
+  "google_drive",
+  "github",
+] as const;
+
+/**
+ * Explicit "none" for every supported app. Forms must start from this (and
+ * edit hydration must fill missing apps back to it): an untouched dropdown
+ * whose value is `undefined` fails the enum check and shows a false red
+ * "Required" error on save, even though "No Access" is exactly what it means.
+ */
+export function defaultAppGrants(): AgentFormValues["appGrants"] {
+  return Object.fromEntries(
+    SUPPORTED_CONNECTED_APPS.map((app) => [app, "none" as const]),
+  );
+}
+
 /**
  * A complete, blank set of field values.
  *
@@ -140,7 +160,7 @@ export const emptyAgentFormValues: AgentFormValues = {
   maxTasksPerDay: "",
   approvalThresholdCents: "",
   shellColor: LOBSTER_PRESETS[0].shellColor,
-  appGrants: {},
+  appGrants: defaultAppGrants(),
 };
 
 /** Convert the form's app→level map into the API's grant list. */
@@ -162,7 +182,9 @@ export function appGrantsPayload(
 export function appGrantsFormValue(
   grants: readonly { app: string; accessLevel: string }[] | undefined,
 ): AgentFormValues["appGrants"] {
-  const value: AgentFormValues["appGrants"] = {};
+  // Start from the full "none" set so apps the agent holds no grant for
+  // still hydrate to an explicit value instead of undefined.
+  const value: AgentFormValues["appGrants"] = defaultAppGrants();
   for (const grant of grants ?? []) {
     value[grant.app] = grant.accessLevel as "read" | "draft" | "write";
   }
@@ -576,9 +598,19 @@ function ConnectedAppsFields({ form }: { form: UseFormReturn<AgentFormValues> })
   return (
     <div className="border-4 border-border bg-muted/20 p-4 space-y-3">
       <div>
-        <div className="uppercase font-bold text-xs">Connected Apps</div>
+        <div className="uppercase font-bold text-xs">Connected App Access</div>
         <p className="text-[10px] text-muted-foreground uppercase font-bold">
-          What this agent may do with your connected accounts. Default: nothing.
+          What this agent may do with your already-connected accounts.
+          Default: nothing.
+        </p>
+        <p className="text-[10px] text-muted-foreground mt-1">
+          These dropdowns only grant permission — they don't connect an
+          account. You connect Gmail, Drive, or GitHub once (as the owner) on
+          the{" "}
+          <Link href="/connected-apps" className="underline font-bold">
+            Connected Apps
+          </Link>{" "}
+          page; agents never see credentials.
         </p>
       </div>
       <div className="space-y-2">
@@ -598,12 +630,31 @@ function ConnectedAppsFields({ form }: { form: UseFormReturn<AgentFormValues> })
                         <Badge variant="destructive">Disabled</Badge>
                       ) : app.status === "connected" ? (
                         <Badge variant="success">Connected</Badge>
+                      ) : app.status === "expired" ? (
+                        <Badge variant="destructive">Reconnect Needed</Badge>
                       ) : app.status === "not_connected" ? (
                         <Badge variant="warning">Not Connected</Badge>
                       ) : (
                         <Badge variant="outline">Status Unknown</Badge>
                       )}
                     </div>
+                    {app.status === "connected" && app.accountLabel ? (
+                      <p className="text-[9px] text-muted-foreground font-mono mt-1 break-all">
+                        Account: {app.accountLabel}
+                      </p>
+                    ) : null}
+                    {app.status === "not_connected" || app.status === "expired" ? (
+                      <p className="text-[9px] mt-1">
+                        <Link
+                          href="/connected-apps"
+                          className="underline font-bold uppercase text-muted-foreground"
+                        >
+                          {app.status === "expired"
+                            ? "Reconnect in Connected Apps →"
+                            : "Set up in Connected Apps →"}
+                        </Link>
+                      </p>
+                    ) : null}
                     <p className="text-[9px] text-muted-foreground uppercase font-bold mt-1">
                       {ACCESS_LEVEL_OPTIONS.find((o) => o.value === level)?.blurb}
                     </p>
