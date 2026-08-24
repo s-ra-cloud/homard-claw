@@ -54,6 +54,14 @@ export const agentsTable = pgTable(
   ],
 );
 
+export type TaskFile = {
+  name: string;
+  content: string;
+};
+
+// Task lifecycle: queued (pending) → running → completed | failed |
+// cancelled, with waiting_approval and blocked as holding states. Blocked
+// tasks carry an errorKind/errorMessage explaining why and can be retried.
 export const tasksTable = pgTable("tasks", {
   id: uuid("id").primaryKey().defaultRandom(),
   agentId: uuid("agent_id")
@@ -61,6 +69,8 @@ export const tasksTable = pgTable("tasks", {
     .references(() => agentsTable.id),
   objective: text("objective").notNull(),
   status: text("status").notNull().default("queued"),
+  priority: text("priority").notNull().default("normal"),
+  budgetCents: doublePrecision("budget_cents"),
   provider: text("provider").notNull(),
   model: text("model"),
   estimatedTokens: integer("estimated_tokens"),
@@ -68,6 +78,28 @@ export const tasksTable = pgTable("tasks", {
   actualInputTokens: integer("actual_input_tokens"),
   actualOutputTokens: integer("actual_output_tokens"),
   actualCostCents: doublePrecision("actual_cost_cents"),
+  output: text("output"),
+  files: jsonb("files").$type<TaskFile[]>().notNull().default([]),
+  errorKind: text("error_kind"),
+  errorMessage: text("error_message"),
+  attempts: integer("attempts").notNull().default(0),
+  // Earliest time the worker may (re)claim this task; used for rate-limit
+  // backoff between attempts.
+  notBefore: timestamp("not_before", { withTimezone: true }),
+  startedAt: timestamp("started_at", { withTimezone: true }),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const taskLogsTable = pgTable("task_logs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  taskId: uuid("task_id")
+    .notNull()
+    .references(() => tasksTable.id, { onDelete: "cascade" }),
+  level: text("level").notNull().default("info"),
+  message: text("message").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -125,6 +157,7 @@ export const insertAuditEventSchema = createInsertSchema(auditEventsTable).omit(
 
 export type AgentRecord = typeof agentsTable.$inferSelect;
 export type TaskRecord = typeof tasksTable.$inferSelect;
+export type TaskLogRecord = typeof taskLogsTable.$inferSelect;
 export type ApprovalRecord = typeof approvalsTable.$inferSelect;
 export type InsertAgent = z.infer<typeof insertAgentSchema>;
 export type InsertTask = z.infer<typeof insertTaskSchema>;

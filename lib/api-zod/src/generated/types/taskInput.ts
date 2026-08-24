@@ -5,6 +5,7 @@
  * HomardClaw private agent office API
  * OpenAPI spec version: 0.1.0
  */
+import type { TaskInputPriority } from './taskInputPriority';
 import type { TaskInputProviderOverride } from './taskInputProviderOverride';
 
 export interface TaskInput {
@@ -14,6 +15,12 @@ export interface TaskInput {
      * @maxLength 5000
      */
   objective: string;
+  priority?: TaskInputPriority;
+  /**
+     * @minimum 0.01
+     * @maximum 1000000
+     */
+  budgetCents?: number;
   providerOverride?: TaskInputProviderOverride;
   /** @maxLength 200 */
   modelOverride?: string;

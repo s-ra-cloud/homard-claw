@@ -23,9 +23,10 @@ function taskStatusBadge(status: string) {
     case "queued": return <Badge variant="outline">Queued</Badge>;
     case "running": return <Badge variant="success">Running</Badge>;
     case "waiting_approval": return <Badge variant="warning">Waiting Approval</Badge>;
-    case "paused": return <Badge variant="destructive">Paused</Badge>;
-    case "complete": return <Badge variant="accent">Complete</Badge>;
+    case "blocked": return <Badge variant="warning">Blocked</Badge>;
+    case "completed": return <Badge variant="accent">Complete</Badge>;
     case "failed": return <Badge variant="destructive">Failed</Badge>;
+    case "cancelled": return <Badge variant="default">Cancelled</Badge>;
     default: return <Badge variant="default">{status}</Badge>;
   }
 }

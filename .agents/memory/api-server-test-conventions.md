@@ -12,3 +12,9 @@ The api-server uses vitest + supertest suites (e.g. src/routes/office.lifecycle.
 - vitest.config.ts sets fileParallelism: false because suites share DB tables.
 - Manual vite builds of the web app need PORT and BASE_PATH env vars (workflows provide them; shell builds must pass e.g. PORT=5000 BASE_PATH=/).
 - The package-management install tool fails at the pnpm workspace root (ERR_PNPM_ADDING_TO_ROOT); install per-package with `pnpm --filter <pkg> add`.
+
+## Testing the persistent task worker
+
+The dev API server runs a live queue worker (advisory-lock singleton) against the same Postgres the tests use, so tests must never leave claimable `queued` rows or call unscoped claim functions — they would steal or mutate real work.
+
+**How to apply:** keep test agents paused (the worker skips paused agents), use the worker's test-only claim scope (`agentIds` + `includePausedAgents`) for ordering assertions, insert `running` rows directly to exercise execution paths, and cancel/block every row a test leaves behind. All provider traffic goes through a stubbed global fetch — never the network.

@@ -1,5 +1,7 @@
 import { getAuth } from "@clerk/express";
 import {
+  CancelTaskParams,
+  CancelTaskResponse,
   CreateAgentBody,
   CreateAgentResponse,
   CreateTaskBody,
@@ -17,6 +19,8 @@ import {
   GetOfficeOverviewResponse,
   GetProviderSettingsResponse,
   GetProvidersResponse,
+  GetTaskParams,
+  GetTaskResponse,
   ListAgentsResponse,
   ListApprovalsResponse,
   ListProviderModelsParams,
@@ -31,6 +35,8 @@ import {
   RecordTaskUsageResponse,
   RetireAgentParams,
   RetireAgentResponse,
+  RetryTaskParams,
+  RetryTaskResponse,
   SetAgentArchivedBody,
   SetAgentArchivedParams,
   SetAgentArchivedResponse,
@@ -48,6 +54,7 @@ import {
   auditEventsTable,
   db,
   systemStateTable,
+  taskLogsTable,
   tasksTable,
 } from "@workspace/db";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
@@ -70,6 +77,7 @@ import {
   updateProviderSettings,
   type ProviderId,
 } from "../providers";
+import { abortRunningTask } from "../worker";
 
 const router: IRouter = Router();
 
@@ -135,9 +143,16 @@ function toTaskJson(
   return {
     ...task,
     agentName,
+    startedAt: task.startedAt ? task.startedAt.toISOString() : null,
+    finishedAt: task.finishedAt ? task.finishedAt.toISOString() : null,
     createdAt: task.createdAt.toISOString(),
   };
 }
+
+/** Statuses the owner may cancel from; everything else is already final. */
+const CANCELLABLE_STATUSES = ["queued", "running", "waiting_approval", "blocked"];
+/** Statuses eligible for a fresh retry attempt. */
+const RETRYABLE_STATUSES = ["failed", "cancelled", "blocked"];
 
 /** Prompt-relevant agent configuration used for token estimation. */
 function agentPromptContext(agent: {
@@ -498,10 +513,15 @@ router.post("/agents/:agentId/archive", async (req, res): Promise<void> => {
         .limit(1);
       return { status: 200 as const, agent: current! };
     }
+    let interrupted: { id: string }[] = [];
     if (archived) {
-      await tx
+      interrupted = await tx
         .update(tasksTable)
-        .set({ status: "paused" })
+        .set({
+          status: "blocked",
+          errorKind: "agent_archived",
+          errorMessage: `${agent.name} was archived; restore the agent and retry.`,
+        })
         .where(
           and(
             eq(tasksTable.agentId, agent.id),
@@ -511,7 +531,8 @@ router.post("/agents/:agentId/archive", async (req, res): Promise<void> => {
               "waiting_approval",
             ]),
           ),
-        );
+        )
+        .returning({ id: tasksTable.id });
     }
     await tx.insert(auditEventsTable).values({
       kind: archived ? "agent.archived" : "agent.restored",
@@ -519,8 +540,11 @@ router.post("/agents/:agentId/archive", async (req, res): Promise<void> => {
         ? `${agent.name} was archived and stepped away from the office.`
         : `${agent.name} was restored to the active roster.`,
     });
-    return { status: 200 as const, agent };
+    return { status: 200 as const, agent, interrupted };
   });
+  if (outcome.status === 200 && "interrupted" in outcome) {
+    for (const task of outcome.interrupted ?? []) abortRunningTask(task.id);
+  }
   if (outcome.status === 404) {
     res.status(404).json({ error: "Agent not found" });
     return;
@@ -552,14 +576,29 @@ router.delete("/agents/:agentId", async (req, res): Promise<void> => {
     await tx
       .delete(approvalsTable)
       .where(eq(approvalsTable.agentId, agent.id));
+    // Collect active tasks first so any in-flight provider calls can be
+    // aborted after the delete commits; otherwise the worker would keep
+    // spending against rows that no longer exist.
+    const active = await tx
+      .select({ id: tasksTable.id })
+      .from(tasksTable)
+      .where(
+        and(
+          eq(tasksTable.agentId, agent.id),
+          eq(tasksTable.status, "running"),
+        ),
+      );
     await tx.delete(tasksTable).where(eq(tasksTable.agentId, agent.id));
     await tx.delete(agentsTable).where(eq(agentsTable.id, agent.id));
     await tx.insert(auditEventsTable).values({
       kind: "agent.deleted",
       summary: `${agent.name} and their task history were permanently deleted.`,
     });
-    return { status: 204 as const };
+    return { status: 204 as const, active };
   });
+  if (outcome.status === 204 && "active" in outcome) {
+    for (const task of outcome.active ?? []) abortRunningTask(task.id);
+  }
   if (outcome.status === 404) {
     res.status(404).json({ error: "Agent not found" });
     return;
@@ -666,21 +705,29 @@ router.post("/agents/:agentId/retire", async (req, res): Promise<void> => {
       if (existing) return { status: 409 as const };
       return { status: 404 as const };
     }
-    await tx
+    const interrupted = await tx
       .update(tasksTable)
-      .set({ status: "paused" })
+      .set({
+        status: "blocked",
+        errorKind: "agent_retired",
+        errorMessage: `${agent.name} retired; reassign this work to an active agent.`,
+      })
       .where(
         and(
           eq(tasksTable.agentId, agent.id),
           inArray(tasksTable.status, ["queued", "running", "waiting_approval"]),
         ),
-      );
+      )
+      .returning({ id: tasksTable.id });
     await tx.insert(auditEventsTable).values({
       kind: "agent.retired",
       summary: `${agent.name} retired to the island after honorable service.`,
     });
-    return { status: 200 as const, agent };
+    return { status: 200 as const, agent, interrupted };
   });
+  if (outcome.status === 200 && "interrupted" in outcome) {
+    for (const task of outcome.interrupted) abortRunningTask(task.id);
+  }
   if (outcome.status === 404) {
     res.status(404).json({ error: "Agent not found" });
     return;
@@ -785,29 +832,47 @@ router.post("/tasks", async (req, res): Promise<void> => {
         .where(eq(systemStateTable.key, "emergency_stop"))
         .limit(1);
       const configured = isConfigured(routing.provider);
-      const status =
-        stop?.value === "true" || agent.paused || !configured
-          ? "paused"
-          : "queued";
+      // Unconfigured providers and the emergency stop block explicitly, with
+      // a reason the owner can act on; a paused agent's tasks simply wait in
+      // the queue until the agent resumes.
+      const blockReason =
+        stop?.value === "true"
+          ? { errorKind: "emergency_stop", errorMessage: "The emergency stop is engaged." }
+          : !configured
+            ? {
+                errorKind: "not_configured",
+                errorMessage: `${routing.provider === "claude_max" ? "Claude" : "OpenRouter"} is not configured; add the credential and retry.`,
+              }
+            : null;
       const [task] = await tx
         .insert(tasksTable)
         .values({
           agentId: agent.id,
           objective: parsed.data.objective,
+          priority: parsed.data.priority ?? "normal",
+          budgetCents: parsed.data.budgetCents ?? null,
           provider: routing.provider,
           model: routing.model,
           estimatedTokens: estimate.estimatedTokens,
           estimatedCostCents: estimate.costKnown
             ? estimate.estimatedCostCents
             : null,
-          status,
+          status: blockReason ? "blocked" : "queued",
+          ...(blockReason ?? {}),
         })
         .returning();
+      await tx.insert(taskLogsTable).values({
+        taskId: task.id,
+        level: blockReason ? "warn" : "info",
+        message: blockReason
+          ? `Task created but blocked: ${blockReason.errorMessage}`
+          : `Task created and queued for ${agent.name} (priority ${task.priority}).`,
+      });
       await tx.insert(auditEventsTable).values({
         kind: "task.created",
-        summary: configured
-          ? `A task was queued for ${agent.name}.`
-          : `A task for ${agent.name} was paused because ${routing.provider} is not configured.`,
+        summary: blockReason
+          ? `A task for ${agent.name} was blocked: ${blockReason.errorMessage}`
+          : `A task was queued for ${agent.name}.`,
       });
       return { status: 201, task, agentName: agent.name };
     });
@@ -831,6 +896,144 @@ router.post("/tasks", async (req, res): Promise<void> => {
   res
     .status(201)
     .json(CreateTaskResponse.parse(toTaskJson(outcome.task, outcome.agentName)));
+});
+
+router.get("/tasks/:taskId", async (req, res): Promise<void> => {
+  const params = GetTaskParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: "Invalid task id" });
+    return;
+  }
+  const [row] = await db
+    .select({ task: tasksTable, agentName: agentsTable.name })
+    .from(tasksTable)
+    .innerJoin(agentsTable, eq(tasksTable.agentId, agentsTable.id))
+    .where(eq(tasksTable.id, params.data.taskId))
+    .limit(1);
+  if (!row) {
+    res.status(404).json({ error: "Task not found" });
+    return;
+  }
+  const logs = await db
+    .select()
+    .from(taskLogsTable)
+    .where(eq(taskLogsTable.taskId, row.task.id))
+    .orderBy(taskLogsTable.createdAt);
+  res.json(
+    GetTaskResponse.parse({
+      task: toTaskJson(row.task, row.agentName),
+      logs: logs.map((log) => ({
+        ...log,
+        createdAt: log.createdAt.toISOString(),
+      })),
+    }),
+  );
+});
+
+router.post("/tasks/:taskId/cancel", async (req, res): Promise<void> => {
+  const params = CancelTaskParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: "Invalid task id" });
+    return;
+  }
+  const outcome = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .select({ task: tasksTable, agentName: agentsTable.name })
+      .from(tasksTable)
+      .innerJoin(agentsTable, eq(tasksTable.agentId, agentsTable.id))
+      .where(eq(tasksTable.id, params.data.taskId))
+      .limit(1)
+      .for("update", { of: tasksTable });
+    if (!row) return { status: 404 as const };
+    if (!CANCELLABLE_STATUSES.includes(row.task.status)) {
+      return { status: 409 as const, current: row.task.status };
+    }
+    const [task] = await tx
+      .update(tasksTable)
+      .set({ status: "cancelled", finishedAt: new Date() })
+      .where(eq(tasksTable.id, row.task.id))
+      .returning();
+    await tx.insert(taskLogsTable).values({
+      taskId: task.id,
+      level: "warn",
+      message: "Cancelled by the owner.",
+    });
+    await tx.insert(auditEventsTable).values({
+      kind: "task.cancelled",
+      summary: `A task for ${row.agentName} was cancelled.`,
+    });
+    return { status: 200 as const, task, agentName: row.agentName };
+  });
+  if (outcome.status === 404) {
+    res.status(404).json({ error: "Task not found" });
+    return;
+  }
+  if (outcome.status === 409) {
+    res.status(409).json({
+      error: `A ${outcome.current} task can no longer be cancelled`,
+    });
+    return;
+  }
+  // Abort any in-flight provider call after the status is committed, so the
+  // worker's conditional finish sees "cancelled" and discards the result.
+  abortRunningTask(outcome.task.id);
+  res.json(CancelTaskResponse.parse(toTaskJson(outcome.task, outcome.agentName)));
+});
+
+router.post("/tasks/:taskId/retry", async (req, res): Promise<void> => {
+  const params = RetryTaskParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: "Invalid task id" });
+    return;
+  }
+  const outcome = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .select({ task: tasksTable, agentName: agentsTable.name })
+      .from(tasksTable)
+      .innerJoin(agentsTable, eq(tasksTable.agentId, agentsTable.id))
+      .where(eq(tasksTable.id, params.data.taskId))
+      .limit(1)
+      .for("update", { of: tasksTable });
+    if (!row) return { status: 404 as const };
+    if (!RETRYABLE_STATUSES.includes(row.task.status)) {
+      return { status: 409 as const, current: row.task.status };
+    }
+    const [task] = await tx
+      .update(tasksTable)
+      .set({
+        status: "queued",
+        attempts: 0,
+        notBefore: null,
+        errorKind: null,
+        errorMessage: null,
+        output: null,
+        startedAt: null,
+        finishedAt: null,
+      })
+      .where(eq(tasksTable.id, row.task.id))
+      .returning();
+    await tx.insert(taskLogsTable).values({
+      taskId: task.id,
+      level: "info",
+      message: "Retried by the owner; requeued for a fresh attempt.",
+    });
+    await tx.insert(auditEventsTable).values({
+      kind: "task.retried",
+      summary: `A task for ${row.agentName} was requeued.`,
+    });
+    return { status: 200 as const, task, agentName: row.agentName };
+  });
+  if (outcome.status === 404) {
+    res.status(404).json({ error: "Task not found" });
+    return;
+  }
+  if (outcome.status === 409) {
+    res.status(409).json({
+      error: `Only failed, blocked, or cancelled tasks can be retried (this one is ${outcome.current})`,
+    });
+    return;
+  }
+  res.json(RetryTaskResponse.parse(toTaskJson(outcome.task, outcome.agentName)));
 });
 
 router.post("/tasks/estimate", async (req, res): Promise<void> => {
@@ -912,10 +1115,16 @@ router.post("/emergency-stop", async (req, res): Promise<void> => {
       set: { value: String(parsed.data.active) },
     });
   if (parsed.data.active) {
-    await db
+    const interrupted = await db
       .update(tasksTable)
-      .set({ status: "paused" })
-      .where(inArray(tasksTable.status, ["queued", "running"]));
+      .set({
+        status: "blocked",
+        errorKind: "emergency_stop",
+        errorMessage: "The emergency stop was engaged; retry once released.",
+      })
+      .where(inArray(tasksTable.status, ["queued", "running"]))
+      .returning({ id: tasksTable.id });
+    for (const task of interrupted) abortRunningTask(task.id);
   }
   await db.insert(auditEventsTable).values({
     kind: parsed.data.active ? "system.stopped" : "system.resumed",

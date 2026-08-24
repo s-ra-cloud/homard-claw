@@ -38,6 +38,7 @@ import type {
   ProviderStatus,
   RetiredAgent,
   Task,
+  TaskDetail,
   TaskEstimate,
   TaskEstimateInput,
   TaskInput,
@@ -1626,6 +1627,225 @@ export function useListProviderModels<TData = Awaited<ReturnType<typeof listProv
 
 
 
+
+export const getGetTaskUrl = (taskId: string,) => {
+
+
+
+
+  return `/api/tasks/${taskId}`
+}
+
+/**
+ * @summary Get one task with its execution logs
+ */
+export const getTask = async (taskId: string, options?: Parameters<typeof customFetch>[1]): Promise<TaskDetail> => {
+
+  return customFetch<TaskDetail>(getGetTaskUrl(taskId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetTaskQueryKey = (taskId: string,) => {
+    return [
+    `/api/tasks/${taskId}`
+    ] as const;
+    }
+
+
+export const getGetTaskQueryOptions = <TData = Awaited<ReturnType<typeof getTask>>, TError = ErrorType<void>>(taskId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTask>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetTaskQueryKey(taskId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getTask>>> = ({ signal }) => getTask(taskId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: taskId !== null && taskId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getTask>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetTaskQueryResult = NonNullable<Awaited<ReturnType<typeof getTask>>>
+export type GetTaskQueryError = ErrorType<void>
+
+
+/**
+ * @summary Get one task with its execution logs
+ */
+
+export function useGetTask<TData = Awaited<ReturnType<typeof getTask>>, TError = ErrorType<void>>(
+ taskId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTask>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetTaskQueryOptions(taskId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCancelTaskUrl = (taskId: string,) => {
+
+
+
+
+  return `/api/tasks/${taskId}/cancel`
+}
+
+/**
+ * @summary Cancel a queued, running, blocked, or waiting task immediately
+ */
+export const cancelTask = async (taskId: string, options?: Parameters<typeof customFetch>[1]): Promise<Task> => {
+
+  return customFetch<Task>(getCancelTaskUrl(taskId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCancelTaskMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelTask>>, TError,{taskId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof cancelTask>>, TError,{taskId: string}, TContext> => {
+
+const mutationKey = ['cancelTask'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof cancelTask>>, {taskId: string}> = (props) => {
+          const {taskId} = props ?? {};
+
+          return  cancelTask(taskId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CancelTaskMutationResult = NonNullable<Awaited<ReturnType<typeof cancelTask>>>
+
+    export type CancelTaskMutationError = ErrorType<void>
+
+    /**
+ * @summary Cancel a queued, running, blocked, or waiting task immediately
+ */
+export const useCancelTask = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelTask>>, TError,{taskId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof cancelTask>>,
+        TError,
+        {taskId: string},
+        TContext
+      > => {
+      return useMutation(getCancelTaskMutationOptions(options));
+    }
+
+export const getRetryTaskUrl = (taskId: string,) => {
+
+
+
+
+  return `/api/tasks/${taskId}/retry`
+}
+
+/**
+ * @summary Requeue a failed, blocked, or cancelled task
+ */
+export const retryTask = async (taskId: string, options?: Parameters<typeof customFetch>[1]): Promise<Task> => {
+
+  return customFetch<Task>(getRetryTaskUrl(taskId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRetryTaskMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryTask>>, TError,{taskId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof retryTask>>, TError,{taskId: string}, TContext> => {
+
+const mutationKey = ['retryTask'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof retryTask>>, {taskId: string}> = (props) => {
+          const {taskId} = props ?? {};
+
+          return  retryTask(taskId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RetryTaskMutationResult = NonNullable<Awaited<ReturnType<typeof retryTask>>>
+
+    export type RetryTaskMutationError = ErrorType<void>
+
+    /**
+ * @summary Requeue a failed, blocked, or cancelled task
+ */
+export const useRetryTask = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryTask>>, TError,{taskId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof retryTask>>,
+        TError,
+        {taskId: string},
+        TContext
+      > => {
+      return useMutation(getRetryTaskMutationOptions(options));
+    }
 
 export const getEstimateTaskUrl = () => {
 

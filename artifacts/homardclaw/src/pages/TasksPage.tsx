@@ -6,16 +6,23 @@ import {
   useListProviderModels,
   useGetProviderSettings,
   useEstimateTask,
+  useGetTask,
+  useCancelTask,
+  useRetryTask,
   TaskStatus,
+  TaskInputPriority,
   TaskInputProviderOverride,
   type Task,
   type TaskEstimate,
+  type TaskLog,
 } from "@workspace/api-client-react";
 import { Shell } from "@/components/layout/Shell";
 import { PixelCard } from "@/components/ui/pixel-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Activity, Play, Clock, AlertTriangle, CheckCircle, Calculator } from "lucide-react";
+import { Activity, Play, Clock, AlertTriangle, CheckCircle, Calculator, Ban, RotateCcw, ScrollText, XCircle } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Dialog,
@@ -182,6 +189,224 @@ function ModelOverrideSelect({
   );
 }
 
+const LOG_LEVEL_CLASS: Record<string, string> = {
+  info: "text-muted-foreground",
+  warn: "text-yellow-600 dark:text-yellow-500",
+  error: "text-destructive",
+};
+
+function TaskLogList({ logs }: { logs: TaskLog[] }) {
+  if (logs.length === 0) {
+    return (
+      <div className="text-[10px] font-mono text-muted-foreground uppercase">
+        No log entries yet.
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-1 max-h-56 overflow-y-auto bg-background border-2 border-border/50 p-3">
+      {logs.map((log) => (
+        <div key={log.id} className="font-mono text-[11px] leading-relaxed flex gap-2">
+          <span className="text-muted-foreground shrink-0">
+            {new Date(log.createdAt).toLocaleTimeString()}
+          </span>
+          <span className={LOG_LEVEL_CLASS[log.level] ?? "text-muted-foreground"}>
+            {log.message}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const CANCELLABLE: TaskStatus[] = [
+  TaskStatus.queued,
+  TaskStatus.running,
+  TaskStatus.waiting_approval,
+  TaskStatus.blocked,
+];
+const RETRYABLE: TaskStatus[] = [
+  TaskStatus.failed,
+  TaskStatus.cancelled,
+  TaskStatus.blocked,
+];
+
+/** Full task inspector: live status, output, error, and execution logs. */
+function TaskDetailDialog({
+  taskId,
+  onClose,
+}: {
+  taskId: string;
+  onClose: () => void;
+}) {
+  const { data: detail } = useGetTask(taskId, {
+    query: {
+      queryKey: [`/api/tasks/${taskId}`],
+      refetchInterval: (query) => {
+        const status = (query.state.data as { task?: Task } | undefined)?.task?.status;
+        return status === "running" || status === "queued" ? 2000 : false;
+      },
+    },
+  });
+  const task = detail?.task;
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="border-4 border-border bg-card p-0 rounded-none max-w-2xl max-h-[90vh] overflow-y-auto">
+        <div className="border-b-4 border-border p-4 bg-muted/30 flex items-center justify-between gap-3">
+          <DialogTitle className="font-display uppercase text-lg truncate">
+            Task Detail
+          </DialogTitle>
+        </div>
+        {!task ? (
+          <div className="p-6 font-mono text-xs uppercase text-muted-foreground animate-pulse">
+            Loading task...
+          </div>
+        ) : (
+          <div className="p-6 space-y-5">
+            <div className="flex flex-wrap items-center gap-2">
+              <TaskStatusBadge status={task.status} />
+              <Badge variant="outline">{task.priority} priority</Badge>
+              {task.provider && <Badge variant="outline">{task.provider}</Badge>}
+              {task.budgetCents != null && (
+                <Badge variant="outline">Budget {formatCents(task.budgetCents)}</Badge>
+              )}
+              {task.attempts > 0 && (
+                <Badge variant="outline">Attempt {task.attempts}</Badge>
+              )}
+            </div>
+
+            <div>
+              <div className="text-[10px] font-bold uppercase text-muted-foreground mb-1">
+                Objective — {task.agentName}
+              </div>
+              <p className="font-mono text-sm bg-muted/30 border-2 border-border/50 p-3 whitespace-pre-wrap">
+                {task.objective}
+              </p>
+            </div>
+
+            {task.errorMessage && (
+              <div className="border-4 border-destructive/60 bg-destructive/10 p-3">
+                <div className="text-[10px] font-bold uppercase text-destructive mb-1">
+                  {task.errorKind ? task.errorKind.replace(/_/g, " ") : "Error"}
+                </div>
+                <p className="font-mono text-xs">{task.errorMessage}</p>
+              </div>
+            )}
+
+            {task.output && (
+              <div>
+                <div className="text-[10px] font-bold uppercase text-muted-foreground mb-1">
+                  Result
+                </div>
+                <pre className="font-mono text-xs bg-background border-2 border-border/50 p-3 whitespace-pre-wrap max-h-72 overflow-y-auto">
+                  {task.output}
+                </pre>
+              </div>
+            )}
+
+            {task.files.length > 0 && (
+              <div>
+                <div className="text-[10px] font-bold uppercase text-muted-foreground mb-1">
+                  Files
+                </div>
+                <div className="space-y-2">
+                  {task.files.map((file) => (
+                    <details key={file.name} className="border-2 border-border/50">
+                      <summary className="font-mono text-xs px-3 py-2 cursor-pointer uppercase">
+                        {file.name}
+                      </summary>
+                      <pre className="font-mono text-xs p-3 whitespace-pre-wrap max-h-48 overflow-y-auto border-t-2 border-border/50">
+                        {file.content}
+                      </pre>
+                    </details>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <TaskCostLine task={task} />
+            </div>
+
+            <div>
+              <div className="flex items-center gap-2 text-[10px] font-bold uppercase text-muted-foreground mb-1">
+                <ScrollText className="w-3 h-3" />
+                Execution Log
+              </div>
+              <TaskLogList logs={detail?.logs ?? []} />
+            </div>
+
+            <div className="pt-2 border-t-4 border-border flex justify-between items-center gap-3">
+              <div className="text-[10px] font-mono text-muted-foreground uppercase">
+                Created {formatDistanceToNow(new Date(task.createdAt), { addSuffix: true })}
+              </div>
+              <TaskActions task={task} />
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Cancel / retry controls shared by cards and the detail dialog. */
+function TaskActions({ task }: { task: Task }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+    queryClient.invalidateQueries({ queryKey: [`/api/tasks/${task.id}`] });
+    queryClient.invalidateQueries({ queryKey: ["/api/office/overview"] });
+  };
+  const onError = (error: unknown) => {
+    const message =
+      (error as { response?: { data?: { error?: string } } })?.response?.data?.error ??
+      "The action could not be completed.";
+    toast({ title: "Task action failed", description: message, variant: "destructive" });
+  };
+  const cancelTask = useCancelTask({ mutation: { onSuccess: invalidate, onError } });
+  const retryTask = useRetryTask({ mutation: { onSuccess: invalidate, onError } });
+  return (
+    <div className="flex gap-2">
+      {CANCELLABLE.includes(task.status) && (
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={cancelTask.isPending}
+          onClick={() => cancelTask.mutate({ taskId: task.id })}
+        >
+          <Ban className="w-3 h-3 mr-1" />
+          {cancelTask.isPending ? "CANCELLING..." : "CANCEL"}
+        </Button>
+      )}
+      {RETRYABLE.includes(task.status) && (
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={retryTask.isPending}
+          onClick={() => retryTask.mutate({ taskId: task.id })}
+        >
+          <RotateCcw className="w-3 h-3 mr-1" />
+          {retryTask.isPending ? "RETRYING..." : "RETRY"}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function TaskStatusBadge({ status }: { status: TaskStatus }) {
+  switch (status) {
+    case 'queued': return <Badge variant="outline">Queued</Badge>;
+    case 'running': return <Badge variant="success" className="animate-pulse">Running</Badge>;
+    case 'waiting_approval': return <Badge variant="warning">Awaiting Approval</Badge>;
+    case 'blocked': return <Badge variant="warning">Blocked</Badge>;
+    case 'completed': return <Badge variant="accent">Complete</Badge>;
+    case 'failed': return <Badge variant="destructive">Failed</Badge>;
+    case 'cancelled': return <Badge variant="default">Cancelled</Badge>;
+    default: return <Badge variant="default">{status}</Badge>;
+  }
+}
+
 function TaskCostLine({ task }: { task: Task }) {
   const parts: React.ReactNode[] = [];
   if (task.model) {
@@ -212,14 +437,20 @@ function TaskCostLine({ task }: { task: Task }) {
 }
 
 export default function TasksPage() {
-  const { data: tasks, isLoading: tasksLoading } = useListTasks();
+  // The queue advances server-side; poll so status transitions appear live.
+  const { data: tasks, isLoading: tasksLoading } = useListTasks({
+    query: { queryKey: ["/api/tasks"], refetchInterval: 4000 },
+  });
   const { data: agents } = useListAgents();
   const queryClient = useQueryClient();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [inspectedTaskId, setInspectedTaskId] = useState<string | null>(null);
 
   const [newTask, setNewTask] = useState({
     agentId: "",
     objective: "",
+    priority: TaskInputPriority.normal as TaskInputPriority,
+    budgetDollars: "",
     providerOverride: "" as TaskInputProviderOverride | "",
     modelOverride: "",
   });
@@ -242,35 +473,39 @@ export default function TasksPage() {
         queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
         queryClient.invalidateQueries({ queryKey: ["/api/office/overview"] });
         setIsDialogOpen(false);
-        setNewTask({ agentId: "", objective: "", providerOverride: "", modelOverride: "" });
+        setNewTask({
+          agentId: "",
+          objective: "",
+          priority: TaskInputPriority.normal,
+          budgetDollars: "",
+          providerOverride: "",
+          modelOverride: "",
+        });
       }
     }
   });
 
+  const budgetCents = newTask.budgetDollars.trim()
+    ? Math.round(Number(newTask.budgetDollars) * 10000) / 100
+    : null;
+  const budgetInvalid =
+    newTask.budgetDollars.trim() !== "" &&
+    (!Number.isFinite(budgetCents) || (budgetCents ?? 0) <= 0);
+
   const handleCreateTask = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTask.agentId || !newTask.objective) return;
+    if (!newTask.agentId || !newTask.objective || budgetInvalid) return;
 
     createTask.mutate({
       data: {
         agentId: newTask.agentId,
         objective: newTask.objective,
+        priority: newTask.priority,
+        ...(budgetCents != null && !budgetInvalid ? { budgetCents } : {}),
         ...(newTask.providerOverride ? { providerOverride: newTask.providerOverride } : {}),
         ...(newTask.modelOverride ? { modelOverride: newTask.modelOverride } : {})
       }
     });
-  };
-
-  const getStatusBadge = (status: TaskStatus) => {
-    switch (status) {
-      case 'queued': return <Badge variant="outline">Queued</Badge>;
-      case 'running': return <Badge variant="success" className="animate-pulse">Running</Badge>;
-      case 'waiting_approval': return <Badge variant="warning">Awaiting Approval</Badge>;
-      case 'paused': return <Badge variant="default">Paused</Badge>;
-      case 'completed': return <Badge variant="accent">Complete</Badge>;
-      case 'failed': return <Badge variant="destructive">Failed</Badge>;
-      default: return <Badge variant="default">{status}</Badge>;
-    }
   };
 
   const getStatusIcon = (status: TaskStatus) => {
@@ -278,8 +513,10 @@ export default function TasksPage() {
       case 'queued': return <Clock className="w-5 h-5 text-muted-foreground" />;
       case 'running': return <Activity className="w-5 h-5 text-green-500 animate-pulse" />;
       case 'waiting_approval': return <AlertTriangle className="w-5 h-5 text-yellow-500" />;
+      case 'blocked': return <AlertTriangle className="w-5 h-5 text-yellow-500" />;
       case 'completed': return <CheckCircle className="w-5 h-5 text-accent" />;
       case 'failed': return <AlertTriangle className="w-5 h-5 text-destructive" />;
+      case 'cancelled': return <XCircle className="w-5 h-5 text-muted-foreground" />;
       default: return <Activity className="w-5 h-5 text-muted-foreground" />;
     }
   };
@@ -338,6 +575,46 @@ export default function TasksPage() {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
+                    <label className="uppercase font-bold text-xs">Priority</label>
+                    <Select
+                      value={newTask.priority}
+                      onValueChange={(val) => setNewTask({...newTask, priority: val as TaskInputPriority})}
+                    >
+                      <SelectTrigger className={selectTriggerClass}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className={selectContentClass}>
+                        <SelectItem value={TaskInputPriority.high} className={selectItemClass}>High</SelectItem>
+                        <SelectItem value={TaskInputPriority.normal} className={selectItemClass}>Normal</SelectItem>
+                        <SelectItem value={TaskInputPriority.low} className={selectItemClass}>Low</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="uppercase font-bold text-xs flex justify-between">
+                      <span>Budget (USD)</span>
+                      <span className="text-muted-foreground font-normal">(Optional)</span>
+                    </label>
+                    <Input
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      value={newTask.budgetDollars}
+                      onChange={(e) => setNewTask({...newTask, budgetDollars: e.target.value})}
+                      placeholder="No spending cap"
+                      className="bg-background border-4 border-border rounded-none focus-visible:ring-0 focus-visible:border-primary font-mono text-sm"
+                    />
+                    {budgetInvalid && (
+                      <div className="text-[10px] font-mono text-destructive uppercase">
+                        Enter a positive dollar amount.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-2">
                     <label className="uppercase font-bold text-xs flex justify-between">
                       <span>Provider Override</span>
                       <span className="text-muted-foreground font-normal">(Optional)</span>
@@ -382,7 +659,7 @@ export default function TasksPage() {
                   <Button
                     type="submit"
                     variant="primary"
-                    disabled={createTask.isPending || !newTask.agentId || !newTask.objective}
+                    disabled={createTask.isPending || !newTask.agentId || !newTask.objective || budgetInvalid}
                   >
                     {createTask.isPending ? "DISPATCHING..." : "DISPATCH"}
                   </Button>
@@ -436,25 +713,54 @@ export default function TasksPage() {
                       <p className="font-mono text-sm line-clamp-2">{task.objective}</p>
                     </div>
                     <div className="shrink-0 ml-4 hidden sm:block">
-                      {getStatusBadge(task.status)}
+                      <TaskStatusBadge status={task.status} />
                     </div>
                   </div>
 
+                  {task.errorMessage && (
+                    <div className="text-[10px] font-mono text-destructive border-l-4 border-destructive/60 pl-2">
+                      {task.errorMessage}
+                    </div>
+                  )}
+
                   <div className="flex flex-wrap items-center gap-4 border-t-4 border-border/30 pt-3">
                     <div className="sm:hidden mb-2 w-full">
-                      {getStatusBadge(task.status)}
+                      <TaskStatusBadge status={task.status} />
                     </div>
                     {task.provider && (
                       <div className="text-[10px] bg-muted px-2 py-1 uppercase font-bold text-muted-foreground border-2 border-border/50">
                         Via: {task.provider}
                       </div>
                     )}
+                    {task.priority !== "normal" && (
+                      <div className="text-[10px] bg-muted px-2 py-1 uppercase font-bold text-muted-foreground border-2 border-border/50">
+                        {task.priority} priority
+                      </div>
+                    )}
                     <TaskCostLine task={task} />
+                    <div className="ml-auto flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setInspectedTaskId(task.id)}
+                      >
+                        <ScrollText className="w-3 h-3 mr-1" />
+                        DETAILS
+                      </Button>
+                      <TaskActions task={task} />
+                    </div>
                   </div>
                 </div>
               </PixelCard>
             ))}
           </div>
+        )}
+
+        {inspectedTaskId && (
+          <TaskDetailDialog
+            taskId={inspectedTaskId}
+            onClose={() => setInspectedTaskId(null)}
+          />
         )}
       </div>
     </Shell>

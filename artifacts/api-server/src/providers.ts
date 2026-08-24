@@ -374,6 +374,11 @@ const CHARS_PER_TOKEN = 4;
 const PROMPT_OVERHEAD_TOKENS = 600;
 const DEFAULT_OUTPUT_TOKENS = 800;
 
+/** Conservative prompt-token estimate shared by estimates and the budget gate. */
+export function estimatePromptTokens(promptChars: number): number {
+  return Math.ceil(promptChars / CHARS_PER_TOKEN) + PROMPT_OVERHEAD_TOKENS;
+}
+
 export type TaskEstimate = {
   provider: ProviderId;
   model: string;
@@ -391,8 +396,7 @@ export async function estimateTask(
   routing: { provider: ProviderId; model: string },
 ): Promise<TaskEstimate> {
   const promptChars = agentContext.length + objective.length;
-  const estimatedInputTokens =
-    Math.ceil(promptChars / CHARS_PER_TOKEN) + PROMPT_OVERHEAD_TOKENS;
+  const estimatedInputTokens = estimatePromptTokens(promptChars);
   const estimatedOutputTokens = DEFAULT_OUTPUT_TOKENS;
   const estimatedTokens = estimatedInputTokens + estimatedOutputTokens;
 

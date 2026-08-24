@@ -174,7 +174,9 @@ export const GetAgentResponse = zod.object({
   "agentId": zod.string(),
   "agentName": zod.string(),
   "objective": zod.string(),
-  "status": zod.enum(['queued', 'running', 'waiting_approval', 'paused', 'completed', 'failed']),
+  "status": zod.enum(['queued', 'running', 'waiting_approval', 'blocked', 'completed', 'failed', 'cancelled']),
+  "priority": zod.enum(['low', 'normal', 'high']),
+  "budgetCents": zod.number().nullish(),
   "provider": zod.enum(['claude_max', 'openrouter']).optional(),
   "model": zod.string().nullish(),
   "estimatedTokens": zod.number().nullish(),
@@ -182,6 +184,16 @@ export const GetAgentResponse = zod.object({
   "actualInputTokens": zod.number().nullish(),
   "actualOutputTokens": zod.number().nullish(),
   "actualCostCents": zod.number().nullish(),
+  "output": zod.string().nullish(),
+  "files": zod.array(zod.object({
+  "name": zod.string(),
+  "content": zod.string()
+})),
+  "errorKind": zod.string().nullish(),
+  "errorMessage": zod.string().nullish(),
+  "attempts": zod.number(),
+  "startedAt": zod.coerce.date().nullish(),
+  "finishedAt": zod.coerce.date().nullish(),
   "createdAt": zod.coerce.date()
 }))
 })
@@ -437,7 +449,9 @@ export const ListTasksResponseItem = zod.object({
   "agentId": zod.string(),
   "agentName": zod.string(),
   "objective": zod.string(),
-  "status": zod.enum(['queued', 'running', 'waiting_approval', 'paused', 'completed', 'failed']),
+  "status": zod.enum(['queued', 'running', 'waiting_approval', 'blocked', 'completed', 'failed', 'cancelled']),
+  "priority": zod.enum(['low', 'normal', 'high']),
+  "budgetCents": zod.number().nullish(),
   "provider": zod.enum(['claude_max', 'openrouter']).optional(),
   "model": zod.string().nullish(),
   "estimatedTokens": zod.number().nullish(),
@@ -445,6 +459,16 @@ export const ListTasksResponseItem = zod.object({
   "actualInputTokens": zod.number().nullish(),
   "actualOutputTokens": zod.number().nullish(),
   "actualCostCents": zod.number().nullish(),
+  "output": zod.string().nullish(),
+  "files": zod.array(zod.object({
+  "name": zod.string(),
+  "content": zod.string()
+})),
+  "errorKind": zod.string().nullish(),
+  "errorMessage": zod.string().nullish(),
+  "attempts": zod.number(),
+  "startedAt": zod.coerce.date().nullish(),
+  "finishedAt": zod.coerce.date().nullish(),
   "createdAt": zod.coerce.date()
 })
 export const ListTasksResponse = zod.array(ListTasksResponseItem)
@@ -456,6 +480,9 @@ export const ListTasksResponse = zod.array(ListTasksResponseItem)
 export const createTaskBodyObjectiveMin = 3;
 export const createTaskBodyObjectiveMax = 5000;
 
+export const createTaskBodyBudgetCentsMin = 0.01;
+export const createTaskBodyBudgetCentsMax = 1000000;
+
 export const createTaskBodyModelOverrideMax = 200;
 
 
@@ -463,6 +490,8 @@ export const createTaskBodyModelOverrideMax = 200;
 export const CreateTaskBody = zod.object({
   "agentId": zod.string(),
   "objective": zod.string().min(createTaskBodyObjectiveMin).max(createTaskBodyObjectiveMax),
+  "priority": zod.enum(['low', 'normal', 'high']).optional(),
+  "budgetCents": zod.number().min(createTaskBodyBudgetCentsMin).max(createTaskBodyBudgetCentsMax).optional(),
   "providerOverride": zod.enum(['claude_max', 'openrouter']).optional(),
   "modelOverride": zod.string().max(createTaskBodyModelOverrideMax).optional()
 })
@@ -472,7 +501,9 @@ export const CreateTaskResponse = zod.object({
   "agentId": zod.string(),
   "agentName": zod.string(),
   "objective": zod.string(),
-  "status": zod.enum(['queued', 'running', 'waiting_approval', 'paused', 'completed', 'failed']),
+  "status": zod.enum(['queued', 'running', 'waiting_approval', 'blocked', 'completed', 'failed', 'cancelled']),
+  "priority": zod.enum(['low', 'normal', 'high']),
+  "budgetCents": zod.number().nullish(),
   "provider": zod.enum(['claude_max', 'openrouter']).optional(),
   "model": zod.string().nullish(),
   "estimatedTokens": zod.number().nullish(),
@@ -480,6 +511,16 @@ export const CreateTaskResponse = zod.object({
   "actualInputTokens": zod.number().nullish(),
   "actualOutputTokens": zod.number().nullish(),
   "actualCostCents": zod.number().nullish(),
+  "output": zod.string().nullish(),
+  "files": zod.array(zod.object({
+  "name": zod.string(),
+  "content": zod.string()
+})),
+  "errorKind": zod.string().nullish(),
+  "errorMessage": zod.string().nullish(),
+  "attempts": zod.number(),
+  "startedAt": zod.coerce.date().nullish(),
+  "finishedAt": zod.coerce.date().nullish(),
   "createdAt": zod.coerce.date()
 })
 
@@ -599,6 +640,122 @@ export const ListProviderModelsResponse = zod.object({
 
 
 /**
+ * @summary Get one task with its execution logs
+ */
+export const GetTaskParams = zod.object({
+  "taskId": zod.coerce.string()
+})
+
+export const GetTaskResponse = zod.object({
+  "task": zod.object({
+  "id": zod.string(),
+  "agentId": zod.string(),
+  "agentName": zod.string(),
+  "objective": zod.string(),
+  "status": zod.enum(['queued', 'running', 'waiting_approval', 'blocked', 'completed', 'failed', 'cancelled']),
+  "priority": zod.enum(['low', 'normal', 'high']),
+  "budgetCents": zod.number().nullish(),
+  "provider": zod.enum(['claude_max', 'openrouter']).optional(),
+  "model": zod.string().nullish(),
+  "estimatedTokens": zod.number().nullish(),
+  "estimatedCostCents": zod.number().nullish(),
+  "actualInputTokens": zod.number().nullish(),
+  "actualOutputTokens": zod.number().nullish(),
+  "actualCostCents": zod.number().nullish(),
+  "output": zod.string().nullish(),
+  "files": zod.array(zod.object({
+  "name": zod.string(),
+  "content": zod.string()
+})),
+  "errorKind": zod.string().nullish(),
+  "errorMessage": zod.string().nullish(),
+  "attempts": zod.number(),
+  "startedAt": zod.coerce.date().nullish(),
+  "finishedAt": zod.coerce.date().nullish(),
+  "createdAt": zod.coerce.date()
+}),
+  "logs": zod.array(zod.object({
+  "id": zod.string(),
+  "level": zod.enum(['info', 'warn', 'error']),
+  "message": zod.string(),
+  "createdAt": zod.coerce.date()
+}))
+})
+
+
+/**
+ * @summary Cancel a queued, running, blocked, or waiting task immediately
+ */
+export const CancelTaskParams = zod.object({
+  "taskId": zod.coerce.string()
+})
+
+export const CancelTaskResponse = zod.object({
+  "id": zod.string(),
+  "agentId": zod.string(),
+  "agentName": zod.string(),
+  "objective": zod.string(),
+  "status": zod.enum(['queued', 'running', 'waiting_approval', 'blocked', 'completed', 'failed', 'cancelled']),
+  "priority": zod.enum(['low', 'normal', 'high']),
+  "budgetCents": zod.number().nullish(),
+  "provider": zod.enum(['claude_max', 'openrouter']).optional(),
+  "model": zod.string().nullish(),
+  "estimatedTokens": zod.number().nullish(),
+  "estimatedCostCents": zod.number().nullish(),
+  "actualInputTokens": zod.number().nullish(),
+  "actualOutputTokens": zod.number().nullish(),
+  "actualCostCents": zod.number().nullish(),
+  "output": zod.string().nullish(),
+  "files": zod.array(zod.object({
+  "name": zod.string(),
+  "content": zod.string()
+})),
+  "errorKind": zod.string().nullish(),
+  "errorMessage": zod.string().nullish(),
+  "attempts": zod.number(),
+  "startedAt": zod.coerce.date().nullish(),
+  "finishedAt": zod.coerce.date().nullish(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Requeue a failed, blocked, or cancelled task
+ */
+export const RetryTaskParams = zod.object({
+  "taskId": zod.coerce.string()
+})
+
+export const RetryTaskResponse = zod.object({
+  "id": zod.string(),
+  "agentId": zod.string(),
+  "agentName": zod.string(),
+  "objective": zod.string(),
+  "status": zod.enum(['queued', 'running', 'waiting_approval', 'blocked', 'completed', 'failed', 'cancelled']),
+  "priority": zod.enum(['low', 'normal', 'high']),
+  "budgetCents": zod.number().nullish(),
+  "provider": zod.enum(['claude_max', 'openrouter']).optional(),
+  "model": zod.string().nullish(),
+  "estimatedTokens": zod.number().nullish(),
+  "estimatedCostCents": zod.number().nullish(),
+  "actualInputTokens": zod.number().nullish(),
+  "actualOutputTokens": zod.number().nullish(),
+  "actualCostCents": zod.number().nullish(),
+  "output": zod.string().nullish(),
+  "files": zod.array(zod.object({
+  "name": zod.string(),
+  "content": zod.string()
+})),
+  "errorKind": zod.string().nullish(),
+  "errorMessage": zod.string().nullish(),
+  "attempts": zod.number(),
+  "startedAt": zod.coerce.date().nullish(),
+  "finishedAt": zod.coerce.date().nullish(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
  * @summary Estimate provider, model, tokens, and cost for a task before dispatch
  */
 export const estimateTaskBodyObjectiveMin = 3;
@@ -653,7 +810,9 @@ export const RecordTaskUsageResponse = zod.object({
   "agentId": zod.string(),
   "agentName": zod.string(),
   "objective": zod.string(),
-  "status": zod.enum(['queued', 'running', 'waiting_approval', 'paused', 'completed', 'failed']),
+  "status": zod.enum(['queued', 'running', 'waiting_approval', 'blocked', 'completed', 'failed', 'cancelled']),
+  "priority": zod.enum(['low', 'normal', 'high']),
+  "budgetCents": zod.number().nullish(),
   "provider": zod.enum(['claude_max', 'openrouter']).optional(),
   "model": zod.string().nullish(),
   "estimatedTokens": zod.number().nullish(),
@@ -661,6 +820,16 @@ export const RecordTaskUsageResponse = zod.object({
   "actualInputTokens": zod.number().nullish(),
   "actualOutputTokens": zod.number().nullish(),
   "actualCostCents": zod.number().nullish(),
+  "output": zod.string().nullish(),
+  "files": zod.array(zod.object({
+  "name": zod.string(),
+  "content": zod.string()
+})),
+  "errorKind": zod.string().nullish(),
+  "errorMessage": zod.string().nullish(),
+  "attempts": zod.number(),
+  "startedAt": zod.coerce.date().nullish(),
+  "finishedAt": zod.coerce.date().nullish(),
   "createdAt": zod.coerce.date()
 })
 

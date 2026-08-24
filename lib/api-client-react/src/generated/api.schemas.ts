@@ -85,9 +85,19 @@ export const TaskStatus = {
   queued: 'queued',
   running: 'running',
   waiting_approval: 'waiting_approval',
-  paused: 'paused',
+  blocked: 'blocked',
   completed: 'completed',
   failed: 'failed',
+  cancelled: 'cancelled',
+} as const;
+
+export type TaskPriority = typeof TaskPriority[keyof typeof TaskPriority];
+
+
+export const TaskPriority = {
+  low: 'low',
+  normal: 'normal',
+  high: 'high',
 } as const;
 
 export type TaskProvider = typeof TaskProvider[keyof typeof TaskProvider];
@@ -98,12 +108,20 @@ export const TaskProvider = {
   openrouter: 'openrouter',
 } as const;
 
+export interface TaskFile {
+  name: string;
+  content: string;
+}
+
 export interface Task {
   id: string;
   agentId: string;
   agentName: string;
   objective: string;
   status: TaskStatus;
+  priority: TaskPriority;
+  /** @nullable */
+  budgetCents?: number | null;
   provider?: TaskProvider;
   /** @nullable */
   model?: string | null;
@@ -117,6 +135,18 @@ export interface Task {
   actualOutputTokens?: number | null;
   /** @nullable */
   actualCostCents?: number | null;
+  /** @nullable */
+  output?: string | null;
+  files: TaskFile[];
+  /** @nullable */
+  errorKind?: string | null;
+  /** @nullable */
+  errorMessage?: string | null;
+  attempts: number;
+  /** @nullable */
+  startedAt?: string | null;
+  /** @nullable */
+  finishedAt?: string | null;
   createdAt: string;
 }
 
@@ -294,6 +324,36 @@ export interface PauseInput {
   paused: boolean;
 }
 
+export type TaskLogLevel = typeof TaskLogLevel[keyof typeof TaskLogLevel];
+
+
+export const TaskLogLevel = {
+  info: 'info',
+  warn: 'warn',
+  error: 'error',
+} as const;
+
+export interface TaskLog {
+  id: string;
+  level: TaskLogLevel;
+  message: string;
+  createdAt: string;
+}
+
+export interface TaskDetail {
+  task: Task;
+  logs: TaskLog[];
+}
+
+export type TaskInputPriority = typeof TaskInputPriority[keyof typeof TaskInputPriority];
+
+
+export const TaskInputPriority = {
+  low: 'low',
+  normal: 'normal',
+  high: 'high',
+} as const;
+
 export type TaskInputProviderOverride = typeof TaskInputProviderOverride[keyof typeof TaskInputProviderOverride];
 
 
@@ -309,6 +369,12 @@ export interface TaskInput {
      * @maxLength 5000
      */
   objective: string;
+  priority?: TaskInputPriority;
+  /**
+     * @minimum 0.01
+     * @maximum 1000000
+     */
+  budgetCents?: number;
   providerOverride?: TaskInputProviderOverride;
   /** @maxLength 200 */
   modelOverride?: string;

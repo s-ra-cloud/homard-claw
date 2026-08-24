@@ -358,6 +358,58 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProviderModels"
+  /tasks/{taskId}:
+    get:
+      operationId: getTask
+      tags: [office]
+      summary: Get one task with its execution logs
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Task detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetail"
+        "404":
+          description: Task not found
+  /tasks/{taskId}/cancel:
+    post:
+      operationId: cancelTask
+      tags: [office]
+      summary: Cancel a queued, running, blocked, or waiting task immediately
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Cancelled task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "404":
+          description: Task not found
+        "409":
+          description: Task is already finished
+  /tasks/{taskId}/retry:
+    post:
+      operationId: retryTask
+      tags: [office]
+      summary: Requeue a failed, blocked, or cancelled task
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Requeued task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "404":
+          description: Task not found
+        "409":
+          description: Task is not in a retryable state
   /tasks/estimate:
     post:
       operationId: estimateTask
@@ -412,6 +464,11 @@ components:
       schema: { type: string }
     ApprovalId:
       name: approvalId
+      in: path
+      required: true
+      schema: { type: string }
+    TaskId:
+      name: taskId
       in: path
       required: true
       schema: { type: string }
@@ -518,13 +575,15 @@ components:
         paused: { type: boolean }
     Task:
       type: object
-      required: [id, agentId, agentName, objective, status, createdAt]
+      required: [id, agentId, agentName, objective, status, priority, attempts, files, createdAt]
       properties:
         id: { type: string }
         agentId: { type: string }
         agentName: { type: string }
         objective: { type: string }
-        status: { type: string, enum: [queued, running, waiting_approval, paused, completed, failed] }
+        status: { type: string, enum: [queued, running, waiting_approval, blocked, completed, failed, cancelled] }
+        priority: { type: string, enum: [low, normal, high] }
+        budgetCents: { type: [number, "null"] }
         provider: { type: string, enum: [claude_max, openrouter] }
         model: { type: [string, "null"] }
         estimatedTokens: { type: [number, "null"] }
@@ -532,13 +591,49 @@ components:
         actualInputTokens: { type: [number, "null"] }
         actualOutputTokens: { type: [number, "null"] }
         actualCostCents: { type: [number, "null"] }
+        output: { type: [string, "null"] }
+        files:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaskFile"
+        errorKind: { type: [string, "null"] }
+        errorMessage: { type: [string, "null"] }
+        attempts: { type: number }
+        startedAt: { type: [string, "null"], format: date-time }
+        finishedAt: { type: [string, "null"], format: date-time }
         createdAt: { type: string, format: date-time }
+    TaskFile:
+      type: object
+      required: [name, content]
+      properties:
+        name: { type: string }
+        content: { type: string }
+    TaskLog:
+      type: object
+      required: [id, level, message, createdAt]
+      properties:
+        id: { type: string }
+        level: { type: string, enum: [info, warn, error] }
+        message: { type: string }
+        createdAt: { type: string, format: date-time }
+    TaskDetail:
+      type: object
+      required: [task, logs]
+      properties:
+        task:
+          $ref: "#/components/schemas/Task"
+        logs:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaskLog"
     TaskInput:
       type: object
       required: [agentId, objective]
       properties:
         agentId: { type: string }
         objective: { type: string, minLength: 3, maxLength: 5000 }
+        priority: { type: string, enum: [low, normal, high] }
+        budgetCents: { type: number, minimum: 0.01, maximum: 1000000 }
         providerOverride: { type: string, enum: [claude_max, openrouter] }
         modelOverride: { type: string, maxLength: 200 }
     TaskEstimateInput:

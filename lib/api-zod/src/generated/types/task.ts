@@ -5,6 +5,8 @@
  * HomardClaw private agent office API
  * OpenAPI spec version: 0.1.0
  */
+import type { TaskFile } from './taskFile';
+import type { TaskPriority } from './taskPriority';
 import type { TaskProvider } from './taskProvider';
 import type { TaskStatus } from './taskStatus';
 
@@ -14,6 +16,9 @@ export interface Task {
   agentName: string;
   objective: string;
   status: TaskStatus;
+  priority: TaskPriority;
+  /** @nullable */
+  budgetCents?: number | null;
   provider?: TaskProvider;
   /** @nullable */
   model?: string | null;
@@ -27,5 +32,17 @@ export interface Task {
   actualOutputTokens?: number | null;
   /** @nullable */
   actualCostCents?: number | null;
+  /** @nullable */
+  output?: string | null;
+  files: TaskFile[];
+  /** @nullable */
+  errorKind?: string | null;
+  /** @nullable */
+  errorMessage?: string | null;
+  attempts: number;
+  /** @nullable */
+  startedAt?: Date | null;
+  /** @nullable */
+  finishedAt?: Date | null;
   createdAt: Date;
 }

@@ -112,7 +112,7 @@ export default function AgentsPage() {
 
   const handleRetire = (agentId: string, name: string) => {
     const confirmed = window.confirm(
-      `RETIRE ${name.toUpperCase()}? This is PERMANENT.\n\n${name} will be removed from active work forever and move to the Island. Any queued work will be paused. This cannot be undone.`
+      `RETIRE ${name.toUpperCase()}? This is PERMANENT.\n\n${name} will be removed from active work forever and move to the Island. Any queued work will be blocked until reassigned. This cannot be undone.`
     );
     if (confirmed) {
       retireAgent.mutate({ agentId });

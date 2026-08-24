@@ -13,7 +13,8 @@ export const TaskStatus = {
   queued: 'queued',
   running: 'running',
   waiting_approval: 'waiting_approval',
-  paused: 'paused',
+  blocked: 'blocked',
   completed: 'completed',
   failed: 'failed',
+  cancelled: 'cancelled',
 } as const;
