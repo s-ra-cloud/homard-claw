@@ -19,13 +19,16 @@ import "./office-dashboard.css";
 // Use the server-rack edition if available, fall back to the original.
 const officeArt = `${import.meta.env.BASE_URL}images/four-desk-office-server.png`;
 
-// Chair centres in the original office scene. Agent sprites are layered on top
-// so every employee is rendered by the same canonical component as the roster.
+// Chair centres in the original office scene, measured from the artwork: each
+// seat sits in the middle of its desk's knee space, between the two drawer
+// pedestals. The desks are not exact mirrors, so the right-hand seats do not
+// mirror the left-hand ones. Agent sprites are layered on top so every
+// employee is rendered by the same canonical component as the roster.
 const DESK_SEATS = [
-  { left: 29.0, top: 43.0, label: "window desk" },
-  { left: 71.0, top: 43.0, label: "library desk" },
-  { left: 29.0, top: 72.0, label: "garden desk" },
-  { left: 71.0, top: 72.0, label: "filing desk" },
+  { left: 29.0, top: 43.0, label: "window desk" }, // knee space 25.0–35.2%
+  { left: 73.0, top: 43.0, label: "library desk" }, // knee space 68.2–78.1%
+  { left: 29.0, top: 72.0, label: "garden desk" }, // knee space 25.0–33.8%
+  { left: 69.5, top: 72.0, label: "filing desk" }, // knee space 65.0–73.4%
 ];
 
 // The original scene intentionally leaves its centre open: a wide band behind
@@ -88,7 +91,12 @@ interface SceneHotspot {
   href: string;
   label: string;         // shown as tooltip on hover/focus
   ariaLabel: string;     // accessible name for screen readers
-  /** Centre position as a percentage of the room-scene container. */
+  /**
+   * Centre position as a percentage of the room-scene container. `.scene-hotspot`
+   * applies `transform: translate(-50%, -50%)`, so these are the centre of the hit
+   * rectangle, NOT its top-left corner: the covered band is left ± width/2 and
+   * top ± height/2.
+   */
   left: string;
   top: string;
   /** Hit-area dimensions as percentages. */
@@ -428,37 +436,46 @@ const SCENE_HOTSPOTS: SceneHotspot[] = [
     href: "/island",
     label: "Retirement Island",
     ariaLabel: "Beach painting — open Retirement Island",
-    left: "82%",
-    top: "18%",
-    width: "10%",
-    height: "10%",
+    // Frame spans 84.2–93.1% × 20.8–31.6% of the artwork.
+    // Centre-anchored hit area covers 84.0–93.0% × 20.75–31.25%.
+    left: "88.5%",
+    top: "26%",
+    width: "9%",
+    height: "10.5%",
   },
   {
     href: "/tasks",
     label: "Tasks",
     ariaLabel: "Library bookshelf — open Tasks",
-    left: "51%",
-    top: "13%",
-    width: "16%",
-    height: "13%",
+    // Bookcase carcass spans 52.7–70.3% × 9.1–33.2%; inset slightly so the
+    // hit area stops short of the adjoining desk.
+    // Centre-anchored hit area covers 52.5–69.5% × 9.5–32.5%.
+    left: "61%",
+    top: "21%",
+    width: "17%",
+    height: "23%",
   },
   {
     href: "/approvals",
     label: "Approvals",
     ariaLabel: "Window desk computer — open Approvals",
-    left: "18%",
-    top: "31%",
-    width: "11%",
-    height: "10%",
+    // Monitor (20.3–28.5% × 23.9–33.2%) plus the keyboard in front of it.
+    // Centre-anchored hit area covers 20.25–30.75% × 23.75–35.25%.
+    left: "25.5%",
+    top: "29.5%",
+    width: "10.5%",
+    height: "11.5%",
     extraClass: "scene-hotspot--approval",
   },
   {
     href: "/providers",
     label: "Providers",
     ariaLabel: "Server rack — open Providers",
-    left: "87%",
-    top: "68%",
-    width: "10%",
-    height: "13%",
+    // Rack spans 81.9–98.0% × 55.8–86.3%; kept a hair inside those edges.
+    // Centre-anchored hit area covers 82.0–97.0% × 57.0–85.0%.
+    left: "89.5%",
+    top: "71%",
+    width: "15%",
+    height: "28%",
   },
 ];
