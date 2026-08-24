@@ -14,12 +14,31 @@ while every furniture pixel stays byte-identical.
 **Why:** the owner called out desk and floor agents "floating" — the bob/sip/groove
 animations were rocking the chair and cushion along with the lobster.
 
-**How to apply:** keep frame counts at 2 or 3 so CSS background positions land on exact
-0/50/100% boundaries at any rendered size; other counts need thirds and can seam or
-jitter. Step frames rather than tween them, and express status through cadence, not
-movement — brisk claw taps for busy, slow blinks for calm, a held frame for paused or
-error. Size these sprites through a custom property rather than an inline width: page
-CSS shrinks them at mobile breakpoints and an inline style would outrank it.
+**How to apply:** any frame count works as long as the component emits each column as
+`calc(i * 100% / (n - 1))`; round percentages are what seam or jitter, not the count.
+Poses carry different beats, so the build script writes a layout manifest the app reads
+back — never hand-maintain the frame order in two places. Step frames rather than tween
+them, and express status through cadence, not movement — brisk claw taps for busy, slow
+blinks for calm, a held frame for paused or error. Size these sprites through a custom
+property rather than an inline width: page CSS shrinks them at mobile breakpoints and an
+inline style would outrank it.
+
+# Heads may travel; the CSS shorthand may not
+
+Translating the head region inside a composite sprite is safe even though transforming
+the whole sprite is not: the pose art is a transparent overlay, so vacated pixels refill
+from the source offset by the shift and only shell-coloured columns move. Every frame
+recipe asserts at build time that it repaints nothing outside its calibrated rect, which
+is what catches a rect that no longer sits over the feature it was measured against.
+
+**Why:** idle agents that only blinked still read as cardboard; nodding and turning
+heads are what make a room of them look alive.
+
+**How to apply:** give each agent a negative `animation-delay` and a tempo multiplier
+hashed from its id, or a roomful animates in lockstep and reads as one looped GIF. Set
+those with `animation-name`/`animation-duration` longhands — the `animation` shorthand in
+a later rule silently resets the shared delay to zero. Poses drawn with the eyes shut
+(music, stretch) get head motion but no blink frame; there is nothing to close.
 
 # The committed pose sprites cannot be regenerated
 

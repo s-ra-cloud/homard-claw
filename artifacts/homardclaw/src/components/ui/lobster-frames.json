@@ -1,0 +1,50 @@
+{
+  "lobsters-sitting": [
+    "rest",
+    "blink",
+    "nod",
+    "turn"
+  ],
+  "lobsters-working": [
+    "rest",
+    "blink",
+    "stir",
+    "nod"
+  ],
+  "lobsters-idle-coffee": [
+    "rest",
+    "blink",
+    "stir",
+    "nod",
+    "turn"
+  ],
+  "lobsters-idle-music": [
+    "rest",
+    "stir",
+    "nod",
+    "turn"
+  ],
+  "lobsters-idle-reading": [
+    "rest",
+    "blink",
+    "stir",
+    "nod"
+  ],
+  "lobsters-idle-stretch": [
+    "rest",
+    "stir",
+    "nod"
+  ],
+  "lobsters-floor-working": [
+    "rest",
+    "blink",
+    "stir",
+    "nod"
+  ],
+  "lobsters-beach": [
+    "rest",
+    "blink",
+    "nod",
+    "turn"
+  ]
+}

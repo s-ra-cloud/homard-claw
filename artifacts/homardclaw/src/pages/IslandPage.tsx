@@ -93,6 +93,7 @@ export default function IslandPage() {
                       size={56}
                       pose="beach"
                       status="idle"
+                      seed={agent.id}
                       shellColor={agent.avatar.shellColor}
                     />
                     <span className="island__nametag">{agent.name}</span>

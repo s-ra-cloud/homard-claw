@@ -19,6 +19,7 @@ export type LobsterStatus =
   | string;
 
 import presets from "./lobster-presets.json";
+import frameLayouts from "./lobster-frames.json";
 
 export interface LobsterPreset {
   id: string;
@@ -88,18 +89,59 @@ export type LobsterPose =
  * cushion or laptop off the floor with the lobster. They ship a frame strip
  * beside the still sprite instead (`scripts/build-lobster-sprites.mjs`), where
  * the furniture pixels are identical in every frame and only the character
- * moves: a blink, and a claw pressing the keys. Counts must match the strips.
+ * moves: a blink, a claw pressing the keys, a head dip, a head turn.
+ *
+ * A pose that lacks one of those beats simply holds its rest frame there, so
+ * one set of keyframes drives every pose.
  */
-const POSE_FRAMES: Partial<Record<LobsterPose, 2 | 3>> = {
-  seated: 2,
-  working: 3,
-  "idle-coffee": 3,
-  "idle-music": 2,
-  "idle-reading": 3,
-  "idle-stretch": 2,
-  "floor-working": 3,
-  beach: 2,
-};
+type LobsterFrame = "rest" | "blink" | "stir" | "nod" | "turn";
+
+const MOVING_FRAMES: LobsterFrame[] = ["blink", "stir", "nod", "turn"];
+
+/**
+ * Written by the build script alongside the strips, keyed by sprite folder, so
+ * a pose can never disagree with its own artwork about which column holds the
+ * blink. Poses drawn with their eyes shut simply have no blink frame.
+ */
+const FRAME_LAYOUTS = frameLayouts as Record<string, string[] | undefined>;
+
+/**
+ * Column positions for a strip: frame `i` of `n` sits at `i / (n - 1)` of the
+ * background travel. Expressed as a division so the browser lands on the exact
+ * frame boundary at any rendered size instead of a rounded percentage.
+ */
+function framePositions(layout: string[]): Record<string, string> {
+  const last = layout.length - 1;
+  const vars: Record<string, string> = { "--marlow-frames": String(layout.length) };
+  // Anything the pose does not draw falls back to holding the rest frame.
+  for (const frame of MOVING_FRAMES) vars[`--marlow-${frame}`] = "0%";
+  layout.forEach((frame, index) => {
+    if (!MOVING_FRAMES.includes(frame as LobsterFrame)) return;
+    vars[`--marlow-${frame}`] = `calc(${index} * 100% / ${last})`;
+  });
+  return vars;
+}
+
+/**
+ * A roomful of lobsters blinking in lockstep reads as one animation played
+ * eight times, so each agent gets its own start offset and slightly different
+ * tempo from a stable hash of its id.
+ */
+function idleRhythm(seed: string | undefined): Record<string, string> {
+  if (!seed) return {};
+  let hash = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  const phase = ((hash >>> 8) % 1000) / 1000;
+  const tempo = ((hash >>> 20) % 1000) / 1000;
+  return {
+    // Negative delay starts the loop mid-cycle instead of pausing it.
+    "--marlow-phase": `${(-phase * 8).toFixed(2)}s`,
+    "--marlow-tempo": (0.86 + tempo * 0.34).toFixed(3),
+  };
+}
 
 /**
  * One character scale for a whole scene.
@@ -155,6 +197,8 @@ export interface MarlowLobsterProps {
   status?: LobsterStatus;
   /** Office workstations use the composite lobster-and-chair sprites. */
   pose?: LobsterPose;
+  /** Stable per-agent value (its id) so a room of lobsters moves out of sync. */
+  seed?: string;
   title?: string;
   className?: string;
 }
@@ -165,20 +209,23 @@ export function MarlowLobster({
   preset,
   status = "idle",
   pose = "standing",
+  seed,
   title,
   className = "",
 }: MarlowLobsterProps) {
   const chosen =
     LOBSTER_PRESETS.find((p) => p.id === preset) ?? presetForShellColor(shellColor);
   const folder = `${import.meta.env.BASE_URL}images/${POSE_FOLDERS[pose]}`;
-  const frames = POSE_FRAMES[pose];
+  const layout = FRAME_LAYOUTS[POSE_FOLDERS[pose]];
   const classes = `marlow-lobster marlow-lobster--${status} marlow-lobster--pose-${pose}`;
 
-  if (frames) {
+  if (layout) {
     // Sized through a custom property so page CSS can still shrink the sprite;
     // an inline width would outrank the office's responsive rules.
     const style = {
       "--marlow-size": `${size}px`,
+      ...framePositions(layout),
+      ...idleRhythm(seed),
       backgroundImage: `url("${folder}/${chosen.id}-frames.png")`,
     } as CSSProperties;
     return (
@@ -187,7 +234,7 @@ export function MarlowLobster({
         role={title ? "img" : undefined}
         aria-label={title}
         aria-hidden={title ? undefined : true}
-        className={`${classes} marlow-lobster--frames marlow-lobster--frames-${frames} ${className}`}
+        className={`${classes} marlow-lobster--frames ${className}`}
       />
     );
   }

@@ -348,6 +348,7 @@ export default function OfficeDashboard() {
                       <MarlowLobster
                         pose={pose}
                         status={stopped ? "paused" : agent.status}
+                        seed={agent.id}
                         shellColor={agent.avatar.shellColor}
                         title={`${agent.name} at the ${seat.label}`}
                       />

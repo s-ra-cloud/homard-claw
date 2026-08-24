@@ -55,9 +55,11 @@
 }
 
 /*
- * Frame strips: one sprite-sized frame per column, always rest first, then the
- * blink and/or the claw press. Percentage positions land exactly on a frame
- * boundary at any rendered size, so the furniture never shifts by a pixel.
+ * Frame strips: one sprite-sized frame per column — rest first, then the
+ * blink, the claw press, the head dip and the head turn, in whatever subset
+ * the pose draws. `MarlowLobster` writes each frame's column position as an
+ * exact division, so the browser lands on a frame boundary at any rendered
+ * size and the furniture never shifts by a pixel.
  */
 .marlow-lobster--frames {
   width: var(--marlow-size);
@@ -67,79 +69,103 @@
   background-repeat: no-repeat;
   background-position: 0% 0;
   background-size: calc(var(--marlow-frames) * 100%) 100%;
-}
-.marlow-lobster--frames-2 {
-  --marlow-frames: 2;
-  --marlow-blink: 100%;
-  --marlow-stir: 100%;
-}
-.marlow-lobster--frames-3 {
-  --marlow-frames: 3;
-  --marlow-blink: 50%;
-  --marlow-stir: 100%;
+  /*
+   * Each agent carries its own tempo and start offset (see `idleRhythm`), so a
+   * roomful of lobsters never blinks in unison. Without a seed both are inert.
+   *
+   * Every rule below sets the name and duration as longhands: the `animation`
+   * shorthand would quietly reset this delay back to zero and put the whole
+   * office back in lockstep.
+   */
+  animation-delay: var(--marlow-phase, 0s);
+  animation-timing-function: step-end;
+  animation-iteration-count: infinite;
 }
 
 /* Cadence carries the status: busy claws, slow blinks, or a frozen frame. */
 .marlow-lobster--frames.marlow-lobster--working,
 .marlow-lobster--frames.marlow-lobster--researching {
-  animation: marlow-frames-busy 1.6s step-end infinite;
+  animation-name: marlow-frames-busy;
+  animation-duration: calc(1.6s * var(--marlow-tempo, 1));
 }
 .marlow-lobster--frames.marlow-lobster--idle,
 .marlow-lobster--frames.marlow-lobster--queued,
 .marlow-lobster--frames.marlow-lobster--complete {
-  animation: marlow-frames-calm 5.4s step-end infinite;
+  animation-name: marlow-frames-alive;
+  animation-duration: calc(6.4s * var(--marlow-tempo, 1));
 }
 .marlow-lobster--frames.marlow-lobster--waiting {
-  animation: marlow-frames-calm 3.4s step-end infinite;
+  animation-name: marlow-frames-alive;
+  animation-duration: calc(4.2s * var(--marlow-tempo, 1));
 }
 /*
- * Poses without a press frame would spend the busy cadence blinking franticly,
- * so they keep the calm one, only quicker.
+ * Poses whose only extra frame is a claw beat (eyes shut for the music, head
+ * thrown back mid-stretch) would spend the busy cadence flapping that claw, so
+ * they keep the idle one, only quicker.
  */
-.marlow-lobster--frames-2.marlow-lobster--working,
-.marlow-lobster--frames-2.marlow-lobster--researching {
-  animation: marlow-frames-calm 2.6s step-end infinite;
+.marlow-lobster--pose-idle-music.marlow-lobster--working,
+.marlow-lobster--pose-idle-music.marlow-lobster--researching,
+.marlow-lobster--pose-idle-stretch.marlow-lobster--working,
+.marlow-lobster--pose-idle-stretch.marlow-lobster--researching {
+  animation-name: marlow-frames-alive;
+  animation-duration: calc(2.6s * var(--marlow-tempo, 1));
 }
 /* Paused and error hold the rest frame — stillness is the tell. */
 
 /*
- * Activity-specific idle cadences — the base calm rule above applies to every
+ * Activity-specific idle cadences — the base idle rule above applies to every
  * idle pose; these overrides dial in a rhythm that fits the activity.
  *
- * Music: faster claw-bob (2 frames) so the beat reads clearly.
- * Coffee: slightly quicker calm cycle so the sip shows up more often.
- * Reading: keep the full 5.4s — a slow page-turn feels more natural.
+ * Music: quick loop so the claw keeps the beat.
+ * Coffee: slightly quicker so the sip comes round more often.
+ * Reading: keep the full cycle — a slow page-turn feels more natural.
  */
 .marlow-lobster--frames.marlow-lobster--pose-idle-music.marlow-lobster--idle,
 .marlow-lobster--frames.marlow-lobster--pose-idle-music.marlow-lobster--queued,
 .marlow-lobster--frames.marlow-lobster--pose-idle-music.marlow-lobster--complete {
-  animation: marlow-frames-calm 2.6s step-end infinite;
+  animation-duration: calc(2.6s * var(--marlow-tempo, 1));
 }
 .marlow-lobster--frames.marlow-lobster--pose-idle-coffee.marlow-lobster--idle,
 .marlow-lobster--frames.marlow-lobster--pose-idle-coffee.marlow-lobster--queued,
 .marlow-lobster--frames.marlow-lobster--pose-idle-coffee.marlow-lobster--complete {
-  animation: marlow-frames-calm 4.2s step-end infinite;
+  animation-duration: calc(5.2s * var(--marlow-tempo, 1));
 }
 
 @keyframes marlow-frames-busy {
   0% { background-position-x: 0%; }
-  10% { background-position-x: var(--marlow-stir); }
+  10% { background-position-x: var(--marlow-stir, 0%); }
   20% { background-position-x: 0%; }
-  32% { background-position-x: var(--marlow-stir); }
+  32% { background-position-x: var(--marlow-stir, 0%); }
   42% { background-position-x: 0%; }
-  54% { background-position-x: var(--marlow-stir); }
+  54% { background-position-x: var(--marlow-stir, 0%); }
   64% { background-position-x: 0%; }
-  76% { background-position-x: var(--marlow-stir); }
+  76% { background-position-x: var(--marlow-stir, 0%); }
   86% { background-position-x: 0%; }
-  92% { background-position-x: var(--marlow-blink); }
+  92% { background-position-x: var(--marlow-blink, 0%); }
   98% { background-position-x: 0%; }
 }
-@keyframes marlow-frames-calm {
+/*
+ * The idle loop: a doubled blink, a look around, the activity beat, a nod, one
+ * last blink. Beats a pose does not draw resolve to its rest frame, so the same
+ * loop reads as breathing on a still lobster and as a full routine on a busy
+ * one. Held frames are short — a blink is a couple of hundred milliseconds,
+ * a head turn about half a second.
+ */
+@keyframes marlow-frames-alive {
   0% { background-position-x: 0%; }
-  90% { background-position-x: var(--marlow-blink); }
-  93% { background-position-x: 0%; }
-  96% { background-position-x: var(--marlow-stir); }
-  99% { background-position-x: 0%; }
+  7% { background-position-x: var(--marlow-blink, 0%); }
+  10% { background-position-x: 0%; }
+  14% { background-position-x: var(--marlow-blink, 0%); }
+  17% { background-position-x: 0%; }
+  32% { background-position-x: var(--marlow-turn, 0%); }
+  40% { background-position-x: var(--marlow-nod, 0%); }
+  44% { background-position-x: 0%; }
+  56% { background-position-x: var(--marlow-stir, 0%); }
+  64% { background-position-x: 0%; }
+  74% { background-position-x: var(--marlow-nod, 0%); }
+  80% { background-position-x: 0%; }
+  91% { background-position-x: var(--marlow-blink, 0%); }
+  94% { background-position-x: 0%; }
 }
 
 @media (prefers-reduced-motion: reduce) {

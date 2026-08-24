@@ -28,7 +28,7 @@
  * That mode never touches the still sprites — it reads the shipped ones and
  * writes `<pose>/<preset>-frames.png` strips beside them. See FRAME_POSES.
  */
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { inflateSync, deflateSync } from "node:zlib";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -417,36 +417,57 @@ const VARIANTS = [
  * - `eyes`: one rect per eyeball, painted shut for the blink frame.
  * - `claws`: one rect per claw, stretched `drop` rows toward the keys (a
  *   negative `drop` reaches upward instead) for the press frame.
+ * - `head`: one rect covering the head (antennae included) down to just above
+ *   the shoulders, plus how far the head dips (`nod`) and leans (`turn`).
+ *   Unlike the claws, the head is genuinely translated: these sprites are
+ *   transparent overlays, so the pixels it vacates are refilled from whatever
+ *   sat above/beside it in the same sprite. Only shell-coloured columns move,
+ *   so a chair back behind the head keeps its own pixels.
  *
  * Frame order in the strip is always: rest, blink (if `eyes`), press (if
- * `claws`). `src/components/ui/marlow-lobster.tsx` mirrors the frame counts.
+ * `claws`), nod (if `head`), turn (if `head.turn`).
+ * `src/components/ui/marlow-lobster.tsx` mirrors this layout frame for frame.
  */
 const FRAME_POSES = {
-  "lobsters-sitting": { eyes: [[52, 14, 58, 21], [69, 14, 75, 21]] },
+  "lobsters-sitting": {
+    eyes: [[52, 14, 58, 21], [69, 14, 75, 21]],
+    head: { rect: [30, 0, 100, 32], nod: 3, turn: 3 },
+  },
   "lobsters-working": {
     eyes: [[54, 4, 59, 12], [67, 4, 73, 12]],
     claws: [{ rect: [70, 40, 106, 68], drop: 2 }],
+    head: { rect: [40, 0, 104, 24], nod: 3 },
   },
   // Frame order: rest, blink, sip (left arm raises cup toward mouth).
   // The cup's neutral pixels do not move; only the warm arm pixels shift up.
   "lobsters-idle-coffee": {
     eyes: [[51, 24, 57, 33], [67, 23, 74, 33]],
     claws: [{ rect: [17, 36, 57, 65], drop: -4 }],
+    head: { rect: [36, 0, 100, 40], nod: 3, turn: 3 },
   },
-  // Frame order: rest, claw-bob (left claw lifts with the beat, drop increased
+  // Eyes shut, lost in the track: the blink frame has nothing to close, so the
+  // beat is carried by the claw and by the head bobbing with it (drop increased
   // from -2 to -4 so the motion reads clearly at small sizes).
-  "lobsters-idle-music": { claws: [{ rect: [16, 14, 46, 56], drop: -4 }] },
+  "lobsters-idle-music": {
+    claws: [{ rect: [16, 14, 46, 56], drop: -4 }],
+    head: { rect: [40, 0, 96, 46], nod: 3, turn: 3 },
+  },
   // Frame order: rest, blink, right-arm-lift (right claw rises slightly as if
   // reaching to turn a page, while the book and left arm stay planted).
   "lobsters-idle-reading": {
     eyes: [[52, 27, 60, 35], [67, 27, 75, 35]],
     claws: [{ rect: [84, 44, 100, 72], drop: -3 }],
+    head: { rect: [40, 0, 92, 42], nod: 3 },
   },
+  // Head thrown back mid-yawn, so there are no eyes to blink here either; the
+  // head settles between stretches instead. Its rect stops short of the raised
+  // claws on either side so only the head travels.
   "lobsters-idle-stretch": {
     claws: [
       { rect: [26, 0, 52, 36], drop: -2 },
       { rect: [76, 0, 104, 36], drop: -2 },
     ],
+    head: { rect: [46, 0, 86, 52], nod: 3 },
   },
   "lobsters-floor-working": {
     eyes: [[36, 40, 49, 59], [50, 42, 65, 61]],
@@ -454,8 +475,12 @@ const FRAME_POSES = {
       { rect: [45, 88, 72, 114], drop: 2 },
       { rect: [20, 66, 44, 92], drop: 1 },
     ],
+    head: { rect: [18, 0, 90, 66], nod: 3 },
   },
-  "lobsters-beach": { eyes: [[47, 22, 57, 32], [59, 21, 69, 31]] },
+  "lobsters-beach": {
+    eyes: [[47, 22, 57, 32], [59, 21, 69, 31]],
+    head: { rect: [30, 0, 92, 40], nod: 3, turn: 3 },
+  },
 };
 
 const at = (img, x, y) => (y * img.width + x) * 4;
@@ -609,6 +634,64 @@ function pressFrame(img, claws) {
   return out;
 }
 
+/**
+ * Head columns: for each column crossing the head rect, the span of shell
+ * pixels from the antenna tip down to the chin. Neutral pixels caught inside
+ * that span (eyeballs, glints, mouth) belong to the head and travel with it;
+ * anything outside — a chair back, a headrest, the mug — is never read.
+ */
+function headColumns(img, [x0, y0, x1, y1]) {
+  const columns = new Map();
+  for (let x = x0; x <= x1; x++) {
+    let top = Infinity;
+    let bottom = -Infinity;
+    for (let y = y0; y <= y1; y++) {
+      if (!isOpaque(img, x, y)) continue;
+      const [h, s] = hslAt(img, x, y);
+      if (s < 0.35 || (h > 45 && h < 320)) continue;
+      top = Math.min(top, y);
+      bottom = Math.max(bottom, y);
+    }
+    if (bottom >= top) columns.set(x, [top, bottom]);
+  }
+  return columns;
+}
+
+/**
+ * Translates the head by (dx, dy). Each masked column is redrawn from the
+ * source offset by the shift, which refills the vacated pixels with whatever
+ * the head was covering — transparent sky above it, or the chair behind it.
+ * Furniture columns the head never occupied are left byte-identical.
+ */
+function headFrame(img, columns, dx, dy) {
+  const out = { width: img.width, height: img.height, data: Buffer.from(img.data) };
+  const copy = (x, y, sx, sy) => {
+    if (x < 0 || y < 0 || x >= img.width || y >= img.height) return;
+    const d = at(out, x, y);
+    if (sx < 0 || sy < 0 || sx >= img.width || sy >= img.height) {
+      out.data[d + 3] = 0;
+      return;
+    }
+    const s = at(img, sx, sy);
+    out.data[d] = img.data[s];
+    out.data[d + 1] = img.data[s + 1];
+    out.data[d + 2] = img.data[s + 2];
+    out.data[d + 3] = img.data[s + 3];
+  };
+  for (const [x, [top, bottom]] of columns) {
+    // Walk against the shift so a pixel is read before it is overwritten.
+    const from = dy >= 0 ? bottom + dy : top + dy;
+    const to = dy >= 0 ? top : bottom;
+    const step = dy >= 0 ? -1 : 1;
+    for (let y = from; dy >= 0 ? y >= to : y <= to; y += step) {
+      copy(x + dx, y, x, y - dy);
+      // The column the head leaves behind shows what stood beside it.
+      if (dx !== 0) copy(x, y, x - dx, y - dy);
+    }
+  }
+  return out;
+}
+
 function frameStrip(frames) {
   const size = frames[0].height;
   const width = size * frames.length;
@@ -620,6 +703,33 @@ function frameStrip(frames) {
   });
   return { width, height: size, data };
 }
+
+/**
+ * Every frame is a repaint of a calibrated region, so no pixel may change
+ * outside that region once the shift is accounted for. If the art is ever
+ * retuned and a rect no longer sits over the feature it was measured against,
+ * this fails the build instead of shipping a sprite whose chair twitches.
+ */
+function assertWithin(rest, frame, name, boxes) {
+  for (let y = 0; y < rest.height; y++) {
+    for (let x = 0; x < rest.width; x++) {
+      const d = at(rest, x, y);
+      let changed = false;
+      for (let k = 0; k < 4; k++) changed ||= rest.data[d + k] !== frame.data[d + k];
+      if (!changed) continue;
+      if (boxes.some(([x0, y0, x1, y1]) => x >= x0 && x <= x1 && y >= y0 && y <= y1)) continue;
+      throw new Error(`${name} frame repaints ${x},${y} outside its calibrated region`);
+    }
+  }
+}
+
+/** A recipe rect grown by the shift the frame applies to it. */
+const grow = ([x0, y0, x1, y1], dx, dy) => [
+  x0 + Math.min(dx, 0),
+  y0 + Math.min(dy, 0),
+  x1 + Math.max(dx, 0),
+  y1 + Math.max(dy, 0),
+];
 
 /** Writes `<preset>-frames.png` for one pose folder from its shipped sprites. */
 function buildFrames(folder) {
@@ -633,21 +743,55 @@ function buildFrames(folder) {
     columns: clawRegion(canonical, rect),
     drop,
   }));
+  const head = config.head
+    ? { ...config.head, columns: headColumns(canonical, config.head.rect) }
+    : null;
 
+  const layout = ["rest"];
   for (const { id } of VARIANTS) {
     const sprite = decodePng(readFileSync(resolve(dir, `${id}.png`)));
     const frames = [sprite];
-    if (eyes.length) frames.push(blinkFrame(sprite, eyes));
-    if (claws.length) frames.push(pressFrame(sprite, claws));
+    const add = (frame, name, boxes) => {
+      assertWithin(sprite, frame, `${folder} ${id} ${name}`, boxes);
+      frames.push(frame);
+      if (frames.length > layout.length) layout.push(name);
+    };
+    if (eyes.length) add(blinkFrame(sprite, eyes), "blink", config.eyes);
+    if (claws.length) {
+      add(
+        pressFrame(sprite, claws),
+        "stir",
+        config.claws.map(({ rect, drop }) => grow(rect, 0, drop)),
+      );
+    }
+    if (head) {
+      add(headFrame(sprite, head.columns, 0, head.nod), "nod", [
+        grow(head.rect, 0, head.nod),
+      ]);
+      if (head.turn) {
+        add(headFrame(sprite, head.columns, head.turn, Math.sign(head.nod)), "turn", [
+          grow(head.rect, head.turn, Math.sign(head.nod)),
+        ]);
+      }
+    }
     writeFileSync(resolve(dir, `${id}-frames.png`), encodePng(frameStrip(frames)));
   }
-  const count = 1 + (eyes.length ? 1 : 0) + (claws.length ? 1 : 0);
-  console.log(`${folder}: ${VARIANTS.length} strips of ${count} frames`);
+  console.log(`${folder}: ${VARIANTS.length} strips of ${layout.length} frames`);
+  return layout;
 }
 
 if (FRAMES) {
   const folders = FRAMES === "all" ? Object.keys(FRAME_POSES) : [FRAMES];
-  for (const folder of folders) buildFrames(folder);
+  const manifest = resolve(HERE, "../src/components/ui/lobster-frames.json");
+  // The app reads this layout back, so a pose can never disagree with its strip
+  // about which column holds the blink, the stir or the head. Rebuilding a
+  // single folder merges into the manifest rather than leaving it stale.
+  const layouts = existsSync(manifest) ? JSON.parse(readFileSync(manifest, "utf8")) : {};
+  for (const folder of folders) layouts[folder] = buildFrames(folder);
+  for (const folder of Object.keys(layouts)) {
+    if (!FRAME_POSES[folder]) delete layouts[folder];
+  }
+  writeFileSync(manifest, `${JSON.stringify(layouts, null, 2)}\n`);
   process.exit(0);
 }
 
