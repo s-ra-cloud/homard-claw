@@ -293,6 +293,31 @@ function TaskDetailDialog({
               </div>
             )}
 
+            {task.contextSources && task.contextSources.length > 0 && (
+              <div>
+                <div className="text-[10px] font-bold uppercase text-muted-foreground mb-1">
+                  Context Sources
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {task.contextSources.map((source) => (
+                    <Badge
+                      key={source.label}
+                      variant="outline"
+                      className="rounded-none font-mono text-[10px] max-w-full"
+                      title={source.title}
+                      data-testid={`badge-source-${source.label}`}
+                    >
+                      <span className="font-bold mr-1">[{source.label}]</span>
+                      <span className="truncate">
+                        {source.type === "file" ? "📄 " : ""}
+                        {source.title}
+                      </span>
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {task.output && (
               <div>
                 <div className="text-[10px] font-bold uppercase text-muted-foreground mb-1">

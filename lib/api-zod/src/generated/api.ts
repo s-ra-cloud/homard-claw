@@ -192,6 +192,12 @@ export const GetAgentResponse = zod.object({
   "errorKind": zod.string().nullish(),
   "errorMessage": zod.string().nullish(),
   "attempts": zod.number(),
+  "contextSources": zod.array(zod.object({
+  "type": zod.enum(['memory', 'file']),
+  "id": zod.string(),
+  "label": zod.string(),
+  "title": zod.string()
+})).nullish(),
   "startedAt": zod.coerce.date().nullish(),
   "finishedAt": zod.coerce.date().nullish(),
   "createdAt": zod.coerce.date()
@@ -467,6 +473,12 @@ export const ListTasksResponseItem = zod.object({
   "errorKind": zod.string().nullish(),
   "errorMessage": zod.string().nullish(),
   "attempts": zod.number(),
+  "contextSources": zod.array(zod.object({
+  "type": zod.enum(['memory', 'file']),
+  "id": zod.string(),
+  "label": zod.string(),
+  "title": zod.string()
+})).nullish(),
   "startedAt": zod.coerce.date().nullish(),
   "finishedAt": zod.coerce.date().nullish(),
   "createdAt": zod.coerce.date()
@@ -519,6 +531,12 @@ export const CreateTaskResponse = zod.object({
   "errorKind": zod.string().nullish(),
   "errorMessage": zod.string().nullish(),
   "attempts": zod.number(),
+  "contextSources": zod.array(zod.object({
+  "type": zod.enum(['memory', 'file']),
+  "id": zod.string(),
+  "label": zod.string(),
+  "title": zod.string()
+})).nullish(),
   "startedAt": zod.coerce.date().nullish(),
   "finishedAt": zod.coerce.date().nullish(),
   "createdAt": zod.coerce.date()
@@ -670,6 +688,12 @@ export const GetTaskResponse = zod.object({
   "errorKind": zod.string().nullish(),
   "errorMessage": zod.string().nullish(),
   "attempts": zod.number(),
+  "contextSources": zod.array(zod.object({
+  "type": zod.enum(['memory', 'file']),
+  "id": zod.string(),
+  "label": zod.string(),
+  "title": zod.string()
+})).nullish(),
   "startedAt": zod.coerce.date().nullish(),
   "finishedAt": zod.coerce.date().nullish(),
   "createdAt": zod.coerce.date()
@@ -713,6 +737,12 @@ export const CancelTaskResponse = zod.object({
   "errorKind": zod.string().nullish(),
   "errorMessage": zod.string().nullish(),
   "attempts": zod.number(),
+  "contextSources": zod.array(zod.object({
+  "type": zod.enum(['memory', 'file']),
+  "id": zod.string(),
+  "label": zod.string(),
+  "title": zod.string()
+})).nullish(),
   "startedAt": zod.coerce.date().nullish(),
   "finishedAt": zod.coerce.date().nullish(),
   "createdAt": zod.coerce.date()
@@ -749,6 +779,12 @@ export const RetryTaskResponse = zod.object({
   "errorKind": zod.string().nullish(),
   "errorMessage": zod.string().nullish(),
   "attempts": zod.number(),
+  "contextSources": zod.array(zod.object({
+  "type": zod.enum(['memory', 'file']),
+  "id": zod.string(),
+  "label": zod.string(),
+  "title": zod.string()
+})).nullish(),
   "startedAt": zod.coerce.date().nullish(),
   "finishedAt": zod.coerce.date().nullish(),
   "createdAt": zod.coerce.date()
@@ -781,6 +817,221 @@ export const EstimateTaskResponse = zod.object({
   "estimatedCostCents": zod.number(),
   "costKnown": zod.boolean(),
   "note": zod.string().nullish()
+})
+
+
+/**
+ * @summary List or search memories, optionally scoped to one agent
+ */
+export const listMemoriesQueryQMax = 500;
+
+
+
+export const ListMemoriesQueryParams = zod.object({
+  "agentId": zod.coerce.string().optional().describe('Filter to one agent\'s memories plus shared memories; \"shared\" for shared-only'),
+  "q": zod.coerce.string().max(listMemoriesQueryQMax).optional()
+})
+
+export const ListMemoriesResponse = zod.object({
+  "memories": zod.array(zod.object({
+  "id": zod.string(),
+  "agentId": zod.string().nullable(),
+  "agentName": zod.string().nullable(),
+  "kind": zod.enum(['fact', 'decision', 'context', 'task_outcome', 'relationship']),
+  "content": zod.string(),
+  "pinned": zod.boolean(),
+  "disabled": zod.boolean(),
+  "sourceTaskId": zod.string().nullable(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})),
+  "total": zod.number()
+})
+
+
+/**
+ * @summary Save a memory for an agent or the whole office
+ */
+export const createMemoryBodyContentMin = 3;
+export const createMemoryBodyContentMax = 4000;
+
+
+
+export const CreateMemoryBody = zod.object({
+  "agentId": zod.string().nullish(),
+  "kind": zod.enum(['fact', 'decision', 'context', 'task_outcome', 'relationship']).optional(),
+  "content": zod.string().min(createMemoryBodyContentMin).max(createMemoryBodyContentMax),
+  "pinned": zod.boolean().optional()
+})
+
+export const CreateMemoryResponse = zod.object({
+  "id": zod.string(),
+  "agentId": zod.string().nullable(),
+  "agentName": zod.string().nullable(),
+  "kind": zod.enum(['fact', 'decision', 'context', 'task_outcome', 'relationship']),
+  "content": zod.string(),
+  "pinned": zod.boolean(),
+  "disabled": zod.boolean(),
+  "sourceTaskId": zod.string().nullable(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Clear all memories, optionally for one agent only
+ */
+export const ClearMemoriesQueryParams = zod.object({
+  "agentId": zod.coerce.string().optional()
+})
+
+export const ClearMemoriesResponse = zod.object({
+  "deleted": zod.number()
+})
+
+
+/**
+ * @summary Export every memory as a JSON document
+ */
+export const ExportMemoriesResponse = zod.object({
+  "memories": zod.array(zod.object({
+  "id": zod.string(),
+  "agentId": zod.string().nullable(),
+  "agentName": zod.string().nullable(),
+  "kind": zod.enum(['fact', 'decision', 'context', 'task_outcome', 'relationship']),
+  "content": zod.string(),
+  "pinned": zod.boolean(),
+  "disabled": zod.boolean(),
+  "sourceTaskId": zod.string().nullable(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})),
+  "total": zod.number()
+})
+
+
+/**
+ * @summary Edit, pin, disable, or reassign a memory
+ */
+export const UpdateMemoryParams = zod.object({
+  "memoryId": zod.coerce.string()
+})
+
+export const updateMemoryBodyContentMin = 3;
+export const updateMemoryBodyContentMax = 4000;
+
+
+
+export const UpdateMemoryBody = zod.object({
+  "agentId": zod.string().nullish(),
+  "kind": zod.enum(['fact', 'decision', 'context', 'task_outcome', 'relationship']).optional(),
+  "content": zod.string().min(updateMemoryBodyContentMin).max(updateMemoryBodyContentMax).optional(),
+  "pinned": zod.boolean().optional(),
+  "disabled": zod.boolean().optional()
+})
+
+export const UpdateMemoryResponse = zod.object({
+  "id": zod.string(),
+  "agentId": zod.string().nullable(),
+  "agentName": zod.string().nullable(),
+  "kind": zod.enum(['fact', 'decision', 'context', 'task_outcome', 'relationship']),
+  "content": zod.string(),
+  "pinned": zod.boolean(),
+  "disabled": zod.boolean(),
+  "sourceTaskId": zod.string().nullable(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Delete a memory permanently
+ */
+export const DeleteMemoryParams = zod.object({
+  "memoryId": zod.coerce.string()
+})
+
+export const DeleteMemoryResponse = zod.void()
+
+
+/**
+ * @summary List uploaded knowledge files with their agent assignments
+ */
+export const ListKnowledgeFilesResponseItem = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "mimeType": zod.string(),
+  "description": zod.string().nullable(),
+  "sizeBytes": zod.number(),
+  "wordCount": zod.number(),
+  "agentIds": zod.array(zod.string()),
+  "createdAt": zod.coerce.date()
+})
+export const ListKnowledgeFilesResponse = zod.array(ListKnowledgeFilesResponseItem)
+
+
+/**
+ * @summary Upload a text-based knowledge file
+ */
+export const uploadKnowledgeFileBodyNameMax = 200;
+
+export const uploadKnowledgeFileBodyMimeTypeMax = 100;
+
+export const uploadKnowledgeFileBodyDescriptionMax = 500;
+
+export const uploadKnowledgeFileBodyContentMax = 200000;
+
+
+
+export const UploadKnowledgeFileBody = zod.object({
+  "name": zod.string().min(1).max(uploadKnowledgeFileBodyNameMax),
+  "mimeType": zod.string().max(uploadKnowledgeFileBodyMimeTypeMax),
+  "description": zod.string().max(uploadKnowledgeFileBodyDescriptionMax).optional(),
+  "content": zod.string().min(1).max(uploadKnowledgeFileBodyContentMax)
+})
+
+export const UploadKnowledgeFileResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "mimeType": zod.string(),
+  "description": zod.string().nullable(),
+  "sizeBytes": zod.number(),
+  "wordCount": zod.number(),
+  "agentIds": zod.array(zod.string()),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Delete a knowledge file and its assignments
+ */
+export const DeleteKnowledgeFileParams = zod.object({
+  "fileId": zod.coerce.string()
+})
+
+export const DeleteKnowledgeFileResponse = zod.void()
+
+
+/**
+ * @summary Set which agents may use a knowledge file
+ */
+export const SetKnowledgeAssignmentsParams = zod.object({
+  "fileId": zod.coerce.string()
+})
+
+export const SetKnowledgeAssignmentsBody = zod.object({
+  "agentIds": zod.array(zod.string())
+})
+
+export const SetKnowledgeAssignmentsResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "mimeType": zod.string(),
+  "description": zod.string().nullable(),
+  "sizeBytes": zod.number(),
+  "wordCount": zod.number(),
+  "agentIds": zod.array(zod.string()),
+  "createdAt": zod.coerce.date()
 })
 
 
@@ -828,6 +1079,12 @@ export const RecordTaskUsageResponse = zod.object({
   "errorKind": zod.string().nullish(),
   "errorMessage": zod.string().nullish(),
   "attempts": zod.number(),
+  "contextSources": zod.array(zod.object({
+  "type": zod.enum(['memory', 'file']),
+  "id": zod.string(),
+  "label": zod.string(),
+  "title": zod.string()
+})).nullish(),
   "startedAt": zod.coerce.date().nullish(),
   "finishedAt": zod.coerce.date().nullish(),
   "createdAt": zod.coerce.date()

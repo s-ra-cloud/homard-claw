@@ -78,6 +78,7 @@ import {
   type ProviderId,
 } from "../providers";
 import { abortRunningTask } from "../worker";
+import memoryRouter from "./memory";
 
 const router: IRouter = Router();
 
@@ -111,6 +112,8 @@ async function requireOwner(
 }
 
 router.use(requireOwner);
+// Memory and knowledge routes share the owner gate above.
+router.use(memoryRouter);
 
 function toAgent(agent: typeof agentsTable.$inferSelect) {
   return {

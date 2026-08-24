@@ -20,6 +20,7 @@ import {
   isConfigured,
   type ProviderId,
 } from "./providers";
+import { buildTaskContext, saveTaskOutcomeMemory } from "./memory-context";
 import { logger } from "./lib/logger";
 
 /**
@@ -246,7 +247,39 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     `Attempt ${task.attempts}: running on ${provider}${task.model ? ` (${task.model})` : ""}.`,
   );
 
-  const system = buildSystemPrompt(agent);
+  // Retrieve relevant memories and authorized knowledge for the prompt. A
+  // retrieval failure must not sink the task — run without context, loudly.
+  let context: Awaited<ReturnType<typeof buildTaskContext>> = {
+    promptSection: null,
+    sources: [],
+  };
+  try {
+    context = await buildTaskContext(agent.id, task.objective);
+  } catch (error) {
+    logger.warn({ taskId: task.id, error }, "Memory retrieval failed");
+    await addTaskLog(
+      task.id,
+      "warn",
+      "Memory retrieval failed; running without stored context.",
+    );
+  }
+  if (context.sources.length > 0) {
+    await db
+      .update(tasksTable)
+      .set({ contextSources: context.sources })
+      .where(
+        and(eq(tasksTable.id, task.id), eq(tasksTable.attempts, task.attempts)),
+      );
+    await addTaskLog(
+      task.id,
+      "info",
+      `Using ${context.sources.length} context source(s): ${context.sources.map((s) => s.label).join(", ")}.`,
+    );
+  }
+
+  const system = context.promptSection
+    ? `${buildSystemPrompt(agent)}\n\n${context.promptSection}`
+    : buildSystemPrompt(agent);
 
   try {
     if (!isConfigured(provider)) {
@@ -354,6 +387,23 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         kind: "task.completed",
         summary: `${agent.name} completed a task.`,
       });
+      // Retain the outcome as agent memory so future tasks can draw on it.
+      try {
+        const saved = await saveTaskOutcomeMemory({
+          taskId: task.id,
+          agentId: agent.id,
+          objective: task.objective,
+          output: result.output,
+        });
+        if (!saved) {
+          logger.warn(
+            { taskId: task.id },
+            "Memory store is full of curated entries; task outcome not saved",
+          );
+        }
+      } catch (error) {
+        logger.warn({ taskId: task.id, error }, "Could not save task outcome memory");
+      }
     } else {
       // Cancelled (or stopped) while the call was in flight; keep that
       // status but still record what the attempt actually consumed. The

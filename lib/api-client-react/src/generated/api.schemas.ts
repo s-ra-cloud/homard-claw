@@ -113,6 +113,21 @@ export interface TaskFile {
   content: string;
 }
 
+export type TaskSourceType = typeof TaskSourceType[keyof typeof TaskSourceType];
+
+
+export const TaskSourceType = {
+  memory: 'memory',
+  file: 'file',
+} as const;
+
+export interface TaskSource {
+  type: TaskSourceType;
+  id: string;
+  label: string;
+  title: string;
+}
+
 export interface Task {
   id: string;
   agentId: string;
@@ -143,6 +158,8 @@ export interface Task {
   /** @nullable */
   errorMessage?: string | null;
   attempts: number;
+  /** @nullable */
+  contextSources?: TaskSource[] | null;
   /** @nullable */
   startedAt?: string | null;
   /** @nullable */
@@ -564,4 +581,135 @@ export interface OfficeOverview {
   monthlyCostCents: number;
   recentEvents: AuditEvent[];
 }
+
+export type MemoryKind = typeof MemoryKind[keyof typeof MemoryKind];
+
+
+export const MemoryKind = {
+  fact: 'fact',
+  decision: 'decision',
+  context: 'context',
+  task_outcome: 'task_outcome',
+  relationship: 'relationship',
+} as const;
+
+export interface Memory {
+  id: string;
+  /** @nullable */
+  agentId: string | null;
+  /** @nullable */
+  agentName: string | null;
+  kind: MemoryKind;
+  content: string;
+  pinned: boolean;
+  disabled: boolean;
+  /** @nullable */
+  sourceTaskId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type MemoryInputKind = typeof MemoryInputKind[keyof typeof MemoryInputKind];
+
+
+export const MemoryInputKind = {
+  fact: 'fact',
+  decision: 'decision',
+  context: 'context',
+  task_outcome: 'task_outcome',
+  relationship: 'relationship',
+} as const;
+
+export interface MemoryInput {
+  /** @nullable */
+  agentId?: string | null;
+  kind?: MemoryInputKind;
+  /**
+     * @minLength 3
+     * @maxLength 4000
+     */
+  content: string;
+  pinned?: boolean;
+}
+
+export type MemoryUpdateKind = typeof MemoryUpdateKind[keyof typeof MemoryUpdateKind];
+
+
+export const MemoryUpdateKind = {
+  fact: 'fact',
+  decision: 'decision',
+  context: 'context',
+  task_outcome: 'task_outcome',
+  relationship: 'relationship',
+} as const;
+
+export interface MemoryUpdate {
+  /** @nullable */
+  agentId?: string | null;
+  kind?: MemoryUpdateKind;
+  /**
+     * @minLength 3
+     * @maxLength 4000
+     */
+  content?: string;
+  pinned?: boolean;
+  disabled?: boolean;
+}
+
+export interface MemoryList {
+  memories: Memory[];
+  total: number;
+}
+
+export interface ClearMemoriesResult {
+  deleted: number;
+}
+
+export interface KnowledgeFile {
+  id: string;
+  name: string;
+  mimeType: string;
+  /** @nullable */
+  description: string | null;
+  sizeBytes: number;
+  wordCount: number;
+  agentIds: string[];
+  createdAt: string;
+}
+
+export interface KnowledgeFileInput {
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  name: string;
+  /** @maxLength 100 */
+  mimeType: string;
+  /** @maxLength 500 */
+  description?: string;
+  /**
+     * @minLength 1
+     * @maxLength 200000
+     */
+  content: string;
+}
+
+export interface KnowledgeAssignmentsInput {
+  agentIds: string[];
+}
+
+export type ListMemoriesParams = {
+/**
+ * Filter to one agent's memories plus shared memories; "shared" for shared-only
+ */
+agentId?: string;
+/**
+ * @maxLength 500
+ */
+q?: string;
+};
+
+export type ClearMemoriesParams = {
+agentId?: string;
+};
 

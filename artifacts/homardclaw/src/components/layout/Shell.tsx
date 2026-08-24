@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useUser, useClerk } from "@clerk/react";
-import { LogOut, Home, Users, CheckSquare, Settings, Activity, Palmtree, Menu, X } from "lucide-react";
+import { LogOut, Home, Users, CheckSquare, Settings, Activity, Palmtree, Menu, X, Brain } from "lucide-react";
 
 const navItems = [
   { href: "/office", label: "Office", icon: Home },
   { href: "/agents", label: "Agents", icon: Users },
   { href: "/tasks", label: "Tasks", icon: Activity },
+  { href: "/memory", label: "Memory", icon: Brain },
   { href: "/approvals", label: "Approvals", icon: CheckSquare },
   { href: "/providers", label: "Providers", icon: Settings },
   { href: "/island", label: "Island", icon: Palmtree },

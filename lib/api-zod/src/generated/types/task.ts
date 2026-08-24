@@ -8,6 +8,7 @@
 import type { TaskFile } from './taskFile';
 import type { TaskPriority } from './taskPriority';
 import type { TaskProvider } from './taskProvider';
+import type { TaskSource } from './taskSource';
 import type { TaskStatus } from './taskStatus';
 
 export interface Task {
@@ -40,6 +41,8 @@ export interface Task {
   /** @nullable */
   errorMessage?: string | null;
   attempts: number;
+  /** @nullable */
+  contextSources?: TaskSource[] | null;
   /** @nullable */
   startedAt?: Date | null;
   /** @nullable */

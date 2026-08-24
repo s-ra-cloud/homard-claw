@@ -430,6 +430,179 @@ paths:
                 $ref: "#/components/schemas/TaskEstimate"
         "404":
           description: Agent not found
+  /memories:
+    get:
+      operationId: listMemories
+      tags: [office]
+      summary: List or search memories, optionally scoped to one agent
+      parameters:
+        - name: agentId
+          in: query
+          required: false
+          description: Filter to one agent's memories plus shared memories; "shared" for shared-only
+          schema: { type: string }
+        - name: q
+          in: query
+          required: false
+          schema: { type: string, maxLength: 500 }
+      responses:
+        "200":
+          description: Memories
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryList"
+    post:
+      operationId: createMemory
+      tags: [office]
+      summary: Save a memory for an agent or the whole office
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemoryInput"
+      responses:
+        "201":
+          description: Created memory
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Memory"
+        "404":
+          description: Agent not found
+        "409":
+          description: Memory limit reached
+    delete:
+      operationId: clearMemories
+      tags: [office]
+      summary: Clear all memories, optionally for one agent only
+      parameters:
+        - name: agentId
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: Number of memories deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClearMemoriesResult"
+  /memories/export:
+    get:
+      operationId: exportMemories
+      tags: [office]
+      summary: Export every memory as a JSON document
+      responses:
+        "200":
+          description: Full memory export
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryList"
+  /memories/{memoryId}:
+    patch:
+      operationId: updateMemory
+      tags: [office]
+      summary: Edit, pin, disable, or reassign a memory
+      parameters:
+        - $ref: "#/components/parameters/MemoryId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemoryUpdate"
+      responses:
+        "200":
+          description: Updated memory
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Memory"
+        "404":
+          description: Memory not found
+    delete:
+      operationId: deleteMemory
+      tags: [office]
+      summary: Delete a memory permanently
+      parameters:
+        - $ref: "#/components/parameters/MemoryId"
+      responses:
+        "204":
+          description: Memory deleted
+        "404":
+          description: Memory not found
+  /knowledge:
+    get:
+      operationId: listKnowledgeFiles
+      tags: [office]
+      summary: List uploaded knowledge files with their agent assignments
+      responses:
+        "200":
+          description: Knowledge files
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/KnowledgeFile"
+    post:
+      operationId: uploadKnowledgeFile
+      tags: [office]
+      summary: Upload a text-based knowledge file
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KnowledgeFileInput"
+      responses:
+        "201":
+          description: Stored knowledge file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeFile"
+        "400":
+          description: Unsupported file type or empty content
+        "409":
+          description: Storage limit reached
+  /knowledge/{fileId}:
+    delete:
+      operationId: deleteKnowledgeFile
+      tags: [office]
+      summary: Delete a knowledge file and its assignments
+      parameters:
+        - $ref: "#/components/parameters/FileId"
+      responses:
+        "204":
+          description: File deleted
+        "404":
+          description: File not found
+  /knowledge/{fileId}/assignments:
+    put:
+      operationId: setKnowledgeAssignments
+      tags: [office]
+      summary: Set which agents may use a knowledge file
+      parameters:
+        - $ref: "#/components/parameters/FileId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KnowledgeAssignmentsInput"
+      responses:
+        "200":
+          description: Updated knowledge file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeFile"
+        "404":
+          description: File or agent not found
   /tasks/{taskId}/usage:
     post:
       operationId: recordTaskUsage
@@ -469,6 +642,16 @@ components:
       schema: { type: string }
     TaskId:
       name: taskId
+      in: path
+      required: true
+      schema: { type: string }
+    MemoryId:
+      name: memoryId
+      in: path
+      required: true
+      schema: { type: string }
+    FileId:
+      name: fileId
       in: path
       required: true
       schema: { type: string }
@@ -599,9 +782,21 @@ components:
         errorKind: { type: [string, "null"] }
         errorMessage: { type: [string, "null"] }
         attempts: { type: number }
+        contextSources:
+          type: ["array", "null"]
+          items:
+            $ref: "#/components/schemas/TaskSource"
         startedAt: { type: [string, "null"], format: date-time }
         finishedAt: { type: [string, "null"], format: date-time }
         createdAt: { type: string, format: date-time }
+    TaskSource:
+      type: object
+      required: [type, id, label, title]
+      properties:
+        type: { type: string, enum: [memory, file] }
+        id: { type: string }
+        label: { type: string }
+        title: { type: string }
     TaskFile:
       type: object
       required: [name, content]
@@ -751,4 +946,77 @@ components:
         kind: { type: string }
         summary: { type: string }
         createdAt: { type: string, format: date-time }
+    Memory:
+      type: object
+      required: [id, agentId, agentName, kind, content, pinned, disabled, sourceTaskId, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        agentId: { type: [string, "null"] }
+        agentName: { type: [string, "null"] }
+        kind: { type: string, enum: [fact, decision, context, task_outcome, relationship] }
+        content: { type: string }
+        pinned: { type: boolean }
+        disabled: { type: boolean }
+        sourceTaskId: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    MemoryInput:
+      type: object
+      required: [content]
+      properties:
+        agentId: { type: [string, "null"] }
+        kind: { type: string, enum: [fact, decision, context, task_outcome, relationship] }
+        content: { type: string, minLength: 3, maxLength: 4000 }
+        pinned: { type: boolean }
+    MemoryUpdate:
+      type: object
+      properties:
+        agentId: { type: [string, "null"] }
+        kind: { type: string, enum: [fact, decision, context, task_outcome, relationship] }
+        content: { type: string, minLength: 3, maxLength: 4000 }
+        pinned: { type: boolean }
+        disabled: { type: boolean }
+    MemoryList:
+      type: object
+      required: [memories, total]
+      properties:
+        memories:
+          type: array
+          items:
+            $ref: "#/components/schemas/Memory"
+        total: { type: number }
+    ClearMemoriesResult:
+      type: object
+      required: [deleted]
+      properties:
+        deleted: { type: number }
+    KnowledgeFile:
+      type: object
+      required: [id, name, mimeType, description, sizeBytes, wordCount, agentIds, createdAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        mimeType: { type: string }
+        description: { type: [string, "null"] }
+        sizeBytes: { type: number }
+        wordCount: { type: number }
+        agentIds:
+          type: array
+          items: { type: string }
+        createdAt: { type: string, format: date-time }
+    KnowledgeFileInput:
+      type: object
+      required: [name, mimeType, content]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        mimeType: { type: string, maxLength: 100 }
+        description: { type: string, maxLength: 500 }
+        content: { type: string, minLength: 1, maxLength: 200000 }
+    KnowledgeAssignmentsInput:
+      type: object
+      required: [agentIds]
+      properties:
+        agentIds:
+          type: array
+          items: { type: string }
 
