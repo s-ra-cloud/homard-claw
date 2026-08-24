@@ -962,6 +962,126 @@ paths:
                 $ref: "#/components/schemas/Task"
         "404":
           description: Task not found
+  /schedules:
+    get:
+      operationId: listSchedules
+      tags: [office]
+      summary: List durable task schedules
+      responses:
+        "200":
+          description: Schedules
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Schedule"
+    post:
+      operationId: createSchedule
+      tags: [office]
+      summary: Create a one-time or recurring task schedule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScheduleInput"
+      responses:
+        "201":
+          description: Created schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+  /schedules/{scheduleId}:
+    patch:
+      operationId: updateSchedule
+      tags: [office]
+      summary: Update or enable/disable a schedule
+      parameters:
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScheduleUpdate"
+      responses:
+        "200":
+          description: Updated schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+    delete:
+      operationId: deleteSchedule
+      tags: [office]
+      summary: Delete a schedule (already-created tasks are kept)
+      parameters:
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: Deleted
+  /notifications:
+    get:
+      operationId: listNotifications
+      tags: [office]
+      summary: List in-app notifications with the unread count
+      parameters:
+        - name: unreadOnly
+          in: query
+          required: false
+          schema: { type: boolean }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: number, minimum: 1, maximum: 200 }
+      responses:
+        "200":
+          description: Notifications, newest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationList"
+  /notifications/read:
+    post:
+      operationId: markNotificationsRead
+      tags: [office]
+      summary: Mark notifications as read (all when no ids are given)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarkNotificationsReadInput"
+      responses:
+        "200":
+          description: How many notifications were marked read
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [updated]
+                properties:
+                  updated: { type: number }
+  /reports/usage:
+    get:
+      operationId: getUsageReport
+      tags: [office]
+      summary: Real usage, cost, outcome, and health reporting
+      responses:
+        "200":
+          description: Usage report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageReport"
 components:
   parameters:
     AgentId:
@@ -1637,4 +1757,170 @@ components:
         agentIds:
           type: array
           items: { type: string }
-
+    NotifyPrefs:
+      type: object
+      required: [onCompleted, onFailed, onBlocked, onApprovalNeeded]
+      properties:
+        onCompleted: { type: boolean }
+        onFailed: { type: boolean }
+        onBlocked: { type: boolean }
+        onApprovalNeeded: { type: boolean }
+    ScheduleInput:
+      type: object
+      required: [name, agentId, objective, cadence, timezone]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80 }
+        agentId: { type: string }
+        objective: { type: string, minLength: 3, maxLength: 5000 }
+        priority: { type: string, enum: [low, normal, high] }
+        providerOverride: { type: string, enum: [claude_max, openrouter] }
+        modelOverride: { type: string, maxLength: 200 }
+        budgetCents: { type: number, minimum: 0.01, maximum: 1000000 }
+        cadence: { type: string, enum: [once, daily, weekly, monthly] }
+        timezone: { type: string, minLength: 1, maxLength: 60 }
+        runAt: { type: string, format: date-time }
+        timeOfDay: { type: string, pattern: "^([01]?\\d|2[0-3]):[0-5]\\d$" }
+        daysOfWeek:
+          type: array
+          items: { type: number, minimum: 0, maximum: 6 }
+        dayOfMonth: { type: number, minimum: 1, maximum: 31 }
+        notify:
+          $ref: "#/components/schemas/NotifyPrefs"
+    ScheduleUpdate:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80 }
+        objective: { type: string, minLength: 3, maxLength: 5000 }
+        priority: { type: string, enum: [low, normal, high] }
+        providerOverride: { type: [string, "null"] }
+        modelOverride: { type: [string, "null"] }
+        budgetCents: { type: [number, "null"] }
+        cadence: { type: string, enum: [once, daily, weekly, monthly] }
+        timezone: { type: string, minLength: 1, maxLength: 60 }
+        runAt: { type: string, format: date-time }
+        timeOfDay: { type: string, pattern: "^([01]?\\d|2[0-3]):[0-5]\\d$" }
+        daysOfWeek:
+          type: array
+          items: { type: number, minimum: 0, maximum: 6 }
+        dayOfMonth: { type: number, minimum: 1, maximum: 31 }
+        notify:
+          $ref: "#/components/schemas/NotifyPrefs"
+        enabled: { type: boolean }
+    Schedule:
+      type: object
+      required: [id, name, agentId, agentName, objective, priority, cadence, timezone, notify, enabled, createdAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        agentId: { type: string }
+        agentName: { type: string }
+        objective: { type: string }
+        priority: { type: string }
+        providerOverride: { type: [string, "null"] }
+        modelOverride: { type: [string, "null"] }
+        budgetCents: { type: [number, "null"] }
+        cadence: { type: string, enum: [once, daily, weekly, monthly] }
+        timezone: { type: string }
+        runAt: { type: [string, "null"], format: date-time }
+        timeOfDay: { type: [string, "null"] }
+        daysOfWeek:
+          type: [array, "null"]
+          items: { type: number }
+        dayOfMonth: { type: [number, "null"] }
+        notify:
+          $ref: "#/components/schemas/NotifyPrefs"
+        enabled: { type: boolean }
+        nextRunAt: { type: [string, "null"], format: date-time }
+        lastRunAt: { type: [string, "null"], format: date-time }
+        lastTaskId: { type: [string, "null"] }
+        lastTaskStatus: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+    Notification:
+      type: object
+      required: [id, kind, title, body, read, createdAt]
+      properties:
+        id: { type: string }
+        kind: { type: string }
+        title: { type: string }
+        body: { type: string }
+        taskId: { type: [string, "null"] }
+        agentId: { type: [string, "null"] }
+        read: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    NotificationList:
+      type: object
+      required: [unread, notifications]
+      properties:
+        unread: { type: number }
+        notifications:
+          type: array
+          items:
+            $ref: "#/components/schemas/Notification"
+    MarkNotificationsReadInput:
+      type: object
+      properties:
+        ids:
+          type: array
+          items: { type: string }
+          maxItems: 500
+    UsageReport:
+      type: object
+      required: [totals, outcomes, agents, providers, blockers]
+      properties:
+        totals:
+          type: object
+          required: [todayCostCents, last7dCostCents, monthCostCents, monthInputTokens, monthOutputTokens]
+          properties:
+            todayCostCents: { type: number }
+            last7dCostCents: { type: number }
+            monthCostCents: { type: number }
+            monthInputTokens: { type: number }
+            monthOutputTokens: { type: number }
+        outcomes:
+          type: object
+          required: [completed, failed, blocked, cancelled, queued, running, waitingApproval]
+          properties:
+            completed: { type: number }
+            failed: { type: number }
+            blocked: { type: number }
+            cancelled: { type: number }
+            queued: { type: number }
+            running: { type: number }
+            waitingApproval: { type: number }
+        agents:
+          type: array
+          items:
+            type: object
+            required: [agentId, name, status, tasksCompleted, tasksFailed, inputTokens, outputTokens, costCents]
+            properties:
+              agentId: { type: string }
+              name: { type: string }
+              status: { type: string }
+              tasksCompleted: { type: number }
+              tasksFailed: { type: number }
+              inputTokens: { type: number }
+              outputTokens: { type: number }
+              costCents: { type: number }
+        providers:
+          type: array
+          items:
+            type: object
+            required: [provider, tasks, inputTokens, outputTokens, costCents]
+            properties:
+              provider: { type: string }
+              tasks: { type: number }
+              inputTokens: { type: number }
+              outputTokens: { type: number }
+              costCents: { type: number }
+        blockers:
+          type: array
+          items:
+            type: object
+            required: [taskId, agentName, objective, createdAt]
+            properties:
+              taskId: { type: string }
+              agentName: { type: string }
+              objective: { type: string }
+              errorKind: { type: [string, "null"] }
+              errorMessage: { type: [string, "null"] }
+              createdAt: { type: string, format: date-time }

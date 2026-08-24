@@ -1113,6 +1113,268 @@ export interface KnowledgeAssignmentsInput {
   agentIds: string[];
 }
 
+export interface NotifyPrefs {
+  onCompleted: boolean;
+  onFailed: boolean;
+  onBlocked: boolean;
+  onApprovalNeeded: boolean;
+}
+
+export type ScheduleInputPriority = typeof ScheduleInputPriority[keyof typeof ScheduleInputPriority];
+
+
+export const ScheduleInputPriority = {
+  low: 'low',
+  normal: 'normal',
+  high: 'high',
+} as const;
+
+export type ScheduleInputProviderOverride = typeof ScheduleInputProviderOverride[keyof typeof ScheduleInputProviderOverride];
+
+
+export const ScheduleInputProviderOverride = {
+  claude_max: 'claude_max',
+  openrouter: 'openrouter',
+} as const;
+
+export type ScheduleInputCadence = typeof ScheduleInputCadence[keyof typeof ScheduleInputCadence];
+
+
+export const ScheduleInputCadence = {
+  once: 'once',
+  daily: 'daily',
+  weekly: 'weekly',
+  monthly: 'monthly',
+} as const;
+
+export interface ScheduleInput {
+  /**
+     * @minLength 1
+     * @maxLength 80
+     */
+  name: string;
+  agentId: string;
+  /**
+     * @minLength 3
+     * @maxLength 5000
+     */
+  objective: string;
+  priority?: ScheduleInputPriority;
+  providerOverride?: ScheduleInputProviderOverride;
+  /** @maxLength 200 */
+  modelOverride?: string;
+  /**
+     * @minimum 0.01
+     * @maximum 1000000
+     */
+  budgetCents?: number;
+  cadence: ScheduleInputCadence;
+  /**
+     * @minLength 1
+     * @maxLength 60
+     */
+  timezone: string;
+  runAt?: string;
+  /** @pattern ^([01]?\d|2[0-3]):[0-5]\d$ */
+  timeOfDay?: string;
+  /**
+     * @items.minimum 0
+     * @items.maximum 6
+     */
+  daysOfWeek?: number[];
+  /**
+     * @minimum 1
+     * @maximum 31
+     */
+  dayOfMonth?: number;
+  notify?: NotifyPrefs;
+}
+
+export type ScheduleUpdatePriority = typeof ScheduleUpdatePriority[keyof typeof ScheduleUpdatePriority];
+
+
+export const ScheduleUpdatePriority = {
+  low: 'low',
+  normal: 'normal',
+  high: 'high',
+} as const;
+
+export type ScheduleUpdateCadence = typeof ScheduleUpdateCadence[keyof typeof ScheduleUpdateCadence];
+
+
+export const ScheduleUpdateCadence = {
+  once: 'once',
+  daily: 'daily',
+  weekly: 'weekly',
+  monthly: 'monthly',
+} as const;
+
+export interface ScheduleUpdate {
+  /**
+     * @minLength 1
+     * @maxLength 80
+     */
+  name?: string;
+  /**
+     * @minLength 3
+     * @maxLength 5000
+     */
+  objective?: string;
+  priority?: ScheduleUpdatePriority;
+  /** @nullable */
+  providerOverride?: string | null;
+  /** @nullable */
+  modelOverride?: string | null;
+  /** @nullable */
+  budgetCents?: number | null;
+  cadence?: ScheduleUpdateCadence;
+  /**
+     * @minLength 1
+     * @maxLength 60
+     */
+  timezone?: string;
+  runAt?: string;
+  /** @pattern ^([01]?\d|2[0-3]):[0-5]\d$ */
+  timeOfDay?: string;
+  /**
+     * @items.minimum 0
+     * @items.maximum 6
+     */
+  daysOfWeek?: number[];
+  /**
+     * @minimum 1
+     * @maximum 31
+     */
+  dayOfMonth?: number;
+  notify?: NotifyPrefs;
+  enabled?: boolean;
+}
+
+export type ScheduleCadence = typeof ScheduleCadence[keyof typeof ScheduleCadence];
+
+
+export const ScheduleCadence = {
+  once: 'once',
+  daily: 'daily',
+  weekly: 'weekly',
+  monthly: 'monthly',
+} as const;
+
+export interface Schedule {
+  id: string;
+  name: string;
+  agentId: string;
+  agentName: string;
+  objective: string;
+  priority: string;
+  /** @nullable */
+  providerOverride?: string | null;
+  /** @nullable */
+  modelOverride?: string | null;
+  /** @nullable */
+  budgetCents?: number | null;
+  cadence: ScheduleCadence;
+  timezone: string;
+  /** @nullable */
+  runAt?: string | null;
+  /** @nullable */
+  timeOfDay?: string | null;
+  /** @nullable */
+  daysOfWeek?: number[] | null;
+  /** @nullable */
+  dayOfMonth?: number | null;
+  notify: NotifyPrefs;
+  enabled: boolean;
+  /** @nullable */
+  nextRunAt?: string | null;
+  /** @nullable */
+  lastRunAt?: string | null;
+  /** @nullable */
+  lastTaskId?: string | null;
+  /** @nullable */
+  lastTaskStatus?: string | null;
+  createdAt: string;
+}
+
+export interface Notification {
+  id: string;
+  kind: string;
+  title: string;
+  body: string;
+  /** @nullable */
+  taskId?: string | null;
+  /** @nullable */
+  agentId?: string | null;
+  read: boolean;
+  createdAt: string;
+}
+
+export interface NotificationList {
+  unread: number;
+  notifications: Notification[];
+}
+
+export interface MarkNotificationsReadInput {
+  /** @maxItems 500 */
+  ids?: string[];
+}
+
+export type UsageReportTotals = {
+  todayCostCents: number;
+  last7dCostCents: number;
+  monthCostCents: number;
+  monthInputTokens: number;
+  monthOutputTokens: number;
+};
+
+export type UsageReportOutcomes = {
+  completed: number;
+  failed: number;
+  blocked: number;
+  cancelled: number;
+  queued: number;
+  running: number;
+  waitingApproval: number;
+};
+
+export type UsageReportAgentsItem = {
+  agentId: string;
+  name: string;
+  status: string;
+  tasksCompleted: number;
+  tasksFailed: number;
+  inputTokens: number;
+  outputTokens: number;
+  costCents: number;
+};
+
+export type UsageReportProvidersItem = {
+  provider: string;
+  tasks: number;
+  inputTokens: number;
+  outputTokens: number;
+  costCents: number;
+};
+
+export type UsageReportBlockersItem = {
+  taskId: string;
+  agentName: string;
+  objective: string;
+  /** @nullable */
+  errorKind?: string | null;
+  /** @nullable */
+  errorMessage?: string | null;
+  createdAt: string;
+};
+
+export interface UsageReport {
+  totals: UsageReportTotals;
+  outcomes: UsageReportOutcomes;
+  agents: UsageReportAgentsItem[];
+  providers: UsageReportProvidersItem[];
+  blockers: UsageReportBlockersItem[];
+}
+
 export type SearchAuditParams = {
 q?: string;
 kind?: string;
@@ -1139,5 +1401,18 @@ q?: string;
 
 export type ClearMemoriesParams = {
 agentId?: string;
+};
+
+export type ListNotificationsParams = {
+unreadOnly?: boolean;
+/**
+ * @minimum 1
+ * @maximum 200
+ */
+limit?: number;
+};
+
+export type MarkNotificationsRead200 = {
+  updated: number;
 };
 

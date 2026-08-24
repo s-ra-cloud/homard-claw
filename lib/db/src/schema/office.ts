@@ -168,6 +168,9 @@ export const tasksTable = pgTable("tasks", {
   // Which execution runtime should run this task. "native" is the built-in
   // provider runner; other adapters can be registered without a migration.
   runtime: text("runtime").notNull().default("native"),
+  // Set when this task was launched by a durable schedule; notification
+  // preferences for the task's lifecycle events come from that schedule.
+  scheduleId: uuid("schedule_id"),
   objective: text("objective").notNull(),
   status: text("status").notNull().default("queued"),
   priority: text("priority").notNull().default("normal"),
@@ -196,6 +199,93 @@ export const tasksTable = pgTable("tasks", {
     .notNull()
     .defaultNow(),
 });
+
+/** Which lifecycle events a schedule (or the office default) reports on. */
+export type NotifyPrefs = {
+  onCompleted: boolean;
+  onFailed: boolean;
+  onBlocked: boolean;
+  onApprovalNeeded: boolean;
+};
+
+/**
+ * Durable dispatch schedules: one-time (`once` + runAt) or recurring
+ * (`daily`/`weekly`/`monthly` + timeOfDay in the schedule's IANA timezone).
+ * `nextRunAt` is precomputed in UTC so the worker can claim due schedules
+ * with a single indexed comparison; after firing, the next occurrence is
+ * computed strictly after "now" — a schedule missed while the server was
+ * down fires once (catch-up), never once per missed occurrence.
+ */
+export const schedulesTable = pgTable(
+  "schedules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => agentsTable.id, { onDelete: "cascade" }),
+    objective: text("objective").notNull(),
+    priority: text("priority").notNull().default("normal"),
+    // Null = follow the agent's own routing.
+    providerOverride: text("provider_override"),
+    modelOverride: text("model_override"),
+    budgetCents: doublePrecision("budget_cents"),
+    // once | daily | weekly | monthly
+    cadence: text("cadence").notNull(),
+    /** IANA timezone the wall-clock fields below are interpreted in. */
+    timezone: text("timezone").notNull().default("UTC"),
+    /** For `once`: the absolute UTC instant to fire. */
+    runAt: timestamp("run_at", { withTimezone: true }),
+    /** For recurring cadences: "HH:MM" wall time in `timezone`. */
+    timeOfDay: text("time_of_day"),
+    /** For `weekly`: days 0 (Sunday) – 6 (Saturday). */
+    daysOfWeek: jsonb("days_of_week").$type<number[]>(),
+    /** For `monthly`: 1–31, clamped to the month's last day. */
+    dayOfMonth: integer("day_of_month"),
+    notify: jsonb("notify").$type<NotifyPrefs>().notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }),
+    /**
+     * Two-phase firing marker: set when an occurrence is claimed, cleared
+     * when the launch is finalized. A stale claim (crash between the two)
+     * is recovered by checking whether the task row exists.
+     */
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    lastTaskId: uuid("last_task_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("schedules_due_idx").on(table.enabled, table.nextRunAt)],
+);
+
+/**
+ * In-app notification feed. Rows are written by the worker on task
+ * lifecycle transitions (completed/failed/blocked/approval-needed);
+ * schedule-launched tasks honor their schedule's notify preferences.
+ */
+export const notificationsTable = pgTable(
+  "notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // task_completed | task_failed | task_blocked | approval_needed | schedule_error
+    kind: text("kind").notNull(),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    taskId: uuid("task_id").references(() => tasksTable.id, {
+      onDelete: "set null",
+    }),
+    agentId: uuid("agent_id").references(() => agentsTable.id, {
+      onDelete: "set null",
+    }),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("notifications_read_created_idx").on(table.readAt, table.createdAt)],
+);
 
 export const taskLogsTable = pgTable("task_logs", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -375,6 +465,8 @@ export const insertTeamSchema = createInsertSchema(teamsTable).omit({
   createdAt: true,
 });
 
+export type ScheduleRecord = typeof schedulesTable.$inferSelect;
+export type NotificationRecord = typeof notificationsTable.$inferSelect;
 export type TeamRecord = typeof teamsTable.$inferSelect;
 export type TeamMemberRecord = typeof teamMembersTable.$inferSelect;
 export type AgentMessageRecord = typeof agentMessagesTable.$inferSelect;

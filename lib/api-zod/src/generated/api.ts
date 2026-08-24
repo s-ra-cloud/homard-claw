@@ -2103,3 +2103,290 @@ export const RecordTaskUsageResponse = zod.object({
 })
 
 
+/**
+ * @summary List durable task schedules
+ */
+export const ListSchedulesResponseItem = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "agentId": zod.string(),
+  "agentName": zod.string(),
+  "objective": zod.string(),
+  "priority": zod.string(),
+  "providerOverride": zod.string().nullish(),
+  "modelOverride": zod.string().nullish(),
+  "budgetCents": zod.number().nullish(),
+  "cadence": zod.enum(['once', 'daily', 'weekly', 'monthly']),
+  "timezone": zod.string(),
+  "runAt": zod.coerce.date().nullish(),
+  "timeOfDay": zod.string().nullish(),
+  "daysOfWeek": zod.array(zod.number()).nullish(),
+  "dayOfMonth": zod.number().nullish(),
+  "notify": zod.object({
+  "onCompleted": zod.boolean(),
+  "onFailed": zod.boolean(),
+  "onBlocked": zod.boolean(),
+  "onApprovalNeeded": zod.boolean()
+}),
+  "enabled": zod.boolean(),
+  "nextRunAt": zod.coerce.date().nullish(),
+  "lastRunAt": zod.coerce.date().nullish(),
+  "lastTaskId": zod.string().nullish(),
+  "lastTaskStatus": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
+})
+export const ListSchedulesResponse = zod.array(ListSchedulesResponseItem)
+
+
+/**
+ * @summary Create a one-time or recurring task schedule
+ */
+export const createScheduleBodyNameMax = 80;
+
+export const createScheduleBodyObjectiveMin = 3;
+export const createScheduleBodyObjectiveMax = 5000;
+
+export const createScheduleBodyModelOverrideMax = 200;
+
+export const createScheduleBodyBudgetCentsMin = 0.01;
+export const createScheduleBodyBudgetCentsMax = 1000000;
+
+export const createScheduleBodyTimezoneMax = 60;
+
+export const createScheduleBodyTimeOfDayRegExp = new RegExp('^([01]?\\d|2[0-3]):[0-5]\\d$');
+export const createScheduleBodyDaysOfWeekItemMin = 0;
+export const createScheduleBodyDaysOfWeekItemMax = 6;
+
+export const createScheduleBodyDayOfMonthMax = 31;
+
+
+
+export const CreateScheduleBody = zod.object({
+  "name": zod.string().min(1).max(createScheduleBodyNameMax),
+  "agentId": zod.string(),
+  "objective": zod.string().min(createScheduleBodyObjectiveMin).max(createScheduleBodyObjectiveMax),
+  "priority": zod.enum(['low', 'normal', 'high']).optional(),
+  "providerOverride": zod.enum(['claude_max', 'openrouter']).optional(),
+  "modelOverride": zod.string().max(createScheduleBodyModelOverrideMax).optional(),
+  "budgetCents": zod.number().min(createScheduleBodyBudgetCentsMin).max(createScheduleBodyBudgetCentsMax).optional(),
+  "cadence": zod.enum(['once', 'daily', 'weekly', 'monthly']),
+  "timezone": zod.string().min(1).max(createScheduleBodyTimezoneMax),
+  "runAt": zod.coerce.date().optional(),
+  "timeOfDay": zod.string().regex(createScheduleBodyTimeOfDayRegExp).optional(),
+  "daysOfWeek": zod.array(zod.number().min(createScheduleBodyDaysOfWeekItemMin).max(createScheduleBodyDaysOfWeekItemMax)).optional(),
+  "dayOfMonth": zod.number().min(1).max(createScheduleBodyDayOfMonthMax).optional(),
+  "notify": zod.object({
+  "onCompleted": zod.boolean(),
+  "onFailed": zod.boolean(),
+  "onBlocked": zod.boolean(),
+  "onApprovalNeeded": zod.boolean()
+}).optional()
+})
+
+export const CreateScheduleResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "agentId": zod.string(),
+  "agentName": zod.string(),
+  "objective": zod.string(),
+  "priority": zod.string(),
+  "providerOverride": zod.string().nullish(),
+  "modelOverride": zod.string().nullish(),
+  "budgetCents": zod.number().nullish(),
+  "cadence": zod.enum(['once', 'daily', 'weekly', 'monthly']),
+  "timezone": zod.string(),
+  "runAt": zod.coerce.date().nullish(),
+  "timeOfDay": zod.string().nullish(),
+  "daysOfWeek": zod.array(zod.number()).nullish(),
+  "dayOfMonth": zod.number().nullish(),
+  "notify": zod.object({
+  "onCompleted": zod.boolean(),
+  "onFailed": zod.boolean(),
+  "onBlocked": zod.boolean(),
+  "onApprovalNeeded": zod.boolean()
+}),
+  "enabled": zod.boolean(),
+  "nextRunAt": zod.coerce.date().nullish(),
+  "lastRunAt": zod.coerce.date().nullish(),
+  "lastTaskId": zod.string().nullish(),
+  "lastTaskStatus": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Update or enable/disable a schedule
+ */
+export const UpdateScheduleParams = zod.object({
+  "scheduleId": zod.coerce.string()
+})
+
+export const updateScheduleBodyNameMax = 80;
+
+export const updateScheduleBodyObjectiveMin = 3;
+export const updateScheduleBodyObjectiveMax = 5000;
+
+export const updateScheduleBodyTimezoneMax = 60;
+
+export const updateScheduleBodyTimeOfDayRegExp = new RegExp('^([01]?\\d|2[0-3]):[0-5]\\d$');
+export const updateScheduleBodyDaysOfWeekItemMin = 0;
+export const updateScheduleBodyDaysOfWeekItemMax = 6;
+
+export const updateScheduleBodyDayOfMonthMax = 31;
+
+
+
+export const UpdateScheduleBody = zod.object({
+  "name": zod.string().min(1).max(updateScheduleBodyNameMax).optional(),
+  "objective": zod.string().min(updateScheduleBodyObjectiveMin).max(updateScheduleBodyObjectiveMax).optional(),
+  "priority": zod.enum(['low', 'normal', 'high']).optional(),
+  "providerOverride": zod.string().nullish(),
+  "modelOverride": zod.string().nullish(),
+  "budgetCents": zod.number().nullish(),
+  "cadence": zod.enum(['once', 'daily', 'weekly', 'monthly']).optional(),
+  "timezone": zod.string().min(1).max(updateScheduleBodyTimezoneMax).optional(),
+  "runAt": zod.coerce.date().optional(),
+  "timeOfDay": zod.string().regex(updateScheduleBodyTimeOfDayRegExp).optional(),
+  "daysOfWeek": zod.array(zod.number().min(updateScheduleBodyDaysOfWeekItemMin).max(updateScheduleBodyDaysOfWeekItemMax)).optional(),
+  "dayOfMonth": zod.number().min(1).max(updateScheduleBodyDayOfMonthMax).optional(),
+  "notify": zod.object({
+  "onCompleted": zod.boolean(),
+  "onFailed": zod.boolean(),
+  "onBlocked": zod.boolean(),
+  "onApprovalNeeded": zod.boolean()
+}).optional(),
+  "enabled": zod.boolean().optional()
+})
+
+export const UpdateScheduleResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "agentId": zod.string(),
+  "agentName": zod.string(),
+  "objective": zod.string(),
+  "priority": zod.string(),
+  "providerOverride": zod.string().nullish(),
+  "modelOverride": zod.string().nullish(),
+  "budgetCents": zod.number().nullish(),
+  "cadence": zod.enum(['once', 'daily', 'weekly', 'monthly']),
+  "timezone": zod.string(),
+  "runAt": zod.coerce.date().nullish(),
+  "timeOfDay": zod.string().nullish(),
+  "daysOfWeek": zod.array(zod.number()).nullish(),
+  "dayOfMonth": zod.number().nullish(),
+  "notify": zod.object({
+  "onCompleted": zod.boolean(),
+  "onFailed": zod.boolean(),
+  "onBlocked": zod.boolean(),
+  "onApprovalNeeded": zod.boolean()
+}),
+  "enabled": zod.boolean(),
+  "nextRunAt": zod.coerce.date().nullish(),
+  "lastRunAt": zod.coerce.date().nullish(),
+  "lastTaskId": zod.string().nullish(),
+  "lastTaskStatus": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Delete a schedule (already-created tasks are kept)
+ */
+export const DeleteScheduleParams = zod.object({
+  "scheduleId": zod.coerce.string()
+})
+
+export const DeleteScheduleResponse = zod.void()
+
+
+/**
+ * @summary List in-app notifications with the unread count
+ */
+export const listNotificationsQueryLimitMax = 200;
+
+
+
+export const ListNotificationsQueryParams = zod.object({
+  "unreadOnly": zod.coerce.boolean().optional(),
+  "limit": zod.coerce.number().min(1).max(listNotificationsQueryLimitMax).optional()
+})
+
+export const ListNotificationsResponse = zod.object({
+  "unread": zod.number(),
+  "notifications": zod.array(zod.object({
+  "id": zod.string(),
+  "kind": zod.string(),
+  "title": zod.string(),
+  "body": zod.string(),
+  "taskId": zod.string().nullish(),
+  "agentId": zod.string().nullish(),
+  "read": zod.boolean(),
+  "createdAt": zod.coerce.date()
+}))
+})
+
+
+/**
+ * @summary Mark notifications as read (all when no ids are given)
+ */
+export const markNotificationsReadBodyIdsMax = 500;
+
+
+
+export const MarkNotificationsReadBody = zod.object({
+  "ids": zod.array(zod.string()).max(markNotificationsReadBodyIdsMax).optional()
+})
+
+export const MarkNotificationsReadResponse = zod.object({
+  "updated": zod.number()
+})
+
+
+/**
+ * @summary Real usage, cost, outcome, and health reporting
+ */
+export const GetUsageReportResponse = zod.object({
+  "totals": zod.object({
+  "todayCostCents": zod.number(),
+  "last7dCostCents": zod.number(),
+  "monthCostCents": zod.number(),
+  "monthInputTokens": zod.number(),
+  "monthOutputTokens": zod.number()
+}),
+  "outcomes": zod.object({
+  "completed": zod.number(),
+  "failed": zod.number(),
+  "blocked": zod.number(),
+  "cancelled": zod.number(),
+  "queued": zod.number(),
+  "running": zod.number(),
+  "waitingApproval": zod.number()
+}),
+  "agents": zod.array(zod.object({
+  "agentId": zod.string(),
+  "name": zod.string(),
+  "status": zod.string(),
+  "tasksCompleted": zod.number(),
+  "tasksFailed": zod.number(),
+  "inputTokens": zod.number(),
+  "outputTokens": zod.number(),
+  "costCents": zod.number()
+})),
+  "providers": zod.array(zod.object({
+  "provider": zod.string(),
+  "tasks": zod.number(),
+  "inputTokens": zod.number(),
+  "outputTokens": zod.number(),
+  "costCents": zod.number()
+})),
+  "blockers": zod.array(zod.object({
+  "taskId": zod.string(),
+  "agentName": zod.string(),
+  "objective": zod.string(),
+  "errorKind": zod.string().nullish(),
+  "errorMessage": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
+}))
+})
+
+

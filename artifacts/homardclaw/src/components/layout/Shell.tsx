@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useUser, useClerk } from "@clerk/react";
-import { LogOut, Home, Users, CheckSquare, Settings, Activity, Palmtree, Menu, X, Brain, Network, Phone } from "lucide-react";
+import { LogOut, Home, Users, CheckSquare, Settings, Activity, Palmtree, Menu, X, Brain, Network, Phone, CalendarClock, Bell, BarChart3 } from "lucide-react";
+import { useListNotifications } from "@workspace/api-client-react";
+import { useLiveUpdates } from "@/lib/useLiveUpdates";
 
 const navItems = [
   { href: "/office", label: "Office", icon: Home },
@@ -9,8 +11,11 @@ const navItems = [
   { href: "/talk", label: "Talk", icon: Phone },
   { href: "/teams", label: "Teams", icon: Network },
   { href: "/tasks", label: "Tasks", icon: Activity },
+  { href: "/schedules", label: "Schedules", icon: CalendarClock },
+  { href: "/inbox", label: "Inbox", icon: Bell },
   { href: "/memory", label: "Memory", icon: Brain },
   { href: "/approvals", label: "Approvals", icon: CheckSquare },
+  { href: "/reports", label: "Reports", icon: BarChart3 },
   { href: "/providers", label: "Providers", icon: Settings },
   { href: "/island", label: "Island", icon: Palmtree },
 ];
@@ -24,6 +29,16 @@ export function Shell({ children, immersive = false }: ShellProps) {
   const [location] = useLocation();
   const { user } = useUser();
   const { signOut } = useClerk();
+  // One live-update stream per signed-in view: SSE topic hints invalidate
+  // React Query caches so every page refreshes without waiting on polls.
+  useLiveUpdates();
+  // Unread count for the Inbox badge; SSE keeps it fresh, the interval is
+  // only a fallback when the stream is down.
+  const { data: notificationData } = useListNotifications(
+    { limit: 1 },
+    { query: { queryKey: ["/api/notifications", "badge"], refetchInterval: 60_000 } },
+  );
+  const unread = notificationData?.unread ?? 0;
   const [navOpen, setNavOpen] = useState(false);
   const navRef = useRef<HTMLElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -155,6 +170,18 @@ export function Shell({ children, immersive = false }: ShellProps) {
                 >
                   <item.icon className="w-4 h-4 shrink-0" />
                   <span className="font-bold text-sm tracking-wide uppercase">{item.label}</span>
+                  {item.href === "/inbox" && unread > 0 && (
+                    <span
+                      className={`ml-auto min-w-[1.25rem] px-1 py-0.5 text-center text-[10px] font-bold leading-none ${
+                        isActive
+                          ? "bg-primary-foreground text-primary"
+                          : "bg-destructive text-destructive-foreground"
+                      }`}
+                      data-testid="badge-unread-count"
+                    >
+                      {unread > 99 ? "99+" : unread}
+                    </span>
+                  )}
                 </div>
               </Link>
             );

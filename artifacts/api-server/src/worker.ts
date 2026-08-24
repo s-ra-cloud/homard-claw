@@ -30,6 +30,9 @@ import {
   type ProviderId,
 } from "./providers";
 import { buildTaskContext, saveTaskOutcomeMemory } from "./memory-context";
+import { publish } from "./events";
+import { notifyTaskEvent } from "./notifications";
+import { runDueSchedules } from "./scheduler";
 import { logger } from "./lib/logger";
 
 /**
@@ -149,7 +152,7 @@ export async function expireStaleApprovals(): Promise<number> {
     .returning();
   for (const approval of expired) {
     if (approval.taskId) {
-      await db
+      const [blocked] = await db
         .update(tasksTable)
         .set({
           status: "blocked",
@@ -162,7 +165,11 @@ export async function expireStaleApprovals(): Promise<number> {
             eq(tasksTable.id, approval.taskId),
             eq(tasksTable.status, "waiting_approval"),
           ),
-        );
+        )
+        .returning();
+      if (blocked) {
+        await notifyTaskEvent("task_blocked", blocked, blocked.errorMessage);
+      }
       await addTaskLog(
         approval.taskId,
         "warn",
@@ -174,6 +181,7 @@ export async function expireStaleApprovals(): Promise<number> {
       `An approval request expired undecided: ${approval.action}`,
     );
   }
+  if (expired.length > 0) publish("tasks", "approvals", "overview");
   return expired.length;
 }
 
@@ -284,6 +292,18 @@ async function finishIfStillRunning(
       ),
     )
     .returning();
+  if (task) {
+    publish("tasks", "overview");
+    // Every terminal transition the owner asked to hear about flows through
+    // here, so this is the single notification hook for worker outcomes.
+    if (set.status === "completed") {
+      await notifyTaskEvent("task_completed", task);
+    } else if (set.status === "failed") {
+      await notifyTaskEvent("task_failed", task, task.errorMessage);
+    } else if (set.status === "blocked") {
+      await notifyTaskEvent("task_blocked", task, task.errorMessage);
+    }
+  }
   return task ?? null;
 }
 
@@ -292,6 +312,7 @@ async function settleAgentStatus(agentId: string): Promise<void> {
     .update(agentsTable)
     .set({ status: "idle" })
     .where(and(eq(agentsTable.id, agentId), eq(agentsTable.status, "working")));
+  publish("agents");
 }
 
 /**
@@ -304,7 +325,7 @@ async function parkForApproval(
   { task, agent }: ClaimedTask,
   reason: string,
 ): Promise<void> {
-  await db.transaction(async (tx) => {
+  const parked = await db.transaction(async (tx) => {
     const [updated] = await tx
       .update(tasksTable)
       .set({ status: "waiting_approval", attempts: task.attempts - 1 })
@@ -316,7 +337,7 @@ async function parkForApproval(
         ),
       )
       .returning({ id: tasksTable.id });
-    if (!updated) return;
+    if (!updated) return false;
     const [pending] = await tx
       .select({ id: approvalsTable.id })
       .from(approvalsTable)
@@ -341,7 +362,12 @@ async function parkForApproval(
       `${agent.name} needs approval to run a task: ${reason}`,
       tx,
     );
+    return true;
   });
+  if (parked) {
+    publish("tasks", "approvals", "overview");
+    await notifyTaskEvent("approval_needed", task, reason);
+  }
   await addTaskLog(task.id, "info", `Waiting for your approval: ${reason}`);
 }
 
@@ -720,6 +746,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         "warn",
         `${callError.message} Retrying in ${Math.round(backoffMs / 1000)}s (attempt ${task.attempts} of ${MAX_ATTEMPTS}).`,
       );
+      publish("tasks");
       return;
     }
     const finished = await finishIfStillRunning(task.id, task.attempts, {
@@ -743,6 +770,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
 export async function workOnce(): Promise<boolean> {
   const claimed = await claimNextTask();
   if (!claimed) return false;
+  publish("tasks", "agents", "overview");
   await runTask(claimed);
   return true;
 }
@@ -837,6 +865,9 @@ export function startWorker(intervalMs = POLL_INTERVAL_MS): void {
         leaseRecovered = true;
       }
       await expireStaleApprovals();
+      // Fire durable schedules before draining, so a task launched by a
+      // just-due schedule runs in the same tick.
+      await runDueSchedules();
       // Drain the queue: keep claiming until nothing is runnable.
       while (await workOnce()) {
         /* claimed and ran one task */

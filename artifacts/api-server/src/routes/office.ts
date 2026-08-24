@@ -83,6 +83,8 @@ import {
   type ProviderId,
 } from "../providers";
 import { recordAudit, verifyAuditChain } from "../audit";
+import { agentPromptContext, dispatchTask } from "../dispatch";
+import { publish } from "../events";
 import { effectivePermissions } from "../policy";
 import {
   DEFAULT_RUNTIME,
@@ -90,7 +92,11 @@ import {
   queueHealth,
 } from "../runtime";
 import { abortRunningTask, getWorkerStatus } from "../worker";
+import eventsRouter from "./events";
 import memoryRouter from "./memory";
+import notificationsRouter from "./notifications";
+import reportsRouter from "./reports";
+import schedulesRouter from "./schedules";
 import teamsRouter from "./teams";
 import voiceRouter from "./voice";
 
@@ -130,6 +136,10 @@ router.use(requireOwner);
 router.use(memoryRouter);
 router.use(teamsRouter);
 router.use(voiceRouter);
+router.use(schedulesRouter);
+router.use(notificationsRouter);
+router.use(reportsRouter);
+router.use(eventsRouter);
 
 router.get("/runtime/health", async (_req: Request, res: Response) => {
   const [runtimes, queue, stop] = await Promise.all([
@@ -207,24 +217,6 @@ const CANCELLABLE_STATUSES = ["queued", "running", "waiting_approval", "blocked"
 /** Statuses eligible for a fresh retry attempt. */
 const RETRYABLE_STATUSES = ["failed", "cancelled", "blocked"];
 
-/** Prompt-relevant agent configuration used for token estimation. */
-function agentPromptContext(agent: {
-  mission: string;
-  specialization: string | null;
-  personality: string | null;
-  goals: string | null;
-  instructions: string | null;
-}): string {
-  return [
-    agent.mission,
-    agent.specialization,
-    agent.personality,
-    agent.goals,
-    agent.instructions,
-  ]
-    .filter(Boolean)
-    .join("\n");
-}
 
 /** Case-insensitive name collision check across every agent, any lifecycle state. */
 async function findNameConflict(
@@ -830,114 +822,14 @@ router.post("/tasks", async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-  type CreateOutcome =
-    | { status: 404 }
-    | { status: 409 }
-    | { status: 425 } // internal marker: routing went stale, retry
-    | {
-        status: 201;
-        task: typeof tasksTable.$inferSelect;
-        agentName: string;
-      };
-  // Resolve routing and pricing before opening the transaction: pricing may
-  // hit the provider's (cached) model catalog and must not run while a row
-  // lock is held. If the agent's routing configuration changes concurrently,
-  // the transaction detects it against the locked row and we re-resolve.
-  let outcome: CreateOutcome = { status: 425 };
-  for (let attempt = 0; attempt < 2 && outcome.status === 425; attempt += 1) {
-    const [preview] = await db
-      .select()
-      .from(agentsTable)
-      .where(eq(agentsTable.id, parsed.data.agentId))
-      .limit(1);
-    if (!preview) {
-      outcome = { status: 404 };
-      break;
-    }
-    if (preview.retired || preview.archived) {
-      outcome = { status: 409 };
-      break;
-    }
-    const routing = await resolveRouting(
-      preview,
-      parsed.data.providerOverride as ProviderId | undefined,
-      parsed.data.modelOverride,
-    );
-    const estimate = await estimateTask(
-      agentPromptContext(preview),
-      parsed.data.objective,
-      routing,
-    );
-    outcome = await db.transaction(async (tx): Promise<CreateOutcome> => {
-      // Lock the agent row so a concurrent retirement cannot slip in between
-      // the check and the task insert.
-      const [agent] = await tx
-        .select()
-        .from(agentsTable)
-        .where(eq(agentsTable.id, parsed.data.agentId))
-        .limit(1)
-        .for("update");
-      if (!agent) return { status: 404 };
-      if (agent.retired || agent.archived) return { status: 409 };
-      if (
-        agent.provider !== preview.provider ||
-        agent.model !== preview.model
-      ) {
-        // Routing config changed between preview and lock; retry.
-        return { status: 425 };
-      }
-      const [stop] = await tx
-        .select()
-        .from(systemStateTable)
-        .where(eq(systemStateTable.key, "emergency_stop"))
-        .limit(1);
-      const configured = isConfigured(routing.provider);
-      // Unconfigured providers and the emergency stop block explicitly, with
-      // a reason the owner can act on; a paused agent's tasks simply wait in
-      // the queue until the agent resumes.
-      const blockReason =
-        stop?.value === "true"
-          ? { errorKind: "emergency_stop", errorMessage: "The emergency stop is engaged." }
-          : !configured
-            ? {
-                errorKind: "not_configured",
-                errorMessage: `${routing.provider === "claude_max" ? "Claude" : "OpenRouter"} is not configured; add the credential and retry.`,
-              }
-            : null;
-      const [task] = await tx
-        .insert(tasksTable)
-        .values({
-          agentId: agent.id,
-          objective: parsed.data.objective,
-          priority: parsed.data.priority ?? "normal",
-          budgetCents: parsed.data.budgetCents ?? null,
-          provider: routing.provider,
-          model: routing.model,
-          estimatedTokens: estimate.estimatedTokens,
-          estimatedCostCents: estimate.costKnown
-            ? estimate.estimatedCostCents
-            : null,
-          status: blockReason ? "blocked" : "queued",
-          ...(blockReason ?? {}),
-        })
-        .returning();
-      await tx.insert(taskLogsTable).values({
-        taskId: task.id,
-        level: blockReason ? "warn" : "info",
-        message: blockReason
-          ? `Task created but blocked: ${blockReason.errorMessage}`
-          : `Task created and queued for ${agent.name} (priority ${task.priority}).`,
-      });
-      await recordAudit(
-      "task.created",
-      blockReason
-          ? `A task for ${agent.name} was blocked: ${blockReason.errorMessage}`
-          : `A task was queued for ${agent.name}.`,
-      tx,
-    );
-      return { status: 201, task, agentName: agent.name };
-    });
-  }
+  const outcome = await dispatchTask({
+    agentId: parsed.data.agentId,
+    objective: parsed.data.objective,
+    priority: parsed.data.priority,
+    budgetCents: parsed.data.budgetCents ?? null,
+    providerOverride: parsed.data.providerOverride as ProviderId | undefined,
+    modelOverride: parsed.data.modelOverride,
+  });
   if (outcome.status === 404) {
     res.status(404).json({ error: "Agent not found" });
     return;
@@ -1064,6 +956,7 @@ router.post("/tasks/:taskId/cancel", async (req, res): Promise<void> => {
   // Abort any in-flight provider call after the status is committed, so the
   // worker's conditional finish sees "cancelled" and discards the result.
   abortRunningTask(outcome.task.id);
+  publish("tasks", "approvals", "overview");
   res.json(CancelTaskResponse.parse(toTaskJson(outcome.task, outcome.agentName)));
 });
 
@@ -1121,6 +1014,7 @@ router.post("/tasks/:taskId/retry", async (req, res): Promise<void> => {
     });
     return;
   }
+  publish("tasks", "overview");
   res.json(RetryTaskResponse.parse(toTaskJson(outcome.task, outcome.agentName)));
 });
 
@@ -1220,6 +1114,7 @@ router.post("/emergency-stop", async (req, res): Promise<void> => {
       ? "Global emergency stop was engaged."
       : "Global emergency stop was released.",
     );
+  publish("tasks", "agents", "overview");
   res.json(SetEmergencyStopResponse.parse(parsed.data));
 });
 
@@ -1348,6 +1243,7 @@ router.patch("/approvals/:approvalId", async (req, res): Promise<void> => {
     res.status(404).json({ error: "Pending approval not found" });
     return;
   }
+  publish("approvals", "tasks", "overview");
   res.json(
     DecideApprovalResponse.parse(
       toApprovalJson(outcome.approval, outcome.agentName, outcome.taskObjective),

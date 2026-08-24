@@ -28,6 +28,9 @@ import ApprovalsPage from '@/pages/ApprovalsPage';
 import ProvidersPage from '@/pages/ProvidersPage';
 import IslandPage from '@/pages/IslandPage';
 import MemoryPage from '@/pages/MemoryPage';
+import SchedulesPage from '@/pages/SchedulesPage';
+import NotificationsPage from '@/pages/NotificationsPage';
+import ReportsPage from '@/pages/ReportsPage';
 
 const clerkPubKey = publishableKeyFromHost(
   window.location.hostname,
@@ -216,6 +219,18 @@ function ClerkProviderWithRoutes() {
 
             <Route path="/providers">
               <ProtectedRoute component={ProvidersPage} />
+            </Route>
+
+            <Route path="/schedules">
+              <ProtectedRoute component={SchedulesPage} />
+            </Route>
+
+            <Route path="/inbox">
+              <ProtectedRoute component={NotificationsPage} />
+            </Route>
+
+            <Route path="/reports">
+              <ProtectedRoute component={ReportsPage} />
             </Route>
 
             <Route component={NotFound} />
