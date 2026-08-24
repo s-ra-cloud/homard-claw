@@ -76,6 +76,7 @@ export const listAgentsResponsePermissionOverridesOneMaxDelegationDepthMin = 0;
 export const listAgentsResponsePermissionOverridesOneMaxSubtasksPerTaskMin = 0;
 
 
+
 export const ListAgentsResponseItem = zod.object({
   "id": zod.string(),
   "name": zod.string(),
@@ -180,6 +181,7 @@ export const createAgentBodyPermissionOverridesOneMaxDelegationDepthMin = 0;
 export const createAgentBodyPermissionOverridesOneMaxSubtasksPerTaskMin = 0;
 
 
+
 export const CreateAgentBody = zod.object({
   "name": zod.string().min(createAgentBodyNameMin).max(createAgentBodyNameMax),
   "title": zod.string().min(createAgentBodyTitleMin).max(createAgentBodyTitleMax),
@@ -255,6 +257,7 @@ export const createAgentResponsePermissionOverridesOneMaxAttemptsMin = 0;
 export const createAgentResponsePermissionOverridesOneMaxDelegationDepthMin = 0;
 
 export const createAgentResponsePermissionOverridesOneMaxSubtasksPerTaskMin = 0;
+
 
 
 export const CreateAgentResponse = zod.object({
@@ -357,6 +360,7 @@ export const getAgentResponseAgentPermissionOverridesOneMaxAttemptsMin = 0;
 export const getAgentResponseAgentPermissionOverridesOneMaxDelegationDepthMin = 0;
 
 export const getAgentResponseAgentPermissionOverridesOneMaxSubtasksPerTaskMin = 0;
+
 
 
 export const GetAgentResponse = zod.object({
@@ -537,6 +541,7 @@ export const updateAgentBodyPermissionOverridesOneMaxDelegationDepthMin = 0;
 export const updateAgentBodyPermissionOverridesOneMaxSubtasksPerTaskMin = 0;
 
 
+
 export const UpdateAgentBody = zod.object({
   "name": zod.string().min(updateAgentBodyNameMin).max(updateAgentBodyNameMax).optional(),
   "title": zod.string().min(updateAgentBodyTitleMin).max(updateAgentBodyTitleMax).optional(),
@@ -612,6 +617,7 @@ export const updateAgentResponsePermissionOverridesOneMaxAttemptsMin = 0;
 export const updateAgentResponsePermissionOverridesOneMaxDelegationDepthMin = 0;
 
 export const updateAgentResponsePermissionOverridesOneMaxSubtasksPerTaskMin = 0;
+
 
 
 export const UpdateAgentResponse = zod.object({
@@ -726,6 +732,7 @@ export const duplicateAgentResponsePermissionOverridesOneMaxDelegationDepthMin =
 export const duplicateAgentResponsePermissionOverridesOneMaxSubtasksPerTaskMin = 0;
 
 
+
 export const DuplicateAgentResponse = zod.object({
   "id": zod.string(),
   "name": zod.string(),
@@ -832,6 +839,7 @@ export const setAgentArchivedResponsePermissionOverridesOneMaxDelegationDepthMin
 export const setAgentArchivedResponsePermissionOverridesOneMaxSubtasksPerTaskMin = 0;
 
 
+
 export const SetAgentArchivedResponse = zod.object({
   "id": zod.string(),
   "name": zod.string(),
@@ -936,6 +944,7 @@ export const pauseAgentResponsePermissionOverridesOneMaxAttemptsMin = 0;
 export const pauseAgentResponsePermissionOverridesOneMaxDelegationDepthMin = 0;
 
 export const pauseAgentResponsePermissionOverridesOneMaxSubtasksPerTaskMin = 0;
+
 
 
 export const PauseAgentResponse = zod.object({
@@ -1114,6 +1123,7 @@ export const createTaskBodyBudgetCentsMin = 0.01;
 export const createTaskBodyBudgetCentsMax = 1000000;
 
 export const createTaskBodyModelOverrideMax = 200;
+
 
 
 export const CreateTaskBody = zod.object({
@@ -1333,6 +1343,7 @@ export const createTeamBodyNameMax = 60;
 export const createTeamBodyMissionMax = 2000;
 
 
+
 export const CreateTeamBody = zod.object({
   "name": zod.string().min(createTeamBodyNameMin).max(createTeamBodyNameMax),
   "mission": zod.string().max(createTeamBodyMissionMax).optional(),
@@ -1373,6 +1384,7 @@ export const updateTeamBodyNameMin = 2;
 export const updateTeamBodyNameMax = 60;
 
 export const updateTeamBodyMissionMax = 2000;
+
 
 
 export const UpdateTeamBody = zod.object({
@@ -1490,6 +1502,7 @@ export const delegateTaskBodyBudgetCentsMin = 0.01;
 export const delegateTaskBodyBudgetCentsMax = 1000000;
 
 export const delegateTaskBodyNoteMax = 2000;
+
 
 
 export const DelegateTaskBody = zod.object({
@@ -1652,6 +1665,7 @@ export const converseWithAgentBodyHistoryItemTextMax = 8000;
 export const converseWithAgentBodyHistoryMax = 20;
 
 
+
 export const ConverseWithAgentBody = zod.object({
   "text": zod.string().min(1).max(converseWithAgentBodyTextMax),
   "history": zod.array(zod.object({
@@ -1677,6 +1691,7 @@ export const VoiceConverseWithAgentParams = zod.object({
 export const voiceConverseWithAgentBodyHistoryItemTextMax = 8000;
 
 export const voiceConverseWithAgentBodyHistoryMax = 20;
+
 
 
 export const VoiceConverseWithAgentBody = zod.object({
@@ -1736,6 +1751,7 @@ export const updateProviderSettingsBodyCodexModelMax = 200;
 export const updateProviderSettingsBodyPaidFallbackLimitCentsMin = 0;
 
 
+
 export const UpdateProviderSettingsBody = zod.object({
   "defaultProvider": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter']).optional(),
   "claudeModel": zod.string().max(updateProviderSettingsBodyClaudeModelMax).nullish(),
@@ -1786,6 +1802,7 @@ export const BootstrapCodexResponse = zod.object({
  */
 export const connectCodexBodyAuthJsonMin = 2;
 export const connectCodexBodyAuthJsonMax = 20000;
+
 
 
 export const ConnectCodexBody = zod.object({
@@ -2113,6 +2130,7 @@ export const estimateTaskBodyObjectiveMax = 5000;
 export const estimateTaskBodyModelOverrideMax = 200;
 
 
+
 export const EstimateTaskBody = zod.object({
   "agentId": zod.string(),
   "objective": zod.string().min(estimateTaskBodyObjectiveMin).max(estimateTaskBodyObjectiveMax),
@@ -2137,6 +2155,7 @@ export const EstimateTaskResponse = zod.object({
  * @summary List or search memories, optionally scoped to one agent
  */
 export const listMemoriesQueryQMax = 500;
+
 
 
 export const ListMemoriesQueryParams = zod.object({
@@ -2166,6 +2185,7 @@ export const ListMemoriesResponse = zod.object({
  */
 export const createMemoryBodyContentMin = 3;
 export const createMemoryBodyContentMax = 4000;
+
 
 
 export const CreateMemoryBody = zod.object({
@@ -2232,6 +2252,7 @@ export const updateMemoryBodyContentMin = 3;
 export const updateMemoryBodyContentMax = 4000;
 
 
+
 export const UpdateMemoryBody = zod.object({
   "agentId": zod.string().nullish(),
   "kind": zod.enum(['fact', 'decision', 'context', 'task_outcome', 'relationship']).optional(),
@@ -2290,6 +2311,7 @@ export const uploadKnowledgeFileBodyMimeTypeMax = 100;
 export const uploadKnowledgeFileBodyDescriptionMax = 500;
 
 export const uploadKnowledgeFileBodyContentMax = 200000;
+
 
 
 export const UploadKnowledgeFileBody = zod.object({
@@ -2356,6 +2378,7 @@ export const recordTaskUsageBodyInputTokensMin = 0;
 export const recordTaskUsageBodyOutputTokensMin = 0;
 
 export const recordTaskUsageBodyCostCentsMin = 0;
+
 
 
 export const RecordTaskUsageBody = zod.object({
@@ -2476,6 +2499,7 @@ export const createScheduleBodyDaysOfWeekItemMax = 6;
 export const createScheduleBodyDayOfMonthMax = 31;
 
 
+
 export const CreateScheduleBody = zod.object({
   "name": zod.string().min(1).max(createScheduleBodyNameMax),
   "agentId": zod.string(),
@@ -2550,6 +2574,7 @@ export const updateScheduleBodyDaysOfWeekItemMax = 6;
 export const updateScheduleBodyDayOfMonthMax = 31;
 
 
+
 export const UpdateScheduleBody = zod.object({
   "name": zod.string().min(1).max(updateScheduleBodyNameMax).optional(),
   "objective": zod.string().min(updateScheduleBodyObjectiveMin).max(updateScheduleBodyObjectiveMax).optional(),
@@ -2619,6 +2644,7 @@ export const DeleteScheduleResponse = zod.void()
 export const listNotificationsQueryLimitMax = 200;
 
 
+
 export const ListNotificationsQueryParams = zod.object({
   "unreadOnly": zod.coerce.boolean().optional(),
   "limit": zod.coerce.number().min(1).max(listNotificationsQueryLimitMax).optional()
@@ -2643,6 +2669,7 @@ export const ListNotificationsResponse = zod.object({
  * @summary Mark notifications as read (all when no ids are given)
  */
 export const markNotificationsReadBodyIdsMax = 500;
+
 
 
 export const MarkNotificationsReadBody = zod.object({
@@ -2739,9 +2766,14 @@ export const UpdateConnectedAppResponse = zod.object({
   "grantedAgents": zod.number()
 })
 
+
 /**
- * @summary Begin the in-app Google OAuth consent flow for Gmail
+ * @summary Begin the in-app Google OAuth consent flow for Gmail or Google Drive
  */
+export const StartGoogleOauthBody = zod.object({
+  "service": zod.enum(['gmail', 'google_drive']).optional()
+}).describe('Which Google-backed app to request consent for. Omitting the body (or the service) starts a Gmail flow; google_drive runs an incremental consent that adds Drive scopes to the same account.\n')
+
 export const StartGoogleOauthResponse = zod.object({
   "authUrl": zod.string().describe('Google consent URL the browser should navigate to.')
 })
@@ -2753,3 +2785,21 @@ export const StartGoogleOauthResponse = zod.object({
 export const DisconnectGoogleAccountResponse = zod.object({
   "disconnected": zod.boolean()
 })
+
+
+/**
+ * @summary Begin the in-app GitHub OAuth consent flow
+ */
+export const StartGithubOauthResponse = zod.object({
+  "authUrl": zod.string().describe('GitHub consent URL the browser should navigate to.')
+})
+
+
+/**
+ * @summary Disconnect the workspace's GitHub account and revoke its credential
+ */
+export const DisconnectGithubAccountResponse = zod.object({
+  "disconnected": zod.boolean()
+})
+
+

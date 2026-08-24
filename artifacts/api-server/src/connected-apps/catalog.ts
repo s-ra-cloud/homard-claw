@@ -7,16 +7,13 @@ import {
 
 /**
  * The closed catalog of external apps agents can be granted. Every entry
- * maps to a Replit-managed connector: the owner connects the account once
- * through the platform, and this server never sees or stores a credential.
+ * connects per workspace through in-app OAuth; this server stores only
+ * encrypted credentials it minted itself, never a shared platform secret.
  */
-export const APP_CATALOG: Record<
-  ConnectedAppId,
-  { displayName: string; connectorName: string }
-> = {
-  gmail: { displayName: "Gmail", connectorName: "google-mail" },
-  google_drive: { displayName: "Google Drive", connectorName: "google-drive" },
-  github: { displayName: "GitHub", connectorName: "github" },
+export const APP_CATALOG: Record<ConnectedAppId, { displayName: string }> = {
+  gmail: { displayName: "Gmail" },
+  google_drive: { displayName: "Google Drive" },
+  github: { displayName: "GitHub" },
 };
 
 export { APP_ACCESS_LEVELS, CONNECTED_APP_IDS };

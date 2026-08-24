@@ -1,15 +1,15 @@
-import { ReplitConnectors } from "@replit/connectors-sdk";
-import {
-  APP_CATALOG,
-  type AppOperation,
-  type ConnectedAppId,
-} from "./catalog";
-import { legacyWorkspaceId } from "../workspace";
+import { type AppOperation, type ConnectedAppId } from "./catalog";
 import {
   GoogleAuthError,
+  driveAccessToken,
   gmailAccessToken,
   googleAccountSummary,
 } from "../google/credentials";
+import {
+  GithubAuthError,
+  githubAccessToken,
+  githubAccountSummary,
+} from "../github/credentials";
 
 /**
  * Live connection state of the workspace owner's account for one app.
@@ -29,123 +29,57 @@ export type ConnectionStatus = {
 };
 
 /**
- * The only connector-metadata keys ever surfaced to the UI. Everything else
- * (tokens, scopes, raw settings) stays server-side. Order is preference.
- */
-const ACCOUNT_LABEL_KEYS = [
-  "email",
-  "account_email",
-  "user_email",
-  "emailAddress",
-  "login",
-  "username",
-  "user_name",
-  "account_name",
-  "handle",
-] as const;
-
-function pickLabel(source: unknown): string | null {
-  if (typeof source !== "object" || source === null) return null;
-  const record = source as Record<string, unknown>;
-  for (const key of ACCOUNT_LABEL_KEYS) {
-    const value = record[key];
-    if (
-      typeof value === "string" &&
-      value.trim().length > 0 &&
-      value.length <= 120
-    ) {
-      return value.trim();
-    }
-  }
-  return null;
-}
-
-/** Connector status strings that mean "the owner must re-authorize". */
-const EXPIRED_STATUS = /expire|revok|invalid|reauth|disconnect|error|fail/i;
-
-/**
- * Map one raw connector listing (or its absence) to the state the UI shows.
- * Pure and exported for tests: this is where "no credential ever leaks" and
- * "expired is not the same as never connected" are pinned down.
- */
-export function describeConnection(
-  match: Record<string, unknown> | undefined,
-): ConnectionStatus {
-  if (!match) return { status: "not_connected", detail: null, accountLabel: null };
-  const accountLabel =
-    pickLabel(match.metadata) ?? pickLabel(match.integration) ?? pickLabel(match);
-  const rawStatus = typeof match.status === "string" ? match.status : "";
-  const detail =
-    typeof match.status_message === "string" && match.status_message.trim()
-      ? match.status_message
-      : null;
-  if (EXPIRED_STATUS.test(rawStatus) || EXPIRED_STATUS.test(detail ?? "")) {
-    return { status: "expired", detail, accountLabel };
-  }
-  return { status: "connected", detail, accountLabel };
-}
-
-/**
- * A fresh client per call, never cached: the SDK resolves and refreshes
- * OAuth tokens on the platform side, and holding a client (or anything
- * derived from it) would freeze a token that must be allowed to rotate.
- */
-function client(): ReplitConnectors {
-  return new ReplitConnectors();
-}
-
-/**
- * Gmail's connection is the workspace's own Google account, created by the
- * in-app OAuth flow. Drive and GitHub still ride the Replit workspace
- * connector, which belongs to the original owner alone: any other
- * workspace sees them as not connected, so a shared platform credential
- * can never become a cross-user access path.
+ * Every app now connects per workspace through in-app OAuth: Gmail and
+ * Drive share the workspace's own Google account (Drive is an incremental
+ * consent on top of it), and GitHub has its own OAuth-app credential. No
+ * shared platform connector remains, so a credential can never become a
+ * cross-user access path.
  */
 export async function connectionStatus(
   app: ConnectedAppId,
   workspaceId: string,
 ): Promise<ConnectionStatus> {
-  if (app === "gmail") {
+  if (app === "gmail" || app === "google_drive") {
     const account = await googleAccountSummary(workspaceId);
     if (!account) {
       return { status: "not_connected", detail: null, accountLabel: null };
     }
-    if (account.missingScopes.length > 0) {
+    if (app === "gmail") {
+      if (account.missingScopes.length > 0) {
+        return {
+          status: "expired",
+          detail:
+            "The connected Google account is missing required Gmail permissions. Reconnect and grant all requested access.",
+          accountLabel: account.email,
+        };
+      }
+      return { status: "connected", detail: null, accountLabel: account.email };
+    }
+    if (account.missingDriveScopes.length > 0) {
+      // The Google account exists but Drive was never granted: to the user
+      // this app is simply not connected yet.
       return {
-        status: "expired",
+        status: "not_connected",
         detail:
-          "The connected Google account is missing required Gmail permissions. Reconnect and grant all requested access.",
-        accountLabel: account.email,
+          "Your Google account is connected, but Drive access has not been granted yet. Connect Google Drive to add it.",
+        accountLabel: null,
       };
     }
     return { status: "connected", detail: null, accountLabel: account.email };
   }
-  const legacyId = await legacyWorkspaceId();
-  if (!legacyId || legacyId !== workspaceId) {
+  const account = await githubAccountSummary(workspaceId);
+  if (!account) {
+    return { status: "not_connected", detail: null, accountLabel: null };
+  }
+  if (account.missingScopes.length > 0) {
     return {
-      status: "not_connected",
+      status: "expired",
       detail:
-        "This app is not yet available for personal accounts — per-user connections for it are coming later.",
-      accountLabel: null,
+        "The connected GitHub account is missing required permissions. Reconnect and grant all requested access.",
+      accountLabel: account.login,
     };
   }
-  const { connectorName } = APP_CATALOG[app];
-  try {
-    const connections = await client().listConnections({
-      connector_names: connectorName,
-    });
-    const match = connections.find(
-      (item) => item.connector_name === connectorName,
-    );
-    return describeConnection(match);
-  } catch (error) {
-    return {
-      status: "unavailable",
-      detail:
-        error instanceof Error ? error.message : "Connector service unreachable",
-      accountLabel: null,
-    };
-  }
+  return { status: "connected", detail: null, accountLabel: account.login };
 }
 
 /** Longest result payload ever fed back to a model or stored on an action. */
@@ -193,47 +127,6 @@ export function mapProxyFailure(
   };
 }
 
-async function proxyJson(
-  app: ConnectedAppId,
-  path: string,
-  options?: { method?: string; body?: unknown; headers?: Record<string, string> },
-): Promise<
-  | { ok: true; data: unknown }
-  | { ok: false; outcome: ExecutionOutcome }
-> {
-  const { connectorName } = APP_CATALOG[app];
-  let response: Response;
-  try {
-    response = await client().proxy(connectorName, path, options);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    // The SDK throws before any HTTP round-trip when no connection exists
-    // for the connector; that is an authorization problem, not a provider one.
-    const authLike = /not.{0,10}connect|no connection|unauthoriz|forbidden|credential|token/i.test(
-      message,
-    );
-    return {
-      ok: false,
-      outcome: {
-        ok: false,
-        kind: authLike ? "auth" : "failed",
-        message: authLike
-          ? `No usable connection for this app: ${message}. The owner must connect or reconnect it.`
-          : `Could not reach the app: ${message}`,
-      },
-    };
-  }
-  const text = await response.text();
-  if (!response.ok) {
-    return { ok: false, outcome: mapProxyFailure(response.status, text) };
-  }
-  if (!text) return { ok: true, data: null };
-  try {
-    return { ok: true, data: JSON.parse(text) };
-  } catch {
-    return { ok: true, data: text };
-  }
-}
 
 /**
  * Context threaded into every executor. `actionId` is the durable action
@@ -260,72 +153,69 @@ const NO_WORKSPACE_OUTCOME: ExecutionOutcome = {
     "This task has no workspace owner, so no connected account can be used for it.",
 };
 
-/**
- * Guard for apps still served by the Replit workspace connector: only the
- * legacy owner's workspace may use them.
- */
-async function requireLegacyWorkspace(
-  ctx: ExecutionContext,
-): Promise<ExecutionOutcome | null> {
-  if (!ctx.workspaceId) return NO_WORKSPACE_OUTCOME;
-  const legacyId = await legacyWorkspaceId();
-  if (!legacyId || legacyId !== ctx.workspaceId) {
+/* ---------------- Per-workspace credentialed transports ---------------- */
+
+type JsonResult =
+  | { ok: true; data: unknown }
+  | { ok: false; outcome: ExecutionOutcome };
+
+/** Map a thrown credential-resolution error to an outcome. */
+function credentialFailure(
+  error: unknown,
+): { ok: false; outcome: ExecutionOutcome } | null {
+  if (error instanceof GoogleAuthError || error instanceof GithubAuthError) {
     return {
       ok: false,
-      kind: "auth",
-      message:
-        "This app is not connected for this workspace. Per-user connections for it are not available yet.",
+      outcome: {
+        ok: false,
+        kind: error.kind === "unavailable" ? "failed" : "auth",
+        message: error.message,
+      },
     };
   }
   return null;
 }
 
-/* -------------------- Per-workspace Gmail transport -------------------- */
-
-const GMAIL_API = "https://gmail.googleapis.com";
-
 /**
- * Call the Gmail API as the owning workspace's own Google account. Every
- * call resolves (and if needed refreshes) the credential fresh, so a
- * disconnect or revocation blocks the very next operation.
+ * Perform one authenticated JSON round-trip against a provider API as the
+ * owning workspace's own account. The credential is resolved fresh on
+ * every call, so a disconnect or revocation blocks the very next operation.
  */
-async function gmailJson(
-  workspaceId: string | null,
-  path: string,
-  options?: { method?: string; body?: unknown },
-): Promise<
-  | { ok: true; data: unknown }
-  | { ok: false; outcome: ExecutionOutcome }
-> {
+async function providerJson(input: {
+  workspaceId: string | null;
+  providerLabel: string;
+  baseUrl: string;
+  resolveToken: (workspaceId: string) => Promise<string>;
+  path: string;
+  options?: { method?: string; body?: unknown; headers?: Record<string, string> };
+  extraHeaders?: Record<string, string>;
+  /** When set, a non-JSON body is sent verbatim with these headers. */
+  rawBody?: boolean;
+}): Promise<JsonResult> {
+  const { workspaceId, path, options } = input;
   if (!workspaceId) return { ok: false, outcome: NO_WORKSPACE_OUTCOME };
   let token: string;
   try {
-    ({ token } = await gmailAccessToken(workspaceId));
+    token = await input.resolveToken(workspaceId);
   } catch (error) {
-    if (error instanceof GoogleAuthError) {
-      return {
-        ok: false,
-        outcome: {
-          ok: false,
-          kind: error.kind === "unavailable" ? "failed" : "auth",
-          message: error.message,
-        },
-      };
-    }
+    const failure = credentialFailure(error);
+    if (failure) return failure;
     throw error;
   }
+  const hasBody = options?.body !== undefined;
+  const raw = input.rawBody === true;
   let response: Response;
   try {
-    response = await fetch(`${GMAIL_API}${path}`, {
+    response = await fetch(`${input.baseUrl}${path}`, {
       method: options?.method ?? "GET",
       headers: {
         Authorization: `Bearer ${token}`,
-        ...(options?.body !== undefined
-          ? { "Content-Type": "application/json" }
-          : {}),
+        ...(input.extraHeaders ?? {}),
+        ...(hasBody && !raw ? { "Content-Type": "application/json" } : {}),
+        ...(options?.headers ?? {}),
       },
-      ...(options?.body !== undefined
-        ? { body: JSON.stringify(options.body) }
+      ...(hasBody
+        ? { body: raw ? String(options!.body) : JSON.stringify(options!.body) }
         : {}),
     });
   } catch (error) {
@@ -334,7 +224,7 @@ async function gmailJson(
       outcome: {
         ok: false,
         kind: "failed",
-        message: `Could not reach Gmail: ${error instanceof Error ? error.message : String(error)}`,
+        message: `Could not reach ${input.providerLabel}: ${error instanceof Error ? error.message : String(error)}`,
       },
     };
   }
@@ -348,6 +238,62 @@ async function gmailJson(
   } catch {
     return { ok: true, data: text };
   }
+}
+
+/** Call the Gmail API as the workspace's own Google account. */
+async function gmailJson(
+  workspaceId: string | null,
+  path: string,
+  options?: { method?: string; body?: unknown },
+): Promise<JsonResult> {
+  return providerJson({
+    workspaceId,
+    providerLabel: "Gmail",
+    baseUrl: "https://gmail.googleapis.com",
+    resolveToken: async (id) => (await gmailAccessToken(id)).token,
+    path,
+    options,
+  });
+}
+
+/**
+ * Call the Drive API as the workspace's own Google account (Drive scopes).
+ * Media uploads pass their body verbatim with an explicit content type.
+ */
+async function driveJson(
+  workspaceId: string | null,
+  path: string,
+  options?: { method?: string; body?: unknown; headers?: Record<string, string> },
+): Promise<JsonResult> {
+  return providerJson({
+    workspaceId,
+    providerLabel: "Google Drive",
+    baseUrl: "https://www.googleapis.com",
+    resolveToken: async (id) => (await driveAccessToken(id)).token,
+    path,
+    options,
+    rawBody: typeof options?.body === "string",
+  });
+}
+
+/** Call the GitHub REST API as the workspace's own GitHub account. */
+async function githubJson(
+  workspaceId: string | null,
+  path: string,
+  options?: { method?: string; body?: unknown },
+): Promise<JsonResult> {
+  return providerJson({
+    workspaceId,
+    providerLabel: "GitHub",
+    baseUrl: "https://api.github.com",
+    resolveToken: async (id) => (await githubAccessToken(id)).token,
+    path,
+    options,
+    extraHeaders: {
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+  });
 }
 
 /* ------------------------------ Gmail ---------------------------------- */
@@ -520,14 +466,12 @@ async function driveSearch(
   params: Record<string, unknown>,
   ctx: ExecutionContext,
 ): Promise<ExecutionOutcome> {
-  const denied = await requireLegacyWorkspace(ctx);
-  if (denied) return denied;
   const term = escapeDriveQuery(String(params.query));
   const q = encodeURIComponent(
     `(name contains '${term}' or fullText contains '${term}') and trashed = false`,
   );
-  const result = await proxyJson(
-    "google_drive",
+  const result = await driveJson(
+    ctx.workspaceId,
     `/drive/v3/files?q=${q}&pageSize=10&fields=${encodeURIComponent("files(id,name,mimeType,modifiedTime)")}`,
   );
   if (!result.ok) return result.outcome;
@@ -552,11 +496,9 @@ async function driveReadFile(
   params: Record<string, unknown>,
   ctx: ExecutionContext,
 ): Promise<ExecutionOutcome> {
-  const denied = await requireLegacyWorkspace(ctx);
-  if (denied) return denied;
   const fileId = encodeURIComponent(String(params.fileId));
-  const meta = await proxyJson(
-    "google_drive",
+  const meta = await driveJson(
+    ctx.workspaceId,
     `/drive/v3/files/${fileId}?fields=${encodeURIComponent("id,name,mimeType")}`,
   );
   if (!meta.ok) return meta.outcome;
@@ -565,7 +507,7 @@ async function driveReadFile(
   const path = mime.startsWith(DRIVE_EXPORTABLE_PREFIX)
     ? `/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent("text/plain")}`
     : `/drive/v3/files/${fileId}?alt=media`;
-  const content = await proxyJson("google_drive", path);
+  const content = await driveJson(ctx.workspaceId, path);
   if (!content.ok) return content.outcome;
   const text =
     typeof content.data === "string"
@@ -584,9 +526,7 @@ async function driveCreateFile(
   params: Record<string, unknown>,
   ctx: ExecutionContext,
 ): Promise<ExecutionOutcome> {
-  const denied = await requireLegacyWorkspace(ctx);
-  if (denied) return denied;
-  const created = await proxyJson("google_drive", "/drive/v3/files", {
+  const created = await driveJson(ctx.workspaceId, "/drive/v3/files", {
     method: "POST",
     body: {
       name: String(params.name),
@@ -603,8 +543,8 @@ async function driveCreateFile(
   if (!file?.id) {
     return { ok: false, kind: "failed", message: "Drive did not return a file id." };
   }
-  const uploaded = await proxyJson(
-    "google_drive",
+  const uploaded = await driveJson(
+    ctx.workspaceId,
     `/upload/drive/v3/files/${encodeURIComponent(file.id)}?uploadType=media`,
     {
       method: "PATCH",
@@ -625,10 +565,8 @@ async function githubListRepos(
   _params: Record<string, unknown>,
   ctx: ExecutionContext,
 ): Promise<ExecutionOutcome> {
-  const denied = await requireLegacyWorkspace(ctx);
-  if (denied) return denied;
-  const result = await proxyJson(
-    "github",
+  const result = await githubJson(
+    ctx.workspaceId,
     "/user/repos?sort=pushed&per_page=30",
   );
   if (!result.ok) return result.outcome;
@@ -648,12 +586,10 @@ async function githubReadFile(
   params: Record<string, unknown>,
   ctx: ExecutionContext,
 ): Promise<ExecutionOutcome> {
-  const denied = await requireLegacyWorkspace(ctx);
-  if (denied) return denied;
   const { owner, repo, path } = params;
   const ref = params.ref ? `?ref=${encodeURIComponent(String(params.ref))}` : "";
-  const result = await proxyJson(
-    "github",
+  const result = await githubJson(
+    ctx.workspaceId,
     `/repos/${encodeURIComponent(String(owner))}/${encodeURIComponent(String(repo))}/contents/${String(path).split("/").map(encodeURIComponent).join("/")}${ref}`,
   );
   if (!result.ok) return result.outcome;
@@ -672,13 +608,11 @@ async function githubListIssues(
   params: Record<string, unknown>,
   ctx: ExecutionContext,
 ): Promise<ExecutionOutcome> {
-  const denied = await requireLegacyWorkspace(ctx);
-  if (denied) return denied;
   const state = ["open", "closed", "all"].includes(String(params.state))
     ? String(params.state)
     : "open";
-  const result = await proxyJson(
-    "github",
+  const result = await githubJson(
+    ctx.workspaceId,
     `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/issues?state=${state}&per_page=20`,
   );
   if (!result.ok) return result.outcome;
@@ -714,14 +648,12 @@ async function githubCreateIssue(
   params: Record<string, unknown>,
   ctx: ExecutionContext,
 ): Promise<ExecutionOutcome> {
-  const denied = await requireLegacyWorkspace(ctx);
-  if (denied) return denied;
   const body = withGithubMarker(
     params.body ? String(params.body) : "",
     ctx.actionId,
   );
-  const result = await proxyJson(
-    "github",
+  const result = await githubJson(
+    ctx.workspaceId,
     `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/issues`,
     {
       method: "POST",
@@ -743,11 +675,9 @@ async function githubCommentOnIssue(
   params: Record<string, unknown>,
   ctx: ExecutionContext,
 ): Promise<ExecutionOutcome> {
-  const denied = await requireLegacyWorkspace(ctx);
-  if (denied) return denied;
   const issueNumber = Math.trunc(Number(params.issueNumber));
-  const result = await proxyJson(
-    "github",
+  const result = await githubJson(
+    ctx.workspaceId,
     `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/issues/${issueNumber}/comments`,
     {
       method: "POST",
@@ -860,10 +790,8 @@ async function verifyGithubCreateIssue(
   actionId: string,
   workspaceId: string | null,
 ): Promise<VerificationResult> {
-  const denied = await requireLegacyWorkspace({ actionId, workspaceId });
-  if (denied) return { kind: "unknown", message: failureMessage(denied) };
-  const result = await proxyJson(
-    "github",
+  const result = await githubJson(
+    workspaceId,
     `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/issues?state=all&sort=created&direction=desc&per_page=100`,
   );
   if (!result.ok) {
@@ -898,11 +826,9 @@ async function verifyGithubComment(
   actionId: string,
   workspaceId: string | null,
 ): Promise<VerificationResult> {
-  const denied = await requireLegacyWorkspace({ actionId, workspaceId });
-  if (denied) return { kind: "unknown", message: failureMessage(denied) };
   const issueNumber = Math.trunc(Number(params.issueNumber));
-  const result = await proxyJson(
-    "github",
+  const result = await githubJson(
+    workspaceId,
     `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/issues/${issueNumber}/comments?per_page=100`,
   );
   if (!result.ok) {
@@ -933,13 +859,11 @@ async function verifyDriveCreateFile(
   actionId: string,
   workspaceId: string | null,
 ): Promise<VerificationResult> {
-  const denied = await requireLegacyWorkspace({ actionId, workspaceId });
-  if (denied) return { kind: "unknown", message: failureMessage(denied) };
   const q = encodeURIComponent(
     `appProperties has { key='${DRIVE_ACTION_KEY}' and value='${actionId}' } and trashed = false`,
   );
-  const result = await proxyJson(
-    "google_drive",
+  const result = await driveJson(
+    workspaceId,
     `/drive/v3/files?q=${q}&pageSize=1&fields=${encodeURIComponent("files(id,name,size)")}`,
   );
   if (!result.ok) {
@@ -958,8 +882,8 @@ async function verifyDriveCreateFile(
   const expectedBytes = Buffer.byteLength(content, "utf8");
   const actualBytes = Number(file.size ?? 0);
   if (expectedBytes > 0 && actualBytes !== expectedBytes) {
-    const uploaded = await proxyJson(
-      "google_drive",
+    const uploaded = await driveJson(
+      workspaceId,
       `/upload/drive/v3/files/${encodeURIComponent(file.id)}?uploadType=media`,
       {
         method: "PATCH",

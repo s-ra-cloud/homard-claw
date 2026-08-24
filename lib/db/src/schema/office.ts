@@ -853,6 +853,58 @@ export const googleAccountsTable = pgTable("google_accounts", {
 export type GoogleOauthStateRecord =
   typeof googleOauthStatesTable.$inferSelect;
 
+export type GithubAccountRecord = typeof githubAccountsTable.$inferSelect;
+
+/**
+ * One personal GitHub connection per workspace, created through the in-app
+ * OAuth flow. GitHub OAuth-app tokens do not expire on a schedule, so only
+ * the encrypted access token is stored; it is decrypted per operation and
+ * never logged or returned.
+ */
+export const githubAccountsTable = pgTable("github_accounts", {
+  workspaceId: uuid("workspace_id")
+    .primaryKey()
+    .references(() => workspacesTable.id, { onDelete: "cascade" }),
+  clerkUserId: text("clerk_user_id").notNull(),
+  /** Immutable numeric GitHub account id (as text), from GET /user. */
+  githubUserId: text("github_user_id").notNull(),
+  /** Safe display label (the GitHub login); never a credential. */
+  login: text("login").notNull(),
+  /** AES-256-GCM ciphertext of the OAuth access token. Never logged. */
+  accessTokenEnc: text("access_token_enc").notNull(),
+  /** Comma/space-separated scopes granted at consent time. */
+  scopes: text("scopes").notNull(),
+  connectedAt: timestamp("connected_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type GithubOauthStateRecord =
+  typeof githubOauthStatesTable.$inferSelect;
+
+/**
+ * Single-use GitHub OAuth authorization states, mirroring the Google state
+ * table: minted at start, bound to workspace + Clerk session, consumed
+ * exactly once by a guarded UPDATE at callback.
+ */
+export const githubOauthStatesTable = pgTable("github_oauth_states", {
+  state: text("state").primaryKey(),
+  workspaceId: uuid("workspace_id")
+    .notNull()
+    .references(() => workspacesTable.id, { onDelete: "cascade" }),
+  clerkUserId: text("clerk_user_id").notNull(),
+  /** Exact redirect URI the flow started with; token exchange reuses it. */
+  redirectUri: text("redirect_uri").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+});
+
 /**
  * Per-workspace key/value preferences (emergency stop, voice transcripts,
  * provider routing settings). Replaces the formerly global system_state keys
@@ -880,6 +932,11 @@ export type WorkspaceSettingRecord = typeof workspaceSettingsTable.$inferSelect;
 export const googleOauthStatesTable = pgTable("google_oauth_states", {
   /** Random URL-safe state token; primary key so replays collide. */
   state: text("state").primaryKey(),
+  /**
+   * Which app this consent was started for: "gmail" or "google_drive".
+   * The callback validates the granted scopes against exactly this set.
+   */
+  service: text("service").notNull().default("gmail"),
   workspaceId: uuid("workspace_id")
     .notNull()
     .references(() => workspacesTable.id, { onDelete: "cascade" }),

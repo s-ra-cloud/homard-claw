@@ -102,6 +102,15 @@ export const GMAIL_SCOPES = [
   "https://www.googleapis.com/auth/gmail.send",
 ] as const;
 
+/**
+ * The Drive scopes for the catalog: read any file, create/manage only the
+ * files HomardClaw itself creates. Never full write over the whole Drive.
+ */
+export const DRIVE_SCOPES = [
+  "https://www.googleapis.com/auth/drive.readonly",
+  "https://www.googleapis.com/auth/drive.file",
+] as const;
+
 /** Scopes requested at consent: identity + the Gmail set. */
 export const REQUESTED_SCOPES = [
   "openid",
@@ -109,9 +118,27 @@ export const REQUESTED_SCOPES = [
   ...GMAIL_SCOPES,
 ] as const;
 
-export function missingGmailScopes(granted: string): string[] {
+/** Scopes requested by the incremental Drive consent: identity + Drive. */
+export const DRIVE_REQUESTED_SCOPES = [
+  "openid",
+  "email",
+  ...DRIVE_SCOPES,
+] as const;
+
+function missingScopes(
+  granted: string,
+  required: readonly string[],
+): string[] {
   const have = new Set(granted.split(/\s+/).filter(Boolean));
-  return GMAIL_SCOPES.filter((scope) => !have.has(scope));
+  return required.filter((scope) => !have.has(scope));
+}
+
+export function missingGmailScopes(granted: string): string[] {
+  return missingScopes(granted, GMAIL_SCOPES);
+}
+
+export function missingDriveScopes(granted: string): string[] {
+  return missingScopes(granted, DRIVE_SCOPES);
 }
 
 export type GoogleAccountSummary = {
@@ -120,6 +147,7 @@ export type GoogleAccountSummary = {
   connectedAt: Date;
   updatedAt: Date;
   missingScopes: string[];
+  missingDriveScopes: string[];
 };
 
 /** Metadata only — never decrypts, safe on every request. */
@@ -137,7 +165,11 @@ export async function googleAccountSummary(
     .where(eq(googleAccountsTable.workspaceId, workspaceId))
     .limit(1);
   if (!row) return null;
-  return { ...row, missingScopes: missingGmailScopes(row.scopes) };
+  return {
+    ...row,
+    missingScopes: missingGmailScopes(row.scopes),
+    missingDriveScopes: missingDriveScopes(row.scopes),
+  };
 }
 
 /**
@@ -156,6 +188,27 @@ export async function saveGoogleAccount(input: {
 }): Promise<void> {
   const refreshTokenEnc = encryptRefreshToken(input.refreshToken);
   const now = new Date();
+  // Incremental consent: when the SAME Google account reconnects (e.g. to
+  // add Drive), previously granted scopes are kept — Google's
+  // include_granted_scopes usually reports them all, but a union here means
+  // a Drive connect can never silently drop Gmail. A different account
+  // replaces everything.
+  let scopes = input.scopes;
+  const [existing] = await db
+    .select({
+      googleSub: googleAccountsTable.googleSub,
+      scopes: googleAccountsTable.scopes,
+    })
+    .from(googleAccountsTable)
+    .where(eq(googleAccountsTable.workspaceId, input.workspaceId))
+    .limit(1);
+  if (existing && existing.googleSub === input.googleSub) {
+    scopes = [
+      ...new Set(
+        `${existing.scopes} ${input.scopes}`.split(/\s+/).filter(Boolean),
+      ),
+    ].join(" ");
+  }
   await db
     .insert(googleAccountsTable)
     .values({
@@ -164,7 +217,7 @@ export async function saveGoogleAccount(input: {
       googleSub: input.googleSub,
       email: input.email,
       refreshTokenEnc,
-      scopes: input.scopes,
+      scopes,
       connectedAt: now,
       updatedAt: now,
     })
@@ -175,7 +228,7 @@ export async function saveGoogleAccount(input: {
         googleSub: input.googleSub,
         email: input.email,
         refreshTokenEnc,
-        scopes: input.scopes,
+        scopes,
         revision: randomBytes(16).toString("hex"),
         connectedAt: now,
         updatedAt: now,
@@ -249,6 +302,30 @@ export async function gmailAccessToken(workspaceId: string): Promise<{
   email: string;
   googleSub: string;
 }> {
+  return googleAccessToken(workspaceId, GMAIL_SCOPES, "Gmail");
+}
+
+/**
+ * Resolve a usable access token for the workspace's Google account with
+ * Drive access. Fails closed when Drive scopes were never granted.
+ */
+export async function driveAccessToken(workspaceId: string): Promise<{
+  token: string;
+  email: string;
+  googleSub: string;
+}> {
+  return googleAccessToken(workspaceId, DRIVE_SCOPES, "Google Drive");
+}
+
+async function googleAccessToken(
+  workspaceId: string,
+  requiredScopes: readonly string[],
+  serviceLabel: string,
+): Promise<{
+  token: string;
+  email: string;
+  googleSub: string;
+}> {
   const [row] = await db
     .select()
     .from(googleAccountsTable)
@@ -257,14 +334,18 @@ export async function gmailAccessToken(workspaceId: string): Promise<{
   if (!row) {
     throw new GoogleAuthError(
       "not_connected",
-      "No Gmail account is connected to this workspace. Connect Gmail first.",
+      `No Google account is connected to this workspace. Connect ${serviceLabel} first.`,
     );
   }
-  const missing = missingGmailScopes(row.scopes);
+  const missing = missingScopes(row.scopes, requiredScopes);
   if (missing.length > 0) {
+    // All scopes absent = this service was never connected; a partial set
+    // means a grant was narrowed and must be re-consented.
     throw new GoogleAuthError(
-      "reconnect_required",
-      `The connected Google account is missing required permissions (${missing.join(", ")}). Reconnect Gmail and grant all requested access.`,
+      missing.length === requiredScopes.length
+        ? "not_connected"
+        : "reconnect_required",
+      `The connected Google account has not granted the required ${serviceLabel} permissions (${missing.join(", ")}). Connect ${serviceLabel} and grant all requested access.`,
     );
   }
   const cached = accessTokens.get(workspaceId);

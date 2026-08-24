@@ -1202,7 +1202,13 @@ paths:
     post:
       operationId: startGoogleOauth
       tags: [office]
-      summary: Begin the in-app Google OAuth consent flow for Gmail
+      summary: Begin the in-app Google OAuth consent flow for Gmail or Google Drive
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GoogleOauthStartRequest"
       responses:
         "200":
           description: Consent URL for the browser to visit
@@ -1224,6 +1230,32 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/GoogleOauthDisconnect"
+  /github/oauth/start:
+    post:
+      operationId: startGithubOauth
+      tags: [office]
+      summary: Begin the in-app GitHub OAuth consent flow
+      responses:
+        "200":
+          description: Consent URL for the browser to visit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GithubOauthStart"
+        "503":
+          description: GitHub OAuth is not configured on this server
+  /github/oauth/disconnect:
+    post:
+      operationId: disconnectGithubAccount
+      tags: [office]
+      summary: Disconnect the workspace's GitHub account and revoke its credential
+      responses:
+        "200":
+          description: Disconnect result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GithubOauthDisconnect"
 components:
   parameters:
     AgentId:
@@ -1461,6 +1493,14 @@ components:
       properties:
         app: { type: string, enum: [gmail, google_drive, github] }
         accessLevel: { type: string, enum: [read, draft, write] }
+    GoogleOauthStartRequest:
+      type: object
+      description: >
+        Which Google-backed app to request consent for. Omitting the body
+        (or the service) starts a Gmail flow; google_drive runs an
+        incremental consent that adds Drive scopes to the same account.
+      properties:
+        service: { type: string, enum: [gmail, google_drive] }
     GoogleOauthStart:
       type: object
       required: [authUrl]
@@ -1469,6 +1509,18 @@ components:
           type: string
           description: Google consent URL the browser should navigate to.
     GoogleOauthDisconnect:
+      type: object
+      required: [disconnected]
+      properties:
+        disconnected: { type: boolean }
+    GithubOauthStart:
+      type: object
+      required: [authUrl]
+      properties:
+        authUrl:
+          type: string
+          description: GitHub consent URL the browser should navigate to.
+    GithubOauthDisconnect:
       type: object
       required: [disconnected]
       properties:

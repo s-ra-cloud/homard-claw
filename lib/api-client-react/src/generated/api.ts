@@ -43,8 +43,11 @@ import type {
   DelegationInput,
   EmergencyStop,
   EmergencyStopInput,
+  GithubOauthDisconnect,
+  GithubOauthStart,
   GoogleOauthDisconnect,
   GoogleOauthStart,
+  GoogleOauthStartRequest,
   HealthStatus,
   KnowledgeAssignmentsInput,
   KnowledgeFile,
@@ -5087,16 +5090,16 @@ export const getStartGoogleOauthUrl = () => {
 }
 
 /**
- * @summary Begin the in-app Google OAuth consent flow for Gmail
+ * @summary Begin the in-app Google OAuth consent flow for Gmail or Google Drive
  */
-export const startGoogleOauth = async ( options?: Parameters<typeof customFetch>[1]): Promise<GoogleOauthStart> => {
+export const startGoogleOauth = async (googleOauthStartRequest?: GoogleOauthStartRequest, options?: Parameters<typeof customFetch>[1]): Promise<GoogleOauthStart> => {
 
   return customFetch<GoogleOauthStart>(getStartGoogleOauthUrl(),
   {
     ...options,
-    method: 'POST'
-
-
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(googleOauthStartRequest)
   }
 );}
 
@@ -5105,8 +5108,8 @@ export const startGoogleOauth = async ( options?: Parameters<typeof customFetch>
 
 
 export const getStartGoogleOauthMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startGoogleOauth>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof startGoogleOauth>>, TError,void, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startGoogleOauth>>, TError,{data?: BodyType<GoogleOauthStartRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof startGoogleOauth>>, TError,{data?: BodyType<GoogleOauthStartRequest>}, TContext> => {
 
 const mutationKey = ['startGoogleOauth'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -5118,10 +5121,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startGoogleOauth>>, void> = () => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startGoogleOauth>>, {data?: BodyType<GoogleOauthStartRequest>}> = (props) => {
+          const {data} = props ?? {};
 
-
-          return  startGoogleOauth(requestOptions)
+          return  startGoogleOauth(data,requestOptions)
         }
 
 
@@ -5132,18 +5135,18 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type StartGoogleOauthMutationResult = NonNullable<Awaited<ReturnType<typeof startGoogleOauth>>>
-
+    export type StartGoogleOauthMutationBody = BodyType<GoogleOauthStartRequest> | undefined
     export type StartGoogleOauthMutationError = ErrorType<void>
 
     /**
- * @summary Begin the in-app Google OAuth consent flow for Gmail
+ * @summary Begin the in-app Google OAuth consent flow for Gmail or Google Drive
  */
 export const useStartGoogleOauth = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startGoogleOauth>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startGoogleOauth>>, TError,{data?: BodyType<GoogleOauthStartRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof startGoogleOauth>>,
         TError,
-        void,
+        {data?: BodyType<GoogleOauthStartRequest>},
         TContext
       > => {
       return useMutation(getStartGoogleOauthMutationOptions(options));
@@ -5218,5 +5221,147 @@ export const useDisconnectGoogleAccount = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getDisconnectGoogleAccountMutationOptions(options));
+    }
+
+export const getStartGithubOauthUrl = () => {
+
+
+
+
+  return `/api/github/oauth/start`
+}
+
+/**
+ * @summary Begin the in-app GitHub OAuth consent flow
+ */
+export const startGithubOauth = async ( options?: Parameters<typeof customFetch>[1]): Promise<GithubOauthStart> => {
+
+  return customFetch<GithubOauthStart>(getStartGithubOauthUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getStartGithubOauthMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startGithubOauth>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof startGithubOauth>>, TError,void, TContext> => {
+
+const mutationKey = ['startGithubOauth'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startGithubOauth>>, void> = () => {
+
+
+          return  startGithubOauth(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StartGithubOauthMutationResult = NonNullable<Awaited<ReturnType<typeof startGithubOauth>>>
+
+    export type StartGithubOauthMutationError = ErrorType<void>
+
+    /**
+ * @summary Begin the in-app GitHub OAuth consent flow
+ */
+export const useStartGithubOauth = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startGithubOauth>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof startGithubOauth>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getStartGithubOauthMutationOptions(options));
+    }
+
+export const getDisconnectGithubAccountUrl = () => {
+
+
+
+
+  return `/api/github/oauth/disconnect`
+}
+
+/**
+ * @summary Disconnect the workspace's GitHub account and revoke its credential
+ */
+export const disconnectGithubAccount = async ( options?: Parameters<typeof customFetch>[1]): Promise<GithubOauthDisconnect> => {
+
+  return customFetch<GithubOauthDisconnect>(getDisconnectGithubAccountUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getDisconnectGithubAccountMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectGithubAccount>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof disconnectGithubAccount>>, TError,void, TContext> => {
+
+const mutationKey = ['disconnectGithubAccount'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof disconnectGithubAccount>>, void> = () => {
+
+
+          return  disconnectGithubAccount(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DisconnectGithubAccountMutationResult = NonNullable<Awaited<ReturnType<typeof disconnectGithubAccount>>>
+
+    export type DisconnectGithubAccountMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Disconnect the workspace's GitHub account and revoke its credential
+ */
+export const useDisconnectGithubAccount = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectGithubAccount>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof disconnectGithubAccount>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getDisconnectGithubAccountMutationOptions(options));
     }
 

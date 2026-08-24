@@ -707,10 +707,39 @@ export interface AgentUpdate {
   avatar?: AvatarConfig;
 }
 
+export type GoogleOauthStartRequestService = typeof GoogleOauthStartRequestService[keyof typeof GoogleOauthStartRequestService];
+
+
+export const GoogleOauthStartRequestService = {
+  gmail: 'gmail',
+  google_drive: 'google_drive',
+} as const;
+
+/**
+ * Which Google-backed app to request consent for. Omitting the body (or the service) starts a Gmail flow; google_drive runs an incremental consent that adds Drive scopes to the same account.
+ */
+export interface GoogleOauthStartRequest {
+  service?: GoogleOauthStartRequestService;
+}
+
 export interface GoogleOauthStart {
   /** Google consent URL the browser should navigate to. */
   authUrl: string;
 }
+
+export interface GoogleOauthDisconnect {
+  disconnected: boolean;
+}
+
+export interface GithubOauthStart {
+  /** GitHub consent URL the browser should navigate to. */
+  authUrl: string;
+}
+
+export interface GithubOauthDisconnect {
+  disconnected: boolean;
+}
+
 export type ConnectedAppApp = typeof ConnectedAppApp[keyof typeof ConnectedAppApp];
 
 
@@ -1891,7 +1920,3 @@ export type MarkNotificationsRead200 = {
   updated: number;
 };
 
-
-export interface GoogleOauthDisconnect {
-  disconnected: boolean;
-}

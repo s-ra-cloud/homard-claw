@@ -49,7 +49,6 @@ vi.mock("@clerk/express", () => ({
 }));
 
 import officeRouter from "./office";
-import { describeConnection } from "../connected-apps/connections";
 import { parseAppActions } from "../connected-apps/parser";
 import { authorizeAppAction } from "../connected-apps/authorize";
 import { buildAppsPromptSection } from "../connected-apps/catalog";
@@ -294,71 +293,6 @@ describe("prompt section", () => {
     expect(section).toContain("gmail.search");
     expect(section).not.toContain("gmail.create_draft");
     expect(section).not.toContain("github.");
-  });
-});
-
-describe("connection identity mapping", () => {
-  it("maps a missing connection to not_connected with no label", () => {
-    expect(describeConnection(undefined)).toEqual({
-      status: "not_connected",
-      detail: null,
-      accountLabel: null,
-    });
-  });
-
-  it("surfaces a safe account label from metadata and never raw secrets", () => {
-    const result = describeConnection({
-      connector_name: "google-mail",
-      status: "ACTIVE",
-      metadata: {
-        email: "owner@example.com",
-        access_token: "SECRET-TOKEN",
-        refresh_token: "SECRET-REFRESH",
-      },
-    });
-    expect(result.status).toBe("connected");
-    expect(result.accountLabel).toBe("owner@example.com");
-    expect(JSON.stringify(result)).not.toContain("SECRET");
-  });
-
-  it("falls back to a login/username and then to null", () => {
-    expect(
-      describeConnection({ status: "ACTIVE", metadata: { login: "octocat" } })
-        .accountLabel,
-    ).toBe("octocat");
-    expect(
-      describeConnection({
-        status: "ACTIVE",
-        metadata: { oauth: { credentials: "nope" } },
-      }).accountLabel,
-    ).toBeNull();
-  });
-
-  it("reports an expired/revoked connection as expired, not connected", () => {
-    const expired = describeConnection({
-      status: "EXPIRED",
-      status_message: "Token expired",
-      metadata: { email: "owner@example.com" },
-    });
-    expect(expired.status).toBe("expired");
-    expect(expired.detail).toBe("Token expired");
-    expect(expired.accountLabel).toBe("owner@example.com");
-    expect(
-      describeConnection({ status: "ACTIVE", status_message: "authorization revoked" })
-        .status,
-    ).toBe("expired");
-  });
-
-  it("ignores non-string and oversized label candidates", () => {
-    expect(
-      describeConnection({ status: "ACTIVE", metadata: { email: 42 } }).accountLabel,
-    ).toBeNull();
-    expect(
-      describeConnection({
-        status: "ACTIVE",
-        metadata: { email: "x".repeat(200) },
-      }).accountLabel,
-    ).toBeNull();
   });
 });
 

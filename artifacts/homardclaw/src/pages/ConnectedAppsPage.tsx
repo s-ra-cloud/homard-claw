@@ -4,6 +4,8 @@ import {
   useUpdateConnectedApp,
   useStartGoogleOauth,
   useDisconnectGoogleAccount,
+  useStartGithubOauth,
+  useDisconnectGithubAccount,
   getListConnectedAppsQueryKey,
   type ConnectedApp,
 } from "@workspace/api-client-react";
@@ -35,96 +37,120 @@ function StatusBadge({ app }: { app: ConnectedApp }) {
   return <Badge variant="outline">Status Unknown</Badge>;
 }
 
-/** Human messages for the ?gmail= callback results the API redirects with. */
-const GMAIL_CALLBACK_MESSAGES: Record<string, { title: string; description: string; ok?: boolean }> = {
-  connected: {
-    ok: true,
-    title: "Gmail connected",
-    description: "Your Gmail account is now connected to your workspace.",
-  },
-  "error:denied": {
-    title: "Consent declined",
-    description:
-      "You declined Google's consent screen, so nothing was connected. You can try again any time.",
-  },
-  "error:scopes": {
-    title: "Missing permissions",
-    description:
-      "Google reported that not all requested Gmail permissions were granted. Reconnect and allow all requested access.",
-  },
-  "error:expired": {
-    title: "The sign-in took too long",
-    description: "The connection attempt expired. Start again and finish within a few minutes.",
-  },
-  "error:not_configured": {
-    title: "Google sign-in unavailable",
-    description: "Google OAuth is not configured on this server yet.",
-  },
-};
-
-function gmailCallbackMessage(code: string) {
-  return (
-    GMAIL_CALLBACK_MESSAGES[code] ?? {
-      title: "Gmail connection failed",
+/** Human messages for the OAuth callback results the API redirects with. */
+function oauthCallbackMessage(appName: string, code: string): {
+  title: string;
+  description: string;
+  ok?: boolean;
+} {
+  const messages: Record<string, { title: string; description: string; ok?: boolean }> = {
+    connected: {
+      ok: true,
+      title: `${appName} connected`,
+      description: `Your ${appName} account is now connected to your workspace.`,
+    },
+    "error:denied": {
+      title: "Consent declined",
       description:
-        "Something went wrong while connecting your Google account. Please try again.",
+        "You declined the consent screen, so nothing was connected. You can try again any time.",
+    },
+    "error:scopes": {
+      title: "Missing permissions",
+      description: `Not all requested ${appName} permissions were granted. Reconnect and allow all requested access.`,
+    },
+    "error:expired": {
+      title: "The sign-in took too long",
+      description: "The connection attempt expired. Start again and finish within a few minutes.",
+    },
+    "error:not_configured": {
+      title: `${appName} sign-in unavailable`,
+      description: `${appName} OAuth is not configured on this server yet.`,
+    },
+  };
+  return (
+    messages[code] ?? {
+      title: `${appName} connection failed`,
+      description: `Something went wrong while connecting your ${appName} account. Please try again.`,
     }
   );
 }
 
-/** Gmail connects right here, with the signed-in user's own Google account. */
-function GmailActions({ app }: { app: ConnectedApp }) {
+/**
+ * Every app connects right here, with the signed-in user's own account.
+ * Gmail and Drive share one Google account (Drive is an incremental
+ * consent); GitHub has its own OAuth app.
+ */
+function ConnectActions({ app }: { app: ConnectedApp }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const start = useStartGoogleOauth({
-    mutation: {
-      onSuccess: (data) => {
-        window.location.assign(data.authUrl);
-      },
-      onError: () => {
-        toast({
-          variant: "destructive",
-          title: "Could not start Google sign-in",
-          description:
-            "Google OAuth may not be configured on this server yet. Try again in a moment.",
-        });
-      },
-    },
+  const onStartError = () => {
+    toast({
+      variant: "destructive",
+      title: "Could not start the sign-in",
+      description:
+        "OAuth may not be configured on this server yet. Try again in a moment.",
+    });
+  };
+  const onStartSuccess = (data: { authUrl: string }) => {
+    window.location.assign(data.authUrl);
+  };
+  const onDisconnected = () => {
+    queryClient.invalidateQueries({ queryKey: getListConnectedAppsQueryKey() });
+    toast({
+      title: `${app.displayName} disconnected`,
+      description:
+        app.app === "github"
+          ? "The credential was removed. Agents can no longer act on this account — including actions you had already approved."
+          : "The Google credential was removed — Gmail and Google Drive access both ended. Agents can no longer act on this account, including actions you had already approved.",
+    });
+  };
+  const onDisconnectError = (error: Error) => {
+    toast({
+      variant: "destructive",
+      title: "Disconnect failed",
+      description: error.message,
+    });
+  };
+  const startGoogle = useStartGoogleOauth({
+    mutation: { onSuccess: onStartSuccess, onError: onStartError },
   });
-  const disconnect = useDisconnectGoogleAccount({
-    mutation: {
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: getListConnectedAppsQueryKey() });
-        toast({
-          title: "Gmail disconnected",
-          description:
-            "The credential was removed. Agents can no longer act on this account — including actions you had already approved.",
-        });
-      },
-      onError: (error) => {
-        toast({
-          variant: "destructive",
-          title: "Disconnect failed",
-          description: error.message,
-        });
-      },
-    },
+  const startGithub = useStartGithubOauth({
+    mutation: { onSuccess: onStartSuccess, onError: onStartError },
   });
+  const disconnectGoogle = useDisconnectGoogleAccount({
+    mutation: { onSuccess: onDisconnected, onError: onDisconnectError },
+  });
+  const disconnectGithub = useDisconnectGithubAccount({
+    mutation: { onSuccess: onDisconnected, onError: onDisconnectError },
+  });
+  const start = app.app === "github" ? startGithub : startGoogle;
+  const disconnect = app.app === "github" ? disconnectGithub : disconnectGoogle;
+  const beginConnect = () => {
+    if (app.app === "github") {
+      startGithub.mutate();
+    } else {
+      startGoogle.mutate({
+        data: { service: app.app === "google_drive" ? "google_drive" : "gmail" },
+      });
+    }
+  };
+  const confirmText =
+    app.app === "github"
+      ? "Disconnect GitHub? Agents immediately lose access to this account, including actions you already approved."
+      : `Disconnect this Google account? Gmail AND Google Drive access both end immediately — agents lose access to the account, including actions you already approved.`;
   return (
     <div className="flex gap-2 flex-wrap">
       <Button
         variant={app.status === "connected" ? "outline" : "primary"}
         size="sm"
         disabled={start.isPending}
-        onClick={() => start.mutate()}
+        onClick={beginConnect}
       >
         {start.isPending
           ? "..."
-          : app.status === "connected"
+          : app.status === "connected" || app.status === "expired"
             ? "RECONNECT"
-            : app.status === "expired"
-              ? "RECONNECT"
-              : "CONNECT GMAIL"}
+            : `CONNECT ${app.displayName.toUpperCase()}`}
       </Button>
       {app.status === "connected" || app.status === "expired" ? (
         <Button
@@ -132,11 +158,7 @@ function GmailActions({ app }: { app: ConnectedApp }) {
           size="sm"
           disabled={disconnect.isPending}
           onClick={() => {
-            if (
-              window.confirm(
-                "Disconnect Gmail? Agents immediately lose access to this account, including actions you already approved.",
-              )
-            ) {
+            if (window.confirm(confirmText)) {
               disconnect.mutate();
             }
           }}
@@ -204,7 +226,7 @@ function AppCard({ app }: { app: ConnectedApp }) {
           </div>
         </div>
         <div className="flex gap-2 shrink-0 flex-wrap items-start">
-          {app.app === "gmail" ? <GmailActions app={app} /> : null}
+          <ConnectActions app={app} />
           <Button
             variant={app.enabled ? "outline" : "primary"}
             size="sm"
@@ -217,13 +239,6 @@ function AppCard({ app }: { app: ConnectedApp }) {
           </Button>
         </div>
       </div>
-      {app.app !== "gmail" && app.status === "not_connected" ? (
-        <p className="text-[11px] text-muted-foreground mt-3 border-2 border-dashed border-border bg-muted/20 p-3">
-          Personal {app.displayName} connections aren't available yet — each
-          user will be able to connect their own account here in a future
-          update.
-        </p>
-      ) : null}
     </PixelCard>
   );
 }
@@ -236,17 +251,29 @@ export default function ConnectedAppsPage() {
   // Surface the OAuth callback result exactly once, then clean the URL.
   React.useEffect(() => {
     const url = new URL(window.location.href);
-    const result = url.searchParams.get("gmail");
-    if (!result) return;
-    url.searchParams.delete("gmail");
+    const params: { key: string; appName: string }[] = [
+      { key: "gmail", appName: "Gmail" },
+      { key: "google_drive", appName: "Google Drive" },
+      { key: "github", appName: "GitHub" },
+    ];
+    let anyOk = false;
+    let found = false;
+    for (const { key, appName } of params) {
+      const result = url.searchParams.get(key);
+      if (!result) continue;
+      found = true;
+      url.searchParams.delete(key);
+      const message = oauthCallbackMessage(appName, result);
+      toast({
+        variant: message.ok ? "default" : "destructive",
+        title: message.title,
+        description: message.description,
+      });
+      if (message.ok) anyOk = true;
+    }
+    if (!found) return;
     window.history.replaceState(null, "", url.pathname + url.search);
-    const message = gmailCallbackMessage(result);
-    toast({
-      variant: message.ok ? "default" : "destructive",
-      title: message.title,
-      description: message.description,
-    });
-    if (message.ok) {
+    if (anyOk) {
       queryClient.invalidateQueries({ queryKey: getListConnectedAppsQueryKey() });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -295,9 +322,11 @@ export default function ConnectedAppsPage() {
               </p>
               <p>
                 Disabling an app here blocks it for every agent at once,
-                whatever their individual grants say. Disconnecting Gmail
-                removes the credential immediately — even already-approved
-                actions can no longer run against it.
+                whatever their individual grants say. Disconnecting an
+                account removes the credential immediately — even
+                already-approved actions can no longer run against it. Gmail
+                and Google Drive share one Google account, so disconnecting
+                it ends both.
               </p>
             </div>
           </div>

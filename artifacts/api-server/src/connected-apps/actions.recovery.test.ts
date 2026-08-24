@@ -9,7 +9,7 @@
  *  - write executors embed the marker derived from the action row id
  *
  * Conventions (see .agents/memory/api-server-test-conventions.md): all
- * provider traffic goes through a mocked connector SDK — never the network;
+ * provider traffic goes through a stubbed global fetch — never the network;
  * tag and clean up all created rows; the test agent stays paused so the
  * live queue worker ignores it; audit rows are append-only and accumulate.
  */
@@ -19,6 +19,7 @@ import {
   appActionsTable,
   approvalsTable,
   db,
+  githubAccountsTable,
   googleAccountsTable,
   pool,
   tasksTable,
@@ -51,48 +52,15 @@ const proxyState = vi.hoisted(() => ({
       }) => { status: number; body: unknown }),
 }));
 
-vi.mock("@replit/connectors-sdk", () => ({
-  ReplitConnectors: class {
-    async listConnections() {
-      return [];
-    }
-    async proxy(
-      connector: string,
-      path: string,
-      options?: { method?: string; body?: unknown },
-    ) {
-      const call = {
-        connector,
-        path,
-        method: options?.method ?? "GET",
-        body: options?.body,
-      };
-      proxyState.calls.push(call);
-      const res = proxyState.handler?.(call) ?? {
-        status: 500,
-        body: { error: "no handler installed" },
-      };
-      return new Response(
-        typeof res.body === "string" ? res.body : JSON.stringify(res.body),
-        { status: res.status },
-      );
-    }
-  },
-}));
-
-// Drive/GitHub still ride the workspace connector, which is restricted to
-// the legacy workspace; pin the legacy id to this test's workspace so those
-// executors run. Everything else in the module stays real.
-const legacyState = vi.hoisted(() => ({ id: null as string | null }));
-vi.mock("../workspace", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../workspace")>()),
-  legacyWorkspaceId: async () => legacyState.id,
-}));
-
-// Gmail now talks to Google directly as the workspace's own account. Route
-// its HTTP through the same proxyState the connector mock uses, so every
-// existing handler keeps working; token refreshes are answered locally.
+// Every provider now talks over HTTPS as the workspace's own account.
+// Route Gmail, Drive, and GitHub HTTP through the shared proxyState so one
+// handler serves all providers; token refreshes are answered locally.
 const realFetch = globalThis.fetch;
+const PROVIDER_BASES: Record<string, string> = {
+  "https://gmail.googleapis.com": "gmail",
+  "https://www.googleapis.com": "google_drive",
+  "https://api.github.com": "github",
+};
 vi.stubGlobal(
   "fetch",
   async (
@@ -106,13 +74,22 @@ vi.stubGlobal(
         { status: 200 },
       );
     }
-    if (url.startsWith("https://gmail.googleapis.com")) {
-      const path = url.slice("https://gmail.googleapis.com".length);
+    for (const [base, connector] of Object.entries(PROVIDER_BASES)) {
+      if (!url.startsWith(base)) continue;
+      const path = url.slice(base.length);
+      let body: unknown;
+      if (init?.body !== undefined) {
+        try {
+          body = JSON.parse(String(init.body));
+        } catch {
+          body = String(init.body); // raw media uploads stay verbatim
+        }
+      }
       const call = {
-        connector: "gmail",
+        connector,
         path,
         method: init?.method ?? "GET",
-        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        body,
       };
       proxyState.calls.push(call);
       const res = proxyState.handler?.(call) ?? {
@@ -139,6 +116,7 @@ import {
   clearGoogleTokenCache,
   encryptRefreshToken,
 } from "../google/credentials";
+import { encryptGithubToken } from "../github/credentials";
 
 const RUN_TAG = `HC Recovery Test ${Date.now()}`;
 let agentId: string;
@@ -211,7 +189,6 @@ beforeAll(async () => {
     .values({ clerkUserId: `recovery-test-${Date.now()}` })
     .returning();
   workspaceId = workspace.id;
-  legacyState.id = workspaceId;
   await db.insert(googleAccountsTable).values({
     workspaceId,
     clerkUserId: workspace.clerkUserId,
@@ -219,7 +196,15 @@ beforeAll(async () => {
     email: "tester@example.com",
     refreshTokenEnc: encryptRefreshToken("test-refresh-token"),
     scopes:
-      "openid email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/gmail.send",
+      "openid email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file",
+  });
+  await db.insert(githubAccountsTable).values({
+    workspaceId,
+    clerkUserId: workspace.clerkUserId,
+    githubUserId: "12345",
+    login: "recovery-tester",
+    accessTokenEnc: encryptGithubToken("test-github-token"),
+    scopes: "repo",
   });
   const [agent] = await db
     .insert(agentsTable)

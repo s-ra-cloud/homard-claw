@@ -20,11 +20,40 @@ import { publish } from "../events";
 import {
   GoogleAuthError,
   REQUESTED_SCOPES,
+  DRIVE_REQUESTED_SCOPES,
   deleteGoogleAccount,
   googleClientConfig,
+  missingDriveScopes,
   missingGmailScopes,
   saveGoogleAccount,
 } from "./credentials";
+
+/** The Google-backed apps a consent flow can be started for. */
+type GoogleService = "gmail" | "google_drive";
+
+function parseService(value: unknown): GoogleService {
+  return value === "google_drive" ? "google_drive" : "gmail";
+}
+
+const SERVICE_CONFIG: Record<
+  GoogleService,
+  {
+    scopes: readonly string[];
+    missing: (granted: string) => string[];
+    displayName: string;
+  }
+> = {
+  gmail: {
+    scopes: REQUESTED_SCOPES,
+    missing: missingGmailScopes,
+    displayName: "Gmail",
+  },
+  google_drive: {
+    scopes: DRIVE_REQUESTED_SCOPES,
+    missing: missingDriveScopes,
+    displayName: "Google Drive",
+  },
+};
 
 const router: IRouter = Router();
 router.use(requireWorkspace);
@@ -58,8 +87,8 @@ function redirectUriFor(req: Request): string {
 }
 
 /** Where the browser lands after the flow, with a status the page shows. */
-function connectedAppsUrl(result: string): string {
-  return `/connected-apps?gmail=${encodeURIComponent(result)}`;
+function connectedAppsUrl(service: GoogleService, result: string): string {
+  return `/connected-apps?${service}=${encodeURIComponent(result)}`;
 }
 
 /**
@@ -69,6 +98,9 @@ function connectedAppsUrl(result: string): string {
  */
 router.post("/google/oauth/start", async (req, res, next): Promise<void> => {
   try {
+    const service = parseService(
+      (req.body as { service?: unknown } | undefined)?.service,
+    );
     const { clientId } = googleClientConfig();
     const redirectUri = redirectUriFor(req);
     const state = randomBytes(32).toString("base64url");
@@ -82,6 +114,7 @@ router.post("/google/oauth/start", async (req, res, next): Promise<void> => {
       );
     await db.insert(googleOauthStatesTable).values({
       state,
+      service,
       workspaceId: req.workspaceId!,
       clerkUserId: req.workspaceUserId!,
       codeVerifier,
@@ -96,7 +129,10 @@ router.post("/google/oauth/start", async (req, res, next): Promise<void> => {
     url.searchParams.set("client_id", clientId);
     url.searchParams.set("redirect_uri", redirectUri);
     url.searchParams.set("response_type", "code");
-    url.searchParams.set("scope", REQUESTED_SCOPES.join(" "));
+    url.searchParams.set("scope", SERVICE_CONFIG[service].scopes.join(" "));
+    // Incremental consent: adding Drive must not revoke Gmail (or the
+    // other way round) — previously granted scopes ride along.
+    url.searchParams.set("include_granted_scopes", "true");
     url.searchParams.set("state", state);
     url.searchParams.set("nonce", nonce);
     url.searchParams.set("code_challenge", codeChallenge);
@@ -132,8 +168,11 @@ function jwtPayload(idToken: string): Record<string, unknown> | null {
  * additionally pins it to the state row this flow started with.
  */
 router.get("/google/oauth/callback", async (req, res): Promise<void> => {
+  // Until the state row is loaded, errors are reported against Gmail (the
+  // default service); afterwards, against the service the flow was for.
+  let service: GoogleService = "gmail";
   const fail = (reason: string): void => {
-    res.redirect(connectedAppsUrl(`error:${reason}`));
+    res.redirect(connectedAppsUrl(service, `error:${reason}`));
   };
   const code = typeof req.query.code === "string" ? req.query.code : "";
   const state = typeof req.query.state === "string" ? req.query.state : "";
@@ -168,6 +207,7 @@ router.get("/google/oauth/callback", async (req, res): Promise<void> => {
     fail("state");
     return;
   }
+  service = parseService(row.service);
   if (
     row.clerkUserId !== req.workspaceUserId ||
     row.workspaceId !== req.workspaceId
@@ -227,7 +267,7 @@ router.get("/google/oauth/callback", async (req, res): Promise<void> => {
     return;
   }
   const grantedScopes = tokens.scope ?? "";
-  if (missingGmailScopes(grantedScopes).length > 0) {
+  if (SERVICE_CONFIG[service].missing(grantedScopes).length > 0) {
     fail("scopes");
     return;
   }
@@ -239,13 +279,16 @@ router.get("/google/oauth/callback", async (req, res): Promise<void> => {
     refreshToken: tokens.refresh_token,
     scopes: grantedScopes,
   });
+  const displayName = SERVICE_CONFIG[service].displayName;
   await recordAudit(
     row.workspaceId,
-    "connected_app.gmail_connected",
-    `Gmail was connected for this workspace (${email || "address withheld"}).`,
+    service === "gmail"
+      ? "connected_app.gmail_connected"
+      : "connected_app.google_drive_connected",
+    `${displayName} was connected for this workspace (${email || "address withheld"}).`,
   );
   publish(row.workspaceId, "overview");
-  res.redirect(connectedAppsUrl("connected"));
+  res.redirect(connectedAppsUrl(service, "connected"));
 });
 
 /**
@@ -262,7 +305,7 @@ router.post(
         await recordAudit(
           req.workspaceId!,
           "connected_app.gmail_disconnected",
-          `Gmail (${removed.email}) was disconnected from this workspace.`,
+          `The Google account (${removed.email}) was disconnected from this workspace; Gmail and Google Drive access ended with it.`,
         );
         publish(req.workspaceId!, "overview");
       }
