@@ -52,13 +52,61 @@ export interface Agent {
   name: string;
   title: string;
   mission: string;
+  /** @nullable */
+  specialization?: string | null;
+  /** @nullable */
+  personality?: string | null;
+  /** @nullable */
+  goals?: string | null;
+  /** @nullable */
+  instructions?: string | null;
   provider: AgentProvider;
   /** @nullable */
   model?: string | null;
+  /** @nullable */
+  voiceStyle?: string | null;
   status: AgentStatus;
   securityPreset: AgentSecurityPreset;
   avatar: AvatarConfig;
+  archived: boolean;
+  /** @nullable */
+  archivedAt?: string | null;
   createdAt: string;
+}
+
+export type TaskStatus = typeof TaskStatus[keyof typeof TaskStatus];
+
+
+export const TaskStatus = {
+  queued: 'queued',
+  running: 'running',
+  waiting_approval: 'waiting_approval',
+  paused: 'paused',
+  completed: 'completed',
+  failed: 'failed',
+} as const;
+
+export type TaskProvider = typeof TaskProvider[keyof typeof TaskProvider];
+
+
+export const TaskProvider = {
+  claude_max: 'claude_max',
+  openrouter: 'openrouter',
+} as const;
+
+export interface Task {
+  id: string;
+  agentId: string;
+  agentName: string;
+  objective: string;
+  status: TaskStatus;
+  provider?: TaskProvider;
+  createdAt: string;
+}
+
+export interface AgentDetail {
+  agent: Agent;
+  tasks: Task[];
 }
 
 export type RetiredAgentProvider = typeof RetiredAgentProvider[keyof typeof RetiredAgentProvider];
@@ -125,45 +173,97 @@ export interface AgentInput {
      * @maxLength 2000
      */
   mission: string;
+  /** @maxLength 200 */
+  specialization?: string;
+  /** @maxLength 2000 */
+  personality?: string;
+  /** @maxLength 4000 */
+  goals?: string;
+  /** @maxLength 4000 */
+  instructions?: string;
   provider: AgentInputProvider;
   /** @maxLength 180 */
   model?: string;
+  /** @maxLength 60 */
+  voiceStyle?: string;
   securityPreset: AgentInputSecurityPreset;
   avatar?: AvatarConfig;
 }
 
-export interface PauseInput {
-  paused: boolean;
-}
-
-export type TaskStatus = typeof TaskStatus[keyof typeof TaskStatus];
+export type AgentUpdateProvider = typeof AgentUpdateProvider[keyof typeof AgentUpdateProvider];
 
 
-export const TaskStatus = {
-  queued: 'queued',
-  running: 'running',
-  waiting_approval: 'waiting_approval',
-  paused: 'paused',
-  completed: 'completed',
-  failed: 'failed',
-} as const;
-
-export type TaskProvider = typeof TaskProvider[keyof typeof TaskProvider];
-
-
-export const TaskProvider = {
+export const AgentUpdateProvider = {
   claude_max: 'claude_max',
   openrouter: 'openrouter',
 } as const;
 
-export interface Task {
-  id: string;
-  agentId: string;
-  agentName: string;
-  objective: string;
-  status: TaskStatus;
-  provider?: TaskProvider;
-  createdAt: string;
+export type AgentUpdateSecurityPreset = typeof AgentUpdateSecurityPreset[keyof typeof AgentUpdateSecurityPreset];
+
+
+export const AgentUpdateSecurityPreset = {
+  observer: 'observer',
+  assistant: 'assistant',
+  operator: 'operator',
+} as const;
+
+export interface AgentUpdate {
+  /**
+     * @minLength 2
+     * @maxLength 60
+     */
+  name?: string;
+  /**
+     * @minLength 2
+     * @maxLength 80
+     */
+  title?: string;
+  /**
+     * @minLength 5
+     * @maxLength 2000
+     */
+  mission?: string;
+  /**
+     * @maxLength 200
+     * @nullable
+     */
+  specialization?: string | null;
+  /**
+     * @maxLength 2000
+     * @nullable
+     */
+  personality?: string | null;
+  /**
+     * @maxLength 4000
+     * @nullable
+     */
+  goals?: string | null;
+  /**
+     * @maxLength 4000
+     * @nullable
+     */
+  instructions?: string | null;
+  provider?: AgentUpdateProvider;
+  /**
+     * @maxLength 180
+     * @nullable
+     */
+  model?: string | null;
+  /**
+     * @maxLength 60
+     * @nullable
+     */
+  voiceStyle?: string | null;
+  securityPreset?: AgentUpdateSecurityPreset;
+  avatar?: AvatarConfig;
+}
+
+export interface ArchiveInput {
+  archived: boolean;
+}
+
+export interface PauseInput {
+  paused: boolean;
 }
 
 export type TaskInputProviderOverride = typeof TaskInputProviderOverride[keyof typeof TaskInputProviderOverride];

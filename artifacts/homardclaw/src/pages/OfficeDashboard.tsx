@@ -169,7 +169,7 @@ export default function OfficeDashboard() {
             <div className="room-art">
               <div className="room-scene">
                 <img src={officeArt} alt="Isometric pixel-art HomardClaw office with four desks and chairs" />
-                {(agents ?? []).slice(0, DESK_SEATS.length).map((agent, index) => {
+                {(agents ?? []).filter((agent) => !agent.archived).slice(0, DESK_SEATS.length).map((agent, index) => {
                   const seat = DESK_SEATS[index];
                   return (
                     <div

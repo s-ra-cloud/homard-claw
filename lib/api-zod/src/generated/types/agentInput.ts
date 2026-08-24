@@ -25,9 +25,19 @@ export interface AgentInput {
      * @maxLength 2000
      */
   mission: string;
+  /** @maxLength 200 */
+  specialization?: string;
+  /** @maxLength 2000 */
+  personality?: string;
+  /** @maxLength 4000 */
+  goals?: string;
+  /** @maxLength 4000 */
+  instructions?: string;
   provider: AgentInputProvider;
   /** @maxLength 180 */
   model?: string;
+  /** @maxLength 60 */
+  voiceStyle?: string;
   securityPreset: AgentInputSecurityPreset;
   avatar?: AvatarConfig;
 }

@@ -7,6 +7,11 @@ import {
   DecideApprovalBody,
   DecideApprovalParams,
   DecideApprovalResponse,
+  DeleteAgentParams,
+  DuplicateAgentParams,
+  DuplicateAgentResponse,
+  GetAgentParams,
+  GetAgentResponse,
   GetOfficeOverviewResponse,
   GetProvidersResponse,
   ListAgentsResponse,
@@ -18,8 +23,14 @@ import {
   PauseAgentResponse,
   RetireAgentParams,
   RetireAgentResponse,
+  SetAgentArchivedBody,
+  SetAgentArchivedParams,
+  SetAgentArchivedResponse,
   SetEmergencyStopBody,
   SetEmergencyStopResponse,
+  UpdateAgentBody,
+  UpdateAgentParams,
+  UpdateAgentResponse,
 } from "@workspace/api-zod";
 import {
   agentsTable,
@@ -77,13 +88,45 @@ function toAgent(agent: typeof agentsTable.$inferSelect) {
     name: agent.name,
     title: agent.title,
     mission: agent.mission,
+    specialization: agent.specialization,
+    personality: agent.personality,
+    goals: agent.goals,
+    instructions: agent.instructions,
     provider: agent.provider,
     model: agent.model,
+    voiceStyle: agent.voiceStyle,
     status: agent.status,
     securityPreset: agent.securityPreset,
     avatar: agent.avatar,
+    archived: agent.archived,
+    archivedAt: agent.archivedAt ? agent.archivedAt.toISOString() : null,
     createdAt: agent.createdAt.toISOString(),
   };
+}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** Case-insensitive name collision check across every agent, any lifecycle state. */
+async function findNameConflict(
+  tx: Tx | typeof db,
+  name: string,
+  excludeId?: string,
+): Promise<boolean> {
+  const rows = await tx
+    .select({ id: agentsTable.id })
+    .from(agentsTable)
+    .where(sql`lower(${agentsTable.name}) = lower(${name})`)
+    .limit(2);
+  return rows.some((row) => row.id !== excludeId);
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: string }).code === "23505"
+  );
 }
 
 router.get("/office/overview", async (_req, res): Promise<void> => {
@@ -92,7 +135,9 @@ router.get("/office/overview", async (_req, res): Promise<void> => {
       db
         .select({ count: sql<number>`count(*)::int` })
         .from(agentsTable)
-        .where(eq(agentsTable.retired, false)),
+        .where(
+          and(eq(agentsTable.retired, false), eq(agentsTable.archived, false)),
+        ),
       db
         .select({ count: sql<number>`count(*)::int` })
         .from(tasksTable)
@@ -150,15 +195,322 @@ router.post("/agents", async (req, res): Promise<void> => {
     accessory: "glasses",
     expression: "focused",
   };
+  if (await findNameConflict(db, parsed.data.name)) {
+    res
+      .status(409)
+      .json({ error: `An agent named "${parsed.data.name}" already exists` });
+    return;
+  }
+  try {
+    const [agent] = await db
+      .insert(agentsTable)
+      .values({ ...parsed.data, avatar, status: "idle" })
+      .returning();
+    await db.insert(auditEventsTable).values({
+      kind: "agent.created",
+      summary: `${agent.name} joined the office as ${agent.title}.`,
+    });
+    res.status(201).json(CreateAgentResponse.parse(toAgent(agent)));
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      res
+        .status(409)
+        .json({ error: `An agent named "${parsed.data.name}" already exists` });
+      return;
+    }
+    throw error;
+  }
+});
+
+router.get("/agents/:agentId", async (req, res): Promise<void> => {
+  const params = GetAgentParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: "Invalid agent id" });
+    return;
+  }
   const [agent] = await db
-    .insert(agentsTable)
-    .values({ ...parsed.data, avatar, status: "idle" })
-    .returning();
-  await db.insert(auditEventsTable).values({
-    kind: "agent.created",
-    summary: `${agent.name} joined the office as ${agent.title}.`,
+    .select()
+    .from(agentsTable)
+    .where(eq(agentsTable.id, params.data.agentId))
+    .limit(1);
+  if (!agent) {
+    res.status(404).json({ error: "Agent not found" });
+    return;
+  }
+  const tasks = await db
+    .select()
+    .from(tasksTable)
+    .where(eq(tasksTable.agentId, agent.id))
+    .orderBy(desc(tasksTable.createdAt))
+    .limit(50);
+  res.json(
+    GetAgentResponse.parse({
+      agent: toAgent(agent),
+      tasks: tasks.map((task) => ({
+        ...task,
+        agentName: agent.name,
+        createdAt: task.createdAt.toISOString(),
+      })),
+    }),
+  );
+});
+
+router.patch("/agents/:agentId", async (req, res): Promise<void> => {
+  const params = UpdateAgentParams.safeParse(req.params);
+  const body = UpdateAgentBody.safeParse(req.body);
+  if (!params.success || !body.success) {
+    res.status(400).json({ error: "Invalid update request" });
+    return;
+  }
+  const updates = Object.fromEntries(
+    Object.entries(body.data).filter(([, value]) => value !== undefined),
+  );
+  if (Object.keys(updates).length === 0) {
+    res.status(400).json({ error: "No fields to update" });
+    return;
+  }
+  try {
+    const outcome = await db.transaction(async (tx) => {
+      const [existing] = await tx
+        .select()
+        .from(agentsTable)
+        .where(eq(agentsTable.id, params.data.agentId))
+        .limit(1)
+        .for("update");
+      if (!existing) return { status: 404 as const };
+      if (existing.retired) return { status: 409 as const, retired: true };
+      if (
+        typeof updates.name === "string" &&
+        (await findNameConflict(tx, updates.name, existing.id))
+      ) {
+        return { status: 409 as const, retired: false, name: updates.name };
+      }
+      const [agent] = await tx
+        .update(agentsTable)
+        .set(updates)
+        .where(eq(agentsTable.id, existing.id))
+        .returning();
+      await tx.insert(auditEventsTable).values({
+        kind: "agent.updated",
+        summary: `${agent.name}'s profile was updated.`,
+      });
+      return { status: 200 as const, agent };
+    });
+    if (outcome.status === 404) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+    if (outcome.status === 409) {
+      res.status(409).json({
+        error: outcome.retired
+          ? "Retired agents cannot be edited"
+          : `An agent named "${outcome.name}" already exists`,
+      });
+      return;
+    }
+    res.json(UpdateAgentResponse.parse(toAgent(outcome.agent)));
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      res.status(409).json({ error: "That agent name is already in use" });
+      return;
+    }
+    throw error;
+  }
+});
+
+async function duplicateAgentOnce(agentId: string) {
+  return db.transaction(async (tx) => {
+    const [source] = await tx
+      .select()
+      .from(agentsTable)
+      .where(eq(agentsTable.id, agentId))
+      .limit(1);
+    if (!source) return { status: 404 as const };
+    if (source.retired) return { status: 409 as const };
+    // "Name Copy", then "Name Copy 2", "Name Copy 3", ... within the 60-char
+    // name budget enforced by the API contract.
+    const base = `${source.name.slice(0, 48).trimEnd()} Copy`;
+    let candidate = base;
+    for (let n = 2; await findNameConflict(tx, candidate); n += 1) {
+      if (n > 50) return { status: 409 as const };
+      candidate = `${base} ${n}`;
+    }
+    const [agent] = await tx
+      .insert(agentsTable)
+      .values({
+        name: candidate,
+        title: source.title,
+        mission: source.mission,
+        specialization: source.specialization,
+        personality: source.personality,
+        goals: source.goals,
+        instructions: source.instructions,
+        provider: source.provider,
+        model: source.model,
+        voiceStyle: source.voiceStyle,
+        securityPreset: source.securityPreset,
+        avatar: source.avatar,
+        status: "idle",
+      })
+      .returning();
+    await tx.insert(auditEventsTable).values({
+      kind: "agent.duplicated",
+      summary: `${agent.name} was recruited as a copy of ${source.name}.`,
+    });
+    return { status: 201 as const, agent };
   });
-  res.status(201).json(CreateAgentResponse.parse(toAgent(agent)));
+}
+
+router.post("/agents/:agentId/duplicate", async (req, res): Promise<void> => {
+  const params = DuplicateAgentParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: "Invalid agent id" });
+    return;
+  }
+  // Concurrent duplicates can race on the same "Copy N" name; the unique
+  // index rejects the loser, so retry with a freshly computed candidate.
+  let outcome: Awaited<ReturnType<typeof duplicateAgentOnce>> | null = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      outcome = await duplicateAgentOnce(params.data.agentId);
+      break;
+    } catch (error) {
+      if (!isUniqueViolation(error) || attempt === 2) throw error;
+    }
+  }
+  if (!outcome) {
+    res.status(409).json({ error: "Could not find a free name for the copy" });
+    return;
+  }
+  if (outcome.status === 404) {
+    res.status(404).json({ error: "Agent not found" });
+    return;
+  }
+  if (outcome.status === 409) {
+    res.status(409).json({ error: "Retired agents cannot be duplicated" });
+    return;
+  }
+  res.status(201).json(DuplicateAgentResponse.parse(toAgent(outcome.agent)));
+});
+
+router.post("/agents/:agentId/archive", async (req, res): Promise<void> => {
+  const params = SetAgentArchivedParams.safeParse(req.params);
+  const body = SetAgentArchivedBody.safeParse(req.body);
+  if (!params.success || !body.success) {
+    res.status(400).json({ error: "Invalid archive request" });
+    return;
+  }
+  const archived = body.data.archived;
+  const outcome = await db.transaction(async (tx) => {
+    const [agent] = await tx
+      .update(agentsTable)
+      .set(
+        archived
+          ? {
+              archived: true,
+              archivedAt: new Date(),
+              paused: true,
+              status: "paused",
+            }
+          : { archived: false, archivedAt: null, paused: false, status: "idle" },
+      )
+      .where(
+        and(
+          eq(agentsTable.id, params.data.agentId),
+          eq(agentsTable.retired, false),
+          eq(agentsTable.archived, !archived),
+        ),
+      )
+      .returning();
+    if (!agent) {
+      const [existing] = await tx
+        .select({ id: agentsTable.id, retired: agentsTable.retired })
+        .from(agentsTable)
+        .where(eq(agentsTable.id, params.data.agentId))
+        .limit(1);
+      if (!existing) return { status: 404 as const };
+      if (existing.retired) return { status: 409 as const };
+      // Already in the requested state; return it unchanged.
+      const [current] = await tx
+        .select()
+        .from(agentsTable)
+        .where(eq(agentsTable.id, params.data.agentId))
+        .limit(1);
+      return { status: 200 as const, agent: current! };
+    }
+    if (archived) {
+      await tx
+        .update(tasksTable)
+        .set({ status: "paused" })
+        .where(
+          and(
+            eq(tasksTable.agentId, agent.id),
+            inArray(tasksTable.status, [
+              "queued",
+              "running",
+              "waiting_approval",
+            ]),
+          ),
+        );
+    }
+    await tx.insert(auditEventsTable).values({
+      kind: archived ? "agent.archived" : "agent.restored",
+      summary: archived
+        ? `${agent.name} was archived and stepped away from the office.`
+        : `${agent.name} was restored to the active roster.`,
+    });
+    return { status: 200 as const, agent };
+  });
+  if (outcome.status === 404) {
+    res.status(404).json({ error: "Agent not found" });
+    return;
+  }
+  if (outcome.status === 409) {
+    res.status(409).json({ error: "Retired agents cannot be archived" });
+    return;
+  }
+  res.json(SetAgentArchivedResponse.parse(toAgent(outcome.agent)));
+});
+
+router.delete("/agents/:agentId", async (req, res): Promise<void> => {
+  const params = DeleteAgentParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: "Invalid agent id" });
+    return;
+  }
+  const outcome = await db.transaction(async (tx) => {
+    const [agent] = await tx
+      .select()
+      .from(agentsTable)
+      .where(eq(agentsTable.id, params.data.agentId))
+      .limit(1)
+      .for("update");
+    if (!agent) return { status: 404 as const };
+    // Retirement to the Island is permanent by design; retired agents are
+    // never erased.
+    if (agent.retired) return { status: 409 as const };
+    await tx
+      .delete(approvalsTable)
+      .where(eq(approvalsTable.agentId, agent.id));
+    await tx.delete(tasksTable).where(eq(tasksTable.agentId, agent.id));
+    await tx.delete(agentsTable).where(eq(agentsTable.id, agent.id));
+    await tx.insert(auditEventsTable).values({
+      kind: "agent.deleted",
+      summary: `${agent.name} and their task history were permanently deleted.`,
+    });
+    return { status: 204 as const };
+  });
+  if (outcome.status === 404) {
+    res.status(404).json({ error: "Agent not found" });
+    return;
+  }
+  if (outcome.status === 409) {
+    res.status(409).json({
+      error: "Retired agents rest on the Island permanently and cannot be deleted",
+    });
+    return;
+  }
+  res.status(204).end();
 });
 
 router.post("/agents/:agentId/pause", async (req, res): Promise<void> => {
@@ -178,10 +530,24 @@ router.post("/agents/:agentId/pause", async (req, res): Promise<void> => {
       and(
         eq(agentsTable.id, params.data.agentId),
         eq(agentsTable.retired, false),
+        eq(agentsTable.archived, false),
       ),
     )
     .returning();
   if (!agent) {
+    const [existing] = await db
+      .select({ archived: agentsTable.archived, retired: agentsTable.retired })
+      .from(agentsTable)
+      .where(eq(agentsTable.id, params.data.agentId))
+      .limit(1);
+    if (existing && (existing.archived || existing.retired)) {
+      res.status(409).json({
+        error: existing.retired
+          ? "Retired agents cannot be paused or resumed"
+          : "Archived agents cannot be paused or resumed. Restore them first.",
+      });
+      return;
+    }
     res.status(404).json({ error: "Agent not found" });
     return;
   }
@@ -315,7 +681,7 @@ router.post("/tasks", async (req, res): Promise<void> => {
       .limit(1)
       .for("update");
     if (!agent) return { status: 404 as const };
-    if (agent.retired) return { status: 409 as const };
+    if (agent.retired || agent.archived) return { status: 409 as const };
     const [stop] = await tx
       .select()
       .from(systemStateTable)
@@ -352,9 +718,9 @@ router.post("/tasks", async (req, res): Promise<void> => {
     return;
   }
   if (outcome.status === 409) {
-    res
-      .status(409)
-      .json({ error: "This agent is retired and cannot take new work" });
+    res.status(409).json({
+      error: "This agent is retired or archived and cannot take new work",
+    });
     return;
   }
   res.status(201).json(

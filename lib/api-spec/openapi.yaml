@@ -69,6 +69,100 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Agent"
+  /agents/{agentId}:
+    get:
+      operationId: getAgent
+      tags: [office]
+      summary: Get one agent with its task history
+      parameters:
+        - $ref: "#/components/parameters/AgentId"
+      responses:
+        "200":
+          description: Agent detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentDetail"
+        "404":
+          description: Agent not found
+    patch:
+      operationId: updateAgent
+      tags: [office]
+      summary: Update an agent profile
+      parameters:
+        - $ref: "#/components/parameters/AgentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentUpdate"
+      responses:
+        "200":
+          description: Updated agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        "404":
+          description: Agent not found
+        "409":
+          description: Name already in use or agent retired
+    delete:
+      operationId: deleteAgent
+      tags: [office]
+      summary: Permanently delete an agent and its task history
+      parameters:
+        - $ref: "#/components/parameters/AgentId"
+      responses:
+        "204":
+          description: Agent deleted
+        "404":
+          description: Agent not found
+        "409":
+          description: Retired agents cannot be deleted
+  /agents/{agentId}/duplicate:
+    post:
+      operationId: duplicateAgent
+      tags: [office]
+      summary: Duplicate an agent's configuration as a new agent
+      parameters:
+        - $ref: "#/components/parameters/AgentId"
+      responses:
+        "201":
+          description: Duplicated agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        "404":
+          description: Agent not found
+        "409":
+          description: Agent retired
+  /agents/{agentId}/archive:
+    post:
+      operationId: setAgentArchived
+      tags: [office]
+      summary: Archive or restore an agent
+      parameters:
+        - $ref: "#/components/parameters/AgentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ArchiveInput"
+      responses:
+        "200":
+          description: Updated agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        "404":
+          description: Agent not found
+        "409":
+          description: Agent retired
   /agents/{agentId}/pause:
     post:
       operationId: pauseAgent
@@ -240,18 +334,34 @@ components:
         - status
     Agent:
       type: object
-      required: [id, name, title, mission, provider, status, securityPreset, avatar, createdAt]
+      required: [id, name, title, mission, provider, status, securityPreset, avatar, archived, createdAt]
       properties:
         id: { type: string }
         name: { type: string }
         title: { type: string }
         mission: { type: string }
+        specialization: { type: ["string", "null"] }
+        personality: { type: ["string", "null"] }
+        goals: { type: ["string", "null"] }
+        instructions: { type: ["string", "null"] }
         provider: { type: string, enum: [claude_max, openrouter] }
         model: { type: ["string", "null"] }
+        voiceStyle: { type: ["string", "null"] }
         status: { type: string, enum: [idle, working, researching, waiting, paused, error, queued, complete] }
         securityPreset: { type: string, enum: [observer, assistant, operator] }
         avatar: { $ref: "#/components/schemas/AvatarConfig" }
+        archived: { type: boolean }
+        archivedAt: { type: ["string", "null"] }
         createdAt: { type: string, format: date-time }
+    AgentDetail:
+      type: object
+      required: [agent, tasks]
+      properties:
+        agent: { $ref: "#/components/schemas/Agent" }
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/Task"
     RetiredAgent:
       type: object
       required: [id, name, title, mission, provider, securityPreset, avatar, createdAt, retiredAt]
@@ -281,10 +391,35 @@ components:
         name: { type: string, minLength: 2, maxLength: 60 }
         title: { type: string, minLength: 2, maxLength: 80 }
         mission: { type: string, minLength: 5, maxLength: 2000 }
+        specialization: { type: string, maxLength: 200 }
+        personality: { type: string, maxLength: 2000 }
+        goals: { type: string, maxLength: 4000 }
+        instructions: { type: string, maxLength: 4000 }
         provider: { type: string, enum: [claude_max, openrouter] }
         model: { type: string, maxLength: 180 }
+        voiceStyle: { type: string, maxLength: 60 }
         securityPreset: { type: string, enum: [observer, assistant, operator] }
         avatar: { $ref: "#/components/schemas/AvatarConfig" }
+    AgentUpdate:
+      type: object
+      properties:
+        name: { type: string, minLength: 2, maxLength: 60 }
+        title: { type: string, minLength: 2, maxLength: 80 }
+        mission: { type: string, minLength: 5, maxLength: 2000 }
+        specialization: { type: ["string", "null"], maxLength: 200 }
+        personality: { type: ["string", "null"], maxLength: 2000 }
+        goals: { type: ["string", "null"], maxLength: 4000 }
+        instructions: { type: ["string", "null"], maxLength: 4000 }
+        provider: { type: string, enum: [claude_max, openrouter] }
+        model: { type: ["string", "null"], maxLength: 180 }
+        voiceStyle: { type: ["string", "null"], maxLength: 60 }
+        securityPreset: { type: string, enum: [observer, assistant, operator] }
+        avatar: { $ref: "#/components/schemas/AvatarConfig" }
+    ArchiveInput:
+      type: object
+      required: [archived]
+      properties:
+        archived: { type: boolean }
     PauseInput:
       type: object
       required: [paused]

@@ -1,2 +1,3 @@
 - [HomardClaw art direction](homardclaw-art-direction.md) — Favor dense, cozy isometric pixel dioramas with one expressive lobster at a lived-in workstation.
 - [Pixel character sprites](pixel-character-components.md) — Never hand-code a character that exists in scene art; generate a sprite and bake recoloured variants at build time.
+- [API server test conventions](api-server-test-conventions.md) — Integration tests hit the dev Postgres; impersonate the existing owner, tag+clean up all rows, never clobber owner_clerk_id.

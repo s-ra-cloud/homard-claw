@@ -1,9 +1,11 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
   jsonb,
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
@@ -16,23 +18,38 @@ export type AvatarConfig = {
   expression?: string;
 };
 
-export const agentsTable = pgTable("agents", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  name: text("name").notNull(),
-  title: text("title").notNull(),
-  mission: text("mission").notNull(),
-  provider: text("provider").notNull(),
-  model: text("model"),
-  status: text("status").notNull().default("idle"),
-  securityPreset: text("security_preset").notNull(),
-  avatar: jsonb("avatar").$type<AvatarConfig>().notNull(),
-  paused: boolean("paused").notNull().default(false),
-  retired: boolean("retired").notNull().default(false),
-  retiredAt: timestamp("retired_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const agentsTable = pgTable(
+  "agents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    title: text("title").notNull(),
+    mission: text("mission").notNull(),
+    specialization: text("specialization"),
+    personality: text("personality"),
+    goals: text("goals"),
+    instructions: text("instructions"),
+    provider: text("provider").notNull(),
+    model: text("model"),
+    voiceStyle: text("voice_style"),
+    status: text("status").notNull().default("idle"),
+    securityPreset: text("security_preset").notNull(),
+    avatar: jsonb("avatar").$type<AvatarConfig>().notNull(),
+    paused: boolean("paused").notNull().default(false),
+    archived: boolean("archived").notNull().default(false),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    retired: boolean("retired").notNull().default(false),
+    retiredAt: timestamp("retired_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    // One name per workforce, case-insensitively, across active, archived,
+    // and retired agents.
+    uniqueIndex("agents_name_lower_unique").on(sql`lower(${table.name})`),
+  ],
+);
 
 export const tasksTable = pgTable("tasks", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -78,6 +95,8 @@ export const systemStateTable = pgTable("system_state", {
 export const insertAgentSchema = createInsertSchema(agentsTable).omit({
   id: true,
   paused: true,
+  archived: true,
+  archivedAt: true,
   retired: true,
   retiredAt: true,
   createdAt: true,

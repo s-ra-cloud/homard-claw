@@ -43,8 +43,13 @@ export const ListAgentsResponseItem = zod.object({
   "name": zod.string(),
   "title": zod.string(),
   "mission": zod.string(),
+  "specialization": zod.string().nullish(),
+  "personality": zod.string().nullish(),
+  "goals": zod.string().nullish(),
+  "instructions": zod.string().nullish(),
   "provider": zod.enum(['claude_max', 'openrouter']),
   "model": zod.string().nullish(),
+  "voiceStyle": zod.string().nullish(),
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
   "avatar": zod.object({
@@ -53,6 +58,8 @@ export const ListAgentsResponseItem = zod.object({
   "accessory": zod.string(),
   "expression": zod.string().optional()
 }),
+  "archived": zod.boolean(),
+  "archivedAt": zod.string().nullish(),
   "createdAt": zod.coerce.date()
 })
 export const ListAgentsResponse = zod.array(ListAgentsResponseItem)
@@ -70,7 +77,17 @@ export const createAgentBodyTitleMax = 80;
 export const createAgentBodyMissionMin = 5;
 export const createAgentBodyMissionMax = 2000;
 
+export const createAgentBodySpecializationMax = 200;
+
+export const createAgentBodyPersonalityMax = 2000;
+
+export const createAgentBodyGoalsMax = 4000;
+
+export const createAgentBodyInstructionsMax = 4000;
+
 export const createAgentBodyModelMax = 180;
+
+export const createAgentBodyVoiceStyleMax = 60;
 
 
 
@@ -78,8 +95,13 @@ export const CreateAgentBody = zod.object({
   "name": zod.string().min(createAgentBodyNameMin).max(createAgentBodyNameMax),
   "title": zod.string().min(createAgentBodyTitleMin).max(createAgentBodyTitleMax),
   "mission": zod.string().min(createAgentBodyMissionMin).max(createAgentBodyMissionMax),
+  "specialization": zod.string().max(createAgentBodySpecializationMax).optional(),
+  "personality": zod.string().max(createAgentBodyPersonalityMax).optional(),
+  "goals": zod.string().max(createAgentBodyGoalsMax).optional(),
+  "instructions": zod.string().max(createAgentBodyInstructionsMax).optional(),
   "provider": zod.enum(['claude_max', 'openrouter']),
   "model": zod.string().max(createAgentBodyModelMax).optional(),
+  "voiceStyle": zod.string().max(createAgentBodyVoiceStyleMax).optional(),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
   "avatar": zod.object({
   "shellColor": zod.string(),
@@ -94,8 +116,13 @@ export const CreateAgentResponse = zod.object({
   "name": zod.string(),
   "title": zod.string(),
   "mission": zod.string(),
+  "specialization": zod.string().nullish(),
+  "personality": zod.string().nullish(),
+  "goals": zod.string().nullish(),
+  "instructions": zod.string().nullish(),
   "provider": zod.enum(['claude_max', 'openrouter']),
   "model": zod.string().nullish(),
+  "voiceStyle": zod.string().nullish(),
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
   "avatar": zod.object({
@@ -104,6 +131,208 @@ export const CreateAgentResponse = zod.object({
   "accessory": zod.string(),
   "expression": zod.string().optional()
 }),
+  "archived": zod.boolean(),
+  "archivedAt": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Get one agent with its task history
+ */
+export const GetAgentParams = zod.object({
+  "agentId": zod.coerce.string()
+})
+
+export const GetAgentResponse = zod.object({
+  "agent": zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "title": zod.string(),
+  "mission": zod.string(),
+  "specialization": zod.string().nullish(),
+  "personality": zod.string().nullish(),
+  "goals": zod.string().nullish(),
+  "instructions": zod.string().nullish(),
+  "provider": zod.enum(['claude_max', 'openrouter']),
+  "model": zod.string().nullish(),
+  "voiceStyle": zod.string().nullish(),
+  "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
+  "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
+  "avatar": zod.object({
+  "shellColor": zod.string(),
+  "deskStyle": zod.string(),
+  "accessory": zod.string(),
+  "expression": zod.string().optional()
+}),
+  "archived": zod.boolean(),
+  "archivedAt": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
+}),
+  "tasks": zod.array(zod.object({
+  "id": zod.string(),
+  "agentId": zod.string(),
+  "agentName": zod.string(),
+  "objective": zod.string(),
+  "status": zod.enum(['queued', 'running', 'waiting_approval', 'paused', 'completed', 'failed']),
+  "provider": zod.enum(['claude_max', 'openrouter']).optional(),
+  "createdAt": zod.coerce.date()
+}))
+})
+
+
+/**
+ * @summary Update an agent profile
+ */
+export const UpdateAgentParams = zod.object({
+  "agentId": zod.coerce.string()
+})
+
+export const updateAgentBodyNameMin = 2;
+export const updateAgentBodyNameMax = 60;
+
+export const updateAgentBodyTitleMin = 2;
+export const updateAgentBodyTitleMax = 80;
+
+export const updateAgentBodyMissionMin = 5;
+export const updateAgentBodyMissionMax = 2000;
+
+export const updateAgentBodySpecializationMax = 200;
+
+export const updateAgentBodyPersonalityMax = 2000;
+
+export const updateAgentBodyGoalsMax = 4000;
+
+export const updateAgentBodyInstructionsMax = 4000;
+
+export const updateAgentBodyModelMax = 180;
+
+export const updateAgentBodyVoiceStyleMax = 60;
+
+
+
+export const UpdateAgentBody = zod.object({
+  "name": zod.string().min(updateAgentBodyNameMin).max(updateAgentBodyNameMax).optional(),
+  "title": zod.string().min(updateAgentBodyTitleMin).max(updateAgentBodyTitleMax).optional(),
+  "mission": zod.string().min(updateAgentBodyMissionMin).max(updateAgentBodyMissionMax).optional(),
+  "specialization": zod.string().max(updateAgentBodySpecializationMax).nullish(),
+  "personality": zod.string().max(updateAgentBodyPersonalityMax).nullish(),
+  "goals": zod.string().max(updateAgentBodyGoalsMax).nullish(),
+  "instructions": zod.string().max(updateAgentBodyInstructionsMax).nullish(),
+  "provider": zod.enum(['claude_max', 'openrouter']).optional(),
+  "model": zod.string().max(updateAgentBodyModelMax).nullish(),
+  "voiceStyle": zod.string().max(updateAgentBodyVoiceStyleMax).nullish(),
+  "securityPreset": zod.enum(['observer', 'assistant', 'operator']).optional(),
+  "avatar": zod.object({
+  "shellColor": zod.string(),
+  "deskStyle": zod.string(),
+  "accessory": zod.string(),
+  "expression": zod.string().optional()
+}).optional()
+})
+
+export const UpdateAgentResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "title": zod.string(),
+  "mission": zod.string(),
+  "specialization": zod.string().nullish(),
+  "personality": zod.string().nullish(),
+  "goals": zod.string().nullish(),
+  "instructions": zod.string().nullish(),
+  "provider": zod.enum(['claude_max', 'openrouter']),
+  "model": zod.string().nullish(),
+  "voiceStyle": zod.string().nullish(),
+  "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
+  "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
+  "avatar": zod.object({
+  "shellColor": zod.string(),
+  "deskStyle": zod.string(),
+  "accessory": zod.string(),
+  "expression": zod.string().optional()
+}),
+  "archived": zod.boolean(),
+  "archivedAt": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Permanently delete an agent and its task history
+ */
+export const DeleteAgentParams = zod.object({
+  "agentId": zod.coerce.string()
+})
+
+export const DeleteAgentResponse = zod.void()
+
+
+/**
+ * @summary Duplicate an agent's configuration as a new agent
+ */
+export const DuplicateAgentParams = zod.object({
+  "agentId": zod.coerce.string()
+})
+
+export const DuplicateAgentResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "title": zod.string(),
+  "mission": zod.string(),
+  "specialization": zod.string().nullish(),
+  "personality": zod.string().nullish(),
+  "goals": zod.string().nullish(),
+  "instructions": zod.string().nullish(),
+  "provider": zod.enum(['claude_max', 'openrouter']),
+  "model": zod.string().nullish(),
+  "voiceStyle": zod.string().nullish(),
+  "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
+  "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
+  "avatar": zod.object({
+  "shellColor": zod.string(),
+  "deskStyle": zod.string(),
+  "accessory": zod.string(),
+  "expression": zod.string().optional()
+}),
+  "archived": zod.boolean(),
+  "archivedAt": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Archive or restore an agent
+ */
+export const SetAgentArchivedParams = zod.object({
+  "agentId": zod.coerce.string()
+})
+
+export const SetAgentArchivedBody = zod.object({
+  "archived": zod.boolean()
+})
+
+export const SetAgentArchivedResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "title": zod.string(),
+  "mission": zod.string(),
+  "specialization": zod.string().nullish(),
+  "personality": zod.string().nullish(),
+  "goals": zod.string().nullish(),
+  "instructions": zod.string().nullish(),
+  "provider": zod.enum(['claude_max', 'openrouter']),
+  "model": zod.string().nullish(),
+  "voiceStyle": zod.string().nullish(),
+  "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
+  "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
+  "avatar": zod.object({
+  "shellColor": zod.string(),
+  "deskStyle": zod.string(),
+  "accessory": zod.string(),
+  "expression": zod.string().optional()
+}),
+  "archived": zod.boolean(),
+  "archivedAt": zod.string().nullish(),
   "createdAt": zod.coerce.date()
 })
 
@@ -124,8 +353,13 @@ export const PauseAgentResponse = zod.object({
   "name": zod.string(),
   "title": zod.string(),
   "mission": zod.string(),
+  "specialization": zod.string().nullish(),
+  "personality": zod.string().nullish(),
+  "goals": zod.string().nullish(),
+  "instructions": zod.string().nullish(),
   "provider": zod.enum(['claude_max', 'openrouter']),
   "model": zod.string().nullish(),
+  "voiceStyle": zod.string().nullish(),
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
   "avatar": zod.object({
@@ -134,6 +368,8 @@ export const PauseAgentResponse = zod.object({
   "accessory": zod.string(),
   "expression": zod.string().optional()
 }),
+  "archived": zod.boolean(),
+  "archivedAt": zod.string().nullish(),
   "createdAt": zod.coerce.date()
 })
 

@@ -20,6 +20,7 @@ import PublicWelcome from '@/pages/PublicWelcome';
 import OfficeDashboard from '@/pages/OfficeDashboard';
 import AgentsPage from '@/pages/AgentsPage';
 import NewAgentPage from '@/pages/NewAgentPage';
+import EditAgentPage from '@/pages/EditAgentPage';
 import TasksPage from '@/pages/TasksPage';
 import ApprovalsPage from '@/pages/ApprovalsPage';
 import ProvidersPage from '@/pages/ProvidersPage';
@@ -169,35 +170,39 @@ function ClerkProviderWithRoutes() {
             <Route path="/" component={HomeRedirect} />
             <Route path="/sign-in/*?" component={SignInPage} />
             <Route path="/sign-up/*?" component={SignUpPage} />
-            
+
             <Route path="/office">
               <ProtectedRoute component={OfficeDashboard} />
             </Route>
-            
+
             <Route path="/agents">
               <ProtectedRoute component={AgentsPage} />
             </Route>
-            
+
             <Route path="/agents/new">
               <ProtectedRoute component={NewAgentPage} />
             </Route>
-            
+
+            <Route path="/agents/:agentId/edit">
+              <ProtectedRoute component={EditAgentPage} />
+            </Route>
+
             <Route path="/tasks">
               <ProtectedRoute component={TasksPage} />
             </Route>
-            
+
             <Route path="/approvals">
               <ProtectedRoute component={ApprovalsPage} />
             </Route>
-            
+
             <Route path="/island">
               <ProtectedRoute component={IslandPage} />
             </Route>
-            
+
             <Route path="/providers">
               <ProtectedRoute component={ProvidersPage} />
             </Route>
-            
+
             <Route component={NotFound} />
           </Switch>
         </RoutedErrorBoundary>

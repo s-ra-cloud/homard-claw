@@ -15,11 +15,24 @@ export interface Agent {
   name: string;
   title: string;
   mission: string;
+  /** @nullable */
+  specialization?: string | null;
+  /** @nullable */
+  personality?: string | null;
+  /** @nullable */
+  goals?: string | null;
+  /** @nullable */
+  instructions?: string | null;
   provider: AgentProvider;
   /** @nullable */
   model?: string | null;
+  /** @nullable */
+  voiceStyle?: string | null;
   status: AgentStatus;
   securityPreset: AgentSecurityPreset;
   avatar: AvatarConfig;
+  archived: boolean;
+  /** @nullable */
+  archivedAt?: string | null;
   createdAt: Date;
 }

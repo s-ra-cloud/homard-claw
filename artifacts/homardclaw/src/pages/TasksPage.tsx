@@ -29,7 +29,7 @@ export default function TasksPage() {
   const { data: agents, isLoading: agentsLoading } = useListAgents();
   const queryClient = useQueryClient();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  
+
   const [newTask, setNewTask] = useState({
     agentId: "",
     objective: "",
@@ -50,7 +50,7 @@ export default function TasksPage() {
   const handleCreateTask = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTask.agentId || !newTask.objective) return;
-    
+
     createTask.mutate({
       data: {
         agentId: newTask.agentId,
@@ -91,7 +91,7 @@ export default function TasksPage() {
             <h1 className="font-display text-lg sm:text-2xl text-foreground uppercase mb-2">Task Queue</h1>
             <p className="text-muted-foreground text-sm">Monitor and dispatch jobs to the workforce.</p>
           </div>
-          
+
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
               <Button variant="primary">
@@ -104,18 +104,18 @@ export default function TasksPage() {
                 <DialogTitle className="font-display uppercase text-lg">New Task Directive</DialogTitle>
               </div>
               <form onSubmit={handleCreateTask} className="p-6 space-y-6">
-                
+
                 <div className="space-y-2">
                   <label className="uppercase font-bold text-xs">Assign to Agent</label>
-                  <Select 
-                    value={newTask.agentId} 
+                  <Select
+                    value={newTask.agentId}
                     onValueChange={(val) => setNewTask({...newTask, agentId: val})}
                   >
                     <SelectTrigger className="bg-background border-4 border-border rounded-none focus:ring-0 focus:border-primary font-mono text-sm uppercase">
                       <SelectValue placeholder="Select an available agent..." />
                     </SelectTrigger>
                     <SelectContent className="border-4 border-border rounded-none bg-card">
-                      {agents?.filter(a => a.status !== 'error').map(agent => (
+                      {agents?.filter(a => a.status !== 'error' && !a.archived).map(agent => (
                         <SelectItem key={agent.id} value={agent.id} className="font-mono text-xs uppercase focus:bg-primary focus:text-primary-foreground">
                           {agent.name} [{agent.status}]
                         </SelectItem>
@@ -126,12 +126,12 @@ export default function TasksPage() {
 
                 <div className="space-y-2">
                   <label className="uppercase font-bold text-xs">Objective</label>
-                  <Textarea 
+                  <Textarea
                     value={newTask.objective}
                     onChange={(e) => setNewTask({...newTask, objective: e.target.value})}
                     placeholder="E.g. Analyze the latest sales report and extract key metrics..."
                     rows={4}
-                    className="font-mono text-sm bg-background border-4 border-border rounded-none focus-visible:ring-0 focus-visible:border-primary resize-none" 
+                    className="font-mono text-sm bg-background border-4 border-border rounded-none focus-visible:ring-0 focus-visible:border-primary resize-none"
                   />
                 </div>
 
@@ -140,8 +140,8 @@ export default function TasksPage() {
                     <span>Provider Override</span>
                     <span className="text-muted-foreground font-normal">(Optional)</span>
                   </label>
-                  <Select 
-                    value={newTask.providerOverride || "none"} 
+                  <Select
+                    value={newTask.providerOverride || "none"}
                     onValueChange={(val) => setNewTask({...newTask, providerOverride: val === "none" ? "" : val as TaskInputProviderOverride})}
                   >
                     <SelectTrigger className="bg-background border-4 border-border rounded-none focus:ring-0 focus:border-primary font-mono text-sm uppercase">
@@ -157,9 +157,9 @@ export default function TasksPage() {
 
                 <div className="pt-4 border-t-4 border-border flex justify-end gap-4">
                   <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>CANCEL</Button>
-                  <Button 
-                    type="submit" 
-                    variant="primary" 
+                  <Button
+                    type="submit"
+                    variant="primary"
                     disabled={createTask.isPending || !newTask.agentId || !newTask.objective}
                   >
                     {createTask.isPending ? "DISPATCHING..." : "DISPATCH"}
@@ -190,8 +190,8 @@ export default function TasksPage() {
         ) : (
           <div className="space-y-4">
             {tasks.map((task) => (
-              <PixelCard 
-                key={task.id} 
+              <PixelCard
+                key={task.id}
                 variant={task.status === 'failed' ? 'destructive' : task.status === 'running' ? 'primary' : 'default'}
                 className="flex flex-col md:flex-row gap-6 p-6"
               >
@@ -201,7 +201,7 @@ export default function TasksPage() {
                   </div>
                   <div className="text-[10px] font-mono text-muted-foreground uppercase">{task.id.slice(0, 8)}</div>
                 </div>
-                
+
                 <div className="flex-1 space-y-4">
                   <div className="flex justify-between items-start">
                     <div>
@@ -217,7 +217,7 @@ export default function TasksPage() {
                       {getStatusBadge(task.status)}
                     </div>
                   </div>
-                  
+
                   <div className="flex flex-wrap items-center gap-4 border-t-4 border-border/30 pt-3">
                     <div className="sm:hidden mb-2 w-full">
                       {getStatusBadge(task.status)}

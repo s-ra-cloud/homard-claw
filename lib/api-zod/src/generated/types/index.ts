@@ -7,16 +7,21 @@
  */
 
 export * from './agent';
+export * from './agentDetail';
 export * from './agentInput';
 export * from './agentInputProvider';
 export * from './agentInputSecurityPreset';
 export * from './agentProvider';
 export * from './agentSecurityPreset';
 export * from './agentStatus';
+export * from './agentUpdate';
+export * from './agentUpdateProvider';
+export * from './agentUpdateSecurityPreset';
 export * from './approval';
 export * from './approvalDecision';
 export * from './approvalDecisionDecision';
 export * from './approvalStatus';
+export * from './archiveInput';
 export * from './auditEvent';
 export * from './avatarConfig';
 export * from './emergencyStop';
