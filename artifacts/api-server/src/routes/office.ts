@@ -1,4 +1,4 @@
-import { getAuth } from "@clerk/express";
+import { clerkClient, getAuth } from "@clerk/express";
 import {
   CancelTaskParams,
   CancelTaskResponse,
@@ -115,6 +115,65 @@ import voiceRouter from "./voice";
 
 const router: IRouter = Router();
 
+/**
+ * The office is claimed by the first account that signs in, and the claim is
+ * stored as a Clerk user id. Clerk keeps separate user stores for development
+ * and production, so a published office whose owner row was seeded from
+ * development holds an id no production account can ever match — the owner is
+ * locked out of their own app with no way back in.
+ *
+ * OWNER_EMAIL is the identity that survives that move: whenever the signed-in
+ * account's verified email matches it, ownership follows to that account's id.
+ * Unset, the original first-come claim still applies.
+ */
+const configuredOwnerEmail = (): string | null =>
+  process.env.OWNER_EMAIL?.trim().toLowerCase() || null;
+
+/**
+ * Only refusals are remembered, and only briefly: an account that does not own
+ * the office keeps being turned away without a Clerk call per request. A match
+ * is never cached, so handing over the office always rests on a fresh lookup —
+ * a stale positive would keep authorising an address the owner has since
+ * changed or lost.
+ */
+const DENIAL_TTL_MS = 60_000;
+const DENIAL_LIMIT = 500;
+const denials = new Map<string, { email: string | null; at: number }>();
+
+/** The signed-in account's verified primary email, straight from Clerk. */
+async function verifiedEmail(
+  req: Request,
+  userId: string,
+): Promise<string | null> {
+  try {
+    const user = await clerkClient.users.getUser(userId);
+    const address = user.primaryEmailAddress ?? user.emailAddresses?.[0];
+    // An unverified address proves nothing: anyone could sign up claiming the
+    // owner's email and take the office with it.
+    if (address?.verification?.status !== "verified") return null;
+    return address.emailAddress?.trim().toLowerCase() ?? null;
+  } catch (error) {
+    // A Clerk outage must not hand the office to the wrong account, so a failed
+    // lookup simply means no match.
+    req.log.warn({ userId, err: error }, "Could not resolve signed-in email");
+    return null;
+  }
+}
+
+function rememberDenial(userId: string, email: string | null): void {
+  if (denials.size >= DENIAL_LIMIT) denials.clear();
+  denials.set(userId, { email, at: Date.now() });
+}
+
+async function currentOwner(): Promise<string | undefined> {
+  const [row] = await db
+    .select()
+    .from(systemStateTable)
+    .where(eq(systemStateTable.key, "owner_clerk_id"))
+    .limit(1);
+  return row?.value;
+}
+
 async function requireOwner(
   req: Request,
   res: Response,
@@ -136,12 +195,50 @@ async function requireOwner(
     .from(systemStateTable)
     .where(eq(systemStateTable.key, "owner_clerk_id"))
     .limit(1);
-  if (owner?.value !== userId) {
-    req.log.warn({ userId }, "Blocked non-owner access");
-    res.status(403).json({ error: "This office already has an owner" });
+  if (owner?.value === userId) {
+    next();
     return;
   }
-  next();
+
+  const ownerEmail = configuredOwnerEmail();
+  let email: string | null = null;
+  if (ownerEmail) {
+    const denied = denials.get(userId);
+    if (denied && Date.now() - denied.at < DENIAL_TTL_MS) {
+      email = denied.email;
+    } else {
+      email = await verifiedEmail(req, userId);
+      if (email !== ownerEmail) rememberDenial(userId, email);
+    }
+  }
+
+  if (ownerEmail && email === ownerEmail) {
+    // Compare and set against the owner this request actually read, so two
+    // simultaneous hand-overs cannot interleave into a half-applied one.
+    const moved = await db
+      .update(systemStateTable)
+      .set({ value: userId })
+      .where(
+        and(
+          eq(systemStateTable.key, "owner_clerk_id"),
+          eq(systemStateTable.value, owner?.value ?? ""),
+        ),
+      )
+      .returning({ value: systemStateTable.value });
+    const settled = moved[0]?.value ?? (await currentOwner());
+    if (settled === userId) {
+      req.log.warn({ userId }, "Office ownership moved to the configured owner");
+      next();
+      return;
+    }
+  }
+
+  req.log.warn({ userId }, "Blocked non-owner access");
+  res.status(403).json({
+    error: email
+      ? `This office already has an owner. You are signed in as ${email}.`
+      : "This office already has an owner",
+  });
 }
 
 router.use(requireOwner);

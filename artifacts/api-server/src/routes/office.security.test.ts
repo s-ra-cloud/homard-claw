@@ -20,10 +20,32 @@ import {
 } from "@workspace/db";
 import { and, eq, inArray } from "drizzle-orm";
 
-const authState = vi.hoisted(() => ({ userId: "hc-sec-owner" as string | null }));
+const authState = vi.hoisted(() => ({
+  userId: "hc-sec-owner" as string | null,
+  emails: {} as Record<string, string>,
+  unverified: [] as string[],
+}));
 
 vi.mock("@clerk/express", () => ({
   getAuth: () => ({ userId: authState.userId }),
+  clerkClient: {
+    users: {
+      getUser: async (id: string) => {
+        const email = authState.emails[id];
+        if (!email) throw new Error("no such user");
+        return {
+          primaryEmailAddress: {
+            emailAddress: email,
+            verification: {
+              status: authState.unverified.includes(id)
+                ? "unverified"
+                : "verified",
+            },
+          },
+        };
+      },
+    },
+  },
 }));
 
 import apiRouter from "./index";
@@ -127,6 +149,82 @@ describe("authentication and ownership", () => {
       expect(owner?.value).toBe(ownerId);
     } finally {
       authState.userId = ownerId;
+    }
+  });
+
+  it("hands the office to the account matching OWNER_EMAIL", async () => {
+    // Clerk mints different user ids for development and production, so a
+    // published office can hold an id no live account can match. OWNER_EMAIL
+    // is what lets the real owner back in — and only them.
+    process.env.OWNER_EMAIL = "  Owner@Example.Test ";
+    authState.emails = {
+      "hc-sec-replacement": "owner@example.test",
+      "hc-sec-stranger": "stranger@example.test",
+      "hc-sec-impostor": "owner@example.test",
+    };
+    authState.unverified = ["hc-sec-impostor"];
+    try {
+      // Signing up with the owner's address proves nothing until it is verified.
+      authState.userId = "hc-sec-impostor";
+      const impostor = await request(app).get("/api/agents");
+      expect(impostor.status).toBe(403);
+
+      authState.userId = "hc-sec-stranger";
+      const blocked = await request(app).get("/api/agents");
+      expect(blocked.status).toBe(403);
+      expect(blocked.body.error).toContain("stranger@example.test");
+      const [afterStranger] = await db
+        .select()
+        .from(systemStateTable)
+        .where(eq(systemStateTable.key, "owner_clerk_id"))
+        .limit(1);
+      expect(afterStranger?.value).toBe(ownerId);
+
+      // An account Clerk cannot resolve at all (outage, deleted user, missing
+      // secret) is refused rather than trusted.
+      authState.userId = "hc-sec-unknown-to-clerk";
+      const unresolved = await request(app).get("/api/agents");
+      expect(unresolved.status).toBe(403);
+
+      // Two hand-overs racing must not interleave into a half-applied one.
+      authState.userId = "hc-sec-replacement";
+      const [first, second] = await Promise.all([
+        request(app).get("/api/agents"),
+        request(app).get("/api/agents"),
+      ]);
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      const [afterOwner] = await db
+        .select()
+        .from(systemStateTable)
+        .where(eq(systemStateTable.key, "owner_clerk_id"))
+        .limit(1);
+      expect(afterOwner?.value).toBe("hc-sec-replacement");
+
+      // A match is never cached: once the address stops being verified, the
+      // same account cannot take the office again.
+      await db
+        .update(systemStateTable)
+        .set({ value: ownerId })
+        .where(eq(systemStateTable.key, "owner_clerk_id"));
+      authState.unverified = ["hc-sec-impostor", "hc-sec-replacement"];
+      const revoked = await request(app).get("/api/agents");
+      expect(revoked.status).toBe(403);
+      const [afterRevocation] = await db
+        .select()
+        .from(systemStateTable)
+        .where(eq(systemStateTable.key, "owner_clerk_id"))
+        .limit(1);
+      expect(afterRevocation?.value).toBe(ownerId);
+    } finally {
+      delete process.env.OWNER_EMAIL;
+      authState.emails = {};
+      authState.unverified = [];
+      authState.userId = ownerId;
+      await db
+        .update(systemStateTable)
+        .set({ value: ownerId })
+        .where(eq(systemStateTable.key, "owner_clerk_id"));
     }
   });
 

@@ -21,3 +21,13 @@ timeoutMs = 20000
 
 [nix]
 channel = "stable-25_05"
+
+[userenv]
+
+[userenv.shared]
+OWNER_EMAIL = "sacharaoult@gmail.com"
+
+[userenv.development]
+CODEX_ENABLED = "true"
+CODEX_HOME = "/home/runner/.codex-home"
+CODEX_HOME_IS_PERSISTENT = "true"
