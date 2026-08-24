@@ -42,7 +42,7 @@
 
 /* ── Agent sprites ── */
 .room-agent { position: absolute; z-index: 12; display: flex; flex-direction: column; align-items: center; transform: translate(-50%, -50%); }
-.room-agent .marlow-lobster { filter: drop-shadow(2px 3px 0 rgba(43, 39, 51, 0.5)); }
+.room-agent .marlow-lobster { --marlow-shadow: drop-shadow(2px 3px 0 rgba(43, 39, 51, 0.5)); }
 /* Floor composites are sized as a share of the room so their footprint — and
    therefore the clearance to the desks — is identical at every viewport size.
    Depth (z-index) is set per seat in OfficeDashboard; 3 is the fallback. */

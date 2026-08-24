@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import "./marlow-lobster.css";
 
 /**
@@ -81,6 +82,24 @@ export type LobsterPose =
   | "floor-working"
   | "beach";
 
+/**
+ * Composite poses cannot be animated with a transform — that lifts the chair,
+ * cushion or laptop off the floor with the lobster. They ship a frame strip
+ * beside the still sprite instead (`scripts/build-lobster-sprites.mjs`), where
+ * the furniture pixels are identical in every frame and only the character
+ * moves: a blink, and a claw pressing the keys. Counts must match the strips.
+ */
+const POSE_FRAMES: Partial<Record<LobsterPose, 2 | 3>> = {
+  seated: 2,
+  working: 3,
+  "idle-coffee": 2,
+  "idle-music": 2,
+  "idle-reading": 2,
+  "idle-stretch": 2,
+  "floor-working": 3,
+  beach: 2,
+};
+
 const POSE_FOLDERS: Record<LobsterPose, string> = {
   standing: "lobsters",
   seated: "lobsters-sitting",
@@ -117,17 +136,37 @@ export function MarlowLobster({
 }: MarlowLobsterProps) {
   const chosen =
     LOBSTER_PRESETS.find((p) => p.id === preset) ?? presetForShellColor(shellColor);
-  const src = `${import.meta.env.BASE_URL}images/${POSE_FOLDERS[pose]}/${chosen.id}.png`;
+  const folder = `${import.meta.env.BASE_URL}images/${POSE_FOLDERS[pose]}`;
+  const frames = POSE_FRAMES[pose];
+  const classes = `marlow-lobster marlow-lobster--${status} marlow-lobster--pose-${pose}`;
+
+  if (frames) {
+    // Sized through a custom property so page CSS can still shrink the sprite;
+    // an inline width would outrank the office's responsive rules.
+    const style = {
+      "--marlow-size": `${size}px`,
+      backgroundImage: `url("${folder}/${chosen.id}-frames.png")`,
+    } as CSSProperties;
+    return (
+      <span
+        style={style}
+        role={title ? "img" : undefined}
+        aria-label={title}
+        aria-hidden={title ? undefined : true}
+        className={`${classes} marlow-lobster--frames marlow-lobster--frames-${frames} ${className}`}
+      />
+    );
+  }
 
   return (
     <img
-      src={src}
+      src={`${folder}/${chosen.id}.png`}
       width={size}
       height={size}
       alt={title ?? ""}
       aria-hidden={title ? undefined : true}
       draggable={false}
-      className={`marlow-lobster marlow-lobster--${status} marlow-lobster--pose-${pose} ${className}`}
+      className={`${classes} marlow-lobster--motion ${className}`}
     />
   );
 }

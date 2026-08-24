@@ -2,45 +2,42 @@
   display: block;
   image-rendering: pixelated;
   transform-origin: 50% 100%;
-}
-.marlow-lobster--idle,
-.marlow-lobster--queued,
-.marlow-lobster--complete {
-  animation: marlow-breathe 3.2s steps(2, end) infinite;
-}
-.marlow-lobster--working {
-  animation: marlow-bob 0.7s steps(2, end) infinite;
-}
-.marlow-lobster--researching {
-  animation: marlow-lean 2.4s ease-in-out infinite;
-}
-.marlow-lobster--waiting {
-  animation: marlow-breathe 2s steps(2, end) infinite;
-  filter: saturate(0.85);
-}
-.marlow-lobster--paused {
-  filter: grayscale(0.6);
-  opacity: 0.85;
-}
-.marlow-lobster--error {
-  animation: marlow-shake 0.5s steps(2, end) infinite;
+  /* Composed so a page can add a drop shadow without dropping the status tint. */
+  filter: var(--marlow-shadow, ) var(--marlow-tint, );
 }
 
 /*
- * Idle-activity poses come after the status rules so, at equal specificity,
- * the break animation wins over the generic idle breathing.
+ * Whole-sprite motion is only safe for the standing lobster. Every other pose
+ * bakes its chair, cushion, lounger or laptop into the same image, so moving
+ * the image floats the furniture — those poses animate a frame strip instead.
  */
-.marlow-lobster--pose-idle-coffee {
-  animation: marlow-sip 3.4s steps(2, end) infinite;
+.marlow-lobster--motion.marlow-lobster--idle,
+.marlow-lobster--motion.marlow-lobster--queued,
+.marlow-lobster--motion.marlow-lobster--complete {
+  animation: marlow-breathe 3.2s steps(2, end) infinite;
 }
-.marlow-lobster--pose-idle-music {
-  animation: marlow-groove 1.4s steps(2, end) infinite;
+.marlow-lobster--motion.marlow-lobster--working {
+  animation: marlow-bob 0.7s steps(2, end) infinite;
 }
-.marlow-lobster--pose-idle-reading {
-  animation: marlow-page 4.2s steps(2, end) infinite;
+.marlow-lobster--motion.marlow-lobster--researching {
+  animation: marlow-lean 2.4s ease-in-out infinite;
 }
-.marlow-lobster--pose-idle-stretch {
-  animation: marlow-stretch 2.6s steps(2, end) infinite;
+.marlow-lobster--motion.marlow-lobster--waiting {
+  animation: marlow-breathe 2s steps(2, end) infinite;
+}
+.marlow-lobster--motion.marlow-lobster--error {
+  animation: marlow-shake 0.5s steps(2, end) infinite;
+}
+
+.marlow-lobster--waiting {
+  --marlow-tint: saturate(0.85);
+}
+.marlow-lobster--paused {
+  --marlow-tint: grayscale(0.6);
+  opacity: 0.85;
+}
+.marlow-lobster--error {
+  --marlow-tint: saturate(1.3) drop-shadow(0 0 3px rgba(214, 54, 54, 0.95));
 }
 
 @keyframes marlow-breathe {
@@ -56,19 +53,74 @@
   25% { transform: translateX(-2%); }
   75% { transform: translateX(2%); }
 }
-@keyframes marlow-sip {
-  35% { transform: rotate(-2deg) translateY(-1.5%); }
-  55% { transform: rotate(-2deg) translateY(-1.5%); }
+
+/*
+ * Frame strips: one sprite-sized frame per column, always rest first, then the
+ * blink and/or the claw press. Percentage positions land exactly on a frame
+ * boundary at any rendered size, so the furniture never shifts by a pixel.
+ */
+.marlow-lobster--frames {
+  width: var(--marlow-size);
+  height: var(--marlow-size);
+  /* Sprites are square, so a page can size one axis and leave the other auto. */
+  aspect-ratio: 1;
+  background-repeat: no-repeat;
+  background-position: 0% 0;
+  background-size: calc(var(--marlow-frames) * 100%) 100%;
 }
-@keyframes marlow-groove {
-  50% { transform: rotate(2.5deg) translateY(-1.5%); }
+.marlow-lobster--frames-2 {
+  --marlow-frames: 2;
+  --marlow-blink: 100%;
+  --marlow-stir: 100%;
 }
-@keyframes marlow-page {
-  40% { transform: translateY(1%) rotate(-1deg); }
-  80% { transform: translateY(1%) rotate(1deg); }
+.marlow-lobster--frames-3 {
+  --marlow-frames: 3;
+  --marlow-blink: 50%;
+  --marlow-stir: 100%;
 }
-@keyframes marlow-stretch {
-  50% { transform: scaleY(1.04) translateY(-2%); }
+
+/* Cadence carries the status: busy claws, slow blinks, or a frozen frame. */
+.marlow-lobster--frames.marlow-lobster--working,
+.marlow-lobster--frames.marlow-lobster--researching {
+  animation: marlow-frames-busy 1.6s step-end infinite;
+}
+.marlow-lobster--frames.marlow-lobster--idle,
+.marlow-lobster--frames.marlow-lobster--queued,
+.marlow-lobster--frames.marlow-lobster--complete {
+  animation: marlow-frames-calm 5.4s step-end infinite;
+}
+.marlow-lobster--frames.marlow-lobster--waiting {
+  animation: marlow-frames-calm 3.4s step-end infinite;
+}
+/*
+ * Poses without a press frame would spend the busy cadence blinking franticly,
+ * so they keep the calm one, only quicker.
+ */
+.marlow-lobster--frames-2.marlow-lobster--working,
+.marlow-lobster--frames-2.marlow-lobster--researching {
+  animation: marlow-frames-calm 2.6s step-end infinite;
+}
+/* Paused and error hold the rest frame — stillness is the tell. */
+
+@keyframes marlow-frames-busy {
+  0% { background-position-x: 0%; }
+  10% { background-position-x: var(--marlow-stir); }
+  20% { background-position-x: 0%; }
+  32% { background-position-x: var(--marlow-stir); }
+  42% { background-position-x: 0%; }
+  54% { background-position-x: var(--marlow-stir); }
+  64% { background-position-x: 0%; }
+  76% { background-position-x: var(--marlow-stir); }
+  86% { background-position-x: 0%; }
+  92% { background-position-x: var(--marlow-blink); }
+  98% { background-position-x: 0%; }
+}
+@keyframes marlow-frames-calm {
+  0% { background-position-x: 0%; }
+  90% { background-position-x: var(--marlow-blink); }
+  93% { background-position-x: 0%; }
+  96% { background-position-x: var(--marlow-stir); }
+  99% { background-position-x: 0%; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -19,6 +19,13 @@
  * LOBSTER_OUT_DIR=../public/images/<out-dir> \
  * LOBSTER_WRITE_MANIFEST=0 LOBSTER_MATCH_MANIFEST=1 node \
  * artifacts/homardclaw/scripts/build-lobster-sprites.mjs
+ *
+ * Animation frames for the composite (furniture-bearing) poses:
+ *
+ * LOBSTER_FRAMES=all node artifacts/homardclaw/scripts/build-lobster-sprites.mjs
+ *
+ * That mode never touches the still sprites — it reads the shipped ones and
+ * writes `<pose>/<preset>-frames.png` strips beside them. See FRAME_POSES.
  */
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { inflateSync, deflateSync } from "node:zlib";
@@ -32,6 +39,7 @@ const SOURCE = process.env.LOBSTER_SOURCE
 const OUT_DIR = process.env.LOBSTER_OUT_DIR
   ? resolve(HERE, process.env.LOBSTER_OUT_DIR)
   : resolve(HERE, "../public/images/lobsters");
+const FRAMES = process.env.LOBSTER_FRAMES;
 const WRITE_MANIFEST = process.env.LOBSTER_WRITE_MANIFEST !== "0";
 const MATCH_MANIFEST = process.env.LOBSTER_MATCH_MANIFEST === "1";
 const MANIFEST_PATH = resolve(HERE, "../src/components/ui/lobster-presets.json");
@@ -392,6 +400,245 @@ const VARIANTS = [
   { id: "saffron", name: "Saffron", hue: 39,   sat: 0.95, light: 1.12, blurb: "Lantern amber" },
   { id: "ember",   name: "Ember",   hue: 18,   sat: 0.88, light: 0.72, blurb: "Banked coals" },
 ];
+
+/* -------------------------------------------------------------- frames */
+
+/**
+ * Composite poses bake the chair, cushion or laptop into the sprite, so the app
+ * cannot animate them with a CSS transform without lifting that furniture off
+ * the floor. Each composite pose therefore also ships a frame strip whose
+ * furniture pixels are byte-identical between frames: the extra frames are
+ * derived from the shipped sprite by repainting a couple of small character
+ * regions, never by regenerating the artwork.
+ *
+ * Regions are calibrated once per pose against the canonical `marlow` sprite.
+ * Recolouring never moves a pixel, so the same regions fit all ten presets.
+ * - `eyes`: one rect per eyeball, painted shut for the blink frame.
+ * - `claws`: one rect per claw, stretched `drop` rows toward the keys (a
+ *   negative `drop` reaches upward instead) for the press frame.
+ *
+ * Frame order in the strip is always: rest, blink (if `eyes`), press (if
+ * `claws`). `src/components/ui/marlow-lobster.tsx` mirrors the frame counts.
+ */
+const FRAME_POSES = {
+  "lobsters-sitting": { eyes: [[52, 14, 58, 21], [69, 14, 75, 21]] },
+  "lobsters-working": {
+    eyes: [[54, 4, 59, 12], [67, 4, 73, 12]],
+    claws: [{ rect: [70, 40, 106, 68], drop: 2 }],
+  },
+  "lobsters-idle-coffee": { eyes: [[51, 24, 57, 33], [67, 23, 74, 33]] },
+  "lobsters-idle-music": { claws: [{ rect: [16, 16, 44, 54], drop: -2 }] },
+  "lobsters-idle-reading": { eyes: [[52, 27, 60, 35], [67, 27, 75, 35]] },
+  "lobsters-idle-stretch": {
+    claws: [
+      { rect: [26, 0, 52, 36], drop: -2 },
+      { rect: [76, 0, 104, 36], drop: -2 },
+    ],
+  },
+  "lobsters-floor-working": {
+    eyes: [[36, 40, 49, 59], [50, 42, 65, 61]],
+    claws: [
+      { rect: [45, 88, 72, 114], drop: 2 },
+      { rect: [20, 66, 44, 92], drop: 1 },
+    ],
+  },
+  "lobsters-beach": { eyes: [[47, 22, 57, 32], [59, 21, 69, 31]] },
+};
+
+const at = (img, x, y) => (y * img.width + x) * 4;
+const isOpaque = (img, x, y) => img.data[at(img, x, y) + 3] >= 128;
+const hslAt = (img, x, y) => {
+  const d = at(img, x, y);
+  return rgbToHsl(img.data[d], img.data[d + 1], img.data[d + 2]);
+};
+
+/**
+ * Everything neutral inside an eye rect is eyeball: whites, pupil and glint.
+ * Row-span filling closes the gaps the pupil punches in the whites, and the
+ * outline pixels are kept so the closed eye still reads as an eye.
+ */
+function eyeRegion(img, [x0, y0, x1, y1]) {
+  const cells = new Set();
+  for (let y = y0; y <= y1; y++) {
+    let first = Infinity;
+    let last = -Infinity;
+    for (let x = x0; x <= x1; x++) {
+      if (!isOpaque(img, x, y)) continue;
+      const [, s] = hslAt(img, x, y);
+      if (s >= 0.3) continue;
+      first = Math.min(first, x);
+      last = Math.max(last, x);
+    }
+    for (let x = first; x <= last; x++) cells.add(`${x},${y}`);
+  }
+  const fill = [];
+  const rim = new Set();
+  let top = Infinity;
+  let bottom = -Infinity;
+  for (const key of cells) {
+    const [x, y] = key.split(",").map(Number);
+    fill.push([x, y]);
+    top = Math.min(top, y);
+    bottom = Math.max(bottom, y);
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (!cells.has(`${x + dx},${y + dy}`)) rim.add(key);
+      }
+    }
+  }
+  return { fill, rim, top, bottom };
+}
+
+/** Average shell colour hugging an eye — the pigment its lid is painted in. */
+function lidColor(img, eye) {
+  const inside = new Set(eye.fill.map(([x, y]) => `${x},${y}`));
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const [x, y] of eye.fill) {
+    x0 = Math.min(x0, x); x1 = Math.max(x1, x);
+    y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+  }
+  for (let pad = 2; pad <= 6; pad++) {
+    let r = 0, g = 0, b = 0, n = 0;
+    for (let y = y0 - pad; y <= y1 + pad; y++) {
+      for (let x = x0 - pad; x <= x1 + pad; x++) {
+        if (x < 0 || y < 0 || x >= img.width || y >= img.height) continue;
+        if (inside.has(`${x},${y}`) || !isOpaque(img, x, y)) continue;
+        const [, s, l] = hslAt(img, x, y);
+        if (s < 0.3 || l < 0.15 || l > 0.85) continue;
+        const d = at(img, x, y);
+        r += img.data[d]; g += img.data[d + 1]; b += img.data[d + 2];
+        n++;
+      }
+    }
+    if (n >= 6) return [Math.round(r / n), Math.round(g / n), Math.round(b / n)];
+  }
+  return null;
+}
+
+function shade([r, g, b], factor) {
+  const [h, s, l] = rgbToHsl(r, g, b);
+  return hslToRgb(h, s, clamp(l * factor, 0.04, 0.96));
+}
+
+/** Paints calibrated eyeballs shut, leaving every other pixel untouched. */
+function blinkFrame(img, eyes) {
+  const out = { width: img.width, height: img.height, data: Buffer.from(img.data) };
+  for (const eye of eyes) {
+    const lid = lidColor(img, eye);
+    if (!lid) continue;
+    const lash = Math.round((eye.top + eye.bottom) / 2);
+    // Big googly eyes keep their outline so the shut eye still reads as an eye;
+    // the pinhead eyes on the chair poses are outline all the way through.
+    const keepRim = eye.fill.length >= 60;
+    for (const [x, y] of eye.fill) {
+      if (keepRim && eye.rim.has(`${x},${y}`)) continue;
+      const tall = eye.bottom - eye.top >= 8;
+      const color =
+        y === lash || (tall && y === lash + 1)
+          ? shade(lid, 0.45)
+          : y < lash
+            ? shade(lid, 1.08)
+            : shade(lid, 0.88);
+      const d = at(out, x, y);
+      out.data[d] = color[0];
+      out.data[d + 1] = color[1];
+      out.data[d + 2] = color[2];
+      out.data[d + 3] = 255;
+    }
+  }
+  return out;
+}
+
+/** Warm shell pixels inside a claw rect, column by column. */
+function clawRegion(img, [x0, y0, x1, y1]) {
+  const columns = new Map();
+  for (let x = x0; x <= x1; x++) {
+    const rows = [];
+    for (let y = y0; y <= y1; y++) {
+      if (!isOpaque(img, x, y)) continue;
+      const [h, s] = hslAt(img, x, y);
+      if (s >= 0.35 && (h <= 45 || h >= 320)) rows.push(y);
+    }
+    if (rows.length) columns.set(x, rows);
+  }
+  return columns;
+}
+
+/**
+ * Stretches a claw toward the keys: each masked column is redrawn `drop` rows
+ * further on, with its leading row repeated so the claw never tears open. Only
+ * the claw grows — furniture above it is never read, only briefly covered.
+ */
+function pressFrame(img, claws) {
+  const out = { width: img.width, height: img.height, data: Buffer.from(img.data) };
+  for (const { columns, drop } of claws) {
+    const step = Math.sign(drop);
+    for (const [x, rows] of columns) {
+      const masked = new Set(rows);
+      const lead = step > 0 ? rows[0] : rows[rows.length - 1];
+      const tail = step > 0 ? rows[rows.length - 1] : rows[0];
+      const stops = [];
+      for (let y = tail + drop; y !== lead - step; y -= step) stops.push(y);
+      for (const y of stops) {
+        if (y < 0 || y >= img.height) continue;
+        const src = y - drop;
+        const from = step > 0 ? (src < lead ? lead : src) : src > lead ? lead : src;
+        if (from !== lead && !masked.has(from)) continue;
+        const s = at(img, x, from);
+        const d = at(out, x, y);
+        out.data[d] = img.data[s];
+        out.data[d + 1] = img.data[s + 1];
+        out.data[d + 2] = img.data[s + 2];
+        out.data[d + 3] = img.data[s + 3];
+      }
+    }
+  }
+  return out;
+}
+
+function frameStrip(frames) {
+  const size = frames[0].height;
+  const width = size * frames.length;
+  const data = Buffer.alloc(width * size * 4);
+  frames.forEach((frame, i) => {
+    for (let y = 0; y < size; y++) {
+      frame.data.copy(data, (y * width + i * size) * 4, y * size * 4, (y + 1) * size * 4);
+    }
+  });
+  return { width, height: size, data };
+}
+
+/** Writes `<preset>-frames.png` for one pose folder from its shipped sprites. */
+function buildFrames(folder) {
+  const config = FRAME_POSES[folder];
+  if (!config) throw new Error(`no frame recipe for ${folder}`);
+  const dir = resolve(HERE, "../public/images", folder);
+  const canonical = decodePng(readFileSync(resolve(dir, "marlow.png")));
+  // Geometry is shared by every preset, so calibrate the regions once.
+  const eyes = (config.eyes ?? []).map((rect) => eyeRegion(canonical, rect));
+  const claws = (config.claws ?? []).map(({ rect, drop }) => ({
+    columns: clawRegion(canonical, rect),
+    drop,
+  }));
+
+  for (const { id } of VARIANTS) {
+    const sprite = decodePng(readFileSync(resolve(dir, `${id}.png`)));
+    const frames = [sprite];
+    if (eyes.length) frames.push(blinkFrame(sprite, eyes));
+    if (claws.length) frames.push(pressFrame(sprite, claws));
+    writeFileSync(resolve(dir, `${id}-frames.png`), encodePng(frameStrip(frames)));
+  }
+  const count = 1 + (eyes.length ? 1 : 0) + (claws.length ? 1 : 0);
+  console.log(`${folder}: ${VARIANTS.length} strips of ${count} frames`);
+}
+
+if (FRAMES) {
+  const folders = FRAMES === "all" ? Object.keys(FRAME_POSES) : [FRAMES];
+  for (const folder of folders) buildFrames(folder);
+  process.exit(0);
+}
+
+/* ------------------------------------------------------------ pipeline */
 
 const source = decodePng(readFileSync(SOURCE));
 keyOutBackground(source);
