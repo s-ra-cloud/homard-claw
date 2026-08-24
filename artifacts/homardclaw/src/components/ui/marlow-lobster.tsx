@@ -101,6 +101,39 @@ const POSE_FRAMES: Partial<Record<LobsterPose, 2 | 3>> = {
   beach: 2,
 };
 
+/**
+ * One character scale for a whole scene.
+ *
+ * Every composite bakes its furniture into the same 128px box, so the lobster
+ * inside is a different size in every pose. Measured on the shipped
+ * house-colour sprites (shell pixels only, antennae and legs excluded) the
+ * character's body box is: standing 108x127, seated 60x91, working 79x88,
+ * idle-coffee 75x92, idle-music 92x93, idle-reading 66x96, idle-stretch 72x92,
+ * floor-working 94x107, beach 97x118.
+ *
+ * A pose's scale is the sprite box a scene must render for the character to
+ * come out at a given character size, with the standing sprite as 1. The six
+ * chair poses deliberately share one scale, derived from their mean body box:
+ * the chair is the same piece of furniture in all of them and must not resize
+ * when a status change swaps one chair pose for another.
+ *
+ * floor-working measures 1.17 by body box, but that composite is drawn with a
+ * much larger head, so at 1.17 it still reads as a bigger character beside the
+ * chair poses. 1.07 was settled by compositing the real sprites onto the real
+ * office artwork. Beach is the raw measurement — the retirement island sizes
+ * its sprites directly and does not use this table.
+ */
+export const POSE_CHARACTER_SCALE: Record<LobsterPose, number> = {
+  standing: 1,
+  seated: 1.42,
+  working: 1.42,
+  "idle-coffee": 1.42,
+  "idle-music": 1.42,
+  "idle-reading": 1.42,
+  "idle-stretch": 1.42,
+  "floor-working": 1.07,
+  beach: 1.09,
+};
 const POSE_FOLDERS: Record<LobsterPose, string> = {
   standing: "lobsters",
   seated: "lobsters-sitting",

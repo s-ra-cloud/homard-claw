@@ -11,7 +11,11 @@ import {
   ApprovalDecisionDecision,
 } from "@workspace/api-client-react";
 import { Shell } from "@/components/layout/Shell";
-import { MarlowLobster, type LobsterPose } from "@/components/ui/marlow-lobster";
+import {
+  MarlowLobster,
+  POSE_CHARACTER_SCALE,
+  type LobsterPose,
+} from "@/components/ui/marlow-lobster";
 import { useQueryClient } from "@tanstack/react-query";
 import { useImmersiveMode } from "@/hooks/useImmersiveMode";
 import "./office-dashboard.css";
@@ -31,19 +35,32 @@ const DESK_SEATS = [
   { left: 69.5, top: 72.0, label: "filing desk" }, // knee space 65.0–73.4%
 ];
 
-// The original scene intentionally leaves its centre open: a wide band behind
-// the two front desks, a corridor pinched between their inner corners around
-// 63% down, and open floor in front of them. The cushions form a diamond
-// centred in that empty area so no composite touches a desk, cabinet or wall.
+// Open floorboards in the original scene, measured by compositing the sprites
+// onto the room artwork. The floor is not one open square: the two lower rooms
+// are walled off by diagonals that cut in from (15%, 46%) and (79%, 51%), so
+// the usable space is the area between the back desks, a corridor pinched to
+// x 38%-60% between the front desks' inner corners, and the floor in front of
+// them. The four seats are spread across those three areas rather than stacked
+// down the centre, and each one keeps a margin to every desk, cabinet, plant
+// and wall at the sizes below.
 // Each floor pose is a complete lobster + cushion + laptop composite, so no
 // floor furniture is added to the background and nothing is rendered twice.
 const FLOOR_SEATS = [
-  { left: 50.0, top: 45.0, label: "back floor mat" },
-  { left: 42.0, top: 58.0, label: "left floor mat" },
-  { left: 58.0, top: 58.0, label: "right floor mat" },
-  { left: 50.0, top: 71.0, label: "front floor mat" },
+  { left: 44.0, top: 44.0, label: "back floor mat" },
+  { left: 57.0, top: 47.0, label: "library-side floor mat" },
+  { left: 41.0, top: 66.0, label: "corridor floor mat" },
+  { left: 55.0, top: 79.0, label: "front floor mat" },
 ];
 
+/**
+ * One character size for the whole room, as a share of the (square) scene
+ * container, so the lobsters scale with the artwork instead of drifting
+ * against it: 8.7% renders the chair poses at ~12.4% of the room, the share a
+ * 96px desk agent covered on a desktop before the sprites were pinned to
+ * pixels. Both groups are driven from this one number, so a floor agent can
+ * never end up a different size from a desk agent.
+ */
+const CHARACTER_PCT = 8.7;
 /**
  * Floor cushions overlap by depth: the further back a mat sits, the lower it
  * draws. Everything stays below the desk agents, which own z-index 12.
@@ -52,6 +69,7 @@ function floorZIndex(top: number) {
   return 3 + Math.round(top / 10);
 }
 
+const DESK_Z_INDEX = 12;
 const MAX_VISIBLE = DESK_SEATS.length + FLOOR_SEATS.length; // 8
 
 /** Breaks an agent can take between tasks. */
@@ -234,6 +252,29 @@ export default function OfficeDashboard() {
   const floorAgents = activeAgents.slice(DESK_SEATS.length, MAX_VISIBLE);
   const overflowCount = Math.max(0, activeAgents.length - MAX_VISIBLE);
 
+  // Every seated agent, sprite size included, so the name tags can be drawn as
+  // one layer on top of every lobster instead of inside their own sprite's
+  // stacking context, where a nearer neighbour would cover them.
+  const seatedAgents = [
+    ...floorAgents.map((agent, index) => {
+      const seat = FLOOR_SEATS[index];
+      return {
+        agent,
+        seat,
+        pose: "floor-working" as LobsterPose,
+        zIndex: floorZIndex(seat.top),
+      };
+    }),
+    ...deskAgents.map((agent, index) => ({
+      agent,
+      seat: DESK_SEATS[index],
+      pose: stopped
+        ? ("seated" as LobsterPose)
+        : poseForAgent(agent.status, idleActivities[agent.id]),
+      zIndex: DESK_Z_INDEX,
+    })),
+  ];
+
   return (
     <Shell immersive={immersive}>
       <section className={`iso-office${immersive ? " is-immersive" : ""}`}>
@@ -285,63 +326,53 @@ export default function OfficeDashboard() {
                   />
                 ))}
 
-                {/* ── Desk agent lobsters — click → /agents ── */}
-                {deskAgents.map((agent, index) => {
-                  const seat = DESK_SEATS[index];
-                  return (
-                    <div
-                      key={agent.id}
-                      className="room-agent"
-                      style={{ left: `${seat.left}%`, top: `${seat.top}%` }}
+                {/* ── Agent lobsters, desk and floor — click → /agents ── */}
+                {seatedAgents.map(({ agent, seat, pose, zIndex }) => (
+                  <div
+                    key={agent.id}
+                    className="room-agent"
+                    style={{
+                      left: `${seat.left}%`,
+                      top: `${seat.top}%`,
+                      // Share of the room, per pose, so every lobster is the
+                      // same character size whatever furniture it comes with.
+                      width: `${spritePct(pose)}%`,
+                      zIndex,
+                    }}
+                  >
+                    <Link
+                      href="/agents"
+                      className="room-agent__link"
+                      aria-label={`${agent.name} at the ${seat.label}`}
                     >
-                      <Link
-                        href="/agents"
-                        className="room-agent__link"
-                        aria-label={`${agent.name} at the ${seat.label}`}
-                      >
-                        <MarlowLobster
-                          size={96}
-                          pose={stopped ? "seated" : poseForAgent(agent.status, idleActivities[agent.id])}
-                          status={stopped ? "paused" : agent.status}
-                          shellColor={agent.avatar.shellColor}
-                          title={`${agent.name} at the ${seat.label}`}
-                        />
-                        <span className="room-agent__name">{agent.name}</span>
-                      </Link>
-                    </div>
-                  );
-                })}
+                      <MarlowLobster
+                        pose={pose}
+                        status={stopped ? "paused" : agent.status}
+                        shellColor={agent.avatar.shellColor}
+                        title={`${agent.name} at the ${seat.label}`}
+                      />
+                    </Link>
+                  </div>
+                ))}
 
-                {/* ── Floor agent lobsters — click → /agents ── */}
-                {floorAgents.map((agent, index) => {
-                  const seat = FLOOR_SEATS[index];
-                  return (
-                    <div
-                      key={agent.id}
-                      className="room-agent room-agent--floor"
-                      style={{
-                        left: `${seat.left}%`,
-                        top: `${seat.top}%`,
-                        zIndex: floorZIndex(seat.top),
-                      }}
-                    >
-                      <Link
-                        href="/agents"
-                        className="room-agent__link"
-                        aria-label={`${agent.name} at the ${seat.label}`}
-                      >
-                        <MarlowLobster
-                          size={80}
-                          pose="floor-working"
-                          status={stopped ? "paused" : agent.status}
-                          shellColor={agent.avatar.shellColor}
-                          title={`${agent.name} at the ${seat.label}`}
-                        />
-                        <span className="room-agent__name">{agent.name}</span>
-                      </Link>
-                    </div>
-                  );
-                })}
+                {/* ── Name tags, above every sprite so none can be hidden ── */}
+                {seatedAgents.map(({ agent, seat, pose }) => (
+                  <Link
+                    key={`${agent.id}-name`}
+                    href="/agents"
+                    className="room-agent__name"
+                    style={{
+                      left: `${seat.left}%`,
+                      top: `calc(${seat.top + spritePct(pose) / 2}% - 2px)`,
+                    }}
+                    /* The sprite above already carries this agent's link. */
+                    aria-hidden="true"
+                    tabIndex={-1}
+                    title={agent.name}
+                  >
+                    {agent.name}
+                  </Link>
+                ))}
               </div>
             </div>
           </section>
@@ -479,3 +510,8 @@ const SCENE_HOTSPOTS: SceneHotspot[] = [
     height: "28%",
   },
 ];
+
+/** Sprite box a pose needs to show the character at CHARACTER_PCT. */
+function spritePct(pose: LobsterPose) {
+  return CHARACTER_PCT * POSE_CHARACTER_SCALE[pose];
+}
