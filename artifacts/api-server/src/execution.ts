@@ -85,6 +85,8 @@ function mapHttpError(status: number): ProviderCallError {
   );
 }
 
+import { sanitizeErrorMessage } from "./lib/sanitize";
+
 function mapNetworkError(error: unknown, signal: AbortSignal): ProviderCallError {
   if (error instanceof Error && error.name === "AbortError") {
     // The worker aborts for the per-call timeout, an owner cancellation, or
@@ -94,9 +96,14 @@ function mapNetworkError(error: unknown, signal: AbortSignal): ProviderCallError
       ? new ProviderCallError("timeout", "The provider call timed out.")
       : new ProviderCallError("cancelled", "The call was aborted.");
   }
+  // Network/SDK error messages are arbitrary and can echo request material
+  // (proxies sometimes include the failing request's headers). Scrub them
+  // before they reach durable errorMessage/log/notification storage.
   return new ProviderCallError(
     "provider_error",
-    error instanceof Error ? error.message : "Unknown network error",
+    error instanceof Error
+      ? sanitizeErrorMessage(error.message)
+      : "Unknown network error",
   );
 }
 

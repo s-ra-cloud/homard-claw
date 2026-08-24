@@ -7,3 +7,4 @@
 - [Postgres advisory locks](postgres-advisory-locks.md) — Key registry; the worker lease holds 0x484f4d41 forever, so new xact locks need distinct keys or everything hangs.
 - [Voice conversations](voice-conversations.md) — Managed OpenAI is only mouth/ears; agent replies use native providers, and chat can only propose tasks, never queue them.
 - [Durable scheduling](durable-scheduling.md) — Schedules fire via claim → dispatch → finalize with evidence-based crash recovery; paused agents defer, and tests scope the scheduler like the worker.
+- [Drizzle error wrapping](drizzle-error-wrapping.md) — Pg error codes hide on the cause chain of DrizzleQueryError; walk it or unique-violation checks silently 500.

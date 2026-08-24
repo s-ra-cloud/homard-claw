@@ -233,12 +233,14 @@ async function findNameConflict(
 }
 
 function isUniqueViolation(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: string }).code === "23505"
-  );
+  // Drizzle wraps driver errors (DrizzleQueryError), so the Postgres error
+  // code lives on the cause chain, not the thrown error itself.
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && typeof current === "object" && current !== null; depth += 1) {
+    if ((current as { code?: string }).code === "23505") return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
 }
 
 router.get("/office/overview", async (_req, res): Promise<void> => {
