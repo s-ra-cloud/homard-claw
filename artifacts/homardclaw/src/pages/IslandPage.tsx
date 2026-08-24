@@ -31,7 +31,7 @@ const SALUTES = [
 ];
 
 export default function IslandPage() {
-  const { immersive } = useImmersiveMode();
+  const { immersive, enterImmersive } = useImmersiveMode();
   const { data: retired, isLoading, isError } = useListRetiredAgents();
   const [salute, setSalute] = useState<{ id: string; text: string } | null>(null);
 
@@ -46,7 +46,7 @@ export default function IslandPage() {
   };
 
   return (
-    <Shell immersive={immersive}>
+    <Shell immersive={immersive} onEnterImmersive={enterImmersive}>
       <section className={`island${immersive ? " is-immersive" : ""}`}>
         <header className="island__bar">
           <div className="island__brand">

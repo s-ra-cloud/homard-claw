@@ -102,6 +102,25 @@
 }
 /* Paused and error hold the rest frame — stillness is the tell. */
 
+/*
+ * Activity-specific idle cadences — the base calm rule above applies to every
+ * idle pose; these overrides dial in a rhythm that fits the activity.
+ *
+ * Music: faster claw-bob (2 frames) so the beat reads clearly.
+ * Coffee: slightly quicker calm cycle so the sip shows up more often.
+ * Reading: keep the full 5.4s — a slow page-turn feels more natural.
+ */
+.marlow-lobster--frames.marlow-lobster--pose-idle-music.marlow-lobster--idle,
+.marlow-lobster--frames.marlow-lobster--pose-idle-music.marlow-lobster--queued,
+.marlow-lobster--frames.marlow-lobster--pose-idle-music.marlow-lobster--complete {
+  animation: marlow-frames-calm 2.6s step-end infinite;
+}
+.marlow-lobster--frames.marlow-lobster--pose-idle-coffee.marlow-lobster--idle,
+.marlow-lobster--frames.marlow-lobster--pose-idle-coffee.marlow-lobster--queued,
+.marlow-lobster--frames.marlow-lobster--pose-idle-coffee.marlow-lobster--complete {
+  animation: marlow-frames-calm 4.2s step-end infinite;
+}
+
 @keyframes marlow-frames-busy {
   0% { background-position-x: 0%; }
   10% { background-position-x: var(--marlow-stir); }

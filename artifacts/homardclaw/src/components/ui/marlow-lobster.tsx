@@ -93,9 +93,9 @@ export type LobsterPose =
 const POSE_FRAMES: Partial<Record<LobsterPose, 2 | 3>> = {
   seated: 2,
   working: 3,
-  "idle-coffee": 2,
+  "idle-coffee": 3,
   "idle-music": 2,
-  "idle-reading": 2,
+  "idle-reading": 3,
   "idle-stretch": 2,
   "floor-working": 3,
   beach: 2,

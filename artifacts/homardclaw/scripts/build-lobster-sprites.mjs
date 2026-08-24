@@ -427,9 +427,21 @@ const FRAME_POSES = {
     eyes: [[54, 4, 59, 12], [67, 4, 73, 12]],
     claws: [{ rect: [70, 40, 106, 68], drop: 2 }],
   },
-  "lobsters-idle-coffee": { eyes: [[51, 24, 57, 33], [67, 23, 74, 33]] },
-  "lobsters-idle-music": { claws: [{ rect: [16, 16, 44, 54], drop: -2 }] },
-  "lobsters-idle-reading": { eyes: [[52, 27, 60, 35], [67, 27, 75, 35]] },
+  // Frame order: rest, blink, sip (left arm raises cup toward mouth).
+  // The cup's neutral pixels do not move; only the warm arm pixels shift up.
+  "lobsters-idle-coffee": {
+    eyes: [[51, 24, 57, 33], [67, 23, 74, 33]],
+    claws: [{ rect: [17, 36, 57, 65], drop: -4 }],
+  },
+  // Frame order: rest, claw-bob (left claw lifts with the beat, drop increased
+  // from -2 to -4 so the motion reads clearly at small sizes).
+  "lobsters-idle-music": { claws: [{ rect: [16, 14, 46, 56], drop: -4 }] },
+  // Frame order: rest, blink, right-arm-lift (right claw rises slightly as if
+  // reaching to turn a page, while the book and left arm stay planted).
+  "lobsters-idle-reading": {
+    eyes: [[52, 27, 60, 35], [67, 27, 75, 35]],
+    claws: [{ rect: [84, 44, 100, 72], drop: -3 }],
+  },
   "lobsters-idle-stretch": {
     claws: [
       { rect: [26, 0, 52, 36], drop: -2 },
