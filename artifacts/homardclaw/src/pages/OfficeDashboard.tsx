@@ -1,5 +1,5 @@
 import React from "react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { AlertTriangle, ShieldCheck } from "lucide-react";
 import {
   useGetOfficeOverview,
@@ -12,9 +12,11 @@ import {
 import { Shell } from "@/components/layout/Shell";
 import { MarlowLobster, type LobsterPose } from "@/components/ui/marlow-lobster";
 import { useQueryClient } from "@tanstack/react-query";
+import { useImmersiveMode } from "@/hooks/useImmersiveMode";
 import "./office-dashboard.css";
 
-const officeArt = `${import.meta.env.BASE_URL}images/four-desk-office.png`;
+// Use the server-rack edition if available, fall back to the original.
+const officeArt = `${import.meta.env.BASE_URL}images/four-desk-office-server.png`;
 
 // Chair centres in the original office scene. Agent sprites are layered on top
 // so every employee is rendered by the same canonical component as the roster.
@@ -65,7 +67,26 @@ function poseForAgent(
   return "seated";
 }
 
+/**
+ * Scene shortcut hotspots layered over the office artwork.
+ * Agent seats are handled separately as focusable Link wrappers;
+ * these cover static props: beach picture, library, approvals computer, server unit.
+ */
+interface SceneHotspot {
+  href: string;
+  label: string;         // shown as tooltip on hover/focus
+  ariaLabel: string;     // accessible name for screen readers
+  /** Centre position as a percentage of the room-scene container. */
+  left: string;
+  top: string;
+  /** Hit-area dimensions as percentages. */
+  width: string;
+  height: string;
+  extraClass?: string;
+}
 export default function OfficeDashboard() {
+  const immersive = useImmersiveMode();
+
   const { data: overview, isLoading, isError } = useGetOfficeOverview();
   const {
     data: agents,
@@ -156,10 +177,16 @@ export default function OfficeDashboard() {
   const stopped = overview.emergencyStop;
   const nextApproval = approvals?.find((a) => a.status === "pending");
   const justDecided = decideApproval.isSuccess ? decideApproval.variables : undefined;
+  const hasPendingApprovals = (overview.pendingApprovals ?? 0) > 0;
+
+  const activeAgents = (agents ?? []).filter((a) => !a.archived);
+  const deskAgents = activeAgents.slice(0, DESK_SEATS.length);
+  const floorAgents = activeAgents.slice(DESK_SEATS.length, MAX_VISIBLE);
+  const overflowCount = Math.max(0, activeAgents.length - MAX_VISIBLE);
 
   return (
-    <Shell>
-      <section className="iso-office">
+    <Shell immersive={immersive}>
+      <section className={`iso-office${immersive ? " is-immersive" : ""}`}>
         <header className="iso-office__bar">
           <div className="iso-office__brand">
             <b>HOMARD</b>CLAW / four-desk office
@@ -176,12 +203,6 @@ export default function OfficeDashboard() {
         )}
 
         <main className="iso-office__layout">
-          {(() => {
-            const activeAgents = (agents ?? []).filter((a) => !a.archived);
-            const deskAgents = activeAgents.slice(0, DESK_SEATS.length);
-            const floorAgents = activeAgents.slice(DESK_SEATS.length, MAX_VISIBLE);
-            const overflowCount = Math.max(0, activeAgents.length - MAX_VISIBLE);
-            return (
           <section className={`room-wrap ${stopped ? "is-paused" : ""}`} aria-label="Live office with four desks and four floor workstations">
             <div className="room-caption">LIVE VIEW / FOUR-DESK OFFICE{stopped ? " / PAUSED" : ""}</div>
             {overflowCount > 0 && (
@@ -192,6 +213,29 @@ export default function OfficeDashboard() {
             <div className="room-art">
               <div className="room-scene">
                 <img src={officeArt} alt="Isometric pixel-art HomardClaw office with four desks and an open central floor" />
+
+                {/* ── Static scene navigation hotspots ── */}
+                {SCENE_HOTSPOTS.map((spot) => (
+                  <Link
+                    key={spot.href}
+                    href={spot.href}
+                    className={`scene-hotspot ${spot.extraClass ?? ""}${
+                      spot.extraClass === "scene-hotspot--approval" && hasPendingApprovals
+                        ? " has-pending"
+                        : ""
+                    }`}
+                    data-label={spot.label}
+                    aria-label={spot.ariaLabel}
+                    style={{
+                      left: spot.left,
+                      top: spot.top,
+                      width: spot.width,
+                      height: spot.height,
+                    }}
+                  />
+                ))}
+
+                {/* ── Desk agent lobsters — click → /agents ── */}
                 {deskAgents.map((agent, index) => {
                   const seat = DESK_SEATS[index];
                   return (
@@ -199,19 +243,26 @@ export default function OfficeDashboard() {
                       key={agent.id}
                       className="room-agent"
                       style={{ left: `${seat.left}%`, top: `${seat.top}%` }}
-                      title={`${agent.name} at the ${seat.label}`}
                     >
-                      <MarlowLobster
-                        size={96}
-                        pose={stopped ? "seated" : poseForAgent(agent.status, idleActivities[agent.id])}
-                        status={stopped ? "paused" : agent.status}
-                        shellColor={agent.avatar.shellColor}
-                        title={`${agent.name} at the ${seat.label}`}
-                      />
-                      <span className="room-agent__name">{agent.name}</span>
+                      <Link
+                        href="/agents"
+                        className="room-agent__link"
+                        aria-label={`${agent.name} at the ${seat.label}`}
+                      >
+                        <MarlowLobster
+                          size={96}
+                          pose={stopped ? "seated" : poseForAgent(agent.status, idleActivities[agent.id])}
+                          status={stopped ? "paused" : agent.status}
+                          shellColor={agent.avatar.shellColor}
+                          title={`${agent.name} at the ${seat.label}`}
+                        />
+                        <span className="room-agent__name">{agent.name}</span>
+                      </Link>
                     </div>
                   );
                 })}
+
+                {/* ── Floor agent lobsters — click → /agents ── */}
                 {floorAgents.map((agent, index) => {
                   const seat = FLOOR_SEATS[index];
                   return (
@@ -219,24 +270,27 @@ export default function OfficeDashboard() {
                       key={agent.id}
                       className="room-agent room-agent--floor"
                       style={{ left: `${seat.left}%`, top: `${seat.top}%` }}
-                      title={`${agent.name} at the ${seat.label}`}
                     >
-                      <MarlowLobster
-                        size={80}
-                        pose="floor-working"
-                        status={stopped ? "paused" : agent.status}
-                        shellColor={agent.avatar.shellColor}
-                        title={`${agent.name} at the ${seat.label}`}
-                      />
-                      <span className="room-agent__name">{agent.name}</span>
+                      <Link
+                        href="/agents"
+                        className="room-agent__link"
+                        aria-label={`${agent.name} at the ${seat.label}`}
+                      >
+                        <MarlowLobster
+                          size={80}
+                          pose="floor-working"
+                          status={stopped ? "paused" : agent.status}
+                          shellColor={agent.avatar.shellColor}
+                          title={`${agent.name} at the ${seat.label}`}
+                        />
+                        <span className="room-agent__name">{agent.name}</span>
+                      </Link>
                     </div>
                   );
                 })}
               </div>
             </div>
           </section>
-            );
-          })()}
 
           <aside className="side-panel">
             <section className="quiet-card rail-control">
@@ -313,3 +367,43 @@ export default function OfficeDashboard() {
     </Shell>
   );
 }
+
+const SCENE_HOTSPOTS: SceneHotspot[] = [
+  {
+    href: "/island",
+    label: "Retirement Island",
+    ariaLabel: "Beach painting — open Retirement Island",
+    left: "82%",
+    top: "18%",
+    width: "10%",
+    height: "10%",
+  },
+  {
+    href: "/tasks",
+    label: "Tasks",
+    ariaLabel: "Library bookshelf — open Tasks",
+    left: "51%",
+    top: "13%",
+    width: "16%",
+    height: "13%",
+  },
+  {
+    href: "/approvals",
+    label: "Approvals",
+    ariaLabel: "Window desk computer — open Approvals",
+    left: "18%",
+    top: "31%",
+    width: "11%",
+    height: "10%",
+    extraClass: "scene-hotspot--approval",
+  },
+  {
+    href: "/providers",
+    label: "Providers",
+    ariaLabel: "Server rack — open Providers",
+    left: "87%",
+    top: "68%",
+    width: "10%",
+    height: "13%",
+  },
+];

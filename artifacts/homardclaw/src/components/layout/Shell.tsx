@@ -13,7 +13,12 @@ const navItems = [
   { href: "/island", label: "Island", icon: Palmtree },
 ];
 
-export function Shell({ children }: { children: React.ReactNode }) {
+interface ShellProps {
+  children: React.ReactNode;
+  /** When true, hides the sidebar and mobile header so the scene fills the viewport. */
+  immersive?: boolean;
+}
+export function Shell({ children, immersive = false }: ShellProps) {
   const [location] = useLocation();
   const { user } = useUser();
   const { signOut } = useClerk();
@@ -26,6 +31,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     setNavOpen(false);
   }, [location]);
+
+  // Immersive mode always closes the mobile drawer.
+  useEffect(() => {
+    if (immersive) setNavOpen(false);
+  }, [immersive]);
 
   // Growing past the lg breakpoint turns the drawer back into the permanent
   // sidebar, so a stale "open" flag must not survive into desktop.
@@ -99,14 +109,15 @@ export function Shell({ children }: { children: React.ReactNode }) {
         />
       )}
 
-      {/* Sidebar — permanent from lg up, off-canvas drawer below it */}
+      {/* Sidebar — hidden in immersive mode; permanent from lg up otherwise */}
       <aside
         id="main-nav"
         ref={navRef}
         aria-label="Main navigation"
+        aria-hidden={immersive || undefined}
         {...(navOpen ? { role: "dialog" as const, "aria-modal": true } : {})}
         className={`fixed inset-y-0 left-0 z-40 w-[min(17rem,85vw)] flex flex-col border-r-4 border-border bg-card pixel-shadow transition-transform duration-200 ease-out lg:static lg:z-10 lg:w-64 lg:shrink-0 lg:translate-x-0 ${
-          navOpen ? "translate-x-0" : "-translate-x-full"
+          immersive ? "hidden" : navOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
         <div className="p-4 sm:p-6 border-b-4 border-border bg-muted/30">
@@ -175,30 +186,60 @@ export function Shell({ children }: { children: React.ReactNode }) {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0" ref={contentRef}>
-        {/* Mobile top bar */}
-        <header className="lg:hidden flex items-center gap-3 h-14 shrink-0 px-3 border-b-4 border-border bg-card z-20">
-          <button
-            type="button"
-            onClick={() => setNavOpen(true)}
-            className="flex items-center justify-center w-10 h-10 border-2 border-border bg-muted/40 text-foreground pixel-shadow"
-            aria-label="Open menu"
-            aria-expanded={navOpen}
-            aria-controls="main-nav"
-          >
-            <Menu className="w-5 h-5" />
-          </button>
-          <div className="w-8 h-8 bg-primary pixel-shadow flex items-center justify-center shrink-0">
-            <span className="font-display text-white text-xs">HC</span>
-          </div>
-          <span className="font-display text-xs text-primary uppercase tracking-tighter truncate">
-            {currentPage?.label ?? "HomardClaw"}
-          </span>
-        </header>
+        {/* Mobile top bar — hidden in immersive mode */}
+        {!immersive && (
+          <header className="lg:hidden flex items-center gap-3 h-14 shrink-0 px-3 border-b-4 border-border bg-card z-20">
+            <button
+              type="button"
+              onClick={() => setNavOpen(true)}
+              className="flex items-center justify-center w-10 h-10 border-2 border-border bg-muted/40 text-foreground pixel-shadow"
+              aria-label="Open menu"
+              aria-expanded={navOpen}
+              aria-controls="main-nav"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+            <div className="w-8 h-8 bg-primary pixel-shadow flex items-center justify-center shrink-0">
+              <span className="font-display text-white text-xs">HC</span>
+            </div>
+            <span className="font-display text-xs text-primary uppercase tracking-tighter truncate">
+              {currentPage?.label ?? "HomardClaw"}
+            </span>
+          </header>
+        )}
 
         <main className="flex-1 overflow-y-auto overflow-x-hidden bg-background relative z-0">
           {children}
         </main>
       </div>
+
+      {/* Non-interactive ESC hint shown only during immersive mode */}
+      {immersive && (
+        <div
+          className="fixed bottom-4 right-4 z-[60] pointer-events-none select-none"
+          role="status"
+          aria-live="polite"
+          aria-label="Press Escape to exit immersive view"
+        >
+          <span
+            style={{
+              fontFamily: "'Space Mono', monospace",
+              fontSize: "10px",
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: "0.5px",
+              color: "rgba(255, 240, 205, 0.75)",
+              background: "rgba(43, 39, 51, 0.65)",
+              border: "2px solid rgba(255, 240, 205, 0.3)",
+              padding: "4px 10px",
+              display: "block",
+              boxShadow: "2px 2px 0 rgba(0,0,0,0.4)",
+            }}
+          >
+            ESC — exit
+          </span>
+        </div>
+      )}
     </div>
   );
 }

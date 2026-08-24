@@ -39,11 +39,163 @@
 .room-art { position: relative; width: 100%; max-height: calc(100dvh - 120px); display: flex; justify-content: center; align-items: center; overflow: hidden; background: #8fa9a5; border: 4px solid var(--ink); box-shadow: 7px 7px 0 #546b72; }
 .room-scene { position: relative; width: min(100%, calc(100dvh - 128px)); aspect-ratio: 1; flex: 0 0 auto; }
 .room-scene > img { display: block; width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
-.room-agent { position: absolute; z-index: 4; display: flex; flex-direction: column; align-items: center; transform: translate(-50%, -50%); pointer-events: none; }
+
+/* ── Agent sprites ── */
+.room-agent { position: absolute; z-index: 4; display: flex; flex-direction: column; align-items: center; transform: translate(-50%, -50%); }
 .room-agent .marlow-lobster { filter: drop-shadow(2px 3px 0 rgba(43, 39, 51, 0.5)); }
 .room-agent--floor { z-index: 3; }
 .room-agent__name { margin-top: -3px; padding: 1px 4px; border: 1px solid var(--ink); background: var(--paper); color: var(--ink); font: 700 7px "Space Mono", monospace; text-transform: uppercase; white-space: nowrap; box-shadow: 1px 1px 0 rgba(43, 39, 51, 0.55); }
 
+/* Agent link wrapper: covers the sprite + name, keyboard/click navigates to Agents */
+.room-agent__link {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+}
+.room-agent__link:focus-visible {
+  outline: 2px dashed rgba(255, 247, 223, 0.9);
+  outline-offset: 3px;
+}
+
+/* ── Static scene hotspots (beach picture, library, approvals computer, server) ── */
+.scene-hotspot {
+  position: absolute;
+  z-index: 2;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  /* Centered on the given coordinate */
+  transform: translate(-50%, -50%);
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+
+.scene-hotspot:focus-visible {
+  outline: 2px dashed rgba(255, 247, 223, 0.85);
+  outline-offset: 3px;
+}
+
+/* Pixel-art tooltip shown on hover and keyboard focus for non-agent hotspots */
+.scene-hotspot[data-label]:hover::after,
+.scene-hotspot[data-label]:focus-visible::after {
+  content: attr(data-label);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--paper);
+  border: 2px solid var(--ink);
+  padding: 3px 8px;
+  font: 700 9px "Space Mono", monospace;
+  text-transform: uppercase;
+  white-space: nowrap;
+  box-shadow: 2px 2px 0 rgba(43, 39, 51, 0.5);
+  color: var(--ink);
+  z-index: 20;
+  pointer-events: none;
+}
+
+/* ── Approvals computer — pending indicator ── */
+
+/* Pixel-style ping badge in corner of the hotspot */
+.scene-hotspot--approval::after {
+  /* Override the tooltip ::after when not hovered/focused — hide the badge by default */
+  content: none;
+}
+
+/* Re-enable tooltip when hovered/focused */
+.scene-hotspot--approval[data-label]:hover::after,
+.scene-hotspot--approval[data-label]:focus-visible::after {
+  content: attr(data-label);
+  /* Inherits all tooltip styles above */
+}
+
+/* Pending approval: subtle warm blink on the monitor hotspot */
+@keyframes approval-pulse {
+  0%, 100% { background: rgba(255, 216, 110, 0.0); }
+  50%       { background: rgba(255, 216, 110, 0.28); }
+}
+
+.scene-hotspot--approval.has-pending {
+  animation: approval-pulse 1.4s steps(2) infinite;
+}
+
+/* The pulsing badge dot */
+.scene-hotspot--approval.has-pending::before {
+  content: "";
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  background: #e4514b;
+  border: 1px solid var(--paper);
+  z-index: 5;
+  animation: badge-blink 1.4s steps(2) infinite;
+}
+
+@keyframes badge-blink {
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scene-hotspot--approval.has-pending {
+    animation: none;
+    background: rgba(255, 216, 110, 0.22);
+    outline: 2px solid #ffd86e;
+  }
+  .scene-hotspot--approval.has-pending::before {
+    animation: none;
+  }
+}
+
+/* ── Immersive mode ── */
+.iso-office.is-immersive {
+  padding: 0;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.iso-office.is-immersive .iso-office__bar,
+.iso-office.is-immersive .iso-office__halt {
+  display: none;
+}
+
+.iso-office.is-immersive .iso-office__layout {
+  flex: 1;
+  display: block;
+  max-width: none;
+  margin: 0;
+  gap: 0;
+}
+
+.iso-office.is-immersive .side-panel {
+  display: none;
+}
+
+.iso-office.is-immersive .room-wrap {
+  height: 100%;
+  padding-top: 0;
+}
+
+.iso-office.is-immersive .room-art {
+  max-height: 100dvh;
+  height: 100dvh;
+  border: none;
+  box-shadow: none;
+}
+
+.iso-office.is-immersive .room-scene {
+  width: min(100dvh, 100dvw);
+  height: min(100dvh, 100dvw);
+}
+
+/* ── Responsive ── */
 .side-panel { padding-top: 4px; display: grid; gap: 12px; }
 .quiet-card { border: 3px solid var(--ink); padding: 14px; background: var(--paper); box-shadow: 4px 4px 0 #546b72; }
 .quiet-card h2 { margin: 0 0 10px; font: 700 11px "Space Mono", monospace; text-transform: uppercase; letter-spacing: 0.2px; }

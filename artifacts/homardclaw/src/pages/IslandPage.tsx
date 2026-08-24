@@ -3,6 +3,7 @@ import { AlertTriangle, Palmtree } from "lucide-react";
 import { useListRetiredAgents } from "@workspace/api-client-react";
 import { Shell } from "@/components/layout/Shell";
 import { MarlowLobster } from "@/components/ui/marlow-lobster";
+import { useImmersiveMode } from "@/hooks/useImmersiveMode";
 import "./island.css";
 
 const beachArt = `${import.meta.env.BASE_URL}images/island-beach.png`;
@@ -29,6 +30,7 @@ const SALUTES = [
 ];
 
 export default function IslandPage() {
+  const immersive = useImmersiveMode();
   const { data: retired, isLoading, isError } = useListRetiredAgents();
   const [salute, setSalute] = useState<{ id: string; text: string } | null>(null);
 
@@ -43,8 +45,8 @@ export default function IslandPage() {
   };
 
   return (
-    <Shell>
-      <section className="island">
+    <Shell immersive={immersive}>
+      <section className={`island${immersive ? " is-immersive" : ""}`}>
         <header className="island__bar">
           <div className="island__brand">
             <Palmtree size={14} /> <b>HOMARD</b>CLAW / retirement island
