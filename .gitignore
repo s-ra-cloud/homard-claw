@@ -47,3 +47,11 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Codex: the private CODEX_HOME (ChatGPT session tokens) and the per-agent
+# isolated workspaces Codex runs in. Neither may ever be committed.
+.codex-home/
+.codex-workspaces/
+# Scratch CODEX_HOME used by the api-server Codex tests. Holds a fake
+# auth.json, but it is still credential-shaped: never commit it.
+.test-codex/
