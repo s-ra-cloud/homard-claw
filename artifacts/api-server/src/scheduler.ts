@@ -15,7 +15,6 @@ import { logger } from "./lib/logger";
 import {
   codexFeatureEnabled,
   codexHealthCheckMinutes,
-  codexHomePath,
 } from "./codex/config";
 import { codexRuntimeState } from "./codex/runtime";
 import { addTaskLog } from "./worker";
@@ -302,13 +301,14 @@ export function resetCodexHealthCheck(): void {
 
 export async function runCodexHealthCheck(now = Date.now()): Promise<boolean> {
   if (!codexFeatureEnabled()) return false;
-  // No durable private home means nothing durable to check.
-  if (codexHomePath() === null) return false;
   const intervalMs = codexHealthCheckMinutes() * 60_000;
   if (now - lastCodexHealthAt < intervalMs) return false;
   lastCodexHealthAt = now;
 
   const state = await codexRuntimeState();
+  // Nobody has connected a ChatGPT session, so there is no credential whose
+  // health could decay — reporting it as unhealthy would be noise, not news.
+  if (!state.authPresent) return false;
   const healthy = state.ready;
   if (healthy === lastCodexHealthy) return true;
   lastCodexHealthy = healthy;

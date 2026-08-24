@@ -1,13 +1,4 @@
-import {
-  mkdir,
-  mkdtemp,
-  readFile,
-  rm,
-  stat,
-  symlink,
-  writeFile,
-} from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import express from "express";
 import request from "supertest";
@@ -23,6 +14,7 @@ import {
 } from "vitest";
 import {
   agentsTable,
+  codexCredentialsTable,
   db,
   pool,
   providerConversationsTable,
@@ -59,10 +51,17 @@ import {
 import {
   CODEX_FORBIDDEN_ENV,
   bootstrapCodexHome,
+  codexAuthFilePathFor,
   codexAuthFingerprint,
   codexChildEnv,
+  codexHomeFor,
   codexRuntimeState,
+  connectCodexCredential,
+  disconnectCodexCredential,
+  materializeCodexHome,
+  persistCodexRefresh,
 } from "../codex/runtime";
+import { saveCodexCredential } from "../codex/credential-store";
 import { acquireProviderLease, codexLeaseKey } from "../provider-leases";
 import { setCodexLeaseHeartbeatMs } from "../codex/config";
 import { runCodexHealthCheck, resetCodexHealthCheck } from "../scheduler";
@@ -70,7 +69,10 @@ import { runCodexHealthCheck, resetCodexHealthCheck } from "../scheduler";
 const app = express();
 app.use(express.json());
 app.use((req, _res, next) => {
-  (req as unknown as { log: { warn: () => void } }).log = { warn: () => {} };
+  (req as unknown as { log: { warn: () => void; info: () => void } }).log = {
+    warn: () => {},
+    info: () => {},
+  };
   next();
 });
 app.use("/api", officeRouter);
@@ -103,10 +105,16 @@ const CHATGPT_AUTH = {
   last_refresh: new Date().toISOString(),
 };
 
-async function writeAuthFile(contents: unknown): Promise<void> {
-  await writeFile(path.join(codexHome, "auth.json"), JSON.stringify(contents), {
-    mode: 0o600,
-  });
+/**
+ * Connect a sign-in the way a person does: stored against their account,
+ * not dropped on disk. The filesystem copy only appears when a run
+ * materializes it.
+ */
+async function connectAuth(
+  contents: unknown,
+  userId = authState.userId,
+): Promise<void> {
+  await saveCodexCredential(userId, JSON.stringify(contents));
 }
 
 /* ------------------------------------------------------------------ */
@@ -319,9 +327,11 @@ beforeEach(async () => {
   });
   vi.stubEnv("CODEX_ENABLED", "1");
   vi.stubEnv("CODEX_HOME", codexHome);
-  vi.stubEnv("CODEX_HOME_IS_PERSISTENT", "1");
   vi.stubEnv("CODEX_WORKSPACE_ROOT", workspaceRoot);
   vi.stubEnv("CODEX_AUTH_JSON", "");
+  // Fixed so the encryption key is deterministic across the file; the real
+  // one is never read into a test.
+  vi.stubEnv("SESSION_SECRET", "codex-test-session-secret");
   vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", "test-claude-token");
   vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
   clearProviderCaches();
@@ -329,14 +339,13 @@ beforeEach(async () => {
   sdkCalls.length = 0;
   turnScript = [];
   installSdkFake();
-  await bootstrapCodexHome();
-  await writeAuthFile(CHATGPT_AUTH);
+  await connectAuth(CHATGPT_AUTH);
 });
 
 afterEach(async () => {
   setCodexSdkLoader(null);
   // Never leave a lease behind for the next test (or the live worker).
-  const fingerprint = codexAuthFingerprint();
+  const fingerprint = await codexAuthFingerprint();
   if (fingerprint) {
     await db
       .delete(providerLeasesTable)
@@ -347,6 +356,16 @@ afterEach(async () => {
 afterAll(async () => {
   vi.unstubAllEnvs();
   setCodexSdkLoader(null);
+  // The fixture sign-in is stored, not just written to disk; leaving it
+  // behind would hand the dev worker a fake ChatGPT session.
+  await db
+    .delete(codexCredentialsTable)
+    .where(
+      inArray(codexCredentialsTable.clerkUserId, [
+        authState.userId,
+        `${authState.userId}-second`,
+      ]),
+    );
   if (createdAgentIds.length > 0) {
     await db
       .delete(providerConversationsTable)
@@ -391,13 +410,14 @@ describe("Codex credential storage", () => {
     expect(state.authMode).toBe("chatgpt");
     expect(state.usesChatGptAllowance).toBe(true);
     expect(state.ready).toBe(true);
-    // The fingerprint identifies the file, so it must not contain any of it.
+    // The fingerprint identifies the account, so it must carry nothing
+    // from the credential itself.
     expect(state.detail).not.toContain("sk-test-access-token");
-    expect(state.authFingerprint).not.toContain("sk-");
+    expect(JSON.stringify(state)).not.toContain("rt-test-refresh-token");
   });
 
   it("refuses to call an API-key credential a ChatGPT allowance", async () => {
-    await writeAuthFile({ OPENAI_API_KEY: "sk-live-not-a-subscription" });
+    await connectAuth({ OPENAI_API_KEY: "sk-live-not-a-subscription" });
     const state = await codexRuntimeState();
     expect(state.authMode).toBe("api_key");
     expect(state.usesChatGptAllowance).toBe(false);
@@ -407,120 +427,234 @@ describe("Codex credential storage", () => {
 
   it("treats an expired session as not ready without deleting it", async () => {
     const old = new Date(Date.now() - 400 * 24 * 60 * 60 * 1000).toISOString();
-    await writeAuthFile({ ...CHATGPT_AUTH, last_refresh: old });
+    await connectAuth({ ...CHATGPT_AUTH, last_refresh: old });
     const state = await codexRuntimeState();
     expect(state.authExpired).toBe(true);
     expect(state.ready).toBe(false);
-    // The credential file is untouched: only Codex's own refresh path may
-    // rewrite it, so a stale session stays recoverable by re-login.
-    const stillThere = await readFile(path.join(codexHome, "auth.json"), "utf8");
-    expect(stillThere).toContain("chatgpt");
+    // The stored sign-in survives: only Codex's own refresh path may
+    // replace it, so a stale session stays recoverable by re-login.
+    const [row] = await db
+      .select()
+      .from(codexCredentialsTable)
+      .where(eq(codexCredentialsTable.clerkUserId, authState.userId));
+    expect(row?.authMode).toBe("chatgpt");
   });
 
-  it("fails closed when no durable private storage is configured", async () => {
-    vi.stubEnv("CODEX_HOME", "");
+  it("asks the account to connect a session rather than failing obscurely", async () => {
+    await disconnectCodexCredential(authState.userId);
     const state = await codexRuntimeState();
-    expect(state.storageReady).toBe(false);
+    // Storage is fine — there is simply nobody signed in to Codex yet, and
+    // the difference matters to whoever reads the message.
+    expect(state.storageReady).toBe(true);
+    expect(state.authPresent).toBe(false);
     expect(state.ready).toBe(false);
-    expect(state.detail.length).toBeGreaterThan(0);
+    expect(state.detail).toMatch(/codex login/i);
   });
 
-  it("refuses a CODEX_HOME on scratch storage even when it is writable", async () => {
-    // A tmpdir path is private and writable, so the permission checks all
-    // pass — durability is the only thing standing between the owner and a
-    // ChatGPT session that dies at the next redeploy.
-    const scratch = await mkdtemp(path.join(tmpdir(), "hc-codex-scratch-"));
-    vi.stubEnv("CODEX_HOME", scratch);
+  it("never stores the sign-in where a database dump would reveal it", async () => {
+    const [row] = await db
+      .select()
+      .from(codexCredentialsTable)
+      .where(eq(codexCredentialsTable.clerkUserId, authState.userId));
+    expect(row).toBeDefined();
+    expect(row?.authJson).not.toContain("rt-test-refresh-token");
+    expect(row?.authJson).not.toContain("sk-test-access-token");
+    expect(row?.authJson.startsWith("v1.")).toBe(true);
+  });
+
+  it("survives a filesystem that is wiped between runs", async () => {
+    // Exactly what a redeploy does: the working copy disappears while the
+    // stored session stays put. The next run must rebuild it.
+    const home = codexHomeFor(authState.userId);
+    await rm(home, { recursive: true, force: true });
+    const { home: rebuilt } = await materializeCodexHome(authState.userId);
+    const restored = JSON.parse(
+      await readFile(path.join(rebuilt, "auth.json"), "utf8"),
+    );
+    expect(restored.tokens.account_id).toBe("acct_test");
+
+    const dir = await stat(rebuilt);
+    expect(dir.mode & 0o077).toBe(0);
+    const file = await stat(path.join(rebuilt, "auth.json"));
+    expect(file.mode & 0o077).toBe(0);
+  });
+
+  it("folds a session Codex refreshed mid-run back into storage", async () => {
+    const { home, revision } = await materializeCodexHome(authState.userId);
+    // Stand in for the CLI rotating its own tokens during a run.
+    const refreshedAt = new Date().toISOString();
+    await writeFile(
+      path.join(home, "auth.json"),
+      JSON.stringify({
+        ...CHATGPT_AUTH,
+        tokens: { ...CHATGPT_AUTH.tokens, refresh_token: "rt-rotated" },
+        last_refresh: refreshedAt,
+      }),
+      { mode: 0o600 },
+    );
+    expect(await persistCodexRefresh(authState.userId, revision)).toBe(true);
+
+    // Wipe the disk copy and rebuild it: the rotated token must come back,
+    // otherwise the account is left holding a spent refresh token.
+    await rm(home, { recursive: true, force: true });
+    const { home: rebuilt } = await materializeCodexHome(authState.userId);
+    const restored = JSON.parse(
+      await readFile(path.join(rebuilt, "auth.json"), "utf8"),
+    );
+    expect(restored.tokens.refresh_token).toBe("rt-rotated");
+  });
+
+  it("ignores a half-written credential rather than saving it back", async () => {
+    const { home, revision } = await materializeCodexHome(authState.userId);
+    await writeFile(path.join(home, "auth.json"), '{"auth_mode": "chat', {
+      mode: 0o600,
+    });
+    expect(await persistCodexRefresh(authState.userId, revision)).toBe(false);
+    // Valid JSON that still claims to be a ChatGPT sign-in but carries no
+    // tokens is the same kind of partial write, and just as unusable.
+    await writeFile(
+      path.join(home, "auth.json"),
+      JSON.stringify({ auth_mode: "chatgpt", tokens: { account_id: "x" } }),
+      { mode: 0o600 },
+    );
+    expect(await persistCodexRefresh(authState.userId, revision)).toBe(false);
+    // The stored session is still the good one.
+    await rm(home, { recursive: true, force: true });
+    const { home: rebuilt } = await materializeCodexHome(authState.userId);
+    const restored = JSON.parse(
+      await readFile(path.join(rebuilt, "auth.json"), "utf8"),
+    );
+    expect(restored.auth_mode).toBe("chatgpt");
+  });
+
+  it("does not undo a reconnect that happened while a run was going", async () => {
+    // The run starts from the session stored now...
+    const { home, revision } = await materializeCodexHome(authState.userId);
+    // ...and mid-run the person pastes a fresh sign-in from `codex login`.
+    await connectAuth({
+      ...CHATGPT_AUTH,
+      tokens: { ...CHATGPT_AUTH.tokens, refresh_token: "rt-freshly-pasted" },
+    });
+    await writeFile(
+      path.join(home, "auth.json"),
+      JSON.stringify({
+        ...CHATGPT_AUTH,
+        tokens: { ...CHATGPT_AUTH.tokens, refresh_token: "rt-from-old-run" },
+      }),
+      { mode: 0o600 },
+    );
+    expect(await persistCodexRefresh(authState.userId, revision)).toBe(false);
+
+    await rm(home, { recursive: true, force: true });
+    const { home: rebuilt } = await materializeCodexHome(authState.userId);
+    const restored = JSON.parse(
+      await readFile(path.join(rebuilt, "auth.json"), "utf8"),
+    );
+    expect(restored.tokens.refresh_token).toBe("rt-freshly-pasted");
+  });
+
+  it("does not resurrect a session disconnected while a run was going", async () => {
+    const { home, revision } = await materializeCodexHome(authState.userId);
+    await disconnectCodexCredential(authState.userId);
+    await writeFile(path.join(home, "auth.json"), JSON.stringify(CHATGPT_AUTH), {
+      mode: 0o600,
+    });
+    expect(await persistCodexRefresh(authState.userId, revision)).toBe(false);
+    expect((await codexRuntimeState()).authPresent).toBe(false);
+  });
+
+  it("keeps each account's session separate", async () => {
+    const other = `${authState.userId}-second`;
+    await saveCodexCredential(
+      other,
+      JSON.stringify({
+        ...CHATGPT_AUTH,
+        tokens: { ...CHATGPT_AUTH.tokens, account_id: "acct_other" },
+      }),
+    );
+    try {
+      // Different directories and different lease keys, so two people run
+      // at the same time on their own allowances.
+      expect(codexHomeFor(other)).not.toBe(codexHomeFor(authState.userId));
+      expect(await codexAuthFingerprint(other)).not.toBe(
+        await codexAuthFingerprint(authState.userId),
+      );
+
+      const { home: mine } = await materializeCodexHome(authState.userId);
+      const { home: theirs } = await materializeCodexHome(other);
+      const mineAuth = await readFile(path.join(mine, "auth.json"), "utf8");
+      const theirsAuth = await readFile(path.join(theirs, "auth.json"), "utf8");
+      expect(mineAuth).toContain("acct_test");
+      expect(mineAuth).not.toContain("acct_other");
+      expect(theirsAuth).toContain("acct_other");
+
+      const state = await codexRuntimeState(other);
+      expect(state.clerkUserId).toBe(other);
+      expect(state.ready).toBe(true);
+    } finally {
+      await disconnectCodexCredential(other);
+    }
+  });
+
+  it("disconnecting removes the stored session and its working copy", async () => {
+    const { home } = await materializeCodexHome(authState.userId);
+    expect(await disconnectCodexCredential(authState.userId)).toBe(true);
+    await expect(stat(path.join(home, "auth.json"))).rejects.toThrow();
     const state = await codexRuntimeState();
-    expect(state.storageReady).toBe(false);
+    expect(state.authPresent).toBe(false);
     expect(state.ready).toBe(false);
-    expect(state.detail).toMatch(/redeploy erases|scratch storage/i);
-    await rm(scratch, { recursive: true, force: true });
   });
 
-  it("stays off until the operator confirms CODEX_HOME is persistent", async () => {
-    // Nothing in the container can tell a persistent volume from an
-    // instance disk, so an unattested home is refused rather than guessed.
-    vi.stubEnv("CODEX_HOME_IS_PERSISTENT", "");
+  it("says to reconnect when the encryption key no longer matches", async () => {
+    // Rotating SESSION_SECRET must surface as "reconnect Codex", never as
+    // a run that quietly proceeds without a session.
+    vi.stubEnv("SESSION_SECRET", "a-different-session-secret");
     const state = await codexRuntimeState();
-    expect(state.storageReady).toBe(false);
     expect(state.ready).toBe(false);
-    expect(state.detail).toMatch(/CODEX_HOME_IS_PERSISTENT/);
+    expect(state.detail).toMatch(/reconnect/i);
   });
 
-  it("refuses to bootstrap a credential onto scratch storage", async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), "hc-codex-boot-"));
-    const target = path.join(parent, "home");
-    vi.stubEnv("CODEX_HOME", target);
-    vi.stubEnv("CODEX_AUTH_JSON", JSON.stringify(CHATGPT_AUTH));
-    const outcome = await bootstrapCodexHome();
-    expect(outcome.action).toBe("unavailable");
-    // Refused before any mkdir or write: a credential must never land
-    // somewhere execution would later refuse to read it from.
-    await expect(stat(target)).rejects.toThrow();
-    await rm(parent, { recursive: true, force: true });
+  it("refuses a pasted file that is not JSON without echoing it", async () => {
+    const response = await request(app)
+      .post("/api/providers/codex/credential")
+      .send({ authJson: "definitely-not-json-sk-secret" });
+    expect(response.status).toBe(422);
+    expect(JSON.stringify(response.body)).not.toContain("sk-secret");
   });
 
-  it("refuses to bootstrap a credential onto an unattested home", async () => {
-    const target = path.join(codexHome, "..", "unattested-home");
-    vi.stubEnv("CODEX_HOME", target);
-    vi.stubEnv("CODEX_HOME_IS_PERSISTENT", "");
-    vi.stubEnv("CODEX_AUTH_JSON", JSON.stringify(CHATGPT_AUTH));
-    const outcome = await bootstrapCodexHome();
-    expect(outcome.action).toBe("unavailable");
-    expect(outcome.detail).toMatch(/CODEX_HOME_IS_PERSISTENT/);
-    await expect(stat(target)).rejects.toThrow();
+  it("connects a pasted sign-in and reports how it is billed", async () => {
+    await disconnectCodexCredential(authState.userId);
+    const response = await request(app)
+      .post("/api/providers/codex/credential")
+      .send({ authJson: JSON.stringify(CHATGPT_AUTH) });
+    expect(response.status).toBe(200);
+    expect(response.body.action).toBe("connected");
+    expect(JSON.stringify(response.body)).not.toContain("rt-test-refresh-token");
+    expect((await codexRuntimeState()).ready).toBe(true);
+
+    // An API-key file is stored but never passed off as a subscription.
+    const apiKey = await connectCodexCredential(
+      authState.userId,
+      JSON.stringify({ OPENAI_API_KEY: "sk-api-billing" }),
+    );
+    expect(apiKey.detail).toMatch(/api key/i);
+    expect((await codexRuntimeState()).usesChatGptAllowance).toBe(false);
   });
 
-  it("refuses a CODEX_HOME that reaches scratch storage through ..", async () => {
-    // Every syscall that follows resolves this to /tmp/..., so a gate that
-    // compares the configured string is no gate at all.
-    const target = `/durable-looking/../${path.relative("/", tmpdir())}/hc-codex-dotdot`;
-    vi.stubEnv("CODEX_HOME", target);
-    vi.stubEnv("CODEX_AUTH_JSON", JSON.stringify(CHATGPT_AUTH));
-    const state = await codexRuntimeState();
-    expect(state.storageReady).toBe(false);
-    const outcome = await bootstrapCodexHome();
-    expect(outcome.action).toBe("unavailable");
-    await expect(stat(path.resolve(target))).rejects.toThrow();
-  });
-
-  it("refuses a CODEX_HOME that reaches scratch storage through a symlink", async () => {
-    const scratch = await mkdtemp(path.join(tmpdir(), "hc-codex-sym-"));
-    // The link itself sits on the durable fixture volume and looks fine;
-    // only realpath reveals that it lands on scratch.
-    const link = path.join(codexHome, "..", "durable-alias");
-    await rm(link, { recursive: true, force: true });
-    await symlink(scratch, link);
-    const target = path.join(link, "home");
-    vi.stubEnv("CODEX_HOME", target);
-    vi.stubEnv("CODEX_AUTH_JSON", JSON.stringify(CHATGPT_AUTH));
-    const state = await codexRuntimeState();
-    expect(state.storageReady).toBe(false);
-    const outcome = await bootstrapCodexHome();
-    expect(outcome.action).toBe("unavailable");
-    await expect(stat(target)).rejects.toThrow();
-    await rm(link, { recursive: true, force: true });
-    await rm(scratch, { recursive: true, force: true });
-  });
-
-  it("keeps CODEX_HOME owner-only and preserves an SDK-refreshed credential", async () => {
-    // A credential is already present, so a bootstrap must not clobber it:
-    // Codex rewrites auth.json on every refresh, and restoring the seed
-    // would roll the session back to a revoked refresh token.
+  it("bootstrap never overwrites a session Codex has since refreshed", async () => {
+    // Restoring the seed would roll the account back to a revoked token.
     vi.stubEnv("CODEX_AUTH_JSON", JSON.stringify({ auth_mode: "chatgpt" }));
-    await writeAuthFile({ ...CHATGPT_AUTH, tokens: { account_id: "refreshed" } });
+    await connectAuth({
+      ...CHATGPT_AUTH,
+      tokens: { ...CHATGPT_AUTH.tokens, account_id: "refreshed" },
+    });
     const outcome = await bootstrapCodexHome();
     expect(outcome.action).toBe("preserved");
+    const { home } = await materializeCodexHome(authState.userId);
     const after = JSON.parse(
-      await readFile(path.join(codexHome, "auth.json"), "utf8"),
+      await readFile(path.join(home, "auth.json"), "utf8"),
     );
     expect(after.tokens.account_id).toBe("refreshed");
-
-    const dir = await stat(codexHome);
-    expect(dir.mode & 0o077).toBe(0);
-    const file = await stat(path.join(codexHome, "auth.json"));
-    expect(file.mode & 0o077).toBe(0);
   });
 
   it("reports Codex as unavailable rather than throwing when the flag is off", async () => {
@@ -559,7 +693,7 @@ describe("Codex owner endpoints", () => {
   });
 
   it("explains an unusable credential instead of reporting a healthy provider", async () => {
-    await writeAuthFile({ OPENAI_API_KEY: "sk-api-billing" });
+    await connectAuth({ OPENAI_API_KEY: "sk-api-billing" });
     const res = await request(app).post("/api/providers/codex/test");
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(false);
@@ -900,7 +1034,7 @@ describe("Codex failure handling", () => {
   });
 
   it("refuses to start when the credential is API-key backed", async () => {
-    await writeAuthFile({ OPENAI_API_KEY: "sk-api-billing" });
+    await connectAuth({ OPENAI_API_KEY: "sk-api-billing" });
     clearProviderCaches();
     const agent = await createAgent(`${RUN_TAG} ApiKeyRefusal`);
     const task = await insertTask(agent.id);
@@ -987,7 +1121,7 @@ describe("Codex task dispatch over HTTP", () => {
 describe("Codex serialization and recovery", () => {
   it("queues a second Codex task behind the one holding the credential", async () => {
     const agent = await createAgent(`${RUN_TAG} Serial`);
-    const fingerprint = codexAuthFingerprint()!;
+    const fingerprint = (await codexAuthFingerprint())!;
     // Simulate another run already holding this auth file's lease.
     const held = await acquireProviderLease(
       codexLeaseKey(fingerprint),
@@ -1014,7 +1148,7 @@ describe("Codex serialization and recovery", () => {
     await insertTask(agent.id);
     await drainOne([agent.id]);
 
-    const fingerprint = codexAuthFingerprint()!;
+    const fingerprint = (await codexAuthFingerprint())!;
     const leases = await db
       .select()
       .from(providerLeasesTable)
@@ -1031,7 +1165,7 @@ describe("Codex serialization and recovery", () => {
     const otherAgent = await createAgent(`${RUN_TAG} Free OpenRouter`, {
       provider: "openrouter",
     });
-    const fingerprint = codexAuthFingerprint()!;
+    const fingerprint = (await codexAuthFingerprint())!;
     await acquireProviderLease(
       codexLeaseKey(fingerprint),
       "00000000-0000-4000-8000-00000000cafe",
@@ -1094,7 +1228,7 @@ describe("Codex serialization and recovery", () => {
     expect(row.status).toBe("cancelled");
     // An interrupted turn is never recorded as completed.
     expect(row.status).not.toBe("completed");
-    const fingerprint = codexAuthFingerprint()!;
+    const fingerprint = (await codexAuthFingerprint())!;
     const leases = await db
       .select()
       .from(providerLeasesTable)
@@ -1106,7 +1240,7 @@ describe("Codex serialization and recovery", () => {
     const agent = await createAgent(`${RUN_TAG} Heartbeat`);
     turnScript = [{ events: [], hangUntilAborted: true }];
     const task = await insertTask(agent.id);
-    const fingerprint = codexAuthFingerprint()!;
+    const fingerprint = (await codexAuthFingerprint())!;
     // Beat far faster than the minute-floor TTL so the renewal path runs
     // several times inside the test rather than being taken on trust.
     setCodexLeaseHeartbeatMs(25);
@@ -1146,7 +1280,7 @@ describe("Codex serialization and recovery", () => {
     const agent = await createAgent(`${RUN_TAG} Lease Lost`);
     turnScript = [{ events: [], hangUntilAborted: true }];
     const task = await insertTask(agent.id);
-    const fingerprint = codexAuthFingerprint()!;
+    const fingerprint = (await codexAuthFingerprint())!;
     setCodexLeaseHeartbeatMs(25);
     try {
       const claimed = await claimNextTask({ agentIds: [agent.id] });
@@ -1178,7 +1312,7 @@ describe("Codex serialization and recovery", () => {
 
   it("requeues instead of completing when the lease is lost as the call returns", async () => {
     const agent = await createAgent(`${RUN_TAG} Lease Race`);
-    const fingerprint = codexAuthFingerprint()!;
+    const fingerprint = (await codexAuthFingerprint())!;
     // The turn succeeds normally; the lease disappears during it. The run
     // therefore reaches the success path holding a credential it no longer
     // owns — the window a catch-block-only check would miss entirely.
@@ -1236,11 +1370,13 @@ describe("Codex serialization and recovery", () => {
 });
 
 describe("Codex health check", () => {
-  it("stays quiet when the provider is off or has no durable home", async () => {
+  it("stays quiet when the provider is off or nobody has connected", async () => {
     vi.stubEnv("CODEX_ENABLED", "");
     expect(await runCodexHealthCheck()).toBe(false);
+    // Switched on, but no account has connected a ChatGPT session: there is
+    // no credential whose health could decay, so nothing is monitored.
     vi.stubEnv("CODEX_ENABLED", "1");
-    vi.stubEnv("CODEX_HOME", "");
+    await disconnectCodexCredential(authState.userId);
     expect(await runCodexHealthCheck()).toBe(false);
   });
 

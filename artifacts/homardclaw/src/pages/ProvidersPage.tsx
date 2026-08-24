@@ -5,7 +5,8 @@ import {
   useListProviderModels,
   useUpdateProviderSettings,
   useTestCodexConnection,
-  useBootstrapCodex,
+  useConnectCodex,
+  useDisconnectCodex,
   getGetProvidersQueryKey,
   getGetProviderSettingsQueryKey,
   ProviderSettingsDefaultProvider,
@@ -18,6 +19,7 @@ import { PixelCard } from "@/components/ui/pixel-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -333,17 +335,21 @@ function RoutingDefaultsCard() {
 
 
 /**
- * Owner-only Codex actions. Both are safe to press: the test is entirely
- * local (no request reaches OpenAI, so it cannot spend the allowance) and
- * the bootstrap refuses to overwrite a credential Codex has since
- * refreshed.
+ * Connecting your own ChatGPT account to Codex.
+ *
+ * There is no official "sign in with ChatGPT" flow on the web, so the
+ * session has to come from `codex login` on a desktop. The pasted file is
+ * encrypted server-side and stored against your account — your agents run
+ * on your allowance, and the box is cleared the moment it is sent.
  */
-function CodexActions() {
+function CodexActions({ provider }: { provider: ProviderStatus }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [checks, setChecks] = useState<
     { name: string; ok: boolean; detail: string }[] | null
   >(null);
+  const [authJson, setAuthJson] = useState("");
+  const connected = provider.authMode !== null;
 
   const refresh = () =>
     queryClient.invalidateQueries({ queryKey: getGetProvidersQueryKey() });
@@ -363,24 +369,34 @@ function CodexActions() {
     },
   });
 
-  const bootstrap = useBootstrapCodex({
+  const connect = useConnectCodex({
     mutation: {
       onSuccess: (result) => {
+        setAuthJson("");
+        setChecks(null);
         refresh();
-        toast({
-          title:
-            result.action === "created"
-              ? "Credential stored"
-              : result.action === "preserved"
-                ? "Existing credential kept"
-                : "Nothing written",
-          description: result.detail,
-        });
+        toast({ title: "Codex account connected", description: result.detail });
       },
       onError: (error) =>
         toast({
           variant: "destructive",
-          title: "Bootstrap failed",
+          title: "Could not connect that account",
+          description: error.message,
+        }),
+    },
+  });
+
+  const disconnect = useDisconnectCodex({
+    mutation: {
+      onSuccess: (result) => {
+        setChecks(null);
+        refresh();
+        toast({ title: "Codex account disconnected", description: result.detail });
+      },
+      onError: (error) =>
+        toast({
+          variant: "destructive",
+          title: "Could not disconnect",
           description: error.message,
         }),
     },
@@ -388,7 +404,45 @@ function CodexActions() {
 
   return (
     <div className="mt-4 border-t-2 border-border/30 pt-4 space-y-3">
+      <div className="space-y-2">
+        <label
+          className="uppercase font-bold text-xs"
+          htmlFor="codex-auth-json"
+        >
+          {connected ? "Replace your ChatGPT session" : "Connect your ChatGPT account"}
+        </label>
+        <p className="text-[10px] text-muted-foreground uppercase font-bold leading-relaxed">
+          On a desktop, run <span className="text-foreground">codex login</span>{" "}
+          and choose the ChatGPT sign-in, then paste the contents of{" "}
+          <span className="text-foreground">~/.codex/auth.json</span> here. It is
+          encrypted before it is stored and is never shown again.
+        </p>
+        <Textarea
+          id="codex-auth-json"
+          value={authJson}
+          onChange={(event) => setAuthJson(event.target.value)}
+          placeholder='{"auth_mode":"chatgpt", ...}'
+          rows={3}
+          spellCheck={false}
+          autoComplete="off"
+          className="font-mono text-[11px]"
+          data-testid="input-codex-auth-json"
+        />
+      </div>
       <div className="flex flex-wrap gap-2">
+        <Button
+          onClick={() => {
+            const pasted = authJson.trim();
+            // Cleared as it leaves the browser, success or not — a session
+            // token has no business sitting in a text box.
+            setAuthJson("");
+            connect.mutate({ data: { authJson: pasted } });
+          }}
+          disabled={connect.isPending || authJson.trim().length < 2}
+          data-testid="button-connect-codex"
+        >
+          {connect.isPending ? "CONNECTING..." : "CONNECT ACCOUNT"}
+        </Button>
         <Button
           variant="outline"
           onClick={() => test.mutate()}
@@ -397,14 +451,16 @@ function CodexActions() {
         >
           {test.isPending ? "CHECKING..." : "TEST CONNECTION"}
         </Button>
-        <Button
-          variant="outline"
-          onClick={() => bootstrap.mutate()}
-          disabled={bootstrap.isPending}
-          data-testid="button-bootstrap-codex"
-        >
-          {bootstrap.isPending ? "PREPARING..." : "PREPARE CREDENTIAL STORE"}
-        </Button>
+        {connected ? (
+          <Button
+            variant="outline"
+            onClick={() => disconnect.mutate()}
+            disabled={disconnect.isPending}
+            data-testid="button-disconnect-codex"
+          >
+            {disconnect.isPending ? "REMOVING..." : "DISCONNECT"}
+          </Button>
+        ) : null}
       </div>
       <p className="text-[10px] text-muted-foreground uppercase font-bold">
         The test runs locally only — it never calls OpenAI and never uses your
@@ -571,7 +627,7 @@ export default function ProvidersPage() {
                     )}
                   </div>
 
-                  {isCodex ? <CodexActions /> : null}
+                  {isCodex ? <CodexActions provider={provider} /> : null}
 
                   {!provider.configured && !isCodex && (
                     <div className="mt-4 text-[10px] text-muted-foreground uppercase text-center border-t-2 border-border/30 pt-4">

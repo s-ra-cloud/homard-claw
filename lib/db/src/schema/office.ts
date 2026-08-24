@@ -359,6 +359,46 @@ export const providerConversationsTable = pgTable(
 );
 
 /**
+ * One person's Codex sign-in, owned by them and stored by us.
+ *
+ * Codex authenticates as a ChatGPT account through an `auth.json` the Codex
+ * CLI writes and then rewrites on every token refresh. A published app has
+ * no durable disk, so the database — not the filesystem — is the source of
+ * truth: the credential is written out to a private directory only for the
+ * duration of a run, and whatever Codex refreshed is read back here.
+ *
+ * `authJson` is encrypted before it ever reaches this table; nothing here
+ * is readable from a database dump alone. The plaintext is never logged,
+ * returned by any endpoint, or exposed to an agent's tools.
+ */
+export const codexCredentialsTable = pgTable("codex_credentials", {
+  /** The Clerk account whose ChatGPT allowance these runs draw on. */
+  clerkUserId: text("clerk_user_id").primaryKey(),
+  /** AES-256-GCM ciphertext of the whole auth.json. */
+  authJson: text("auth_json").notNull(),
+  /** "chatgpt" or "api_key", classified when stored. Never a guess. */
+  authMode: text("auth_mode").notNull(),
+  /**
+   * Changes on every write. A run folds its refreshed session back only
+   * when this still matches what it started from, so reconnecting or
+   * disconnecting mid-run is never undone by the run finishing.
+   */
+  revision: text("revision")
+    .notNull()
+    .default(sql`gen_random_uuid()::text`),
+  /** `last_refresh` as Codex last wrote it, for staleness reporting. */
+  lastRefreshAt: timestamp("last_refresh_at", { withTimezone: true }),
+  connectedAt: timestamp("connected_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type CodexCredentialRecord = typeof codexCredentialsTable.$inferSelect;
+
+/**
  * Durable, provider-scoped mutual exclusion.
  *
  * Codex runs against a single ChatGPT auth file; two concurrent runs

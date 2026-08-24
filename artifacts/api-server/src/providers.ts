@@ -4,7 +4,6 @@ import {
   codexDefaultModel,
   codexDefaultReasoning,
   codexFeatureEnabled,
-  codexHomePath,
   codexModels,
   codexReasoningLevels,
   isCodexModel,
@@ -145,12 +144,13 @@ function credential(provider: "claude_max" | "openrouter"): string | undefined {
 
 /**
  * Cheap synchronous check used on the dispatch path. For Codex this only
- * answers "is it switched on and pointed at storage" — the authoritative
- * ChatGPT-auth check is asynchronous and runs immediately before execution.
+ * answers "is it switched on" — whether the account has actually connected
+ * a ChatGPT session is a database read, and that authoritative check runs
+ * asynchronously immediately before execution.
  */
 export function isConfigured(provider: ProviderId): boolean {
   if (provider === "codex_chatgpt") {
-    return codexFeatureEnabled() && codexHomePath() !== null;
+    return codexFeatureEnabled();
   }
   return Boolean(credential(provider));
 }

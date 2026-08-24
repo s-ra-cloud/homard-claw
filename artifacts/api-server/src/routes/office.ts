@@ -7,6 +7,9 @@ import {
   CreateTaskBody,
   CreateTaskResponse,
   BootstrapCodexResponse,
+  ConnectCodexBody,
+  ConnectCodexResponse,
+  DisconnectCodexResponse,
   DecideApprovalBody,
   DecideApprovalParams,
   DecideApprovalResponse,
@@ -92,7 +95,12 @@ import {
   type ProviderId,
 } from "../providers";
 import { testCodexConnection } from "../codex/execute";
-import { bootstrapCodexHome } from "../codex/runtime";
+import {
+  bootstrapCodexHome,
+  connectCodexCredential,
+  disconnectCodexCredential,
+} from "../codex/runtime";
+import { CodexCredentialError } from "../codex/credential-store";
 import { codexReasoningLevels } from "../codex/config";
 import { listProviderLeases } from "../provider-leases";
 import { recordAudit, verifyAuditChain } from "../audit";
@@ -1531,14 +1539,14 @@ router.get("/providers", async (_req, res): Promise<void> => {
 });
 
 /**
- * Owner-only, local-only Codex connection check. It inspects the private
- * CODEX_HOME, the recorded auth mode, and SDK availability — it never
- * starts a thread, so it cannot spend the ChatGPT allowance or leave a
- * stray session behind.
+ * Local-only Codex connection check for the signed-in account. It inspects
+ * that account's stored sign-in, its recorded auth mode, and SDK
+ * availability — it never starts a thread, so it cannot spend anyone's
+ * ChatGPT allowance or leave a stray session behind.
  */
-router.post("/providers/codex/test", async (_req, res): Promise<void> => {
+router.post("/providers/codex/test", async (req, res): Promise<void> => {
   clearProviderCaches();
-  const result = await testCodexConnection();
+  const result = await testCodexConnection(getAuth(req)?.userId);
   await recordAudit(
     "providers.codex_tested",
     `The Codex connection was checked locally: ${result.ok ? "ready" : "not ready"}.`,
@@ -1547,12 +1555,73 @@ router.post("/providers/codex/test", async (_req, res): Promise<void> => {
 });
 
 /**
- * One-time bootstrap of the private CODEX_HOME from CODEX_AUTH_JSON.
- * Refuses to overwrite an existing auth.json so a session the Codex CLI
- * has since refreshed is never clobbered by a stale secret.
+ * Connect the signed-in account's own ChatGPT Codex session.
+ *
+ * The pasted auth.json is encrypted and stored against that account, so
+ * their agents run on their allowance. The value is never logged, never
+ * echoed back, and never included in an audit entry — only the outcome is.
+ */
+router.post("/providers/codex/credential", async (req, res): Promise<void> => {
+  const userId = getAuth(req)?.userId;
+  if (!userId) {
+    res.status(401).json({ error: "Sign in to connect a Codex account." });
+    return;
+  }
+  const parsed = ConnectCodexBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  let outcome;
+  try {
+    outcome = await connectCodexCredential(userId, parsed.data.authJson);
+  } catch (error) {
+    if (error instanceof CodexCredentialError) {
+      res.status(422).json({ error: error.message });
+      return;
+    }
+    throw error;
+  }
+  clearProviderCaches();
+  await recordAudit(
+    "providers.codex_connected",
+    `A ChatGPT Codex sign-in was connected for this account: ${outcome.action}.`,
+  );
+  req.log.info({ action: outcome.action }, "Codex credential connected");
+  res.json(ConnectCodexResponse.parse(outcome));
+});
+
+router.delete("/providers/codex/credential", async (req, res): Promise<void> => {
+  const userId = getAuth(req)?.userId;
+  if (!userId) {
+    res.status(401).json({ error: "Sign in to manage a Codex account." });
+    return;
+  }
+  const removed = await disconnectCodexCredential(userId);
+  clearProviderCaches();
+  await recordAudit(
+    "providers.codex_disconnected",
+    removed
+      ? "The stored ChatGPT Codex sign-in was removed for this account."
+      : "A Codex disconnect was requested, but this account had no sign-in stored.",
+  );
+  res.json(
+    DisconnectCodexResponse.parse({
+      action: removed ? "disconnected" : "skipped",
+      detail: removed
+        ? "Disconnected. The stored sign-in and its working copy were deleted; Codex runs stop until an account is connected again."
+        : "There was no Codex sign-in stored for this account.",
+    }),
+  );
+});
+
+/**
+ * Seed this account's sign-in from CODEX_AUTH_JSON, for operators who
+ * configure one rather than pasting it in. Refuses to overwrite a stored
+ * sign-in so a session Codex has since refreshed is never rolled back.
  */
 router.post("/providers/codex/bootstrap", async (req, res): Promise<void> => {
-  const outcome = await bootstrapCodexHome();
+  const outcome = await bootstrapCodexHome(getAuth(req)?.userId);
   clearProviderCaches();
   await recordAudit(
     "providers.codex_bootstrapped",

@@ -1728,10 +1728,37 @@ export const TestCodexConnectionResponse = zod.object({
 
 
 /**
- * @summary Seed the private CODEX_HOME from CODEX_AUTH_JSON if it is empty
+ * @summary Seed this account's Codex sign-in from CODEX_AUTH_JSON if it has none
  */
 export const BootstrapCodexResponse = zod.object({
-  "action": zod.enum(['created', 'preserved', 'skipped', 'unavailable']),
+  "action": zod.enum(['connected', 'preserved', 'skipped', 'disconnected', 'unavailable']),
+  "detail": zod.string()
+})
+
+
+/**
+ * @summary Connect this account's own ChatGPT Codex sign-in
+ */
+export const connectCodexBodyAuthJsonMin = 2;
+export const connectCodexBodyAuthJsonMax = 20000;
+
+
+
+export const ConnectCodexBody = zod.object({
+  "authJson": zod.string().min(connectCodexBodyAuthJsonMin).max(connectCodexBodyAuthJsonMax)
+}).describe('The contents of the auth.json written by `codex login` on a desktop. It is encrypted before storage, never returned by any endpoint, and never exposed to an agent\'s tools or prompts.')
+
+export const ConnectCodexResponse = zod.object({
+  "action": zod.enum(['connected', 'preserved', 'skipped', 'disconnected', 'unavailable']),
+  "detail": zod.string()
+})
+
+
+/**
+ * @summary Remove this account's stored Codex sign-in
+ */
+export const DisconnectCodexResponse = zod.object({
+  "action": zod.enum(['connected', 'preserved', 'skipped', 'disconnected', 'unavailable']),
   "detail": zod.string()
 })
 

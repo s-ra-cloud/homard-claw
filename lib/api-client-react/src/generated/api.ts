@@ -34,6 +34,7 @@ import type {
   ClearMemoriesResult,
   CodexBootstrapResult,
   CodexConnectionTest,
+  CodexCredentialInput,
   ConverseInput,
   ConverseResponse,
   DelegationInput,
@@ -2941,7 +2942,7 @@ export const getBootstrapCodexUrl = () => {
 }
 
 /**
- * @summary Seed the private CODEX_HOME from CODEX_AUTH_JSON if it is empty
+ * @summary Seed this account's Codex sign-in from CODEX_AUTH_JSON if it has none
  */
 export const bootstrapCodex = async ( options?: Parameters<typeof customFetch>[1]): Promise<CodexBootstrapResult> => {
 
@@ -2990,7 +2991,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type BootstrapCodexMutationError = ErrorType<unknown>
 
     /**
- * @summary Seed the private CODEX_HOME from CODEX_AUTH_JSON if it is empty
+ * @summary Seed this account's Codex sign-in from CODEX_AUTH_JSON if it has none
  */
 export const useBootstrapCodex = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof bootstrapCodex>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -3001,6 +3002,148 @@ export const useBootstrapCodex = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getBootstrapCodexMutationOptions(options));
+    }
+
+export const getConnectCodexUrl = () => {
+
+
+
+
+  return `/api/providers/codex/credential`
+}
+
+/**
+ * @summary Connect this account's own ChatGPT Codex sign-in
+ */
+export const connectCodex = async (codexCredentialInput: CodexCredentialInput, options?: Parameters<typeof customFetch>[1]): Promise<CodexBootstrapResult> => {
+
+  return customFetch<CodexBootstrapResult>(getConnectCodexUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(codexCredentialInput)
+  }
+);}
+
+
+
+
+
+export const getConnectCodexMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof connectCodex>>, TError,{data: BodyType<CodexCredentialInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof connectCodex>>, TError,{data: BodyType<CodexCredentialInput>}, TContext> => {
+
+const mutationKey = ['connectCodex'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof connectCodex>>, {data: BodyType<CodexCredentialInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  connectCodex(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ConnectCodexMutationResult = NonNullable<Awaited<ReturnType<typeof connectCodex>>>
+    export type ConnectCodexMutationBody = BodyType<CodexCredentialInput>
+    export type ConnectCodexMutationError = ErrorType<void>
+
+    /**
+ * @summary Connect this account's own ChatGPT Codex sign-in
+ */
+export const useConnectCodex = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof connectCodex>>, TError,{data: BodyType<CodexCredentialInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof connectCodex>>,
+        TError,
+        {data: BodyType<CodexCredentialInput>},
+        TContext
+      > => {
+      return useMutation(getConnectCodexMutationOptions(options));
+    }
+
+export const getDisconnectCodexUrl = () => {
+
+
+
+
+  return `/api/providers/codex/credential`
+}
+
+/**
+ * @summary Remove this account's stored Codex sign-in
+ */
+export const disconnectCodex = async ( options?: Parameters<typeof customFetch>[1]): Promise<CodexBootstrapResult> => {
+
+  return customFetch<CodexBootstrapResult>(getDisconnectCodexUrl(),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDisconnectCodexMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectCodex>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof disconnectCodex>>, TError,void, TContext> => {
+
+const mutationKey = ['disconnectCodex'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof disconnectCodex>>, void> = () => {
+
+
+          return  disconnectCodex(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DisconnectCodexMutationResult = NonNullable<Awaited<ReturnType<typeof disconnectCodex>>>
+
+    export type DisconnectCodexMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Remove this account's stored Codex sign-in
+ */
+export const useDisconnectCodex = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectCodex>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof disconnectCodex>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getDisconnectCodexMutationOptions(options));
     }
 
 export const getListProviderModelsUrl = (provider: 'claude_max' | 'codex_chatgpt' | 'openrouter',) => {

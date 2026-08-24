@@ -2,7 +2,7 @@ import {
   chmod,
   mkdir,
   readFile,
-  realpath,
+  rm,
   stat,
   unlink,
   writeFile,
@@ -13,42 +13,63 @@ import {
   codexAuthMaxAgeDays,
   codexBootstrapAuthJson,
   codexFeatureEnabled,
-  codexHomeAttestedPersistent,
-  codexHomePath,
+  codexHomeBase,
   codexWorkspaceRoot,
-  isEphemeralPath,
 } from "./config";
+import { readAuthFacts, type CodexAuthMode } from "./auth-file";
+import {
+  CodexCredentialError,
+  codexCredentialSummary,
+  deleteCodexCredential,
+  loadCodexCredential,
+  officeOwnerClerkId,
+  saveCodexCredential,
+  saveCodexRefreshIfUnchanged,
+  verifyCodexCredential,
+} from "./credential-store";
 
 /**
- * The private, file-backed Codex runtime.
+ * The Codex runtime, per signed-in account.
  *
- * Codex authenticates as the owner's ChatGPT account through an `auth.json`
- * that the Codex CLI itself writes and refreshes. HomardClaw never parses,
- * copies, logs, or transmits the tokens inside it — this module only
- * answers three questions:
+ * Codex authenticates as a ChatGPT account through an `auth.json` that the
+ * Codex CLI itself writes and refreshes. HomardClaw never parses the tokens
+ * inside it beyond classifying how the session is billed — this module only
+ * answers three questions, for one account at a time:
  *
- *   1. Is there a private, durable, writable CODEX_HOME?
- *   2. Does `auth.json` say the session is ChatGPT-managed (not an API key)?
- *   3. Is that session fresh enough that Codex's own refresh path still works?
+ *   1. Has this account connected a Codex sign-in?
+ *   2. Does that sign-in say it is ChatGPT-managed (not an API key)?
+ *   3. Is the session fresh enough that Codex's own refresh path still works?
  *
- * Every answer is a boolean plus an owner-facing sentence. If any of them
- * cannot be established, the provider fails closed: no run is attempted.
+ * The credential is kept in the database, not on disk. It is written into a
+ * private per-account directory just before a run, and whatever Codex
+ * rewrote is read back into the database afterwards — so a deployment with
+ * a throwaway filesystem keeps working, and two accounts never share a
+ * session. Every answer is a boolean plus an owner-facing sentence; if any
+ * cannot be established, the provider fails closed and no run is attempted.
  */
 
 const AUTH_FILE = "auth.json";
 const HOME_MODE = 0o700;
 const AUTH_MODE = 0o600;
 
-export type CodexAuthMode = "chatgpt" | "api_key" | "unknown";
+export type { CodexAuthMode };
 
 export type CodexRuntimeState = {
   /** Server-side feature flag. */
   enabled: boolean;
-  /** CODEX_HOME is set, private, and writable. */
+  /** The account this state describes, or null when nobody is resolved. */
+  clerkUserId: string | null;
+  /** A private working directory for this account exists and is writable. */
   storageReady: boolean;
-  /** Absolute CODEX_HOME, or null when unconfigured. */
+  /** Absolute per-account CODEX_HOME, or null when unresolved. */
   home: string | null;
-  /** `auth.json` exists inside CODEX_HOME. */
+  /**
+   * Which stored revision the run materialized. Set only once a run has a
+   * working copy on disk, and checked before saving a refresh back so a
+   * reconnect or disconnect mid-run is never undone.
+   */
+  credentialRevision?: string;
+  /** This account has a stored Codex sign-in. */
   authPresent: boolean;
   /** How that credential authenticates. */
   authMode: CodexAuthMode;
@@ -58,7 +79,7 @@ export type CodexRuntimeState = {
   authExpired: boolean;
   /** ISO timestamp of the last SDK-performed refresh, when recorded. */
   lastRefreshAt: string | null;
-  /** Stable, non-secret identifier of the auth file, for lease keys. */
+  /** Stable, non-secret identifier of this account's session, for leases. */
   authFingerprint: string | null;
   /** Whether a run may be attempted right now. */
   ready: boolean;
@@ -76,20 +97,49 @@ export class CodexRuntimeError extends Error {
   }
 }
 
-export function codexAuthFilePath(): string | null {
-  const home = codexHomePath();
-  return home ? path.join(home, AUTH_FILE) : null;
+/**
+ * Which account a Codex operation runs as. Requests pass the signed-in
+ * user; background work (the worker, the scheduler's health check) passes
+ * nothing and falls back to the office owner, because tasks do not carry an
+ * owner of their own yet.
+ */
+export async function resolveCodexUser(
+  explicit?: string | null,
+): Promise<string | null> {
+  if (explicit) return explicit;
+  return officeOwnerClerkId();
 }
 
 /**
- * Lease key for the auth file. A hash of the *path* — never of the file's
- * contents — so the key is stable across token refreshes and carries no
- * credential material even if it is logged.
+ * Per-account home directory. The account id is hashed rather than used
+ * directly: it keeps the path a fixed, filesystem-safe length and stops an
+ * identifier from showing up in process listings and crash dumps.
  */
-export function codexAuthFingerprint(): string | null {
-  const file = codexAuthFilePath();
-  if (!file) return null;
-  return createHash("sha256").update(file).digest("hex").slice(0, 32);
+export function codexHomeFor(clerkUserId: string): string {
+  const slug = createHash("sha256").update(clerkUserId).digest("hex").slice(0, 24);
+  return path.join(codexHomeBase(), "accounts", slug);
+}
+
+export function codexAuthFilePathFor(clerkUserId: string): string {
+  return path.join(codexHomeFor(clerkUserId), AUTH_FILE);
+}
+
+/**
+ * Lease key for one account's Codex session. A hash of the account id —
+ * never of the credential — so it is stable across token refreshes and
+ * carries nothing sensitive even if it is logged. Two accounts get
+ * different keys and therefore run concurrently; one account never runs
+ * twice at once against the same ChatGPT session.
+ */
+export async function codexAuthFingerprint(
+  explicitUserId?: string | null,
+): Promise<string | null> {
+  const clerkUserId = await resolveCodexUser(explicitUserId);
+  if (!clerkUserId) return null;
+  return createHash("sha256")
+    .update(`codex-session:${clerkUserId}`)
+    .digest("hex")
+    .slice(0, 32);
 }
 
 async function pathExists(target: string): Promise<boolean> {
@@ -102,10 +152,10 @@ async function pathExists(target: string): Promise<boolean> {
 }
 
 /**
- * Create CODEX_HOME if needed, lock it down to owner-only, and prove it is
- * writable by round-tripping a probe file. Anything short of a private
- * writable directory is a hard failure — Codex would otherwise store
- * refreshed credentials on ephemeral or world-readable storage.
+ * Create the account's home if needed, lock it down to owner-only, and
+ * prove it is writable by round-tripping a probe file. Anything short of a
+ * private writable directory is a hard failure — Codex would otherwise
+ * store a refreshed credential somewhere world-readable.
  */
 async function ensurePrivateHome(home: string): Promise<void> {
   await mkdir(home, { recursive: true, mode: HOME_MODE });
@@ -115,136 +165,95 @@ async function ensurePrivateHome(home: string): Promise<void> {
   await unlink(probe);
 }
 
-type RawAuth = {
-  auth_mode?: unknown;
-  OPENAI_API_KEY?: unknown;
-  openai_api_key?: unknown;
-  tokens?: { account_id?: unknown } | null;
-  last_refresh?: unknown;
-};
-
-/**
- * Classify the stored credential. The explicit `auth_mode` written by
- * recent Codex builds wins; older files are classified structurally (an
- * API key present means API billing, a token bundle without one means the
- * ChatGPT session). An unreadable or unrecognized file is "unknown" and is
- * never reported as ChatGPT-backed.
- */
-function classify(raw: RawAuth): {
-  mode: CodexAuthMode;
-  lastRefreshAt: string | null;
-} {
-  const lastRefresh =
-    typeof raw.last_refresh === "string" ? raw.last_refresh : null;
-  const declared =
-    typeof raw.auth_mode === "string" ? raw.auth_mode.toLowerCase() : null;
-  if (declared === "chatgpt") return { mode: "chatgpt", lastRefreshAt: lastRefresh };
-  if (declared === "apikey" || declared === "api_key") {
-    return { mode: "api_key", lastRefreshAt: lastRefresh };
-  }
-  const apiKey = raw.OPENAI_API_KEY ?? raw.openai_api_key;
-  if (typeof apiKey === "string" && apiKey.trim() !== "") {
-    return { mode: "api_key", lastRefreshAt: lastRefresh };
-  }
-  if (raw.tokens && typeof raw.tokens === "object") {
-    return { mode: "chatgpt", lastRefreshAt: lastRefresh };
-  }
-  return { mode: "unknown", lastRefreshAt: lastRefresh };
-}
-
-/**
- * Write `CODEX_AUTH_JSON` into a fresh CODEX_HOME exactly once.
- *
- * The bootstrap only ever fills an *absent* `auth.json`. Codex rewrites
- * that file whenever it refreshes the session, and clobbering it with the
- * original secret would roll the session back to a revoked refresh token.
- */
-export type CodexBootstrapOutcome = {
+export type CodexConnectOutcome = {
   /**
-   * created    — an absent auth.json was seeded from CODEX_AUTH_JSON.
-   * preserved  — a credential was already there and was left untouched.
-   * skipped    — storage is ready but no credential is available to write.
-   * unavailable — Codex is switched off or has no durable private storage.
+   * connected  — a sign-in was stored for this account.
+   * preserved  — a sign-in was already stored and was left untouched.
+   * skipped    — nothing was available to store.
+   * unavailable — Codex is switched off, or no account could be resolved.
    */
-  action: "created" | "preserved" | "skipped" | "unavailable";
+  action: "connected" | "preserved" | "skipped" | "unavailable";
   detail: string;
 };
 
 /**
- * Why this CODEX_HOME must not be used, or null when it is acceptable.
+ * Store a Codex sign-in for one account.
  *
- * Shared by the read-only state check and the bootstrap writer on purpose:
- * a credential must never be written anywhere execution would later refuse
- * to run, or the owner is left with a stored ChatGPT session in a location
- * this server has already declared unusable.
+ * This is how a person connects their own ChatGPT allowance: they run
+ * `codex login` on a desktop and paste the resulting auth.json, which is
+ * encrypted and kept in the database. Their agents then run on their
+ * account, not on a credential the operator supplied.
  */
-async function canonicalHome(home: string): Promise<string> {
-  // The directory usually does not exist yet at bootstrap time, so realpath
-  // the deepest ancestor that does and re-attach the rest. This resolves a
-  // symlinked component anywhere along the path, which a plain path.resolve
-  // cannot see.
-  let current = path.resolve(home);
-  const pending: string[] = [];
-  for (;;) {
-    try {
-      const real = await realpath(current);
-      return path.join(real, ...pending.reverse());
-    } catch {
-      const parent = path.dirname(current);
-      // Reached the root without finding anything that exists.
-      if (parent === current) return path.resolve(home);
-      pending.push(path.basename(current));
-      current = parent;
-    }
-  }
-}
-
-async function durabilityRefusal(home: string): Promise<string | null> {
-  // Checked against the canonical target, not the configured string: both
-  // ".." segments and symlinked components otherwise walk straight past
-  // this gate into the scratch storage it exists to refuse.
-  const canonical = await canonicalHome(home);
-  if (isEphemeralPath(home) || isEphemeralPath(canonical)) {
-    return `CODEX_HOME (${home}) resolves to ${canonical}, which is scratch storage that a redeploy erases. Codex rewrites auth.json on every token refresh, so the ChatGPT session would silently die there; point it at a Reserved VM persistent volume instead.`;
-  }
-  if (!codexHomeAttestedPersistent()) {
-    return "CODEX_HOME has not been confirmed as persistent storage. Nothing inside the container can tell a Reserved VM volume from an autoscale scratch disk, so Codex stays off until CODEX_HOME_IS_PERSISTENT is set on a deployment whose filesystem actually survives a redeploy.";
-  }
-  return null;
-}
-
-export async function bootstrapCodexHome(): Promise<CodexBootstrapOutcome> {
+export async function connectCodexCredential(
+  clerkUserId: string,
+  authJson: string,
+): Promise<CodexConnectOutcome> {
   if (!codexFeatureEnabled()) {
     return {
       action: "unavailable",
-      detail:
-        "Codex is switched off (CODEX_ENABLED is not set), so nothing was written.",
+      detail: "Codex is switched off (CODEX_ENABLED is not set), so nothing was stored.",
     };
   }
-  const home = codexHomePath();
-  if (!home) {
+  const mode = await saveCodexCredential(clerkUserId, authJson);
+  if (mode === "api_key") {
+    return {
+      action: "connected",
+      detail:
+        "Stored, but this credential is an API key: runs would be billed to an OpenAI API account rather than a ChatGPT allowance. Sign in with `codex login` (ChatGPT) instead.",
+    };
+  }
+  if (mode === "unknown") {
+    return {
+      action: "connected",
+      detail:
+        "Stored, but this file does not identify itself as a ChatGPT session, so it will not be used. Sign in again with `codex login`.",
+    };
+  }
+  return {
+    action: "connected",
+    detail:
+      "Connected. Codex runs now use this ChatGPT account's allowance, and refreshed sessions are saved automatically.",
+  };
+}
+
+export async function disconnectCodexCredential(
+  clerkUserId: string,
+): Promise<boolean> {
+  const home = codexHomeFor(clerkUserId);
+  const authFile = path.join(home, AUTH_FILE);
+  // Remove the working copy first: leaving it behind would let a run
+  // continue on a session the account just disconnected.
+  if (await pathExists(authFile)) await unlink(authFile);
+  return deleteCodexCredential(clerkUserId);
+}
+
+/**
+ * Seed a sign-in from the CODEX_AUTH_JSON environment variable, for
+ * operators who prefer to configure one rather than paste it in the app.
+ * Only ever fills an *absent* credential: overwriting would roll the
+ * session back to a refresh token Codex has already spent.
+ */
+export async function bootstrapCodexHome(
+  explicitUserId?: string | null,
+): Promise<CodexConnectOutcome> {
+  if (!codexFeatureEnabled()) {
     return {
       action: "unavailable",
-      detail:
-        "CODEX_HOME is not set to an absolute path on durable storage, so Codex credentials cannot be stored.",
+      detail: "Codex is switched off (CODEX_ENABLED is not set), so nothing was stored.",
     };
   }
-  // Checked before any mkdir or write: refusing after creating the
-  // directory would still have put a credential on undurable storage.
-  const refusal = await durabilityRefusal(home);
-  if (refusal) return { action: "unavailable", detail: refusal };
-
-  await ensurePrivateHome(home);
-  const workspaces = codexWorkspaceRoot();
-  if (workspaces) await mkdir(workspaces, { recursive: true, mode: HOME_MODE });
-
-  const authFile = path.join(home, AUTH_FILE);
-  if (await pathExists(authFile)) {
-    await chmod(authFile, AUTH_MODE);
+  const clerkUserId = await resolveCodexUser(explicitUserId);
+  if (!clerkUserId) {
+    return {
+      action: "unavailable",
+      detail: "No account could be resolved to attach a Codex sign-in to.",
+    };
+  }
+  if (await codexCredentialSummary(clerkUserId)) {
     return {
       action: "preserved",
       detail:
-        "A Codex credential already exists in CODEX_HOME; it was left untouched so the SDK's refreshed session survives.",
+        "A Codex sign-in is already connected for this account; it was left untouched so the refreshed session survives.",
     };
   }
   const seed = codexBootstrapAuthJson();
@@ -252,44 +261,32 @@ export async function bootstrapCodexHome(): Promise<CodexBootstrapOutcome> {
     return {
       action: "skipped",
       detail:
-        "CODEX_HOME is ready and private, but no credential is stored yet. Run `codex login` against this CODEX_HOME, or set CODEX_AUTH_JSON and bootstrap again.",
+        "No Codex sign-in is connected yet. Run `codex login` on a desktop and paste the auth.json it produces, or set CODEX_AUTH_JSON.",
     };
   }
-  try {
-    JSON.parse(seed);
-  } catch {
-    // Never echo the value, not even a prefix.
-    throw new CodexRuntimeError(
-      "auth",
-      "CODEX_AUTH_JSON is not valid JSON, so it was not written. Re-copy the whole auth.json produced by `codex login`.",
-    );
-  }
-  await writeFile(authFile, seed, { mode: AUTH_MODE });
-  await chmod(authFile, AUTH_MODE);
-  return {
-    action: "created",
-    detail:
-      "Stored the ChatGPT credential in CODEX_HOME with owner-only permissions. Codex now owns and refreshes this file.",
-  };
+  return connectCodexCredential(clerkUserId, seed);
 }
 
 /**
- * Inspect the runtime without mutating it. Safe to call on every request
- * and on the background health check.
+ * Inspect one account's runtime without mutating anything it depends on.
+ * Reads metadata only — the credential is never decrypted here — so this is
+ * safe to call on every request and on the background health check.
  */
-export async function codexRuntimeState(): Promise<CodexRuntimeState> {
+export async function codexRuntimeState(
+  explicitUserId?: string | null,
+): Promise<CodexRuntimeState> {
   const enabled = codexFeatureEnabled();
-  const home = codexHomePath();
   const base: CodexRuntimeState = {
     enabled,
+    clerkUserId: null,
     storageReady: false,
-    home,
+    home: null,
     authPresent: false,
     authMode: "unknown",
     usesChatGptAllowance: false,
     authExpired: false,
     lastRefreshAt: null,
-    authFingerprint: codexAuthFingerprint(),
+    authFingerprint: null,
     ready: false,
     detail: "",
   };
@@ -299,109 +296,198 @@ export async function codexRuntimeState(): Promise<CodexRuntimeState> {
       detail: "Codex is turned off for this workspace (CODEX_ENABLED is not set).",
     };
   }
-  if (!home) {
+  const clerkUserId = await resolveCodexUser(explicitUserId);
+  if (!clerkUserId) {
     return {
       ...base,
-      detail:
-        "Codex needs CODEX_HOME pointed at an absolute path on durable, private storage. Without it the refreshed ChatGPT session would be lost on every redeploy, so Codex stays disabled.",
+      detail: "No account is signed in, so there is no Codex session to use.",
     };
   }
-  const durability = await durabilityRefusal(home);
-  if (durability) return { ...base, detail: durability };
+  const home = codexHomeFor(clerkUserId);
+  const identified: CodexRuntimeState = {
+    ...base,
+    clerkUserId,
+    home,
+    authFingerprint: await codexAuthFingerprint(clerkUserId),
+  };
   try {
     await ensurePrivateHome(home);
   } catch (error) {
     return {
-      ...base,
-      detail: `CODEX_HOME (${home}) is not writable, so Codex cannot store or refresh its credential: ${
+      ...identified,
+      detail: `Codex could not prepare a private working directory (${home}): ${
         error instanceof Error ? error.name : "unknown error"
       }.`,
     };
   }
 
-  const authFile = path.join(home, AUTH_FILE);
-  if (!(await pathExists(authFile))) {
-    return {
-      ...base,
-      storageReady: true,
-      detail:
-        "CODEX_HOME is ready but holds no credential yet. Sign in with `codex login` against this CODEX_HOME (or bootstrap CODEX_AUTH_JSON) to use the ChatGPT allowance.",
-    };
-  }
-
-  let raw: RawAuth;
+  let summary;
   try {
-    raw = JSON.parse(await readFile(authFile, "utf8")) as RawAuth;
-  } catch {
+    summary = await codexCredentialSummary(clerkUserId);
+  } catch (error) {
     return {
-      ...base,
+      ...identified,
       storageReady: true,
-      authPresent: true,
       detail:
-        "The stored Codex credential could not be read as JSON. Sign in again with `codex login` to rewrite it.",
+        error instanceof CodexCredentialError
+          ? error.message
+          : "The stored Codex sign-in could not be read.",
+    };
+  }
+  if (!summary) {
+    return {
+      ...identified,
+      storageReady: true,
+      detail:
+        "No ChatGPT account is connected yet. Run `codex login` on a desktop and paste the auth.json it produces to use your own Codex allowance.",
     };
   }
 
-  const { mode, lastRefreshAt } = classify(raw);
-  if (mode === "api_key") {
+  const withAuth: CodexRuntimeState = {
+    ...identified,
+    storageReady: true,
+    authPresent: true,
+    authMode: summary.authMode,
+    lastRefreshAt: summary.lastRefreshAt,
+  };
+  if (summary.authMode === "api_key") {
     return {
-      ...base,
-      storageReady: true,
-      authPresent: true,
-      authMode: "api_key",
-      lastRefreshAt,
+      ...withAuth,
       detail:
         "This Codex credential is an API key, so runs are billed to the OpenAI API account — not the ChatGPT allowance. Sign in with `codex login` (ChatGPT) if you want subscription-backed runs.",
     };
   }
-  if (mode === "unknown") {
+  if (summary.authMode === "unknown") {
     return {
-      ...base,
-      storageReady: true,
-      authPresent: true,
+      ...withAuth,
       detail:
-        "The stored Codex credential does not identify itself as a ChatGPT session, so it is not treated as one. Sign in again with `codex login`.",
+        "The stored Codex sign-in does not identify itself as a ChatGPT session, so it is not treated as one. Sign in again with `codex login`.",
     };
   }
 
+  const readable = await verifyCodexCredential(clerkUserId);
+  if (!readable.ok) return { ...withAuth, detail: readable.detail };
+
   const maxAgeMs = codexAuthMaxAgeDays() * 24 * 60 * 60 * 1000;
-  const refreshedAt = lastRefreshAt ? Date.parse(lastRefreshAt) : Number.NaN;
-  const authExpired =
-    Number.isFinite(refreshedAt) && Date.now() - refreshedAt > maxAgeMs;
-  if (authExpired) {
+  const refreshedAt = summary.lastRefreshAt
+    ? Date.parse(summary.lastRefreshAt)
+    : Number.NaN;
+  if (Number.isFinite(refreshedAt) && Date.now() - refreshedAt > maxAgeMs) {
     return {
-      ...base,
-      storageReady: true,
-      authPresent: true,
-      authMode: "chatgpt",
-      lastRefreshAt,
+      ...withAuth,
       authExpired: true,
-      detail: `The ChatGPT session has not refreshed in over ${codexAuthMaxAgeDays()} days, so it is treated as expired. Run \`codex login\` against this CODEX_HOME to reauthenticate.`,
+      detail: `This ChatGPT session has not refreshed in over ${codexAuthMaxAgeDays()} days, so it is treated as expired. Run \`codex login\` again and reconnect.`,
     };
   }
   return {
-    ...base,
-    storageReady: true,
-    authPresent: true,
-    authMode: "chatgpt",
+    ...withAuth,
     usesChatGptAllowance: true,
-    lastRefreshAt,
     ready: true,
     detail:
-      "Signed in with a ChatGPT-managed Codex session. Runs use the ChatGPT Codex allowance; the remaining balance is not exposed by the SDK.",
+      "Signed in with a ChatGPT-managed Codex session. Runs use that account's Codex allowance; the remaining balance is not exposed by the SDK.",
   };
 }
 
-/** Throw the precise reason a run must not start. */
-export async function requireCodexRuntime(): Promise<CodexRuntimeState> {
-  const state = await codexRuntimeState();
-  if (state.ready) return state;
-  if (!state.enabled) throw new CodexRuntimeError("disabled", state.detail);
-  if (!state.storageReady) throw new CodexRuntimeError("storage", state.detail);
-  if (state.authMode === "api_key") {
-    throw new CodexRuntimeError("api_key_auth", state.detail);
+/**
+ * Write the stored credential into the account's private directory so the
+ * Codex CLI can use it. Called immediately before a run; the file is a
+ * working copy of the database row, never the other way round.
+ */
+export async function materializeCodexHome(
+  clerkUserId: string,
+): Promise<{ home: string; revision: string }> {
+  const home = codexHomeFor(clerkUserId);
+  await ensurePrivateHome(home);
+  const workspaces = codexWorkspaceRoot();
+  if (workspaces) await mkdir(workspaces, { recursive: true, mode: HOME_MODE });
+
+  const stored = await loadCodexCredential(clerkUserId);
+  if (!stored) {
+    throw new CodexRuntimeError(
+      "auth",
+      "No Codex sign-in is connected for this account, so the run was refused.",
+    );
   }
-  throw new CodexRuntimeError("auth", state.detail);
+  const authFile = path.join(home, AUTH_FILE);
+  const onDisk = await readFileOrNull(authFile);
+  if (onDisk !== stored.authJson) {
+    await writeFile(authFile, stored.authJson, { mode: AUTH_MODE });
+  }
+  await chmod(authFile, AUTH_MODE);
+  // The revision travels with the run so the write-back afterwards can tell
+  // whether it is still saving the session it started from.
+  return { home, revision: stored.revision };
+}
+
+/**
+ * Save back whatever Codex rewrote during a run.
+ *
+ * The CLI refreshes its own tokens and rewrites auth.json as it goes. On a
+ * throwaway filesystem that update is lost at the next restart, and the
+ * account would eventually be left holding a spent refresh token, so the
+ * new contents are folded back into the database while the run's lease is
+ * still held.
+ *
+ * `expectedRevision` is what the run started from. If the account has
+ * reconnected or disconnected since, the write is skipped rather than
+ * resurrecting a session the person deliberately replaced.
+ */
+export async function persistCodexRefresh(
+  clerkUserId: string,
+  expectedRevision: string,
+): Promise<boolean> {
+  const authFile = codexAuthFilePathFor(clerkUserId);
+  const onDisk = await readFileOrNull(authFile);
+  if (onDisk === null) return false;
+  // A truncated or half-written file — even one that parses — must never
+  // replace a working session.
+  const facts = readAuthFacts(onDisk);
+  if (!facts || facts.mode === "unknown") return false;
+  const stored = await loadCodexCredential(clerkUserId);
+  if (stored === null || stored.authJson === onDisk) return false;
+  return await saveCodexRefreshIfUnchanged(clerkUserId, onDisk, expectedRevision);
+}
+
+/**
+ * Drop the plaintext working copy once a run is done with it.
+ *
+ * The database holds the session; leaving a decrypted copy lying around
+ * between runs only widens the window in which it could be read.
+ */
+export async function clearCodexWorkingCopy(clerkUserId: string): Promise<void> {
+  await rm(codexAuthFilePathFor(clerkUserId), { force: true });
+}
+
+async function readFileOrNull(target: string): Promise<string | null> {
+  try {
+    return await readFile(target, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Throw the precise reason a run must not start, or return a state whose
+ * credential is on disk and ready for the CLI.
+ */
+export async function requireCodexRuntime(
+  explicitUserId?: string | null,
+): Promise<CodexRuntimeState> {
+  const state = await codexRuntimeState(explicitUserId);
+  if (!state.ready) {
+    if (!state.enabled) throw new CodexRuntimeError("disabled", state.detail);
+    if (!state.clerkUserId || !state.storageReady) {
+      throw new CodexRuntimeError("storage", state.detail);
+    }
+    if (state.authMode === "api_key") {
+      throw new CodexRuntimeError("api_key_auth", state.detail);
+    }
+    throw new CodexRuntimeError("auth", state.detail);
+  }
+  const { home, revision } = await materializeCodexHome(
+    state.clerkUserId as string,
+  );
+  return { ...state, home, credentialRevision: revision };
 }
 
 /**

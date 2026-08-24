@@ -144,73 +144,28 @@ export function isCodexReasoningLevel(value: string): value is CodexReasoningLev
 }
 
 /**
- * Absolute path of the private CODEX_HOME. Null means the operator has not
- * pointed Codex at durable storage yet — the provider then fails closed
- * rather than writing credentials somewhere that vanishes on redeploy.
+ * Root under which each account gets its own private Codex directory.
+ *
+ * This is scratch space on purpose. The credential's home is the database;
+ * what lands here is a working copy written just before a run and folded
+ * back afterwards, which is what lets Codex work on a deployment whose
+ * filesystem is wiped on every restart. CODEX_HOME still overrides the
+ * location for operators who want it somewhere specific.
  */
-export function codexHomePath(): string | null {
+export function codexHomeBase(): string {
   const configured = envValue("CODEX_HOME");
-  if (!configured) return null;
-  if (!configured.startsWith("/")) return null;
-  // Normalised immediately: every durability check downstream compares
-  // against this string, and "/looks-durable/../tmp/x" is /tmp/x to every
-  // syscall that follows.
-  return path.resolve(configured);
-}
-
-/**
- * Filesystem roots that are provably not durable: process-local scratch that
- * a redeploy, a restart, or the OS itself is entitled to erase. A refreshed
- * ChatGPT session written here is gone by the next deploy, and because Codex
- * rewrites auth.json on every refresh, that is not a slow degradation — it
- * silently invalidates the login.
- */
-const EPHEMERAL_ROOTS = ["/tmp", "/var/tmp", "/dev/shm", "/run"];
-
-/**
- * Whether a path sits under a root we know cannot survive a redeploy.
- *
- * Callers must pass a fully canonical path — resolved for `..` *and* for
- * symlinked components. A raw string comparison is trivially defeated by
- * either, and the syscalls that follow use the resolved target regardless.
- */
-export function isEphemeralPath(candidate: string): boolean {
-  const roots = new Set([...EPHEMERAL_ROOTS, path.resolve(tmpdir())]);
-  const resolved = path.resolve(candidate);
-  for (const root of roots) {
-    const normalized = root.endsWith("/") ? root.slice(0, -1) : root;
-    if (resolved === normalized || resolved.startsWith(`${normalized}/`)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/**
- * Whether the operator has attested that CODEX_HOME is on a persistent
- * volume.
- *
- * Nothing readable from inside the container distinguishes a Reserved VM's
- * persistent disk from an autoscale instance's scratch disk — both are just
- * writable directories. Rather than infer durability and be wrong, the
- * decision is handed to the person who provisioned the volume, and Codex
- * stays off until they make it. Combined with the ephemeral-root check
- * above, an obviously wrong answer is still refused.
- */
-export function codexHomeAttestedPersistent(): boolean {
-  const raw = envValue("CODEX_HOME_IS_PERSISTENT")?.toLowerCase();
-  return raw === "1" || raw === "true" || raw === "yes";
+  if (configured?.startsWith("/")) return path.resolve(configured);
+  return path.join(path.resolve(tmpdir()), "homardclaw-codex");
 }
 
 /** Root of the per-agent isolated Codex working directories. */
 export function codexWorkspaceRoot(): string | null {
   const explicit = envValue("CODEX_WORKSPACE_ROOT");
   if (explicit?.startsWith("/")) return path.resolve(explicit);
-  const home = codexHomePath();
-  return home ? `${home}/workspaces` : null;
+  return path.join(codexHomeBase(), "workspaces");
 }
 
-/** Bootstrap material, consumed once when `auth.json` does not exist yet. */
+/** Optional seed, used only when an account has no sign-in stored yet. */
 export function codexBootstrapAuthJson(): string | null {
   return envValue("CODEX_AUTH_JSON");
 }

@@ -59,34 +59,39 @@ opaque spawn error mid-run. Resolution also has to start from the SDK's
 *realpath* — pnpm links through a store, so resolving from the symlink misses
 the CLI installed beside it.
 
-## "Durable storage" cannot be detected, only attested
+## The database owns the sign-in; the filesystem is a working copy
 
-A writable, correctly-permissioned, absolute directory tells you nothing
-about whether it survives a redeploy — a persistent volume and an autoscale
-instance's scratch disk are indistinguishable from inside the container.
+A CLI credential that the provider itself rewrites cannot live on the
+container's disk on a published app. Store it encrypted in Postgres, write
+it into a private per-account directory just before a run, and fold whatever
+the CLI refreshed back into the row inside the same lease window.
 
-**Why:** the Codex CLI rewrites its credential file on every token refresh,
-so storing it on scratch does not degrade slowly; the login silently dies at
-the next deploy and resurfaces later as a confusing auth error.
+**Why:** every deployment type wipes the filesystem, and "is this directory
+durable?" is undetectable from inside a container — a persistent volume and
+an instance's scratch disk look identical. An earlier design demanded an
+operator attestation plus canonical-path gates against ephemeral roots; that
+whole gate disappeared once the disk stopped being the source of truth, and
+with it the requirement for a Reserved VM. Encrypt with a key derived from
+an existing deliberately-rotated secret so rotation surfaces as "reconnect",
+never as silent wrong behaviour.
 
-**How to apply:** for any credential whose file the provider itself rewrites,
-require an explicit operator attestation rather than inferring durability
-from a successful write probe, and separately hard-refuse the roots that are
-provably ephemeral. Apply the gate on *every* path that touches storage —
-the setup/bootstrap writer as much as the execution path, or the credential
-gets written to a location execution will then refuse to read.
+**How to apply:** the write-back must be revision-guarded — stamp a new
+revision on every connect and only save the refresh if the stored revision
+still matches what the run materialized, or a run finishing will restore a
+session the person just replaced or resurrect one they disconnected. Delete
+the plaintext copy when the run ends. Status checks read metadata columns
+only, but must still attempt one decrypt, or "ready" lies after a key
+rotation.
 
-## A path gate must compare canonical paths
+## A credential file that parses is not a credential
 
-Any check that classifies a filesystem location has to resolve `..` *and*
-symlinked components first.
+Classify a ChatGPT `auth.json` as usable only when it carries actual token
+material, not because it declares `auth_mode: "chatgpt"`.
 
-**Why:** a raw string comparison is defeated by `/looks-durable/../tmp/x` and
-by a symlink whose target is elsewhere, while every syscall afterwards uses
-the resolved target. The check then reports safety it did not verify.
-
-**How to apply:** resolve the deepest existing ancestor and re-attach the
-remainder, since the directory being validated usually does not exist yet.
+**Why:** the CLI rewrites the file in place on every refresh, so a partial
+write can be syntactically valid JSON with the mode field intact and no
+tokens. Accepting it lets that fragment overwrite a working session on
+write-back and lets status report a sign-in that authenticates nobody.
 
 ## A lease check belongs before the write, not only in the catch
 

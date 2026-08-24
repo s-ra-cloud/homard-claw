@@ -2,8 +2,10 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { sanitizeErrorMessage } from "../lib/sanitize";
 import {
+  clearCodexWorkingCopy,
   codexChildEnv,
   codexRuntimeState,
+  persistCodexRefresh,
   requireCodexRuntime,
   type CodexRuntimeState,
 } from "./runtime";
@@ -250,6 +252,39 @@ export async function runCodexTurn(input: CodexRunInput): Promise<CodexRunResult
     throw new CodexRunError(kind as CodexFailureKind, detail);
   }
 
+  try {
+    return await runTurnWithState(state, input);
+  } finally {
+    // Codex refreshes its own tokens mid-run and rewrites auth.json. That
+    // update is folded back into durable storage here — while the run's
+    // lease still guarantees nobody else is touching the same session —
+    // because the filesystem copy does not survive a restart.
+    await saveRefreshedSession(state);
+  }
+}
+
+async function saveRefreshedSession(state: CodexRuntimeState): Promise<void> {
+  if (!state.clerkUserId || !state.credentialRevision) return;
+  try {
+    await persistCodexRefresh(state.clerkUserId, state.credentialRevision);
+  } catch {
+    // A failed write-back must never mask the run's own outcome: the next
+    // run materializes the stored copy again and Codex refreshes from it.
+  }
+  try {
+    // Nothing else needs the decrypted copy until the next run writes it
+    // out again.
+    await clearCodexWorkingCopy(state.clerkUserId);
+  } catch {
+    // Leftover working copies are the disk-usage problem, not a run
+    // failure; the file is owner-only either way.
+  }
+}
+
+async function runTurnWithState(
+  state: CodexRuntimeState,
+  input: CodexRunInput,
+): Promise<CodexRunResult> {
   let sdk;
   try {
     sdk = await loadCodexSdk();
@@ -371,16 +406,16 @@ function toRunError(error: unknown, signal: AbortSignal): CodexRunError {
 }
 
 /**
- * Cheap, side-effect-free connection check: configuration, private
- * storage, ChatGPT auth mode, freshness, and SDK availability. It
- * deliberately does not start a thread — a "test" must never consume the
- * owner's allowance or leave a stray session behind.
+ * Cheap, side-effect-free connection check for one account:
+ * configuration, private working storage, ChatGPT auth mode, freshness,
+ * and SDK availability. It deliberately does not start a thread — a "test"
+ * must never consume anyone's allowance or leave a stray session behind.
  */
-export async function testCodexConnection(): Promise<{
+export async function testCodexConnection(clerkUserId?: string | null): Promise<{
   ok: boolean;
   checks: Array<{ name: string; ok: boolean; detail: string }>;
 }> {
-  const state = await codexRuntimeState();
+  const state = await codexRuntimeState(clerkUserId);
   const checks: Array<{ name: string; ok: boolean; detail: string }> = [
     {
       name: "Feature flag",
@@ -390,10 +425,10 @@ export async function testCodexConnection(): Promise<{
         : "CODEX_ENABLED is not set, so Codex is hidden.",
     },
     {
-      name: "Private durable storage",
+      name: "Private working storage",
       ok: state.storageReady,
       detail: state.storageReady
-        ? `CODEX_HOME is private and writable (${state.home}).`
+        ? "A private per-account directory is writable; the sign-in itself is kept in the database."
         : state.detail,
     },
     {

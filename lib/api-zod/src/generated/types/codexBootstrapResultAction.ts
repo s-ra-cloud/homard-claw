@@ -10,8 +10,9 @@ export type CodexBootstrapResultAction = typeof CodexBootstrapResultAction[keyof
 
 
 export const CodexBootstrapResultAction = {
-  created: 'created',
+  connected: 'connected',
   preserved: 'preserved',
   skipped: 'skipped',
+  disconnected: 'disconnected',
   unavailable: 'unavailable',
 } as const;

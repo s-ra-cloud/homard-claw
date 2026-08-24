@@ -1147,15 +1147,27 @@ export type CodexBootstrapResultAction = typeof CodexBootstrapResultAction[keyof
 
 
 export const CodexBootstrapResultAction = {
-  created: 'created',
+  connected: 'connected',
   preserved: 'preserved',
   skipped: 'skipped',
+  disconnected: 'disconnected',
   unavailable: 'unavailable',
 } as const;
 
 export interface CodexBootstrapResult {
   action: CodexBootstrapResultAction;
   detail: string;
+}
+
+/**
+ * The contents of the auth.json written by `codex login` on a desktop. It is encrypted before storage, never returned by any endpoint, and never exposed to an agent's tools or prompts.
+ */
+export interface CodexCredentialInput {
+  /**
+     * @minLength 2
+     * @maxLength 20000
+     */
+  authJson: string;
 }
 
 export type ProviderSettingsDefaultProvider = typeof ProviderSettingsDefaultProvider[keyof typeof ProviderSettingsDefaultProvider];

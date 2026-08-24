@@ -42,6 +42,7 @@ export * from './codexBootstrapResult';
 export * from './codexBootstrapResultAction';
 export * from './codexConnectionCheck';
 export * from './codexConnectionTest';
+export * from './codexCredentialInput';
 export * from './converseInput';
 export * from './converseResponse';
 export * from './converseTurn';

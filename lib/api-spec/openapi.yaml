@@ -691,10 +691,41 @@ paths:
     post:
       operationId: bootstrapCodex
       tags: [office]
-      summary: Seed the private CODEX_HOME from CODEX_AUTH_JSON if it is empty
+      summary: Seed this account's Codex sign-in from CODEX_AUTH_JSON if it has none
       responses:
         "200":
           description: Bootstrap result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CodexBootstrapResult"
+  /providers/codex/credential:
+    post:
+      operationId: connectCodex
+      tags: [office]
+      summary: Connect this account's own ChatGPT Codex sign-in
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CodexCredentialInput"
+      responses:
+        "200":
+          description: Connection result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CodexBootstrapResult"
+        "422":
+          description: The pasted file is not a usable Codex sign-in
+    delete:
+      operationId: disconnectCodex
+      tags: [office]
+      summary: Remove this account's stored Codex sign-in
+      responses:
+        "200":
+          description: Disconnection result
           content:
             application/json:
               schema:
@@ -1789,8 +1820,17 @@ components:
       properties:
         action:
           type: string
-          enum: [created, preserved, skipped, unavailable]
+          enum: [connected, preserved, skipped, disconnected, unavailable]
         detail: { type: string }
+    CodexCredentialInput:
+      type: object
+      description: >-
+        The contents of the auth.json written by `codex login` on a desktop.
+        It is encrypted before storage, never returned by any endpoint, and
+        never exposed to an agent's tools or prompts.
+      required: [authJson]
+      properties:
+        authJson: { type: string, minLength: 2, maxLength: 20000 }
     ProviderSettings:
       type: object
       required:

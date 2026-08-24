@@ -731,13 +731,14 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     let workingDirectory: string | null = null;
     let threadId: string | null = null;
     if (provider === "codex_chatgpt") {
-      // Readiness above already proved a private CODEX_HOME exists, so a
-      // missing fingerprint here would be a contradiction; fail closed.
-      const fingerprint = codexAuthFingerprint();
+      // Keyed by the account whose ChatGPT session the run will use, so two
+      // accounts never queue behind each other. No account resolved means
+      // nothing to run as; fail closed.
+      const fingerprint = await codexAuthFingerprint();
       if (!fingerprint) {
         throw new ProviderCallError(
           "not_configured",
-          "Codex has no private credential storage configured, so the run was refused.",
+          "No account with a Codex sign-in could be resolved for this task, so the run was refused.",
         );
       }
       const key = codexLeaseKey(fingerprint);
