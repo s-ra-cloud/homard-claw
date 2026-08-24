@@ -28,15 +28,26 @@ const DESK_SEATS = [
   { left: 71.0, top: 72.0, label: "filing desk" },
 ];
 
-// The original scene intentionally leaves its centre open. Each floor pose is
-// a complete lobster + cushion + laptop composite, so no floor furniture is
-// added to the background and nothing is rendered twice.
+// The original scene intentionally leaves its centre open: a wide band behind
+// the two front desks, a corridor pinched between their inner corners around
+// 63% down, and open floor in front of them. The cushions form a diamond
+// centred in that empty area so no composite touches a desk, cabinet or wall.
+// Each floor pose is a complete lobster + cushion + laptop composite, so no
+// floor furniture is added to the background and nothing is rendered twice.
 const FLOOR_SEATS = [
-  { left: 42.0, top: 48.0, label: "floor workstation A" },
-  { left: 58.0, top: 48.0, label: "floor workstation B" },
-  { left: 42.0, top: 63.0, label: "floor workstation C" },
-  { left: 58.0, top: 63.0, label: "floor workstation D" },
+  { left: 50.0, top: 45.0, label: "back floor mat" },
+  { left: 42.0, top: 58.0, label: "left floor mat" },
+  { left: 58.0, top: 58.0, label: "right floor mat" },
+  { left: 50.0, top: 71.0, label: "front floor mat" },
 ];
+
+/**
+ * Floor cushions overlap by depth: the further back a mat sits, the lower it
+ * draws. Everything stays below the desk agents, which own z-index 12.
+ */
+function floorZIndex(top: number) {
+  return 3 + Math.round(top / 10);
+}
 
 const MAX_VISIBLE = DESK_SEATS.length + FLOOR_SEATS.length; // 8
 
@@ -300,7 +311,11 @@ export default function OfficeDashboard() {
                     <div
                       key={agent.id}
                       className="room-agent room-agent--floor"
-                      style={{ left: `${seat.left}%`, top: `${seat.top}%` }}
+                      style={{
+                        left: `${seat.left}%`,
+                        top: `${seat.top}%`,
+                        zIndex: floorZIndex(seat.top),
+                      }}
                     >
                       <Link
                         href="/agents"

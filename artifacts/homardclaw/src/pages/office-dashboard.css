@@ -41,9 +41,13 @@
 .room-scene > img { display: block; width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
 
 /* ── Agent sprites ── */
-.room-agent { position: absolute; z-index: 4; display: flex; flex-direction: column; align-items: center; transform: translate(-50%, -50%); }
+.room-agent { position: absolute; z-index: 12; display: flex; flex-direction: column; align-items: center; transform: translate(-50%, -50%); }
 .room-agent .marlow-lobster { filter: drop-shadow(2px 3px 0 rgba(43, 39, 51, 0.5)); }
-.room-agent--floor { z-index: 3; }
+/* Floor composites are sized as a share of the room so their footprint — and
+   therefore the clearance to the desks — is identical at every viewport size.
+   Depth (z-index) is set per seat in OfficeDashboard; 3 is the fallback. */
+.room-agent--floor { z-index: 3; width: 11%; }
+.room-agent--floor .marlow-lobster { width: 100%; height: auto; }
 .room-agent__name { margin-top: -3px; padding: 1px 4px; border: 1px solid var(--ink); background: var(--paper); color: var(--ink); font: 700 7px "Space Mono", monospace; text-transform: uppercase; white-space: nowrap; box-shadow: 1px 1px 0 rgba(43, 39, 51, 0.55); }
 
 /* Agent link wrapper: covers the sprite + name, keyboard/click navigates to Agents */
@@ -252,8 +256,8 @@
   .quiet-card { box-shadow: 3px 3px 0 #546b72; }
   .room-art { border-width: 3px; box-shadow: 4px 4px 0 #546b72; }
   .room-caption { top: 8px; left: 10px; font-size: 8px; }
-  .room-agent .marlow-lobster { width: 64px; height: 64px; }
-  .room-agent--floor .marlow-lobster { width: 52px; height: 52px; }
+  /* Desk sprites shrink on phones; floor sprites stay a share of the room. */
+  .room-agent:not(.room-agent--floor) .marlow-lobster { width: 64px; height: 64px; }
   .room-agent__name { font-size: 5px; padding: 0 2px; }
   .summary b { font-size: 15px; }
   .approval-actions { display: flex; gap: 6px; }

@@ -1,4 +1,5 @@
 - [HomardClaw art direction](homardclaw-art-direction.md) — Favor dense, cozy isometric pixel dioramas with one expressive lobster at a lived-in workstation.
+- [Scene sprite placement](homardclaw-scene-placement.md) — Size room sprites as a % of the scene and tune seats by compositing PNGs, not by eyeballing the app.
 - [Pixel character sprites](pixel-character-components.md) — Never hand-code a character that exists in scene art; generate a sprite and bake recoloured variants at build time.
 - [API server test conventions](api-server-test-conventions.md) — Integration tests hit the dev Postgres; impersonate the existing owner, tag+clean up all rows, never clobber owner_clerk_id.
 - [OpenAPI codegen quirks](openapi-codegen-quirks.md) — Spec must use type: number (never integer) and union-type nullable enums, or Orval's generated Zod fails to compile.
