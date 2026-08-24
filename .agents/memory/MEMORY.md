@@ -13,3 +13,4 @@
 - [Clerk owner identity](clerk-owner-identity.md) — Clerk ids are per-environment; OWNER_EMAIL (verified, never positively cached) is the owner identity that survives publishing.
 - [Codex provider runtime](codex-provider-runtime.md) — Third provider runs on the owner's ChatGPT allowance; serialize by lease table, fail closed, never invent a cost.
 - [Connected-app actions](connected-app-actions.md) — Closed catalog + explicit action blocks only; re-authorize after approval, strip blocks always, budget-check before each round.
+- [Drizzle lazy queries](drizzle-lazy-queries.md) — A drizzle builder chain executes only when awaited/.then()'d; `void db.delete(...)` silently does nothing.

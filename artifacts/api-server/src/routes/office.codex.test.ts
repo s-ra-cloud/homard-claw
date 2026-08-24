@@ -13,6 +13,7 @@ import {
   vi,
 } from "vitest";
 import {
+  agentMessagesTable,
   agentsTable,
   codexCredentialsTable,
   db,
@@ -63,6 +64,8 @@ import {
 } from "../codex/runtime";
 import { saveCodexCredential } from "../codex/credential-store";
 import { acquireProviderLease, codexLeaseKey } from "../provider-leases";
+import { setCodexTalkLeaseWait } from "../talk-codex";
+import { randomUUID } from "node:crypto";
 import { setCodexLeaseHeartbeatMs } from "../codex/config";
 import { runCodexHealthCheck, resetCodexHealthCheck } from "../scheduler";
 
@@ -1419,5 +1422,365 @@ describe("Codex health check", () => {
     expect(await runCodexHealthCheck(now + 31 * 60_000)).toBe(true);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(sdkCalls).toHaveLength(0);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Talk (typed + voice conversations)                                  */
+/* ------------------------------------------------------------------ */
+
+const TALK_REPLY_JSON = '{"reply":"Claws crossed, boss.","taskObjective":null}';
+
+function talkTurn(reply = TALK_REPLY_JSON): ScriptedTurn {
+  return successTurn(reply);
+}
+
+/** Route managed-speech traffic for voice-converse; everything else dies. */
+function mockSpeech(transcript: string): void {
+  vi.stubEnv("AI_INTEGRATIONS_OPENAI_BASE_URL", "https://openai.test/v1");
+  vi.stubEnv("AI_INTEGRATIONS_OPENAI_API_KEY", "test-openai-key");
+  fetchMock.mockImplementation(async (url: unknown) => {
+    const target = String(url);
+    if (target.includes("openai.test") && target.includes("/audio/transcriptions")) {
+      return new Response(JSON.stringify({ text: transcript }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    if (target.includes("openai.test") && target.includes("/chat/completions")) {
+      const frames = ['{"choices":[{"delta":{"audio":{"data":"QUFBQQ=="}}}]}'];
+      const body = frames.map((f) => `data: ${f}\n\n`).join("") + "data: [DONE]\n\n";
+      return new Response(body, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    }
+    throw new Error(`unexpected fetch in test: ${target}`);
+  });
+}
+
+/** Minimal RIFF/WAVE header so format detection skips ffmpeg conversion. */
+const FAKE_WAV_BASE64 = Buffer.concat([
+  Buffer.from("RIFF"),
+  Buffer.from([16, 0, 0, 0]),
+  Buffer.from("WAVEfmt "),
+  Buffer.alloc(32),
+]).toString("base64");
+
+async function talkConversationRows(agentId: string) {
+  return db
+    .select()
+    .from(providerConversationsTable)
+    .where(eq(providerConversationsTable.agentId, agentId));
+}
+
+describe("Codex Talk conversations", () => {
+  afterEach(() => {
+    setCodexTalkLeaseWait(null);
+  });
+
+  it("answers a typed Talk message from a healthy Codex session in an isolated sandboxed workspace", async () => {
+    // Regression: this exact call used to fail before reaching Codex —
+    // no workspace was prepared — and was reported as a missing provider
+    // key even though the Providers card showed a healthy session.
+    const agent = await createAgent(`${RUN_TAG} Talker`);
+    turnScript = [talkTurn()];
+
+    const res = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "How is the kelp doing?" });
+    expect(res.status).toBe(200);
+    expect(res.body.reply).toBe("Claws crossed, boss.");
+    expect(res.body.proposedTaskObjective).toBeNull();
+
+    // Ran in this agent's own workspace with a derived sandbox, and the
+    // Talk framing actually reached Codex.
+    expect(sdkCalls).toHaveLength(1);
+    const call = sdkCalls[0]!;
+    expect(call.kind).toBe("start");
+    expect(call.options?.workingDirectory?.startsWith(
+      path.join(workspaceRoot, agent.id),
+    )).toBe(true);
+    expect(call.options?.sandboxMode).toBe("workspace-write");
+    expect(call.options?.networkAccessEnabled).toBe(false);
+    expect(call.options?.approvalPolicy).toBe("never");
+    expect(call.input).toContain("lobster agent");
+    expect(call.input).toContain("How is the kelp doing?");
+
+    // The lease is released the moment the turn ends.
+    const fingerprint = await codexAuthFingerprint();
+    const leases = await db
+      .select()
+      .from(providerLeasesTable)
+      .where(eq(providerLeasesTable.key, codexLeaseKey(fingerprint!)));
+    expect(leases).toHaveLength(0);
+  });
+
+  it("resumes the same agent's thread on the next Talk turn and records the thread id", async () => {
+    const agent = await createAgent(`${RUN_TAG} Continuity`);
+    turnScript = [talkTurn(), talkTurn()];
+
+    const first = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "First turn." });
+    expect(first.status).toBe(200);
+    // The SDK-issued thread id was recorded on the conversation row.
+    const afterFirst = await talkConversationRows(agent.id);
+    expect(afterFirst).toHaveLength(1);
+    const firstThreadId = afterFirst[0]!.threadId;
+    expect(firstThreadId).toMatch(/^thr_/);
+
+    const second = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Second turn." });
+    expect(second.status).toBe(200);
+
+    expect(sdkCalls).toHaveLength(2);
+    expect(sdkCalls[1]!.kind).toBe("resume");
+    expect(sdkCalls[1]!.threadId).toBe(firstThreadId);
+    const rows = await talkConversationRows(agent.id);
+    expect(rows).toHaveLength(1);
+    // Both turns shared one conversation directory.
+    expect(sdkCalls[1]!.options?.workingDirectory).toBe(
+      sdkCalls[0]!.options?.workingDirectory,
+    );
+  });
+
+  it("never shares a workspace or thread across agents", async () => {
+    const crab = await createAgent(`${RUN_TAG} Crab`);
+    const prawn = await createAgent(`${RUN_TAG} Prawn`);
+    turnScript = [talkTurn(), talkTurn()];
+
+    await request(app).post(`/api/agents/${crab.id}/converse`).send({ text: "Hi" });
+    await request(app).post(`/api/agents/${prawn.id}/converse`).send({ text: "Hi" });
+
+    expect(sdkCalls).toHaveLength(2);
+    // The second agent starts fresh: no resume of the first agent's thread.
+    expect(sdkCalls[1]!.kind).toBe("start");
+    expect(sdkCalls[0]!.options?.workingDirectory).not.toBe(
+      sdkCalls[1]!.options?.workingDirectory,
+    );
+    expect(sdkCalls[0]!.options?.workingDirectory).toContain(crab.id);
+    expect(sdkCalls[1]!.options?.workingDirectory).toContain(prawn.id);
+  });
+
+  it("forces the strictest sandbox for a sensitive-data agent in Talk too", async () => {
+    const agent = await createAgent(`${RUN_TAG} Vaulted`, {
+      securityPreset: "operator",
+      autonomy: "autonomous",
+    });
+    await db
+      .update(agentsTable)
+      .set({ sensitiveDataSandbox: true })
+      .where(eq(agentsTable.id, agent.id));
+    turnScript = [talkTurn()];
+
+    const res = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Anything secret?" });
+    expect(res.status).toBe(200);
+    expect(sdkCalls[0]!.options?.sandboxMode).toBe("read-only");
+    expect(sdkCalls[0]!.options?.networkAccessEnabled).toBe(false);
+    expect(sdkCalls[0]!.options?.webSearchMode).toBe("disabled");
+  });
+
+  it("completes a voice round-trip through the same Codex context", async () => {
+    const agent = await createAgent(`${RUN_TAG} Voicer`, { voiceStyle: "deep" });
+    mockSpeech("Status report please");
+    turnScript = [talkTurn()];
+
+    const res = await request(app)
+      .post(`/api/agents/${agent.id}/voice-converse`)
+      .send({ audio: FAKE_WAV_BASE64 })
+      .buffer(true)
+      .parse((response, callback) => {
+        let text = "";
+        response.on("data", (chunk: Buffer) => (text += chunk.toString()));
+        response.on("end", () => callback(null, text));
+      });
+    expect(res.status).toBe(200);
+    const body = res.body as unknown as string;
+    expect(body).toContain('"type":"user_transcript"');
+    expect(body).toContain("Status report please");
+    expect(body).toContain('"type":"reply"');
+    expect(body).toContain("Claws crossed, boss.");
+    expect(sdkCalls).toHaveLength(1);
+    expect(sdkCalls[0]!.options?.workingDirectory).toContain(agent.id);
+  });
+
+  it("returns a clear busy message when another run holds the ChatGPT credential", async () => {
+    const agent = await createAgent(`${RUN_TAG} Queued`);
+    setCodexTalkLeaseWait({ totalMs: 250, intervalMs: 100 });
+    const fingerprint = await codexAuthFingerprint();
+    await db.insert(providerLeasesTable).values({
+      key: codexLeaseKey(fingerprint!),
+      taskId: randomUUID(),
+      holder: "another-process-entirely",
+      acquiredAt: new Date(),
+      heartbeatAt: new Date(),
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+
+    const res = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Anyone home?" });
+    expect(res.status).toBe(503);
+    expect(res.body.error).toMatch(/busy/i);
+    expect(res.body.error).not.toMatch(/provider key/i);
+    // The turn never reached Codex and never stole the lease.
+    expect(sdkCalls).toHaveLength(0);
+    const [lease] = await db
+      .select()
+      .from(providerLeasesTable)
+      .where(eq(providerLeasesTable.key, codexLeaseKey(fingerprint!)));
+    expect(lease?.holder).toBe("another-process-entirely");
+  });
+
+  it("waits briefly and proceeds once the credential frees up", async () => {
+    const agent = await createAgent(`${RUN_TAG} Patient`);
+    setCodexTalkLeaseWait({ totalMs: 2_000, intervalMs: 50 });
+    const fingerprint = await codexAuthFingerprint();
+    const key = codexLeaseKey(fingerprint!);
+    await db.insert(providerLeasesTable).values({
+      key,
+      taskId: randomUUID(),
+      holder: "short-lived-holder",
+      acquiredAt: new Date(),
+      heartbeatAt: new Date(),
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    turnScript = [talkTurn()];
+    // Free the lease shortly after the Talk turn starts waiting.
+    // NOTE: drizzle queries are lazy thenables — without .then() the
+    // delete would never execute and the wait would always time out.
+    setTimeout(() => {
+      db.delete(providerLeasesTable)
+        .where(eq(providerLeasesTable.key, key))
+        .then(
+          () => {},
+          () => {},
+        );
+    }, 150);
+
+    const res = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Patiently waiting." });
+    expect(res.status).toBe(200);
+    expect(res.body.reply).toBe("Claws crossed, boss.");
+  });
+
+  it("maps an authentication failure to a ChatGPT-session message, not a missing key", async () => {
+    const agent = await createAgent(`${RUN_TAG} Locked Out`);
+    turnScript = [failingTurn("401 unauthorized: please run codex login")];
+
+    const res = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Hello?" });
+    expect(res.status).toBe(503);
+    expect(res.body.error).toMatch(/ChatGPT session/i);
+    expect(res.body.error).not.toMatch(/provider key/i);
+  });
+
+  it("maps an exhausted allowance to an allowance message", async () => {
+    const agent = await createAgent(`${RUN_TAG} Broke`);
+    turnScript = [failingTurn("You've hit your usage limit for the week")];
+
+    const res = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "One more?" });
+    expect(res.status).toBe(503);
+    expect(res.body.error).toMatch(/allowance/i);
+    expect(res.body.error).not.toMatch(/provider key/i);
+  });
+
+  it("reports a missing sign-in as a setup problem instead of a missing key", async () => {
+    const agent = await createAgent(`${RUN_TAG} Signed Out`);
+    await disconnectCodexCredential(authState.userId);
+
+    const res = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Hello?" });
+    expect(res.status).toBe(503);
+    expect(res.body.error).toMatch(/ChatGPT connection|Providers page/i);
+    expect(res.body.error).not.toMatch(/provider key/i);
+    expect(sdkCalls).toHaveLength(0);
+  });
+
+  it("reports a workspace-preparation failure as an internal problem", async () => {
+    const agent = await createAgent(`${RUN_TAG} Homeless`);
+    // Point the workspace root under a regular file so mkdir must fail.
+    const blocker = path.join(workspaceRoot, `blocker-${Date.now()}`);
+    await writeFile(blocker, "not a directory");
+    vi.stubEnv("CODEX_WORKSPACE_ROOT", path.join(blocker, "sub"));
+
+    const res = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Where do I live?" });
+    expect(res.status).toBe(500);
+    expect(res.body.error).toMatch(/workspace/i);
+    expect(res.body.error).not.toMatch(/provider key/i);
+    expect(sdkCalls).toHaveLength(0);
+  });
+
+  it("stores voice transcripts only when the existing setting allows it", async () => {
+    const agent = await createAgent(`${RUN_TAG} Archivist`);
+    const [prior] = await db
+      .select()
+      .from(systemStateTable)
+      .where(eq(systemStateTable.key, "voice_transcripts_enabled"))
+      .limit(1);
+    try {
+      // Off: nothing stored.
+      await db
+        .insert(systemStateTable)
+        .values({ key: "voice_transcripts_enabled", value: "false" })
+        .onConflictDoUpdate({
+          target: systemStateTable.key,
+          set: { value: "false" },
+        });
+      turnScript = [talkTurn()];
+      let res = await request(app)
+        .post(`/api/agents/${agent.id}/converse`)
+        .send({ text: "Off the record." });
+      expect(res.status).toBe(200);
+      let rows = await db
+        .select()
+        .from(agentMessagesTable)
+        .where(eq(agentMessagesTable.toAgentId, agent.id));
+      expect(rows.filter((r) => r.kind === "voice")).toHaveLength(0);
+
+      // On: both sides stored.
+      await db
+        .update(systemStateTable)
+        .set({ value: "true" })
+        .where(eq(systemStateTable.key, "voice_transcripts_enabled"));
+      turnScript = [talkTurn()];
+      res = await request(app)
+        .post(`/api/agents/${agent.id}/converse`)
+        .send({ text: "On the record." });
+      expect(res.status).toBe(200);
+      rows = await db
+        .select()
+        .from(agentMessagesTable)
+        .where(eq(agentMessagesTable.toAgentId, agent.id));
+      expect(rows.some((r) => r.kind === "voice" && r.body === "On the record.")).toBe(true);
+    } finally {
+      if (prior) {
+        await db
+          .update(systemStateTable)
+          .set({ value: prior.value })
+          .where(eq(systemStateTable.key, "voice_transcripts_enabled"));
+      } else {
+        await db
+          .delete(systemStateTable)
+          .where(eq(systemStateTable.key, "voice_transcripts_enabled"));
+      }
+      await db
+        .delete(agentMessagesTable)
+        .where(eq(agentMessagesTable.toAgentId, agent.id));
+      await db
+        .delete(agentMessagesTable)
+        .where(eq(agentMessagesTable.fromAgentId, agent.id));
+    }
   });
 });

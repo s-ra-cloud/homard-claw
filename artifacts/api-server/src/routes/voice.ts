@@ -20,6 +20,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { recordAudit } from "../audit";
 import { callProvider, ProviderCallError } from "../execution";
 import { resolveRouting } from "../providers";
+import { CodexTalkError, runCodexTalkTurn } from "../talk-codex";
 
 const router: IRouter = Router();
 
@@ -276,6 +277,31 @@ async function generateReply(
   signal: AbortSignal,
 ): Promise<{ reply: string; taskObjective: string | null }> {
   const routing = await resolveRouting(agent);
+
+  if (routing.provider === "codex_chatgpt") {
+    // Codex executes in a sandbox, so a Talk turn needs the same safe
+    // context a task run gets: an isolated per-agent workspace, the
+    // agent's current sandbox restrictions, thread continuity, and the
+    // durable ChatGPT-credential lease. No quick retry here — repeating a
+    // subscription call risks double-spending the allowance, and the lease
+    // wait already absorbs short contention.
+    const result = await runCodexTalkTurn({
+      agent: {
+        id: agent.id,
+        securityPreset: agent.securityPreset,
+        autonomy: agent.autonomy,
+        sensitiveDataSandbox: agent.sensitiveDataSandbox,
+      },
+      model: routing.model,
+      reasoningEffort: routing.reasoningEffort,
+      system: buildSystemPrompt(agent),
+      prompt: buildPrompt(history, userText, agent.name),
+      maxOutputTokens: REPLY_MAX_TOKENS,
+      signal,
+    });
+    return parseModelReply(result.output);
+  }
+
   const call = () =>
     callProvider({
       provider: routing.provider,
@@ -314,6 +340,54 @@ async function persistTranscript(agent: AgentRow, userText: string, reply: strin
 
 /** Fixed, sanitized messages only — never echo upstream provider detail. */
 function providerErrorMessage(err: unknown): { status: number; message: string } {
+  if (err instanceof CodexTalkError) {
+    // Codex failures get their own accurate messages: a workspace or
+    // sign-in problem is not a missing API key, and saying so sends the
+    // owner to the wrong fix.
+    switch (err.kind) {
+      case "workspace":
+        return {
+          status: 500,
+          message:
+            "The agent's private Codex workspace could not be prepared. Try again; if this keeps happening, check the server's Codex workspace configuration.",
+        };
+      case "setup":
+        return {
+          status: 503,
+          message:
+            "Codex is not ready to answer. Check the ChatGPT connection on the Providers page.",
+        };
+      case "auth":
+        return {
+          status: 503,
+          message:
+            "The ChatGPT session for Codex could not authenticate. Reconnect Codex on the Providers page.",
+        };
+      case "busy":
+        return {
+          status: 503,
+          message:
+            "This agent's ChatGPT Codex session is busy with another run. Try again in a moment.",
+        };
+      case "allowance":
+        return {
+          status: 503,
+          message:
+            "The ChatGPT Codex plan allowance is used up, so the agent cannot answer right now.",
+        };
+      case "rate_limit":
+        return {
+          status: 503,
+          message: "Codex is rate limiting; try again in a moment.",
+        };
+      case "timeout":
+        return { status: 503, message: "Codex timed out. Try again." };
+      case "cancelled":
+        return { status: 499, message: "The conversation was interrupted." };
+      default:
+        return { status: 503, message: "Codex failed to answer. Try again." };
+    }
+  }
   if (err instanceof ProviderCallError) {
     switch (err.kind) {
       case "not_configured":
