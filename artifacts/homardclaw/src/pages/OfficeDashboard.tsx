@@ -31,6 +31,67 @@ import "./office-dashboard.css";
  */
 const officeArt = `${import.meta.env.BASE_URL}images/four-desk-office-exterior.png`;
 
+/**
+ * Wide immersive companion: a 2048x1024 canvas whose left 1536px are the
+ * baked exterior above, byte-for-byte (office still at 256,0), extended right
+ * with a ping-pong tile of the exterior's own garden strip and a small
+ * cutaway sandbox cabin composited at (1490, 260) at 480x466. The office
+ * footprint is therefore left 12.5%, width 50%, full height of this canvas,
+ * and every seat/tag/hotspot percentage inside `.room-scene` is unchanged.
+ */
+const wideArt = `${import.meta.env.BASE_URL}images/four-desk-office-wide.png`;
+
+/**
+ * The sandbox cabin footprint inside the wide landscape — the exact rectangle
+ * the composited cabin occupies — so cabin seat percentages are calibrated
+ * against the cabin artwork, independent of the office coordinate frame.
+ * 1490/2048, 260/1024, 480/2048, 466/1024.
+ */
+const CABIN_SCENE = {
+  left: 72.7539,
+  top: 25.3906,
+  width: 23.4375,
+  height: 45.5078,
+} as const;
+
+// Cabin floor mats, calibrated by compositing the shipped floor-working
+// sprite (95px on the 2048 canvas) onto the cabin floor diamond. Percentages
+// of the cabin scene rect above.
+const CABIN_SEATS = [
+  { left: 49.6, top: 51.5, label: "back cabin floor mat" },
+  { left: 30.8, top: 63.7, label: "left cabin floor mat" },
+  { left: 68.3, top: 63.7, label: "right cabin floor mat" },
+  { left: 49.6, top: 76.0, label: "front cabin floor mat" },
+];
+
+/**
+ * Cabin sprites keep the office character size: 95px of the 2048 canvas is
+ * the same artwork footprint as a floor agent in the office, expressed as a
+ * share of the 480px cabin scene (95/480).
+ */
+const CABIN_SPRITE_PCT = 19.79;
+
+/**
+ * The cabin only exists in immersive mode on a genuinely wide display —
+ * MacBook-style 16:10 and wider — where the 2:1 canvas fills the viewport
+ * without shrinking the office below its normal immersive size.
+ */
+const WIDE_SCENE_QUERY = "(min-width: 1000px) and (min-aspect-ratio: 3/2)";
+
+function useWideScene(): boolean {
+  const [wide, setWide] = React.useState(
+    () => typeof window !== "undefined" && window.matchMedia(WIDE_SCENE_QUERY).matches,
+  );
+  React.useEffect(() => {
+    const mq = window.matchMedia(WIDE_SCENE_QUERY);
+    const onChange = () => setWide(mq.matches);
+    mq.addEventListener("change", onChange);
+    onChange();
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return wide;
+}
+
 // Chair centres in the original office scene, measured from the artwork: each
 // seat sits in the middle of its desk's knee space, between the two drawer
 // pedestals. The desks are not exact mirrors, so the right-hand seats do not
@@ -132,6 +193,7 @@ interface SceneHotspot {
 }
 export default function OfficeDashboard() {
   const { immersive, enterImmersive } = useImmersiveMode();
+  const isWideViewport = useWideScene();
 
   const { data: overview, isLoading, isError } = useGetOfficeOverview();
   const {
@@ -256,9 +318,20 @@ export default function OfficeDashboard() {
   const hasPendingApprovals = (overview.pendingApprovals ?? 0) > 0;
 
   const activeAgents = (agents ?? []).filter((a) => !a.archived);
-  const deskAgents = activeAgents.slice(0, DESK_SEATS.length);
-  const floorAgents = activeAgents.slice(DESK_SEATS.length, MAX_VISIBLE);
-  const overflowCount = Math.max(0, activeAgents.length - MAX_VISIBLE);
+  // The cabin exists only in the wide immersive presentation; every other
+  // view keeps the exact current scene and agent allocation.
+  const wideScene = immersive && isWideViewport;
+  const sandboxedAgents = wideScene
+    ? activeAgents.filter((a) => a.sensitiveDataSandbox)
+    : [];
+  const officeAgents = wideScene
+    ? activeAgents.filter((a) => !a.sensitiveDataSandbox)
+    : activeAgents;
+  const cabinAgents = sandboxedAgents.slice(0, CABIN_SEATS.length);
+  const cabinOverflowCount = Math.max(0, sandboxedAgents.length - CABIN_SEATS.length);
+  const deskAgents = officeAgents.slice(0, DESK_SEATS.length);
+  const floorAgents = officeAgents.slice(DESK_SEATS.length, MAX_VISIBLE);
+  const overflowCount = Math.max(0, officeAgents.length - MAX_VISIBLE);
 
   // Every seated agent, sprite size included, so the name tags can be drawn as
   // one layer on top of every lobster instead of inside their own sprite's
@@ -302,20 +375,39 @@ export default function OfficeDashboard() {
         )}
 
         <main className="iso-office__layout">
-          <section className={`room-wrap ${stopped ? "is-paused" : ""}`} aria-label="Live office with four desks and four floor workstations">
+          <section
+            className={`room-wrap ${stopped ? "is-paused" : ""}`}
+            aria-label={
+              wideScene
+                ? "Live office with four desks, four floor workstations, and a garden sandbox cabin for agents in the sensitive data sandbox"
+                : "Live office with four desks and four floor workstations"
+            }
+          >
             <div className="room-caption">LIVE VIEW / FOUR-DESK OFFICE{stopped ? " / PAUSED" : ""}</div>
             {overflowCount > 0 && (
               <div className="room-overflow" role="status" aria-live="polite">
                 +{overflowCount} agent{overflowCount !== 1 ? "s" : ""} in roster — room holds 8 · <Link href="/agents">view all</Link>
               </div>
             )}
+            {wideScene && cabinOverflowCount > 0 && (
+              <div className="room-overflow" role="status" aria-live="polite">
+                +{cabinOverflowCount} sandboxed agent{cabinOverflowCount !== 1 ? "s" : ""} beyond the cabin's 4 mats · <Link href="/agents">view all</Link>
+              </div>
+            )}
             <div
               className="room-art"
               /* Feeds the blurred fill-backdrop; keeps the URL on BASE_URL. */
-              style={{ "--exterior-art": `url("${officeArt}")` } as React.CSSProperties}
+              style={{ "--exterior-art": `url("${wideScene ? wideArt : officeArt}")` } as React.CSSProperties}
             >
-              <div className="room-landscape">
-                <img src={officeArt} alt="Isometric pixel-art HomardClaw office with four desks, surrounded by a garden and a road" />
+              <div className={`room-landscape${wideScene ? " room-landscape--wide" : ""}`}>
+                <img
+                  src={wideScene ? wideArt : officeArt}
+                  alt={
+                    wideScene
+                      ? "Isometric pixel-art HomardClaw office with four desks on the left and a small garden sandbox cabin on the right, surrounded by a garden and a road"
+                      : "Isometric pixel-art HomardClaw office with four desks, surrounded by a garden and a road"
+                  }
+                />
                 <div className="room-scene">
 
                 {/* ── Static scene navigation hotspots ── */}
@@ -388,6 +480,71 @@ export default function OfficeDashboard() {
                   </Link>
                 ))}
                 </div>
+
+                {/* ── Sandbox cabin — wide immersive only ── */}
+                {wideScene && (
+                  <div
+                    className="cabin-scene"
+                    role="group"
+                    aria-label={`Sandbox cabin — a separate garden cabin where agents in the sensitive data sandbox work${cabinAgents.length === 0 ? "; currently empty" : ""}`}
+                    style={{
+                      left: `${CABIN_SCENE.left}%`,
+                      top: `${CABIN_SCENE.top}%`,
+                      width: `${CABIN_SCENE.width}%`,
+                      height: `${CABIN_SCENE.height}%`,
+                    }}
+                  >
+                    {cabinAgents.map((agent, index) => {
+                      const seat = CABIN_SEATS[index];
+                      return (
+                        <div
+                          key={agent.id}
+                          className="room-agent"
+                          style={{
+                            left: `${seat.left}%`,
+                            top: `${seat.top}%`,
+                            width: `${CABIN_SPRITE_PCT}%`,
+                            zIndex: floorZIndex(seat.top),
+                          }}
+                        >
+                          <Link
+                            href="/agents"
+                            className="room-agent__link"
+                            aria-label={`${agent.name} on the ${seat.label} in the sandbox cabin`}
+                          >
+                            <MarlowLobster
+                              pose="floor-working"
+                              status={stopped ? "paused" : agent.status}
+                              seed={agent.id}
+                              shellColor={agent.avatar.shellColor}
+                              title={`${agent.name} on the ${seat.label} in the sandbox cabin`}
+                            />
+                          </Link>
+                        </div>
+                      );
+                    })}
+                    {cabinAgents.map((agent, index) => {
+                      const seat = CABIN_SEATS[index];
+                      return (
+                        <Link
+                          key={`${agent.id}-name`}
+                          href="/agents"
+                          className="room-agent__name"
+                          style={{
+                            left: `${seat.left}%`,
+                            top: `calc(${seat.top + CABIN_SPRITE_PCT / 2}% - 2px)`,
+                          }}
+                          /* The sprite above already carries this agent's link. */
+                          aria-hidden="true"
+                          tabIndex={-1}
+                          title={agent.name}
+                        >
+                          {agent.name}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           </section>

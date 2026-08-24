@@ -50,6 +50,19 @@
    coordinate (seats, tags, hotspots) is unchanged. */
 .room-scene { position: absolute; left: 16.6667%; top: 0; width: 66.6667%; height: 100%; }
 
+/* ── Wide immersive landscape (office left + sandbox cabin right) ── */
+/* The 2048x1024 wide canvas keeps the baked exterior byte-for-byte as its
+   left 1536px, so the office footprint moves to left 12.5% / width 50% while
+   every coordinate inside .room-scene stays identical. */
+.room-landscape--wide { aspect-ratio: 2 / 1; }
+.room-landscape--wide .room-scene { left: 12.5%; width: 50%; }
+/* The cabin footprint inside the wide canvas; inline styles pin the rect so
+   seat percentages are calibrated against the cabin artwork alone. */
+.cabin-scene { position: absolute; }
+/* The cabin scene is under a quarter of the landscape wide, so its tags can
+   take a larger share of it without colliding. */
+.cabin-scene .room-agent__name { max-width: 46%; }
+
 /* ── Agent sprites ── */
 /* Desk and floor agents alike are sized as a share of the room (width and
    z-index are set per seat in OfficeDashboard), so their footprint — and
@@ -205,6 +218,10 @@
 
 .iso-office.is-immersive .room-landscape {
   width: min(100dvw, calc(100dvh * 1.5));
+}
+
+.iso-office.is-immersive .room-landscape--wide {
+  width: min(100dvw, calc(100dvh * 2));
 }
 
 /* ── Responsive ── */

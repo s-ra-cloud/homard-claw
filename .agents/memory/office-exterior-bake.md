@@ -29,6 +29,17 @@ destroy them.
 4. Composite cutout at +256+0. If the canvas or offset ever changes, the
    `.room-scene` inset percentages must change in lockstep.
 
+## Wide immersive companion canvas
+
+A second bake (2048x1024) keeps the exterior byte-for-byte as its left 1536px
+and extends right by ping-pong tiling the exterior's own pure-garden strip
+(x1280–1536) — mirroring any wider strip drags office pixels into the garden.
+A cutaway cabin is composited on the right with the same shadow recipe. The
+office footprint there is left 12.5% / width 50%, and the cabin has its own
+overlay rect pinned to the composite geometry; if either canvas, offset, or
+cabin placement changes, the matching scene-inset percentages must change in
+lockstep.
+
 The blurred fill behind the landscape (`.room-art::before`) reuses the same
 image via a `--exterior-art` custom property set inline from BASE_URL, so no
 viewport aspect exposes a blank band.
