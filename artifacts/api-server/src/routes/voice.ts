@@ -28,6 +28,13 @@ const TRANSCRIPTS_KEY = "voice_transcripts_enabled";
 const MAX_AUDIO_BASE64_CHARS = 20 * 1024 * 1024;
 const REPLY_MAX_TOKENS = 500;
 const CONVERSE_TIMEOUT_MS = 60_000;
+/**
+ * A live conversation cannot wait out the worker's minute-scale backoff, but
+ * one quick retry clears most single 5xx/dropped-connection blips before the
+ * owner ever sees an error. Short enough to stay well inside the request
+ * timeout, long enough to let a load balancer swap backends.
+ */
+const CONVERSE_RETRY_DELAY_MS = 500;
 
 type AgentRow = typeof agentsTable.$inferSelect;
 
@@ -245,6 +252,23 @@ function parseModelReply(raw: string): { reply: string; taskObjective: string | 
   return { reply: stripped || "…", taskObjective: null };
 }
 
+/**
+ * Sleep that gives up the moment the conversation's own controller aborts, so
+ * a retry can never outlive the request timeout or a disconnected client.
+ */
+function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal.addEventListener("abort", done, { once: true });
+  });
+}
+
 async function generateReply(
   agent: AgentRow,
   userText: string,
@@ -252,14 +276,31 @@ async function generateReply(
   signal: AbortSignal,
 ): Promise<{ reply: string; taskObjective: string | null }> {
   const routing = await resolveRouting(agent);
-  const result = await callProvider({
-    provider: routing.provider,
-    model: routing.model,
-    system: buildSystemPrompt(agent),
-    prompt: buildPrompt(history, userText, agent.name),
-    maxOutputTokens: REPLY_MAX_TOKENS,
-    signal,
-  });
+  const call = () =>
+    callProvider({
+      provider: routing.provider,
+      model: routing.model,
+      system: buildSystemPrompt(agent),
+      prompt: buildPrompt(history, userText, agent.name),
+      maxOutputTokens: REPLY_MAX_TOKENS,
+      signal,
+    });
+
+  let result;
+  try {
+    result = await call();
+  } catch (err) {
+    // Only ProviderCallError.retryable kinds (transient, rate_limit) are safe
+    // to repeat: the provider never produced a reply. Auth, not_configured,
+    // policy, cancellation, and timeout failures stay terminal — repeating
+    // them just makes the owner wait longer for the same message.
+    if (!(err instanceof ProviderCallError) || !err.retryable || signal.aborted) {
+      throw err;
+    }
+    await abortableDelay(CONVERSE_RETRY_DELAY_MS, signal);
+    if (signal.aborted) throw err;
+    result = await call();
+  }
   return parseModelReply(result.output);
 }
 

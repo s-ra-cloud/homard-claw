@@ -90,11 +90,22 @@ function sseResponse(frames: string[]): Response {
   });
 }
 
-/** Route provider traffic by URL: OpenRouter chat, OpenAI STT + TTS. */
+/**
+ * Route provider traffic by URL: OpenRouter chat, OpenAI STT + TTS.
+ * `chatFailStatuses` makes the first N agent-reply calls fail with those HTTP
+ * statuses; the returned counter reports how many reply calls were made.
+ */
 function mockProviders({
   replyJson = '{"reply":"Sure thing, boss.","taskObjective":null}',
   transcript = "Hello there, how is the reef?",
-}: { replyJson?: string; transcript?: string } = {}) {
+  chatFailStatuses = [],
+}: {
+  replyJson?: string;
+  transcript?: string;
+  chatFailStatuses?: number[];
+} = {}): { calls: () => number } {
+  const failures = [...chatFailStatuses];
+  let replyCalls = 0;
   fetchMock.mockImplementation(async (url: unknown) => {
     const target = String(url);
     if (target.includes("/models")) {
@@ -120,6 +131,11 @@ function mockProviders({
       ]);
     }
     if (target.includes("/chat/completions")) {
+      replyCalls += 1;
+      const failure = failures.shift();
+      if (failure !== undefined) {
+        return jsonResponse({ error: "upstream detail that must never leak" }, failure);
+      }
       return jsonResponse({
         choices: [{ message: { content: replyJson } }],
         usage: { prompt_tokens: 50, completion_tokens: 20 },
@@ -127,6 +143,7 @@ function mockProviders({
     }
     throw new Error(`unexpected fetch in test: ${target}`);
   });
+  return { calls: () => replyCalls };
 }
 
 beforeAll(async () => {
@@ -392,6 +409,44 @@ describe("text conversations", () => {
           .where(eq(systemStateTable.key, "emergency_stop"));
       }
     }
+  });
+
+  it("retries once through a transient provider blip and still answers", async () => {
+    const agent = await createAgent(`${RUN_TAG} Flaky`);
+    const provider = mockProviders({ chatFailStatuses: [503] });
+
+    const res = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Still with me?" });
+    expect(res.status).toBe(200);
+    expect(res.body.reply).toBe("Sure thing, boss.");
+    expect(provider.calls()).toBe(2);
+  });
+
+  it("gives up after the retry with a sanitized 503", async () => {
+    const agent = await createAgent(`${RUN_TAG} Doubly Flaky`);
+    const provider = mockProviders({ chatFailStatuses: [503, 503] });
+
+    const res = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Still with me?" });
+    expect(res.status).toBe(503);
+    expect(res.body.error).toMatch(/temporarily unavailable/i);
+    expect(res.body.error).not.toMatch(/upstream detail/i);
+    // Exactly one retry: a live conversation never hammers a sick provider.
+    expect(provider.calls()).toBe(2);
+  });
+
+  it("fails an auth rejection immediately without retrying", async () => {
+    const agent = await createAgent(`${RUN_TAG} Rejected`);
+    const provider = mockProviders({ chatFailStatuses: [401] });
+
+    const res = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Hello?" });
+    expect(res.status).toBe(503);
+    expect(res.body.error).toMatch(/credentials/i);
+    expect(provider.calls()).toBe(1);
   });
 
   it("maps a missing provider key to a clear 503", async () => {
