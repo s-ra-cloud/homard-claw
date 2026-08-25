@@ -541,6 +541,40 @@ export const agentMessagesTable = pgTable(
   (table) => [index("agent_messages_task_idx").on(table.taskId)],
 );
 
+/**
+ * Durable idempotency for Talk text messages: each client-generated message
+ * id maps to at most one exchange per workspace/agent. A row is claimed
+ * (status "pending") before the provider is called and finalized with the
+ * response payload; a resend that finds a finished row replays the stored
+ * response instead of generating and persisting a duplicate exchange.
+ */
+export const talkExchangesTable = pgTable(
+  "talk_exchanges",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspacesTable.id, { onDelete: "cascade" }),
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => agentsTable.id, { onDelete: "cascade" }),
+    clientMessageId: text("client_message_id").notNull(),
+    // pending | done
+    status: text("status").notNull().default("pending"),
+    responseJson: text("response_json"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("talk_exchanges_client_msg_idx").on(
+      table.workspaceId,
+      table.agentId,
+      table.clientMessageId,
+    ),
+  ],
+);
+
 export const systemStateTable = pgTable("system_state", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),

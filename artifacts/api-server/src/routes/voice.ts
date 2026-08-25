@@ -14,8 +14,8 @@ import {
   UpdateVoiceSettingsBody,
   VoiceConverseWithAgentBody,
 } from "@workspace/api-zod";
-import { agentMessagesTable, agentsTable, db } from "@workspace/db";
-import { and, eq } from "drizzle-orm";
+import { agentMessagesTable, agentsTable, db, talkExchangesTable } from "@workspace/db";
+import { and, desc, eq, or } from "drizzle-orm";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { recordAudit } from "../audit";
 import { callProvider, ProviderCallError } from "../execution";
@@ -324,14 +324,24 @@ async function generateReply(
   return parseModelReply(result.output);
 }
 
+/**
+ * Store one exchange in the agent's Talk history.
+ *
+ * Typed exchanges are always kept — Talk is a chat surface and owners expect
+ * history to survive a refresh. Spoken exchanges honor the workspace's
+ * voice-transcript privacy setting (`force` stays false for those), so
+ * turning transcripts off still keeps spoken words out of the database.
+ */
 async function persistTranscript(
   workspaceId: string,
   agent: AgentRow,
   userText: string,
   reply: string,
+  force = false,
+  executor: Pick<typeof db, "insert"> = db,
 ) {
-  if (!(await transcriptsEnabled(workspaceId))) return;
-  await db.insert(agentMessagesTable).values([
+  if (!force && !(await transcriptsEnabled(workspaceId))) return;
+  await executor.insert(agentMessagesTable).values([
     { fromAgentId: null, toAgentId: agent.id, kind: "voice", body: userText },
     { fromAgentId: agent.id, toAgentId: null, kind: "voice", body: reply },
   ]);
@@ -354,37 +364,45 @@ function providerErrorMessage(err: unknown): { status: number; message: string }
         return {
           status: 503,
           message:
-            "Codex is not ready to answer. Check the ChatGPT connection on the Providers page.",
+            "Codex setup error: the ChatGPT connection is not ready, so this agent could not start its Talk turn. Open Providers and connect or repair ChatGPT, then resend.",
         };
       case "auth":
         return {
           status: 503,
           message:
-            "The ChatGPT session for Codex could not authenticate. Reconnect Codex on the Providers page.",
+            "Codex authentication error: the ChatGPT session was rejected. Open Providers, reconnect ChatGPT, then resend this message.",
         };
       case "busy":
         return {
           status: 503,
           message:
-            "This agent's ChatGPT Codex session is busy with another run. Try again in a moment.",
+            "Codex busy error: this agent's ChatGPT session is already running another task. Wait for it to finish, then resend this message.",
         };
       case "allowance":
         return {
           status: 503,
           message:
-            "The ChatGPT Codex plan allowance is used up, so the agent cannot answer right now.",
+            "Codex allowance error: the ChatGPT plan has no allowance left for this turn. Check the ChatGPT plan or allowance, then resend when available.",
         };
       case "rate_limit":
         return {
           status: 503,
-          message: "Codex is rate limiting; try again in a moment.",
+          message: "Codex rate-limit error: ChatGPT asked us to slow down. Wait a moment, then resend this message.",
         };
       case "timeout":
-        return { status: 503, message: "Codex timed out. Try again." };
+        return {
+          status: 503,
+          message:
+            "Codex timeout error: ChatGPT did not finish within the Talk time limit. Try a shorter message or resend in a moment.",
+        };
       case "cancelled":
         return { status: 499, message: "The conversation was interrupted." };
       default:
-        return { status: 503, message: "Codex failed to answer. Try again." };
+        return {
+          status: 503,
+          message:
+            "Codex provider error: ChatGPT could not complete this Talk turn. Check Providers for connection status, then resend.",
+        };
     }
   }
   if (err instanceof ProviderCallError) {
@@ -421,6 +439,127 @@ function providerErrorMessage(err: unknown): { status: number; message: string }
   return { status: 500, message: "The agent could not answer just now." };
 }
 
+/**
+ * Stored Talk history with one agent, oldest first. Reading history is
+ * harmless, so unlike conversing it works even for retired agents or while
+ * the emergency stop is engaged — the owner can always re-read what was said.
+ */
+const TALK_HISTORY_LIMIT = 200;
+router.get("/agents/:agentId/talk-history", async (req: Request, res: Response) => {
+  const agentId = String(req.params.agentId);
+  const [agent] = await db
+    .select({ id: agentsTable.id, archived: agentsTable.archived })
+    .from(agentsTable)
+    .where(
+      and(eq(agentsTable.id, agentId), eq(agentsTable.workspaceId, req.workspaceId!)),
+    )
+    .limit(1);
+  if (!agent || agent.archived) {
+    res.status(404).json({ error: "Agent not found." });
+    return;
+  }
+  const rows = await db
+    .select()
+    .from(agentMessagesTable)
+    .where(
+      and(
+        eq(agentMessagesTable.kind, "voice"),
+        or(
+          eq(agentMessagesTable.fromAgentId, agentId),
+          eq(agentMessagesTable.toAgentId, agentId),
+        ),
+      ),
+    )
+    .orderBy(desc(agentMessagesTable.createdAt), desc(agentMessagesTable.id))
+    .limit(TALK_HISTORY_LIMIT);
+  // Same-timestamp pairs (one insert stores both sides of an exchange) sort
+  // user-before-agent so the transcript reads in speaking order.
+  const turns = rows
+    .reverse()
+    .sort(
+      (a, b) =>
+        a.createdAt.getTime() - b.createdAt.getTime() ||
+        Number(a.fromAgentId !== null) - Number(b.fromAgentId !== null),
+    )
+    .map((row) => ({
+      id: row.id,
+      role: row.fromAgentId === null ? ("user" as const) : ("agent" as const),
+      text: row.body,
+      createdAt: row.createdAt.toISOString(),
+    }));
+  res.json({ turns });
+});
+
+/**
+ * Resend idempotency: a reply can be generated and persisted while the
+ * client's connection drops, so a resend of the same message must return the
+ * already-generated reply instead of creating a duplicate exchange.
+ *
+ * The guarantee is durable and atomic: `INSERT ... ON CONFLICT DO NOTHING`
+ * on talk_exchanges' unique (workspace, agent, client message id) index
+ * claims the exchange before any provider call. Exactly one of two
+ * concurrent duplicates wins the claim; the loser (and any later retry,
+ * across restarts and instances) sees the existing row and either replays
+ * the stored response or reports that the original is still in flight.
+ *
+ * A claim whose provider call fails is deleted so the owner's retry can
+ * proceed. A claim orphaned by a crash mid-call is retried after
+ * PENDING_CLAIM_TIMEOUT_MS instead of blocking the message forever.
+ */
+const PENDING_CLAIM_TIMEOUT_MS = CONVERSE_TIMEOUT_MS * 2 + 30_000;
+
+async function claimExchange(
+  workspaceId: string,
+  agentId: string,
+  clientMessageId: string,
+): Promise<
+  | { kind: "claimed"; claimId: string }
+  | { kind: "done"; payload: Record<string, unknown> }
+  | { kind: "in_flight" }
+> {
+  const inserted = await db
+    .insert(talkExchangesTable)
+    .values({ workspaceId, agentId, clientMessageId })
+    .onConflictDoNothing()
+    .returning({ id: talkExchangesTable.id });
+  if (inserted.length > 0) return { kind: "claimed", claimId: inserted[0].id };
+
+  const [existing] = await db
+    .select()
+    .from(talkExchangesTable)
+    .where(
+      and(
+        eq(talkExchangesTable.workspaceId, workspaceId),
+        eq(talkExchangesTable.agentId, agentId),
+        eq(talkExchangesTable.clientMessageId, clientMessageId),
+      ),
+    )
+    .limit(1);
+  if (!existing) {
+    // Raced with a failed claim's cleanup; let the caller try fresh.
+    return claimExchange(workspaceId, agentId, clientMessageId);
+  }
+  if (existing.status === "done" && existing.responseJson) {
+    return { kind: "done", payload: JSON.parse(existing.responseJson) };
+  }
+  // Pending: either genuinely in flight, or orphaned by a crash. Reclaim
+  // orphans by deleting the stale row and claiming again.
+  if (Date.now() - existing.createdAt.getTime() > PENDING_CLAIM_TIMEOUT_MS) {
+    // Only a still-pending row may be reclaimed; if the original finished
+    // in the meantime the next claim attempt replays its stored response.
+    await db
+      .delete(talkExchangesTable)
+      .where(
+        and(
+          eq(talkExchangesTable.id, existing.id),
+          eq(talkExchangesTable.status, "pending"),
+        ),
+      );
+    return claimExchange(workspaceId, agentId, clientMessageId);
+  }
+  return { kind: "in_flight" };
+}
+
 /** Text fallback: plain JSON request/response, no speech services involved. */
 router.post("/agents/:agentId/converse", async (req: Request, res: Response) => {
   const parsed = ConverseWithAgentBody.safeParse(req.body);
@@ -435,6 +574,23 @@ router.post("/agents/:agentId/converse", async (req: Request, res: Response) => 
   );
   if (!agent) return;
 
+  const clientMessageId = parsed.data.clientMessageId;
+  let claimId: string | null = null;
+  if (clientMessageId) {
+    const claim = await claimExchange(req.workspaceId!, agent.id, clientMessageId);
+    if (claim.kind === "done") {
+      res.json(claim.payload);
+      return;
+    }
+    if (claim.kind === "in_flight") {
+      res.status(409).json({
+        error: "This message is already being delivered. Give it a moment.",
+      });
+      return;
+    }
+    claimId = claim.claimId;
+  }
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), CONVERSE_TIMEOUT_MS * 2);
   req.on("close", () => controller.abort());
@@ -447,14 +603,87 @@ router.post("/agents/:agentId/converse", async (req: Request, res: Response) => 
       history,
       controller.signal,
     );
-    await persistTranscript(req.workspaceId!, agent, parsed.data.text, reply);
+    const payload = {
+      reply,
+      proposedTaskObjective: taskObjective,
+      voice: agentVoice(agent),
+    };
+    if (claimId) {
+      // Crash safety: history rows and the claim's "done" state commit
+      // atomically, so a crash before this point leaves nothing persisted
+      // (the released/expired claim lets a retry regenerate cleanly) and a
+      // crash after it replays the stored response. The status='pending'
+      // guard means a stolen/expired claim skips persisting instead of
+      // duplicating rows the reclaimer will write.
+      const ownedClaimId = claimId;
+      const finalized = await db.transaction(async (tx) => {
+        const updated = await tx
+          .update(talkExchangesTable)
+          .set({ status: "done", responseJson: JSON.stringify(payload) })
+          .where(
+            and(
+              eq(talkExchangesTable.id, ownedClaimId),
+              eq(talkExchangesTable.status, "pending"),
+            ),
+          )
+          .returning({ id: talkExchangesTable.id });
+        if (updated.length === 0) return false;
+        await persistTranscript(req.workspaceId!, agent, parsed.data.text, reply, true, tx);
+        return true;
+      });
+      // Ownership is consumed either way: nothing past this point may
+      // release or delete the claim (a post-finalization failure such as a
+      // broken audit write must leave the done claim for replay).
+      claimId = null;
+      if (!finalized) {
+        // Lost ownership: our claim was reclaimed while we ran (stale-claim
+        // timeout). The reclaimer's outcome is authoritative — replay it
+        // rather than answering with our own uncommitted reply, which would
+        // double-deliver the message.
+        const [authoritative] = await db
+          .select()
+          .from(talkExchangesTable)
+          .where(
+            and(
+              eq(talkExchangesTable.workspaceId, req.workspaceId!),
+              eq(talkExchangesTable.agentId, agent.id),
+              eq(talkExchangesTable.clientMessageId, clientMessageId!),
+            ),
+          )
+          .limit(1);
+        if (authoritative?.status === "done" && authoritative.responseJson) {
+          res.json(JSON.parse(authoritative.responseJson));
+          return;
+        }
+        res.status(409).json({
+          error: "This message is being retried elsewhere. Give it a moment.",
+        });
+        return;
+      }
+    } else {
+      await persistTranscript(req.workspaceId!, agent, parsed.data.text, reply, true);
+    }
     await recordAudit(
       req.workspaceId!,
       "voice.converse",
       `${agent.name} chatted with the owner (text mode).`,
     );
-    res.json({ reply, proposedTaskObjective: taskObjective, voice: agentVoice(agent) });
+    res.json(payload);
   } catch (err) {
+    // Release only a claim we still own and that never finalized, so the
+    // owner's resend can try again. A finalized claim must survive for
+    // replay even when later steps fail.
+    if (claimId) {
+      await db
+        .delete(talkExchangesTable)
+        .where(
+          and(
+            eq(talkExchangesTable.id, claimId),
+            eq(talkExchangesTable.status, "pending"),
+          ),
+        )
+        .catch(() => {});
+    }
     const { status, message } = providerErrorMessage(err);
     if (!res.headersSent) res.status(status).json({ error: message });
   } finally {

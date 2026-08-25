@@ -13,6 +13,11 @@ export interface ConverseInput {
      * @maxLength 4000
      */
   text: string;
+  /**
+     * Client-generated id for this message. Resending with the same id returns the already-generated reply instead of creating a duplicate exchange.
+     * @maxLength 64
+     */
+  clientMessageId?: string;
   /** @maxItems 20 */
   history?: ConverseTurn[];
 }

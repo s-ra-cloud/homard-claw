@@ -632,6 +632,22 @@ paths:
           description: Agent cannot converse right now
         "503":
           description: Voice services are unavailable
+  /agents/{agentId}/talk-history:
+    get:
+      operationId: getTalkHistory
+      tags: [office]
+      summary: Get the stored Talk conversation history with an agent
+      parameters:
+        - $ref: "#/components/parameters/AgentId"
+      responses:
+        "200":
+          description: Stored turns, oldest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TalkHistory"
+        "404":
+          description: Agent not found
   /providers:
     get:
       operationId: getProviders
@@ -1753,11 +1769,34 @@ components:
       properties:
         role: { type: string, enum: [user, agent] }
         text: { type: string, maxLength: 8000 }
+    TalkHistoryTurn:
+      type: object
+      required: [id, role, text, createdAt]
+      properties:
+        id: { type: string }
+        role: { type: string, enum: [user, agent] }
+        text: { type: string }
+        createdAt: { type: string, format: date-time }
+    TalkHistory:
+      type: object
+      required: [turns]
+      properties:
+        turns:
+          type: array
+          items:
+            $ref: "#/components/schemas/TalkHistoryTurn"
     ConverseInput:
       type: object
       required: [text]
       properties:
         text: { type: string, minLength: 1, maxLength: 4000 }
+        clientMessageId:
+          type: string
+          maxLength: 64
+          description: >-
+            Client-generated id for this message. Resending with the same id
+            returns the already-generated reply instead of creating a
+            duplicate exchange.
         history:
           type: array
           maxItems: 20

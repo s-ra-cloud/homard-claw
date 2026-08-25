@@ -74,6 +74,7 @@ import type {
   ScheduleInput,
   ScheduleUpdate,
   SearchAuditParams,
+  TalkHistory,
   Task,
   TaskDetail,
   TaskEstimate,
@@ -2644,6 +2645,83 @@ export const useVoiceConverseWithAgent = <TError = ErrorType<void>,
       > => {
       return useMutation(getVoiceConverseWithAgentMutationOptions(options));
     }
+
+export const getGetTalkHistoryUrl = (agentId: string,) => {
+
+
+
+
+  return `/api/agents/${agentId}/talk-history`
+}
+
+/**
+ * @summary Get the stored Talk conversation history with an agent
+ */
+export const getTalkHistory = async (agentId: string, options?: Parameters<typeof customFetch>[1]): Promise<TalkHistory> => {
+
+  return customFetch<TalkHistory>(getGetTalkHistoryUrl(agentId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetTalkHistoryQueryKey = (agentId: string,) => {
+    return [
+    `/api/agents/${agentId}/talk-history`
+    ] as const;
+    }
+
+
+export const getGetTalkHistoryQueryOptions = <TData = Awaited<ReturnType<typeof getTalkHistory>>, TError = ErrorType<void>>(agentId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTalkHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetTalkHistoryQueryKey(agentId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getTalkHistory>>> = ({ signal }) => getTalkHistory(agentId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: agentId !== null && agentId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getTalkHistory>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetTalkHistoryQueryResult = NonNullable<Awaited<ReturnType<typeof getTalkHistory>>>
+export type GetTalkHistoryQueryError = ErrorType<void>
+
+
+/**
+ * @summary Get the stored Talk conversation history with an agent
+ */
+
+export function useGetTalkHistory<TData = Awaited<ReturnType<typeof getTalkHistory>>, TError = ErrorType<void>>(
+ agentId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTalkHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetTalkHistoryQueryOptions(agentId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetProvidersUrl = () => {
 

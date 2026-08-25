@@ -958,12 +958,36 @@ export interface ConverseTurn {
   text: string;
 }
 
+export type TalkHistoryTurnRole = typeof TalkHistoryTurnRole[keyof typeof TalkHistoryTurnRole];
+
+
+export const TalkHistoryTurnRole = {
+  user: 'user',
+  agent: 'agent',
+} as const;
+
+export interface TalkHistoryTurn {
+  id: string;
+  role: TalkHistoryTurnRole;
+  text: string;
+  createdAt: string;
+}
+
+export interface TalkHistory {
+  turns: TalkHistoryTurn[];
+}
+
 export interface ConverseInput {
   /**
      * @minLength 1
      * @maxLength 4000
      */
   text: string;
+  /**
+     * Client-generated id for this message. Resending with the same id returns the already-generated reply instead of creating a duplicate exchange.
+     * @maxLength 64
+     */
+  clientMessageId?: string;
   /** @maxItems 20 */
   history?: ConverseTurn[];
 }

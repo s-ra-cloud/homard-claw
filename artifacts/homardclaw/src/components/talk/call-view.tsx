@@ -11,9 +11,11 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Agent } from "@workspace/api-client-react";
 import {
+  getGetTalkHistoryQueryKey,
   transcribeAudio,
   useConverseWithAgent,
   useCreateTask,
+  useGetTalkHistory,
 } from "@workspace/api-client-react";
 import type {
   useAudioPlayback,
@@ -30,6 +32,7 @@ import {
   Loader2,
   Mic,
   MicOff,
+  RotateCcw,
   Send,
   Square,
   Volume2,
@@ -37,7 +40,14 @@ import {
 } from "lucide-react";
 import { presenceForStatus } from "./agent-presence";
 
-export type Turn = { role: "user" | "agent"; text: string };
+export type Turn = {
+  role: "user" | "agent";
+  text: string;
+  /** Stable key for this session; stored history rows reuse their server id. */
+  key: string;
+  /** Set when this outgoing message never got a reply; shows a resend button. */
+  failed?: boolean;
+};
 type Phase = "idle" | "recording" | "thinking" | "speaking";
 
 /**
@@ -162,9 +172,66 @@ export function CallView({
     transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight });
   }, [turns, proposedTask, liveTranscript, phase]);
 
-  const appendTurn = useCallback((turn: Turn) => {
-    setTurns((prev) => [...prev, turn]);
+  // Keys for optimistic turns; hydrated turns use server ids. User turns'
+  // keys double as the converse idempotency id, so they must be unique
+  // across sessions, not just within one.
+  const makeKey = useCallback(
+    () =>
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `local-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    [],
+  );
+
+  const appendTurn = useCallback(
+    (turn: Omit<Turn, "key"> & { key?: string }): string => {
+      const key = turn.key ?? makeKey();
+      setTurns((prev) => [...prev, { ...turn, key }]);
+      return key;
+    },
+    [makeKey],
+  );
+
+  const setTurnFailed = useCallback((key: string, failed: boolean) => {
+    setTurns((prev) =>
+      prev.map((t) => (t.key === key ? { ...t, failed: failed || undefined } : t)),
+    );
   }, []);
+
+  // Stored history: hydrate once per mount (the component is keyed by agent
+  // id, so a contact switch remounts and re-hydrates for the new agent).
+  // Hydration waits for a FRESH fetch (not a stale cache hit that is being
+  // refetched), and sending is disabled until it settles, so stored and
+  // optimistic turns can never race into duplicates.
+  const talkHistory = useGetTalkHistory(agentId, {
+    query: {
+      queryKey: getGetTalkHistoryQueryKey(agentId),
+      refetchOnMount: "always",
+    },
+  });
+  const historyReady =
+    talkHistory.isError || (talkHistory.isFetched && !talkHistory.isFetching);
+  const hydratedRef = useRef(false);
+  useEffect(() => {
+    if (hydratedRef.current || !historyReady || !talkHistory.data) return;
+    hydratedRef.current = true;
+    const stored: Turn[] = talkHistory.data.turns.map((t) => ({
+      role: t.role,
+      text: t.text,
+      key: t.id,
+    }));
+    if (stored.length > 0) setTurns((prev) => [...stored, ...prev]);
+  }, [historyReady, talkHistory.data]);
+
+  /** Context sent to the agent: recent settled turns, without failed sends. */
+  const contextTurns = useCallback(
+    () =>
+      turnsRef.current
+        .filter((t) => !t.failed)
+        .slice(-10)
+        .map(({ role, text }) => ({ role, text })),
+    [],
+  );
 
   const stopLiveCaptions = useCallback(() => {
     liveSessionRef.current += 1;
@@ -281,33 +348,61 @@ export function CallView({
 
   const textConverse = useConverseWithAgent();
 
+  /**
+   * Deliver one user turn (already in the transcript, identified by its key)
+   * as a text message. Used for both fresh sends and resends of failed turns
+   * — a resend retries only this message and never duplicates the turn.
+   */
+  const deliverText = useCallback(
+    (text: string, turnKey: string) => {
+      setFlowError(null);
+      setTurnFailed(turnKey, false);
+      setPhase("thinking");
+      const epoch = epochRef.current;
+      textConverse
+        .mutateAsync({
+          agentId,
+          // The turn key is the idempotency id: a resend of this exact turn
+          // returns the already-generated reply instead of a duplicate.
+          data: { text, history: contextTurns(), clientMessageId: turnKey },
+        })
+        .then((data) => {
+          if (epochRef.current !== epoch) return; // the call was ended
+          appendTurn({ role: "agent", text: data.reply });
+          setProposedTask(data.proposedTaskObjective ?? null);
+          setPhase("idle");
+        })
+        .catch((err) => {
+          if (epochRef.current !== epoch) return;
+          setTurnFailed(turnKey, true);
+          setFlowError(errorText(err, "The agent could not answer just now."));
+          setPhase("idle");
+        });
+    },
+    [agentId, appendTurn, contextTurns, setTurnFailed, textConverse],
+  );
+
   const sendText = (event: React.FormEvent) => {
     event.preventDefault();
     const text = textDraft.trim();
-    if (!text || phase !== "idle") return;
+    if (!text || phase !== "idle" || !historyReady) return;
     setTextDraft("");
     setFlowError(null);
-    appendTurn({ role: "user", text });
+    const key = appendTurn({ role: "user", text });
     if (resolveProposal(text)) return;
-    setPhase("thinking");
-    const epoch = epochRef.current;
-    textConverse
-      .mutateAsync({ agentId, data: { text, history: turnsRef.current.slice(-10) } })
-      .then((data) => {
-        if (epochRef.current !== epoch) return; // the call was ended
-        appendTurn({ role: "agent", text: data.reply });
-        setProposedTask(data.proposedTaskObjective ?? null);
-        setPhase("idle");
-      })
-      .catch((err) => {
-        if (epochRef.current !== epoch) return;
-        setFlowError(errorText(err, "The agent could not answer just now."));
-        setPhase("idle");
-      });
+    deliverText(text, key);
   };
 
+  const resendTurn = useCallback(
+    (turn: Turn) => {
+      if (phase !== "idle") return;
+      deliverText(turn.text, turn.key);
+    },
+    [deliverText, phase],
+  );
+
   const startRecording = async () => {
-    if (phase !== "idle" && phase !== "speaking") return;
+    if ((phase !== "idle" && phase !== "speaking") || !historyReady) return;
     // Recording over a speaking agent interrupts it immediately.
     if (phase === "speaking") interrupt();
     setMicError(null);
@@ -350,12 +445,16 @@ export function CallView({
     // Reset the chunk sequencer: every turn's audio starts again at seq 0.
     playback.clear();
     let sawDone = false;
+    // Key of the spoken turn once transcribed; if the reply then fails, the
+    // turn is marked failed so the owner can resend it as text.
+    let spokenTurnKey: string | null = null;
+    let gotReply = false;
     try {
       const audio = await blobToBase64(blob);
       const response = await fetch(`${import.meta.env.BASE_URL}api/agents/${agentId}/voice-converse`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ audio, history: turnsRef.current.slice(-10) }),
+        body: JSON.stringify({ audio, history: contextTurns() }),
         signal: controller.signal,
       });
       if (!response.ok || !response.body) {
@@ -385,7 +484,7 @@ export function CallView({
           switch (event.type) {
             case "user_transcript": {
               const text = String(event.text ?? "");
-              appendTurn({ role: "user", text });
+              spokenTurnKey = appendTurn({ role: "user", text });
               // A spoken "confirm"/"cancel" settles a pending proposal
               // immediately; the rest of the stream is irrelevant then.
               if (resolveProposal(text)) {
@@ -396,6 +495,7 @@ export function CallView({
               break;
             }
             case "reply": {
+              gotReply = true;
               appendTurn({ role: "agent", text: String(event.text ?? "") });
               setProposedTask(
                 typeof event.proposedTaskObjective === "string"
@@ -416,7 +516,10 @@ export function CallView({
               setFlowError(String(event.message ?? "Something went wrong."));
               // Fatal errors end the turn server-side; returning here keeps
               // the real message instead of a "connection dropped" fallback.
-              if (event.fatal === true) return;
+              if (event.fatal === true) {
+                if (spokenTurnKey && !gotReply) setTurnFailed(spokenTurnKey, true);
+                return;
+              }
               break;
             case "done":
               sawDone = true;
@@ -427,12 +530,14 @@ export function CallView({
       }
       if (!sawDone && !controller.signal.aborted && epochRef.current === epoch) {
         setFlowError("The connection dropped mid-reply. Try again.");
+        if (spokenTurnKey && !gotReply) setTurnFailed(spokenTurnKey, true);
       }
     } catch (err) {
       if (!controller.signal.aborted && epochRef.current === epoch) {
         setFlowError(
           errorText(err, "The voice request failed. Check your connection and try again."),
         );
+        if (spokenTurnKey && !gotReply) setTurnFailed(spokenTurnKey, true);
       }
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
@@ -505,22 +610,45 @@ export function CallView({
       >
         {turns.length === 0 && (
           <p className="text-xs text-muted-foreground font-mono uppercase text-center">
-            Say hello to {agent.name}
+            {talkHistory.isLoading ? "Loading history…" : `Say hello to ${agent.name}`}
           </p>
         )}
-        {turns.map((turn, i) => (
+        {turns.map((turn) => (
           <div
-            key={i}
-            className={`max-w-[85%] px-3 py-2 text-sm border-2 border-border pixel-shadow ${
+            key={turn.key}
+            className={`max-w-[85%] px-3 py-2 text-sm border-2 pixel-shadow ${
               turn.role === "user"
-                ? "ml-auto bg-primary text-primary-foreground"
-                : "mr-auto bg-card"
+                ? `ml-auto ${
+                    turn.failed
+                      ? "border-destructive bg-primary/60 text-primary-foreground"
+                      : "border-border bg-primary text-primary-foreground"
+                  }`
+                : "mr-auto border-border bg-card"
             }`}
           >
             <span className="block text-[9px] font-mono uppercase opacity-70">
               {turn.role === "user" ? "You" : agent.name}
             </span>
             {turn.text}
+            {turn.failed && (
+              <span className="mt-2 flex items-center gap-2 text-[10px] font-mono uppercase">
+                <span className="text-destructive-foreground/90">Not delivered</span>
+                <button
+                  type="button"
+                  onClick={() => resendTurn(turn)}
+                  disabled={phase !== "idle"}
+                  className="flex items-center gap-1 border-2 border-border bg-background px-2 py-0.5 text-foreground disabled:opacity-50"
+                  data-testid={`button-resend-${turn.key}`}
+                >
+                  {phase === "thinking" ? (
+                    <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <RotateCcw className="w-3 h-3" aria-hidden="true" />
+                  )}
+                  Resend
+                </button>
+              </span>
+            )}
           </div>
         ))}
         {phase === "recording" && (
@@ -572,7 +700,12 @@ export function CallView({
           className="shrink-0 border-t-4 border-border p-3 bg-destructive/10 text-destructive text-xs"
           role="alert"
         >
-          {micError ?? flowError}
+          <div className="space-y-1">
+            <strong className="block font-mono uppercase">
+              {micError ? "Talk audio error" : "Talk delivery error"}
+            </strong>
+            <span className="block">{micError ?? flowError}</span>
+          </div>
         </div>
       )}
 
@@ -586,7 +719,7 @@ export function CallView({
             ) : (
               <Button
                 onClick={startRecording}
-                disabled={phase !== "idle" && phase !== "speaking"}
+                disabled={(phase !== "idle" && phase !== "speaking") || !historyReady}
                 aria-label={`Record a message for ${agent.name}`}
               >
                 <Mic className="w-4 h-4 mr-2" aria-hidden="true" /> Record
@@ -631,7 +764,7 @@ export function CallView({
           />
           <Button
             type="submit"
-            disabled={!textDraft.trim() || phase !== "idle"}
+            disabled={!textDraft.trim() || phase !== "idle" || !historyReady}
             aria-label="Send message"
           >
             <Send className="w-4 h-4" aria-hidden="true" />

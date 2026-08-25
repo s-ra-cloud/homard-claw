@@ -1877,11 +1877,13 @@ describe("Codex Talk conversations", () => {
         .post(`/api/agents/${agent.id}/converse`)
         .send({ text: "Off the record." });
       expect(res.status).toBe(200);
+      // Typed Talk exchanges are chat history and persist regardless of the
+      // voice-transcript privacy setting (only spoken turns are gated).
       let rows = await db
         .select()
         .from(agentMessagesTable)
         .where(eq(agentMessagesTable.toAgentId, agent.id));
-      expect(rows.filter((r) => r.kind === "voice")).toHaveLength(0);
+      expect(rows.filter((r) => r.kind === "voice" && r.body === "Off the record.")).toHaveLength(1);
 
       // On: both sides stored.
       await db

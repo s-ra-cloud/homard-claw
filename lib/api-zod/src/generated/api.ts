@@ -1660,6 +1660,8 @@ export const ConverseWithAgentParams = zod.object({
 
 export const converseWithAgentBodyTextMax = 4000;
 
+export const converseWithAgentBodyClientMessageIdMax = 64;
+
 export const converseWithAgentBodyHistoryItemTextMax = 8000;
 
 export const converseWithAgentBodyHistoryMax = 20;
@@ -1668,6 +1670,7 @@ export const converseWithAgentBodyHistoryMax = 20;
 
 export const ConverseWithAgentBody = zod.object({
   "text": zod.string().min(1).max(converseWithAgentBodyTextMax),
+  "clientMessageId": zod.string().max(converseWithAgentBodyClientMessageIdMax).optional().describe('Client-generated id for this message. Resending with the same id returns the already-generated reply instead of creating a duplicate exchange.'),
   "history": zod.array(zod.object({
   "role": zod.enum(['user', 'agent']),
   "text": zod.string().max(converseWithAgentBodyHistoryItemTextMax)
@@ -1703,6 +1706,23 @@ export const VoiceConverseWithAgentBody = zod.object({
 })
 
 export const VoiceConverseWithAgentResponse = zod.unknown()
+
+
+/**
+ * @summary Get the stored Talk conversation history with an agent
+ */
+export const GetTalkHistoryParams = zod.object({
+  "agentId": zod.coerce.string()
+})
+
+export const GetTalkHistoryResponse = zod.object({
+  "turns": zod.array(zod.object({
+  "id": zod.string(),
+  "role": zod.enum(['user', 'agent']),
+  "text": zod.string(),
+  "createdAt": zod.coerce.date()
+}))
+})
 
 
 /**

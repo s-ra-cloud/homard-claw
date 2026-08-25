@@ -15,6 +15,7 @@ import {
   db,
   pool,
   systemStateTable,
+  talkExchangesTable,
   workspaceSettingsTable,
   workspacesTable,
 } from "@workspace/db";
@@ -28,6 +29,23 @@ vi.mock("@clerk/express", () => ({
 
 const fetchMock = vi.hoisted(() => vi.fn());
 vi.stubGlobal("fetch", fetchMock);
+
+// Fault injection: fail the next audit write to prove a post-finalization
+// failure can never delete a completed idempotency claim.
+const auditState = vi.hoisted(() => ({ failNext: false }));
+vi.mock("../audit", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("../audit")>();
+  return {
+    ...mod,
+    recordAudit: (...args: Parameters<typeof mod.recordAudit>) => {
+      if (auditState.failNext) {
+        auditState.failNext = false;
+        return Promise.reject(new Error("audit store down"));
+      }
+      return mod.recordAudit(...args);
+    },
+  };
+});
 
 import officeRouter from "./office";
 import { clearProviderCaches } from "../providers";
@@ -197,6 +215,9 @@ afterAll(async () => {
   vi.unstubAllEnvs();
   if (createdAgentIds.length > 0) {
     await db
+      .delete(talkExchangesTable)
+      .where(inArray(talkExchangesTable.agentId, createdAgentIds));
+    await db
       .delete(agentMessagesTable)
       .where(
         or(
@@ -318,7 +339,7 @@ describe("live-caption transcription", () => {
 });
 
 describe("text conversations", () => {
-  it("returns the agent reply, mapped voice, and no transcript when storage is off", async () => {
+  it("returns the agent reply and always keeps typed Talk history, even with transcripts off", async () => {
     const agent = await createAgent(`${RUN_TAG} Texter`);
     await setTranscripts(false);
     mockProviders();
@@ -331,11 +352,18 @@ describe("text conversations", () => {
     expect(res.body.proposedTaskObjective).toBeNull();
     expect(res.body.voice).toBe("onyx"); // "deep" style
 
-    const rows = await db
+    // Typed exchanges are chat history, not voice transcripts: they persist
+    // regardless of the voice-transcript privacy setting.
+    const toAgent = await db
       .select()
       .from(agentMessagesTable)
       .where(eq(agentMessagesTable.toAgentId, agent.id));
-    expect(rows.filter((r) => r.kind === "voice")).toHaveLength(0);
+    const fromAgent = await db
+      .select()
+      .from(agentMessagesTable)
+      .where(eq(agentMessagesTable.fromAgentId, agent.id));
+    expect(toAgent.some((r) => r.kind === "voice" && r.body === "How are you today?")).toBe(true);
+    expect(fromAgent.some((r) => r.kind === "voice" && r.body === "Sure thing, boss.")).toBe(true);
   });
 
   it("stores both sides of the exchange when transcripts are enabled", async () => {
@@ -360,6 +388,293 @@ describe("text conversations", () => {
     expect(fromAgent.some((r) => r.kind === "voice" && r.body === "Sure thing, boss.")).toBe(true);
 
     await setTranscripts(false);
+  });
+
+  it("serves stored Talk history oldest-first, split into user/agent roles", async () => {
+    const agent = await createAgent(`${RUN_TAG} Historian`);
+    await setTranscripts(false);
+    mockProviders();
+
+    const first = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "First message" });
+    expect(first.status).toBe(200);
+    mockProviders({ replyJson: '{"reply":"Second answer.","taskObjective":null}' });
+    const second = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Second message" });
+    expect(second.status).toBe(200);
+
+    const res = await request(app).get(`/api/agents/${agent.id}/talk-history`);
+    expect(res.status).toBe(200);
+    const turns = res.body.turns as { role: string; text: string; id: string }[];
+    expect(turns.map((t) => [t.role, t.text])).toEqual([
+      ["user", "First message"],
+      ["agent", "Sure thing, boss."],
+      ["user", "Second message"],
+      ["agent", "Second answer."],
+    ]);
+    expect(new Set(turns.map((t) => t.id)).size).toBe(4);
+  });
+
+  it("keeps Talk history readable for retired agents but 404s unknown ones", async () => {
+    const missing = await request(app).get(
+      "/api/agents/00000000-0000-0000-0000-000000000000/talk-history",
+    );
+    expect(missing.status).toBe(404);
+
+    const agent = await createAgent(`${RUN_TAG} Retired Reader`);
+    mockProviders();
+    await request(app).post(`/api/agents/${agent.id}/converse`).send({ text: "Before retiring" });
+    await db
+      .update(agentsTable)
+      .set({ retired: true, retiredAt: new Date() })
+      .where(eq(agentsTable.id, agent.id));
+    const res = await request(app).get(`/api/agents/${agent.id}/talk-history`);
+    expect(res.status).toBe(200);
+    expect(res.body.turns.some((t: { text: string }) => t.text === "Before retiring")).toBe(true);
+  });
+
+  it("keeps another workspace's agent history invisible", async () => {
+    const agent = await createAgent(`${RUN_TAG} Private`);
+    mockProviders();
+    await request(app).post(`/api/agents/${agent.id}/converse`).send({ text: "Private note" });
+
+    // A different signed-in user gets their own workspace; the first
+    // workspace's agent must look nonexistent from there.
+    const originalUser = authState.userId;
+    const outsider = `hc-voice-test-outsider-${Date.now()}`;
+    authState.userId = outsider;
+    try {
+      const boot = await request(app).get("/api/agents");
+      expect(boot.status).toBe(200);
+      const res = await request(app).get(`/api/agents/${agent.id}/talk-history`);
+      expect(res.status).toBe(404);
+    } finally {
+      authState.userId = originalUser;
+      await db.delete(workspacesTable).where(eq(workspacesTable.clerkUserId, outsider));
+    }
+  });
+
+  it("resending with the same clientMessageId returns the cached reply without duplicating history", async () => {
+    const agent = await createAgent(`${RUN_TAG} Resender`);
+    const providers = mockProviders();
+    const clientMessageId = `resend-${Date.now()}`;
+
+    const first = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Deliver this once", clientMessageId });
+    expect(first.status).toBe(200);
+    const second = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Deliver this once", clientMessageId });
+    expect(second.status).toBe(200);
+    expect(second.body.reply).toBe(first.body.reply);
+    // The provider was consulted only once; the resend was answered from
+    // the idempotency cache and persisted nothing new.
+    expect(providers.calls()).toBe(1);
+
+    const rows = await db
+      .select()
+      .from(agentMessagesTable)
+      .where(eq(agentMessagesTable.toAgentId, agent.id));
+    expect(rows.filter((r) => r.body === "Deliver this once")).toHaveLength(1);
+  });
+
+  it("concurrent duplicates: exactly one exchange is generated, the loser gets 409 or the reply", async () => {
+    const agent = await createAgent(`${RUN_TAG} Racer`);
+    const providers = mockProviders();
+    const clientMessageId = `race-${Date.now()}`;
+
+    const [a, b] = await Promise.all([
+      request(app)
+        .post(`/api/agents/${agent.id}/converse`)
+        .send({ text: "Race me", clientMessageId }),
+      request(app)
+        .post(`/api/agents/${agent.id}/converse`)
+        .send({ text: "Race me", clientMessageId }),
+    ]);
+    const statuses = [a.status, b.status].sort();
+    // One wins; the other either replays the finished response (200) or
+    // reports the in-flight original (409). Never two generations.
+    expect(statuses[0]).toBe(200);
+    expect([200, 409]).toContain(statuses[1]);
+    expect(providers.calls()).toBe(1);
+
+    const rows = await db
+      .select()
+      .from(agentMessagesTable)
+      .where(eq(agentMessagesTable.toAgentId, agent.id));
+    expect(rows.filter((r) => r.body === "Race me")).toHaveLength(1);
+  });
+
+  it("replays a finished exchange after a lost response without generating or persisting again", async () => {
+    // Simulates a crash/lost response after the exchange committed: the
+    // durable claim already holds the response, so a retry replays it.
+    const agent = await createAgent(`${RUN_TAG} Replayer`);
+    const providers = mockProviders();
+    const clientMessageId = `replay-${Date.now()}`;
+    const storedPayload = { reply: "Stored answer.", proposedTaskObjective: null, voice: "onyx" };
+    await db.insert(talkExchangesTable).values({
+      workspaceId: wsId,
+      agentId: agent.id,
+      clientMessageId,
+      status: "done",
+      responseJson: JSON.stringify(storedPayload),
+    });
+
+    const res = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Anything", clientMessageId });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(storedPayload);
+    expect(providers.calls()).toBe(0);
+    const rows = await db
+      .select()
+      .from(agentMessagesTable)
+      .where(eq(agentMessagesTable.toAgentId, agent.id));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("reclaims a claim orphaned by a crash mid-generation instead of blocking forever", async () => {
+    const agent = await createAgent(`${RUN_TAG} Orphan`);
+    const providers = mockProviders();
+    const clientMessageId = `orphan-${Date.now()}`;
+    await db.insert(talkExchangesTable).values({
+      workspaceId: wsId,
+      agentId: agent.id,
+      clientMessageId,
+      status: "pending",
+      createdAt: new Date(Date.now() - 10 * 60_000),
+    });
+
+    const res = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Recover me", clientMessageId });
+    expect(res.status).toBe(200);
+    expect(res.body.reply).toBe("Sure thing, boss.");
+    expect(providers.calls()).toBe(1);
+  });
+
+  it("keeps the finished claim for replay when a post-finalization step fails", async () => {
+    const agent = await createAgent(`${RUN_TAG} Auditless`);
+    const providers = mockProviders();
+    const clientMessageId = `audit-fail-${Date.now()}`;
+
+    auditState.failNext = true;
+    const failed = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Persist despite audit", clientMessageId });
+    // The exchange committed before the audit write failed.
+    expect(failed.status).toBe(500);
+
+    const retried = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Persist despite audit", clientMessageId });
+    expect(retried.status).toBe(200);
+    expect(retried.body.reply).toBe("Sure thing, boss.");
+    // Replay came from the stored claim: one generation, one stored exchange.
+    expect(providers.calls()).toBe(1);
+    const rows = await db
+      .select()
+      .from(agentMessagesTable)
+      .where(eq(agentMessagesTable.toAgentId, agent.id));
+    expect(rows.filter((r) => r.body === "Persist despite audit")).toHaveLength(1);
+  });
+
+  it("a stale original that loses its claim replays the reclaimer's reply instead of its own", async () => {
+    const agent = await createAgent(`${RUN_TAG} Stale Owner`);
+    const clientMessageId = `stale-${Date.now()}`;
+
+    // The provider call blocks until we let it finish, giving us time to
+    // steal the claim mid-flight (as a stale-claim reclaimer would).
+    let releaseProvider!: () => void;
+    const providerGate = new Promise<void>((resolve) => (releaseProvider = resolve));
+    fetchMock.mockImplementation(async (url: unknown) => {
+      const target = String(url);
+      if (target.includes("/models")) {
+        return jsonResponse({
+          data: [
+            {
+              id: "test-vendor/test-model",
+              name: "Test Model",
+              context_length: 8192,
+              pricing: { prompt: "0.000001", completion: "0.00001" },
+            },
+          ],
+        });
+      }
+      if (target.includes("/chat/completions")) {
+        await providerGate;
+        return jsonResponse({
+          choices: [{ message: { content: '{"reply":"Late reply.","taskObjective":null}' } }],
+          usage: { prompt_tokens: 50, completion_tokens: 20 },
+        });
+      }
+      throw new Error(`unexpected fetch in test: ${target}`);
+    });
+
+    // .then() starts the supertest request immediately so it runs while we
+    // steal the claim below.
+    const inFlight = request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Slow one", clientMessageId })
+      .then((r) => r);
+
+    // Wait for the original to claim, then steal the claim and finalize it
+    // the way a reclaiming retry would.
+    let claimId: string | undefined;
+    for (let i = 0; i < 100 && !claimId; i++) {
+      const [row] = await db
+        .select()
+        .from(talkExchangesTable)
+        .where(eq(talkExchangesTable.clientMessageId, clientMessageId))
+        .limit(1);
+      claimId = row?.id;
+      if (!claimId) await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(claimId).toBeDefined();
+    const authoritative = { reply: "Reclaimer's answer.", proposedTaskObjective: null, voice: "onyx" };
+    await db.delete(talkExchangesTable).where(eq(talkExchangesTable.id, claimId!));
+    await db.insert(talkExchangesTable).values({
+      workspaceId: wsId,
+      agentId: agent.id,
+      clientMessageId,
+      status: "done",
+      responseJson: JSON.stringify(authoritative),
+    });
+
+    releaseProvider();
+    const res = await inFlight;
+    // The stale original must not answer with "Late reply." — it lost
+    // ownership and replays the authoritative stored response.
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(authoritative);
+    // And it persisted nothing of its own generation.
+    const rows = await db
+      .select()
+      .from(agentMessagesTable)
+      .where(eq(agentMessagesTable.toAgentId, agent.id));
+    expect(rows.filter((r) => r.body === "Slow one")).toHaveLength(0);
+  });
+
+  it("a failed delivery releases its idempotency claim so a retry can succeed", async () => {
+    const agent = await createAgent(`${RUN_TAG} Retrier`);
+    const clientMessageId = `retry-${Date.now()}`;
+    // Both the first call and its automatic in-route retry fail terminally.
+    mockProviders({ chatFailStatuses: [401] });
+
+    const failed = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Try, fail, retry", clientMessageId });
+    expect(failed.status).toBeGreaterThanOrEqual(500);
+
+    mockProviders();
+    const retried = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Try, fail, retry", clientMessageId });
+    expect(retried.status).toBe(200);
+    expect(retried.body.reply).toBe("Sure thing, boss.");
   });
 
   it("surfaces a proposed task objective without creating any task", async () => {
