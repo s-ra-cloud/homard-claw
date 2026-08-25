@@ -1,0 +1,90 @@
+
+Failed
+normal priority
+Codex via ChatGPT Plus
+medium reasoning
+Failed
+Attempt 2
+Objective — Jack
+Review the owner's Google Drive documents related to their COST Action and summarize current progress.
+
+
+provider error
+Codex Exec exited with code 1: WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/homardclaw-codex/accounts/668ef8312e033bf9fdebca53")) Error: No such file or directory (os error 2)
+
+Provider Usage
+Cost
+Covered by plan — no per-token price published
+Provider thread
+01a03781-92fa-72d2-932b-91427267b2e8
+Context Sources
+[M1]
+Task outcome — "Review the owner's Google Drive documents related to their COST
+gpt-5.6-terra
+Est: ~1.4k tok
+Connected-App Actions
+Google Drive · google_drive.search
+Drive search for "COST Action"
+Executed
+- fileId 1GoI4JywZAqJRyqoiwIfLNDtmd7i8Na-KyyEilmEG8rI | COST ACTION | application/vnd.google-apps.spreadsheet | modified 2026-08-25T05:48:37.592Z - fileId 136Kya6Ad_vvshRX1i0GiDey2C0osXVec | COST ACTION | application/vnd.google-apps.folder | modified 2025-03-26T11:33:20.584Z - fileId 1QmKKlUPZ-t9e_pJT1HH9W9xAMxQdbIu_Eh2Y_ZmtdrQ | COST ACTION | application/vnd.google-apps.document | modified 2025-03-15T08:01:05.910Z - fileId 1Koi2-3u_pQQB1HQRR6VxSmZ0EpAc5LUW3rySMtvYNbo | Center for Metanoia Studies Logbook | application/vnd.google-apps.document | modified 2025-03-26T13:00:37.542Z - fileId 1NPGyaLSrkyaUtf_-S7ydqHqPp39Eih9kkILeomRhQfU | Untitled document | application/vnd.google-apps.document | modified 2025-03-26T16:09:37.420Z - fileId 13RKZ01XwvCKr1-19Z8xXckZNA2CYkllqRqa9WC9Q7cQ | METANOIA SYMPOSIUM 2025 | application/vnd.google-apps.document | modified 2025-04-07T05:32:52.058Z
+Executed 1 minute ago
+Google Drive · google_drive.read_file
+Drive file 1GoI4JywZAqJRyqoiwIfLNDtmd7i8Na-KyyEilmEG8rI
+Failed
+The app rejected the request (HTTP 400). { "error": { "code": 400, "message": "The requested conversion is not supported.", "errors": [ { "message": "The requested conversion is not supported.", "domain": "global", "reason": "badRequest", "location": "convertTo", "locationType": "parameter" } ] } }
+Executed 1 minute ago
+Google Drive · google_drive.read_file
+Drive file 1QmKKlUPZ-t9e_pJT1HH9W9xAMxQdbIu_Eh2Y_ZmtdrQ
+Executed
+"COST ACTION" (application/vnd.google-apps.document): People from priority countries (50%+) Laurentiu Cezar Maria Magi Other Pieter Charles Alexis Sacha
+Executed 1 minute ago
+Google Drive · google_drive.read_file
+Drive file 1Koi2-3u_pQQB1HQRR6VxSmZ0EpAc5LUW3rySMtvYNbo
+Executed
+"Center for Metanoia Studies Logbook" (application/vnd.google-apps.document): Center for Metanoia Studies Logbook Action points: * Completed * To do * Outstanding Deadlines: * Dec/jan : Charles prend un premier contact avec DREAM Bordeaux * Jan 2025 : Lancement publique du site web et diffusion des vidéos du colloque * Jan/fev 2025 : Réunion avec DREAM * Fin fev 2025 : équipe COST au complet * Research sacha chapitre metanoia book * AF to write to Symposium delagates to get papers for journal * Fin mars 2025 : first draft COST * Fin mars : redaction sacha chapitre metanoia book * Fin mars : first draft 2 chapter, one outline, one long abstract, envoi à Justin pour potentielle préface * Juillet 2025 : appel à communication, 2eme Metanoia Symposium * Été 2025 (cible) : publication 1st symposium online * 15 Aout 2025 : Dépôt de dossier Templeton OFI * 10 Oct 2025: Décision Templeton OFI * Oct 2025 : Deadline Cost of Action * Nov 2025 : 2eme Metanoia Symposium BOOK : 2 chapitres + un outline + abstract long 2 pages fin mars ________________ 2 avril 2025, Team Meeting AF CM SR GS ODJ : * France Forum * Invitations * Progrès AAC 26 March, 2025, Team Meeting AF CM SR GS * Conference * Invited participants - send out invitations * Can they cover their own travel costs * CFP: Work by email * Ruth - see if we can meet in All Souls * COST Action * Consortium: Min 8 people, with some in under-represented countries * Start right after CFP * Write between 15-30 April * Deadline: 21Oct 2025 * Find a psychologist for COST and/or Synergy? * CM propose une autre Plateforme de travail: RESANA * DREAMS: CM doit rencontrer le directeur le 4 avril * Centre Loyola: En attente… 13 March 2025 Meeting AF CM SR GS * CM: Synergy * SR: COST Action * AF: LWL funds and * Conference * Dates? * Cost at Oxford? * (AF to ask Pieter) * CM to ask Ruth Harris * People to invite? * Charles White, wrote a book on André Louf. Question de la mystique. Chemin des estives * Marion Muller Collard - transformation interieur * Michael Sherwin * K Kristjansen * Grégory Quenet (historien de l'environnement), Olric de Gélis (prêtre théologien), Frédéric Louzeau (prêtre et théologien) * Justin Brierly * Prisons? * Nick from RH * Democratie chrétienne et transformation de soi * 4 Feb 2025 Meeting AF with Eliza bailey, RH Research Office * COST: Eliza warns that if the Lead institution does not have a very big research admin staff, this programme requires lots of work from the PI. She suggests getting a bigger uni to take the lead * AF is trying to find out how much COST permits us to budget on admin support but I don’t see this in the documentation. * Consultancy? Eliza recommends https://www.eurice.eu/ * They work for a colleague in Biology who’s had lots of big grants and they will do the reporting during the life of the project, which is very labour-intensive for EU grants * AF to write to Jess Johnson to ask about other funding options * 12 Feb 2025 Meeting SR AF * Potential partners for COST: * https://www.religionandtransformation.at/en/ * Jubilee Centre for Character and Virtues, U Birmingham * Resources on transformative experience: * LA Paul * https://en.wikipedia.org/wiki/Transformative_Experience * Rebecca CHan * https://plato.stanford.edu/entries/transformative-experience/ * SR has drafted a CFP for the 2025 conference * What date? * AF to Ask Pieter whether he can host conference at Oxford 7 Feb 2025 Meeting with Adam Ellwanger, SR, AF * Uni of Wisconson lab with licence for human experiments with psychedelics * Students there interested in metanoia application * 29 Jan 2025 Réunion AF, SR 1. Meet with Laurentiu Tanase et Cezar Dasclu 1. Laurentiu and Cezar have an ong-going project [truncated]
+Executed 1 minute ago
+Google Drive · google_drive.search
+Drive search for ""first draft COST" OR "COST Action" OR "Deadline Cost" "
+Executed
+- fileId 1Koi2-3u_pQQB1HQRR6VxSmZ0EpAc5LUW3rySMtvYNbo | Center for Metanoia Studies Logbook | application/vnd.google-apps.document | modified 2025-03-26T13:00:37.542Z
+Executed 1 minute ago
+Google Drive · google_drive.read_file
+Drive file 1NPGyaLSrkyaUtf_-S7ydqHqPp39Eih9kkILeomRhQfU
+Executed
+"Untitled document" (application/vnd.google-apps.document): Exemples de cost action précédent pour s’inspirer Mettre vos références dans le dossier cost action Récupérer le CV de tous les membres Date limite 21 octobre
+Executed 1 minute ago
+Execution Log
+08:00:32
+Task created and queued for Jack (priority normal).
+08:00:33
+Attempt 1: running on codex_chatgpt (gpt-5.6-terra).
+08:00:33
+Using 1 context source(s): M1.
+08:00:33
+Starting a new Codex thread in a private workspace for this agent.
+08:00:40
+Using a connected app: Drive search for "COST Action".
+08:00:49
+Using a connected app: Drive file 1GoI4JywZAqJRyqoiwIfLNDtmd7i8Na-KyyEilmEG8rI.
+08:00:50
+Connected-app action failed: The app rejected the request (HTTP 400). { "error": { "code": 400, "message": "The requested conversion is not supported.", "errors": [ { "message": "The requested conversion is not supported.", "domain": "global", "reason": "badRequest", "location": "convertTo", "locationType": "parameter" } ] } }
+08:00:50
+Using a connected app: Drive file 1QmKKlUPZ-t9e_pJT1HH9W9xAMxQdbIu_Eh2Y_ZmtdrQ.
+08:00:52
+Using a connected app: Drive file 1Koi2-3u_pQQB1HQRR6VxSmZ0EpAc5LUW3rySMtvYNbo.
+08:01:01
+Using a connected app: Drive search for ""first draft COST" OR "COST Action" OR "Deadline Cost" ".
+08:01:02
+Using a connected app: Drive file 1NPGyaLSrkyaUtf_-S7ydqHqPp39Eih9kkILeomRhQfU.
+08:01:08
+Provider call aborted by cancellation.
+08:01:09
+Server restarted while this task was running; requeued and its provider thread will be resumed.
+08:01:10
+Attempt 2: running on codex_chatgpt (gpt-5.6-terra).
+08:01:10
+Using 1 context source(s): M1.
+08:01:10
+Resuming the agent's existing Codex thread in its private workspace.
+08:01:10
+Failed (provider_error): Codex Exec exited with code 1: WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/homardclaw-codex/accounts/668ef8312e033bf9fdebca53")) Error: No such file or directory (os error 2)
