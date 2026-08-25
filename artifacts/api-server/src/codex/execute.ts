@@ -174,6 +174,26 @@ const THREAD_RESUME_HINTS = [
   "thread/resume failed",
 ];
 
+/**
+ * The one resume failure that is provider-confirmed pre-execution even when
+ * it arrives as a rejected promise: the server refused `thread/resume`
+ * because the stored rollout no longer exists (JSON-RPC -32600, production
+ * form `thread/resume failed: no rollout found for thread id ...`). The CLI
+ * echoes that server rejection verbatim before any turn can begin, so no
+ * allowance was spent. Deliberately stricter than THREAD_RESUME_HINTS: both
+ * the failing method and the missing-rollout reason must appear together.
+ * Anything looser (a lone "no rollout found", a generic session message)
+ * stays unknown and fails closed.
+ */
+export function isConfirmedMissingRollout(rawMessage: string): boolean {
+  const haystack = rawMessage.toLowerCase();
+  return (
+    haystack.includes("thread/resume") &&
+    (haystack.includes("no rollout found") ||
+      haystack.includes("rollout not found"))
+  );
+}
+
 const RATE_LIMIT_HINTS = ["rate limit", "rate_limit", "429", "too many requests"];
 const ALLOWANCE_HINTS = [
   "usage limit",
@@ -204,7 +224,13 @@ export function classifyCodexError(rawMessage: string): CodexRunError {
   const message = sanitizeErrorMessage(rawMessage);
   const haystack = message.toLowerCase();
   if (THREAD_RESUME_HINTS.some((hint) => haystack.includes(hint))) {
-    return new CodexRunError("provider_error", message);
+    const error = new CodexRunError("provider_error", message);
+    // The full production signature is the server's own pre-turn resume
+    // rejection, so it counts as proof nothing ran — even when it reaches
+    // us through a rejected promise instead of a streamed event. Stream
+    // handlers that saw `turn.started` overwrite this with the truth.
+    if (isConfirmedMissingRollout(message)) error.turnStarted = false;
+    return error;
   }
   if (ALLOWANCE_HINTS.some((hint) => haystack.includes(hint))) {
     return new CodexRunError(
@@ -368,8 +394,11 @@ async function runTurnWithState(
   // *streamed back by the provider* before `turn.started` counts as proof
   // of pre-execution failure (`turnStarted = false`): the server itself
   // reported the turn never ran, so no allowance was spent. A rejected
-  // promise proves nothing — the request may have been accepted remotely
-  // before the client-side failure — and stays `null` (unknown).
+  // promise generally proves nothing — the request may have been accepted
+  // remotely before the client-side failure — and stays `null` (unknown),
+  // with one narrow exception: the full confirmed missing-rollout resume
+  // rejection (see isConfirmedMissingRollout) is the server's own pre-turn
+  // refusal echoed by the CLI, so the classifier marks it `false`.
   let turnStarted = false;
   let streamed;
   try {
@@ -424,9 +453,10 @@ async function runTurnWithState(
     const runError = toRunError(error, input.signal);
     // A stream that breaks mid-iteration only yields safe knowledge in one
     // direction: if the turn was seen starting, record that so nobody
-    // replays it. Its absence proves nothing (the connection may have died
-    // after remote acceptance), so the flag stays unknown.
-    if (runError.turnStarted === null && turnStarted) runError.turnStarted = true;
+    // replays it — even over a classifier verdict of "never started". Its
+    // absence proves nothing (the connection may have died after remote
+    // acceptance), so an unknown flag stays unknown.
+    if (turnStarted) runError.turnStarted = true;
     throw runError;
   }
 

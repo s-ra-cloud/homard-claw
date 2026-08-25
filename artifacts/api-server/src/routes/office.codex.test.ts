@@ -131,6 +131,8 @@ type ScriptedTurn = {
   events: CodexThreadEvent[];
   /** Throw instead of streaming (SDK-level failure). */
   throws?: Error;
+  /** Rejects the event stream after the scripted events were consumed. */
+  throwsMidStream?: Error;
   /** Resolve only once the signal aborts, like a long-running turn. */
   hangUntilAborted?: boolean;
   /**
@@ -217,6 +219,7 @@ function installSdkFake(): void {
           return {
             events: (async function* () {
               for (const event of turn.events) yield event;
+              if (turn.throwsMidStream) throw turn.throwsMidStream;
             })(),
           };
         },
@@ -1726,10 +1729,13 @@ describe("Codex Talk conversations", () => {
     expect(sdkCalls[4]!.threadId).toBe(fresh.threadId);
   });
 
-  it("fails closed but retires the thread when the production missing-rollout error arrives as a promise rejection", async () => {
-    // A rejected runStreamed() promise proves nothing about remote
-    // execution, so even the exact production message must not trigger an
-    // automatic replay — only retirement, so the owner's resend recovers.
+  it("recovers in the same turn when the production missing-rollout error arrives as a promise rejection", async () => {
+    // Regression for the second production failure mode: the CLI process
+    // exits echoing the server's own `thread/resume ... no rollout found`
+    // rejection, so runStreamed() rejects instead of streaming an error
+    // event. That full signature is server-confirmed proof the turn never
+    // began, so this very turn must replay on a fresh thread — no manual
+    // resend.
     const production =
       "thread/resume failed: no rollout found for thread id 0199a7f2-1c2b-7d3e-9a4f-5b6c7d8e9f01 (code -32600)";
     const agent = await createAgent(`${RUN_TAG} GeorgeRejected`);
@@ -1741,38 +1747,66 @@ describe("Codex Talk conversations", () => {
           .send({ text: "Warm up." })
       ).status,
     ).toBe(200);
+    const staleId = (await talkConversationRows(agent.id))[0]!.id;
 
-    turnScript = [{ events: [], throws: new Error(production) }];
+    turnScript = [{ events: [], throws: new Error(production) }, talkTurn()];
     const second = await request(app)
       .post(`/api/agents/${agent.id}/converse`)
       .send({ text: "Rollout gone, via rejection." });
-    expect(second.status).toBe(503);
-    // No automatic replay happened...
-    expect(sdkCalls).toHaveLength(2);
-    // ...but the dead thread was retired,
-    let rows = await talkConversationRows(agent.id);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.resumable).toBe(false);
+    expect(second.status).toBe(200);
+    expect(second.body.reply).toBe("Claws crossed, boss.");
+    // Exactly one automatic replay: failed resume, then one fresh start.
+    expect(sdkCalls).toHaveLength(3);
+    expect(sdkCalls[1]!.kind).toBe("resume");
+    expect(sdkCalls[2]!.kind).toBe("start");
 
-    // so the first resend starts fresh and succeeds,
+    // The dead thread was retired and the fresh one is what resumes next.
+    const rows = await talkConversationRows(agent.id);
+    expect(rows).toHaveLength(2);
+    expect(rows.find((row) => row.id === staleId)!.resumable).toBe(false);
+    const fresh = rows.find((row) => row.id !== staleId)!;
+    expect(fresh.resumable).toBe(true);
+
     turnScript = [talkTurn()];
     const third = await request(app)
       .post(`/api/agents/${agent.id}/converse`)
-      .send({ text: "Resend." });
+      .send({ text: "Carry on." });
     expect(third.status).toBe(200);
-    expect(sdkCalls).toHaveLength(3);
-    expect(sdkCalls[2]!.kind).toBe("start");
-
-    // and a repeated resend resumes that healthy fresh thread.
-    rows = await talkConversationRows(agent.id);
-    const freshThreadId = rows.find((row) => row.resumable)!.threadId;
-    turnScript = [talkTurn()];
-    const fourth = await request(app)
-      .post(`/api/agents/${agent.id}/converse`)
-      .send({ text: "Resend again." });
-    expect(fourth.status).toBe(200);
     expect(sdkCalls[3]!.kind).toBe("resume");
-    expect(sdkCalls[3]!.threadId).toBe(freshThreadId);
+    expect(sdkCalls[3]!.threadId).toBe(fresh.threadId);
+  });
+
+  it("never replays a post-start rejection carrying the exact missing-rollout message", async () => {
+    // Adversarial: the stream saw turn.started, then the promise rejects
+    // with the exact production signature. The observed start outranks the
+    // message — the turn may have been charged, so it must fail closed.
+    const production =
+      "thread/resume failed: no rollout found for thread id 0199a7f2-1c2b-7d3e-9a4f-5b6c7d8e9f01 (code -32600)";
+    const agent = await createAgent(`${RUN_TAG} GeorgeStartedThenRejected`);
+    turnScript = [talkTurn()];
+    expect(
+      (
+        await request(app)
+          .post(`/api/agents/${agent.id}/converse`)
+          .send({ text: "Warm up." })
+      ).status,
+    ).toBe(200);
+
+    turnScript = [
+      {
+        events: [{ type: "turn.started" }],
+        throwsMidStream: new Error(production),
+      },
+    ];
+    const second = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Started, then rejected." });
+    expect(second.status).toBe(503);
+    // No automatic replay, and the thread is not retired: the turn ran.
+    expect(sdkCalls).toHaveLength(2);
+    const rows = await talkConversationRows(agent.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.resumable).toBe(true);
   });
 
   it("never replays the missing-rollout message once the turn has started", async () => {
