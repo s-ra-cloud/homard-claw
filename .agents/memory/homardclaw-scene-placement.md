@@ -46,6 +46,32 @@ up with the target in the artwork therefore parks the chair visibly off-axis.
 take that strip's trim geometry — its centre is what must land on the target.
 Feed the difference back as a constant offset on the seat coordinate.
 
+## Overlap is what reads as "at the furniture"
+In an isometric room, a character that merely *clears* the desk reads as parked
+in the middle of the floor. Depth is communicated by occlusion, so a seated
+agent only looks seated at a workstation once its chair back covers part of the
+desk it belongs to; the same holds for a cushion on an exterior platform, whose
+pad is a quad, so centring on it means moving up as you move right.
+
+**Why:** the instinct is to keep a tidy gap below the shelf, and that gap is
+exactly what makes the character look detached from the furniture.
+
+**How to apply:** aim for a small deliberate overlap with the furniture behind,
+and check the near edges instead — the cushion must not cross a railing, and the
+chair must not cover the monitor screen. A sprite pushed back against wall
+furniture will also cover any invisible click target sitting on that furniture,
+so re-check the hotspot layer whenever a seat moves.
+
+## The chair sits in a different place in each pose's box
+The chair poses share one sprite scale, but not one alignment: the working
+pose's wheelbase is ~10px (of a 128px box) left of where every other chair pose
+draws it. Tuning a seat on one pose therefore misaligns the rest, and a status
+change swaps poses under a fixed seat.
+
+**How to apply:** measure the ground-contact centre for every pose that can
+occupy the seat and use an offset midway between the families, so no pose lands
+more than a few pixels off its target.
+
 ## Name tags belong in their own layer
 An agent wrapper that carries a `z-index` (or a transform) opens a stacking
 context, so a tag nested inside it can never rise above a nearer sibling

@@ -25,15 +25,21 @@ import "./office-dashboard.css";
 /** The full 1586 × 992 submarine illustration is the scene coordinate plane. */
 const officeArt = `${import.meta.env.BASE_URL}images/submarine-office.png`;
 
-// Four wall computers in the middle room. `left` is the monitor's own centre
-// in the artwork (42.0 / 47.6 / 53.6 / 59.5) plus 0.5, because the chair's
-// wheelbase sits that far left of its square sprite box; `top` puts the
-// lobster's head just under the desk shelf, whose front edge is at 39.4%.
+// Four wall computers in the middle room. `left` is the monitor screen's own
+// centre in the artwork — measured at 42.24 / 48.05 / 53.75 / 59.79 — plus
+// 0.24, because the chair's wheelbase is not centred in its square sprite box
+// and lands in a slightly different place per pose: the working pose puts it
+// ~10px (of 128) left of where every other chair pose does. That single offset
+// splits the two pose families, so no pose sits more than ~4px off its screen.
+//
+// `top` is what makes the agent read as *at* the desk rather than parked in the
+// room: the chair back has to overlap the desk shelf, whose front edge is at
+// 39.4%. 43.4% left a whole strip of floor between shelf and chair.
 const DESK_SEATS = [
-  { left: 42.5, top: 43.4, label: "first submarine computer" },
-  { left: 48.1, top: 43.4, label: "second submarine computer" },
-  { left: 54.1, top: 43.4, label: "third submarine computer" },
-  { left: 60.0, top: 43.4, label: "fourth submarine computer" },
+  { left: 42.5, top: 39.8, label: "first submarine computer" },
+  { left: 48.3, top: 39.8, label: "second submarine computer" },
+  { left: 54.0, top: 39.8, label: "third submarine computer" },
+  { left: 60.0, top: 39.8, label: "fourth submarine computer" },
 ];
 
 // Six cushion spots on open floor: four staggered across the middle room, one
@@ -55,9 +61,12 @@ const FLOOR_SEATS = [
 
 // Sandboxed agents are physically separated from the hull: one cushion on each
 // exterior platform, which is all the deck plating those two pads can hold.
+// Each pad is an isometric quad, so centring on it means moving up as you move
+// right; a seat placed toward the near-left corner hangs its cushion and laptop
+// over the railing even though the coordinate still looks "on" the platform.
 const EXTERIOR_SEATS = [
-  { left: 23.9, top: 74.3, label: "port exterior platform" },
-  { left: 65.9, top: 79.6, label: "starboard exterior platform" },
+  { left: 24.7, top: 73.8, label: "port exterior platform" },
+  { left: 66.4, top: 79.2, label: "starboard exterior platform" },
 ];
 
 /** Character size as a share of the wide scene, preserving the old pixel size. */
@@ -847,23 +856,30 @@ const SCENE_HOTSPOTS: SceneHotspot[] = [
     height: "8%",
     extraClass: "scene-hotspot--approval",
   },
+  // The two wall computers that double as navigation sit directly behind the
+  // first two desk agents, whose sprite box reaches up to ~34.6%. These hit
+  // areas are therefore trimmed to the monitor screens themselves (measured at
+  // 32.2-36.3% and 33.0-37.0%) and lifted above the agents, so a seated lobster
+  // cannot swallow the click and the shortcut still stops short of its chair.
   {
     href: "/agents",
     label: "Agents",
     ariaLabel: "First wall computer — open Agents",
     left: "42.4%",
-    top: "36.2%",
+    top: "34.6%",
     width: "5.4%",
-    height: "8%",
+    height: "5.2%",
+    extraClass: "scene-hotspot--monitor",
   },
   {
     href: "/teams",
     label: "Teams",
     ariaLabel: "Second wall computer — open Teams",
     left: "48.4%",
-    top: "36.2%",
+    top: "34.6%",
     width: "5.4%",
-    height: "8%",
+    height: "5.2%",
+    extraClass: "scene-hotspot--monitor",
   },
   {
     href: "/connected-apps",

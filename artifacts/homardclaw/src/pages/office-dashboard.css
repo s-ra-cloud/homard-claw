@@ -253,6 +253,14 @@
   color: inherit;
 }
 
+/* The wall-computer shortcuts share their space with the agents seated at those
+   desks (z-index 12), so they have to sit above them or the sprite's invisible
+   box eats the click. Their hit area is trimmed to the screen for the same
+   reason: only the lobster's antennae reach that high. */
+.scene-hotspot--monitor {
+  z-index: 14;
+}
+
 .scene-hotspot:focus-visible {
   outline: 2px dashed rgba(255, 247, 223, 0.85);
   outline-offset: 3px;
