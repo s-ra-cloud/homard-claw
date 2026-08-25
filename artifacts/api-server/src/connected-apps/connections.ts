@@ -1,4 +1,5 @@
 import { type AppOperation, type ConnectedAppId } from "./catalog";
+import { buildRfc822, sanitizeEmailHtml } from "./email-mime";
 import {
   GoogleAuthError,
   driveAccessToken,
@@ -307,21 +308,31 @@ function gmailMessageId(actionId: string): string {
   return `homardclaw-action-${actionId}@agents.homardclaw`;
 }
 
-function rfc822(
-  to: string,
-  subject: string,
-  body: string,
+/**
+ * Build the raw message for a draft/send operation. The optional bodyHtml
+ * param is sanitized (allowlisted tags, http/https/mailto links only) and
+ * attached as a multipart/alternative HTML part with the plain-text body as
+ * fallback. If sanitization leaves nothing renderable, the message falls
+ * back to plain text only.
+ */
+function gmailRaw(
+  params: Record<string, unknown>,
   messageId?: string,
-): string {
-  const headers = [
-    `To: ${to}`,
-    `Subject: ${subject}`,
-    ...(messageId ? [`Message-ID: <${messageId}>`] : []),
-    `Content-Type: text/plain; charset="UTF-8"`,
-  ];
-  return Buffer.from(`${headers.join("\r\n")}\r\n\r\n${body}`, "utf8").toString(
-    "base64url",
-  );
+): { raw: string; htmlIncluded: boolean } {
+  const html =
+    typeof params.bodyHtml === "string" && params.bodyHtml.trim() !== ""
+      ? sanitizeEmailHtml(params.bodyHtml)
+      : null;
+  return {
+    raw: buildRfc822({
+      to: String(params.to),
+      subject: String(params.subject),
+      text: String(params.body),
+      html,
+      messageId,
+    }),
+    htmlIncluded: html !== null,
+  };
 }
 
 type GmailHeaders = { name?: string; value?: string }[];
@@ -414,19 +425,18 @@ async function gmailCreateDraft(
   params: Record<string, unknown>,
   ctx: ExecutionContext,
 ): Promise<ExecutionOutcome> {
+  const { raw, htmlIncluded } = gmailRaw(params);
   const result = await gmailJson(ctx.workspaceId, "/gmail/v1/users/me/drafts", {
     method: "POST",
     body: {
-      message: {
-        raw: rfc822(String(params.to), String(params.subject), String(params.body)),
-      },
+      message: { raw },
     },
   });
   if (!result.ok) return result.outcome;
   const draft = result.data as { id?: string } | null;
   return {
     ok: true,
-    summary: `Draft created (id ${draft?.id ?? "unknown"}) to ${params.to}: "${params.subject}". It has NOT been sent.`,
+    summary: `Draft created (id ${draft?.id ?? "unknown"}) to ${params.to}: "${params.subject}"${htmlIncluded ? " with a formatted (HTML) version and plain-text fallback" : ""}. It has NOT been sent.`,
   };
 }
 
@@ -434,25 +444,23 @@ async function gmailSendEmail(
   params: Record<string, unknown>,
   ctx: ExecutionContext,
 ): Promise<ExecutionOutcome> {
+  const { raw, htmlIncluded } = gmailRaw(
+    params,
+    ctx.actionId ? gmailMessageId(ctx.actionId) : undefined,
+  );
   const result = await gmailJson(
     ctx.workspaceId,
     "/gmail/v1/users/me/messages/send",
     {
       method: "POST",
-    body: {
-      raw: rfc822(
-        String(params.to),
-        String(params.subject),
-        String(params.body),
-        ctx.actionId ? gmailMessageId(ctx.actionId) : undefined,
-      ),
+      body: { raw },
     },
-  });
+  );
   if (!result.ok) return result.outcome;
   const message = result.data as { id?: string } | null;
   return {
     ok: true,
-    summary: `Email sent (id ${message?.id ?? "unknown"}) to ${params.to}: "${params.subject}".`,
+    summary: `Email sent (id ${message?.id ?? "unknown"}) to ${params.to}: "${params.subject}"${htmlIncluded ? " with a formatted (HTML) version and plain-text fallback" : ""}.`,
   };
 }
 

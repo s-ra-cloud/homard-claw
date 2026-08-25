@@ -67,7 +67,7 @@ const str = (name: string, required = true, maxLength = 2000): ParamSpec => ({
   required,
   kind: "string",
   maxLength,
-  multiline: name === "body" || name === "content",
+  multiline: name === "body" || name === "content" || name === "bodyHtml",
 });
 const num = (name: string, required = true): ParamSpec => ({
   name,
@@ -97,18 +97,30 @@ export const APP_OPERATIONS: AppOperation[] = [
     app: "gmail",
     level: "draft",
     description:
-      "Create an email draft (never sends); params: to, subject, body",
-    params: [str("to", true, 500), str("subject", true, 500), str("body", true, 20000)],
-    target: (p) => `Draft email to ${p.to}: "${p.subject}"`,
+      "Create an email draft (never sends); params: to, subject, body (plain text), bodyHtml (optional HTML alternative for links/formatting; unsafe markup is stripped)",
+    params: [
+      str("to", true, 500),
+      str("subject", true, 500),
+      str("body", true, 20000),
+      str("bodyHtml", false, 40000),
+    ],
+    target: (p) =>
+      `Draft email to ${p.to}: "${p.subject}"${p.bodyHtml ? " (formatted HTML with plain-text fallback)" : " (plain text)"}`,
   },
   {
     name: "gmail.send_email",
     app: "gmail",
     level: "write",
     description:
-      "Send an email from the owner's account; params: to, subject, body",
-    params: [str("to", true, 500), str("subject", true, 500), str("body", true, 20000)],
-    target: (p) => `Send email to ${p.to}: "${p.subject}"`,
+      "Send an email from the owner's account; params: to, subject, body (plain text), bodyHtml (optional HTML alternative for links/formatting; unsafe markup is stripped)",
+    params: [
+      str("to", true, 500),
+      str("subject", true, 500),
+      str("body", true, 20000),
+      str("bodyHtml", false, 40000),
+    ],
+    target: (p) =>
+      `Send email to ${p.to}: "${p.subject}"${p.bodyHtml ? " (formatted HTML with plain-text fallback)" : " (plain text)"}`,
   },
   {
     name: "google_drive.search",

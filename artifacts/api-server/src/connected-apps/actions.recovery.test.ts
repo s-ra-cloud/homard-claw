@@ -270,6 +270,37 @@ describe("idempotency markers on write executors", () => {
     );
   });
 
+  it("keeps the deterministic Message-ID on a formatted (HTML) send", async () => {
+    proxyState.handler = () => ({ status: 200, body: { id: "msg-2" } });
+    const op = findOperation("gmail.send_email");
+    const outcome = await executeOperation(
+      op!,
+      {
+        to: "a@b.c",
+        subject: "Hi",
+        body: "See https://example.com",
+        bodyHtml: '<p>See <a href="https://example.com">our site</a></p><script>x()</script>',
+      },
+      { actionId: "66666666-7777-8888-9999-000000000000", workspaceId },
+    );
+    expect(outcome.ok).toBe(true);
+    const raw = (sendCalls()[0].body as { raw: string }).raw;
+    const message = Buffer.from(raw, "base64url").toString("utf8");
+    expect(message).toContain(
+      "Message-ID: <homardclaw-action-66666666-7777-8888-9999-000000000000@agents.homardclaw>",
+    );
+    expect(message).toContain("multipart/alternative");
+    expect(message).toContain("text/plain");
+    expect(message).toContain("text/html");
+    // Sanitized: the script never reaches the wire (parts are base64).
+    const htmlPart = Buffer.from(
+      message.split("text/html")[1]!.split("\r\n\r\n")[1]!.split("--")[0]!.replace(/\r\n/g, ""),
+      "base64",
+    ).toString("utf8");
+    expect(htmlPart).toContain('<a href="https://example.com">our site</a>');
+    expect(htmlPart).not.toContain("script");
+  });
+
   it("embeds a hidden marker in a GitHub comment body", async () => {
     proxyState.handler = () => ({
       status: 200,
