@@ -1,0 +1,22 @@
+HomardClaw Security and Documentation Report
+Overall finding
+HomardClaw currently behaves as a multi-user application, but several credential and execution systems still assume a single trusted owner. This creates critical isolation and billing risks between users.
+1. Shared provider credentials
+Every authenticated Clerk user can receive a personal workspace. However, Claude, OpenRouter, and voice services use global server environment variables rather than credentials belonging to the current user or workspace.
+Consequently, any permitted user could potentially invoke these services using the application operator’s credentials, consuming shared quotas or generating charges.
+Severity: Critical
+Affected area: Claude, OpenRouter, voice integration, public signup
+2. Codex identity can cross workspace boundaries
+Codex credentials are stored per Clerk user for HTTP requests, but background tasks do not consistently carry the initiating user’s identity.
+When no user is provided, the Codex runtime falls back to the legacy office owner. This means a task created in one user’s workspace could execute using the legacy owner’s Codex credentials and allowance.
+The global CODEX_AUTH_JSON bootstrap mechanism presents an additional boundary problem: it can copy the operator’s seeded Codex credentials into the credential record of an authenticated user.
+Severity: Critical
+Affected area: Background tasks, Talk execution, provider health checks, Codex bootstrap
+3. Production documentation is inaccurate
+PRODUCTION.md describes HomardClaw as a single-owner system where authenticated non-owners receive a 403 response. The current workspace middleware does the opposite: every authenticated user is accepted and can receive a personal workspace.
+The Codex documentation also describes persistent filesystem storage, while the current implementation stores encrypted credentials in PostgreSQL and uses the filesystem only as temporary working storage.
+These contradictions could cause operators to deploy the application under incorrect security assumptions.
+Severity: High
+Affected area: Deployment, security review, operational expectations
+Risk summary
+The central problem is that the application’s authentication model is multi-user, while its provider credential and execution model remains partly single-owner. Until these models are aligned, an authenticated user may be able to consume credentials or allowances that do not belong to their workspace.
