@@ -456,6 +456,216 @@
   white-space: nowrap;
 }
 
+/* ── Desktop point-and-click parchment window ── */
+.office-game-window {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: clamp(22px, 4vw, 64px);
+  background:
+    radial-gradient(circle at center, rgb(12 47 56 / 28%), rgb(4 24 32 / 78%)),
+    rgb(4 24 32 / 48%);
+  backdrop-filter: blur(2px);
+}
+
+.office-game-window__parchment {
+  position: relative;
+  width: min(1120px, 90vw);
+  height: min(850px, 86dvh);
+  min-height: 420px;
+  display: flex;
+  flex-direction: column;
+  padding: clamp(14px, 1.7vw, 24px);
+  color: #3a2414;
+  background-color: #e5c984;
+  background-image:
+    radial-gradient(
+      circle at 14% 8%,
+      rgb(255 249 210 / 76%) 0 1px,
+      transparent 2px
+    ),
+    radial-gradient(
+      circle at 83% 72%,
+      rgb(94 54 20 / 18%) 0 1px,
+      transparent 2px
+    ),
+    repeating-linear-gradient(
+      4deg,
+      transparent 0 8px,
+      rgb(101 62 25 / 5%) 9px 10px
+    );
+  background-size:
+    29px 29px,
+    37px 37px,
+    auto;
+  border: 5px solid #55351b;
+  clip-path: polygon(
+    1% 0,
+    8% 0.7%,
+    17% 0,
+    29% 0.6%,
+    42% 0,
+    55% 0.6%,
+    68% 0,
+    82% 0.7%,
+    99% 0,
+    100% 8%,
+    99.4% 19%,
+    100% 31%,
+    99.5% 48%,
+    100% 66%,
+    99.3% 83%,
+    100% 100%,
+    87% 99.3%,
+    74% 100%,
+    61% 99.4%,
+    48% 100%,
+    34% 99.3%,
+    20% 100%,
+    0 99.2%,
+    0.7% 84%,
+    0 69%,
+    0.6% 53%,
+    0 36%,
+    0.7% 18%
+  );
+  filter: drop-shadow(10px 14px 0 rgb(8 24 27 / 55%));
+  animation: parchment-open 180ms steps(3, end) both;
+}
+
+.office-game-window__parchment::before,
+.office-game-window__parchment::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: 12px;
+  bottom: 12px;
+  width: 18px;
+  border: 3px solid #5f3c20;
+  background: #caa661;
+  box-shadow: inset 4px 0 rgb(255 236 174 / 35%);
+}
+
+.office-game-window__parchment::before {
+  left: -12px;
+}
+
+.office-game-window__parchment::after {
+  right: -12px;
+  transform: scaleX(-1);
+}
+
+.office-game-window__header {
+  flex: 0 0 auto;
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 4px 13px;
+  border-bottom: 3px double #76502b;
+}
+
+.office-game-window__seal {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 3px solid #6b1f21;
+  border-radius: 50%;
+  color: #f4dda1;
+  background: #a12e31;
+  box-shadow: 2px 3px 0 #5f1a1d;
+  font:
+    700 10px "Press Start 2P",
+    cursive;
+}
+
+.office-game-window__header h2 {
+  margin: 0;
+  color: #3a2414;
+  font:
+    700 clamp(11px, 1.2vw, 16px) "Press Start 2P",
+    cursive;
+  line-height: 1.35;
+  text-transform: uppercase;
+}
+
+.office-game-window__header p {
+  margin: 4px 0 0;
+  color: #76502b;
+  font:
+    700 9px "Space Mono",
+    monospace;
+  text-transform: uppercase;
+}
+
+.office-game-window__close {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  margin-left: auto;
+  appearance: none;
+  border: 3px solid #4b2d18;
+  color: #f8e5ae;
+  background: #a83a32;
+  box-shadow: 3px 3px 0 #4b2d18;
+}
+
+.office-game-window__close:hover,
+.office-game-window__close:focus-visible {
+  background: #c14b3d;
+  outline: 3px dashed #4b2d18;
+  outline-offset: 3px;
+}
+
+.office-game-window__close:active {
+  transform: translate(3px, 3px);
+  box-shadow: none;
+}
+
+.office-game-window__close svg {
+  width: 22px;
+  height: 22px;
+  stroke-width: 3;
+}
+
+.office-game-window__content {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 13px;
+  overflow: hidden;
+  border: 4px solid #68441f;
+  background: #dfc37f;
+  box-shadow:
+    inset 0 0 0 3px rgb(255 242 190 / 48%),
+    4px 4px 0 rgb(90 55 25 / 28%);
+}
+
+.office-game-window__content iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #e5c984;
+}
+
+@keyframes parchment-open {
+  from {
+    opacity: 0;
+    transform: scale(0.94) translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
 /* ── Approvals computer — pending indicator ── */
 
 /* Pixel-style ping badge in corner of the hotspot */
@@ -509,6 +719,9 @@
 @media (prefers-reduced-motion: reduce) {
   .ocean-ambient * {
     animation: none !important;
+  }
+  .office-game-window__parchment {
+    animation: none;
   }
   .scene-hotspot--approval.has-pending {
     animation: none;

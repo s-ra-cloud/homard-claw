@@ -1,0 +1,72 @@
+.office-embed-shell {
+  --background: 42 54% 84%;
+  --foreground: 27 48% 17%;
+  --card: 41 50% 78%;
+  --card-foreground: 27 48% 17%;
+  --card-border: 29 45% 29%;
+  --popover: 42 56% 86%;
+  --popover-foreground: 27 48% 17%;
+  --popover-border: 29 45% 29%;
+  --primary: 12 69% 43%;
+  --primary-foreground: 43 70% 94%;
+  --secondary: 38 35% 66%;
+  --secondary-foreground: 27 48% 17%;
+  --muted: 39 38% 73%;
+  --muted-foreground: 28 31% 34%;
+  --accent: 171 43% 31%;
+  --accent-foreground: 43 70% 94%;
+  --destructive: 354 64% 42%;
+  --destructive-foreground: 43 70% 94%;
+  --border: 29 45% 29%;
+  --input: 40 43% 74%;
+  --ring: 12 69% 43%;
+  position: relative;
+  height: 100dvh;
+  overflow: hidden;
+  color: hsl(var(--foreground));
+  background-color: hsl(var(--background));
+  background-image:
+    radial-gradient(
+      circle at 18% 12%,
+      rgb(255 249 211 / 45%) 0 1px,
+      transparent 2px
+    ),
+    radial-gradient(
+      circle at 73% 68%,
+      rgb(101 62 27 / 12%) 0 1px,
+      transparent 2px
+    ),
+    repeating-linear-gradient(
+      6deg,
+      transparent 0 7px,
+      rgb(103 65 30 / 4%) 8px 9px
+    );
+  background-size:
+    27px 27px,
+    35px 35px,
+    auto;
+}
+
+.office-embed-shell__content {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-color: #865c2f #d7bb78;
+  scrollbar-width: thin;
+}
+
+.office-embed-shell__content::-webkit-scrollbar {
+  width: 12px;
+}
+
+.office-embed-shell__content::-webkit-scrollbar-track {
+  background: #d7bb78;
+  border-left: 2px solid #69451f;
+}
+
+.office-embed-shell__content::-webkit-scrollbar-thumb {
+  background: #865c2f;
+  border: 2px solid #d7bb78;
+}

@@ -1,6 +1,6 @@
 import React from "react";
 import { Link } from "wouter";
-import { AlertTriangle, ShieldCheck } from "lucide-react";
+import { AlertTriangle, ShieldCheck, X } from "lucide-react";
 import {
   useGetOfficeOverview,
   useListAgents,
@@ -18,6 +18,8 @@ import {
 } from "@/components/ui/marlow-lobster";
 import { useQueryClient } from "@tanstack/react-query";
 import { useImmersiveMode } from "@/hooks/useImmersiveMode";
+import { useIsDesktop } from "@/hooks/use-mobile";
+import { OFFICE_WINDOW_NAME, officeWindowHref } from "@/lib/office-window";
 import "./office-dashboard.css";
 
 /** The full 1586 × 992 submarine illustration is the scene coordinate plane. */
@@ -114,6 +116,11 @@ interface SceneHotspot {
   extraClass?: string;
 }
 
+interface OpenOfficeWindow {
+  href: string;
+  title: string;
+}
+
 const BUBBLE_STREAMS = [5, 18, 31, 72, 83, 95];
 
 /** Decorative motion stays outside the hull and never captures pointer input. */
@@ -152,10 +159,81 @@ function OceanAmbient() {
   );
 }
 
+function ParchmentWindow({
+  windowState,
+  onClose,
+}: {
+  windowState: OpenOfficeWindow;
+  onClose: () => void;
+}) {
+  const closeRef = React.useRef<HTMLButtonElement>(null);
+
+  React.useEffect(() => {
+    closeRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      className="office-game-window"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        className="office-game-window__parchment"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="office-window-title"
+        aria-describedby="office-window-scroll-hint"
+      >
+        <header className="office-game-window__header">
+          <span className="office-game-window__seal" aria-hidden="true">
+            HC
+          </span>
+          <div>
+            <h2 id="office-window-title">{windowState.title}</h2>
+            <p id="office-window-scroll-hint">Scroll inside this parchment</p>
+          </div>
+          <button
+            ref={closeRef}
+            type="button"
+            className="office-game-window__close"
+            onClick={onClose}
+            aria-label={`Close ${windowState.title}`}
+          >
+            <X aria-hidden="true" />
+          </button>
+        </header>
+        <div className="office-game-window__content">
+          <iframe
+            key={windowState.href}
+            name={OFFICE_WINDOW_NAME}
+            src={officeWindowHref(windowState.href)}
+            title={windowState.title}
+            allow="microphone"
+          />
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export default function OfficeDashboard() {
   const { immersive, enterImmersive } = useImmersiveMode();
+  const gameMode = useIsDesktop();
+  const sceneImmersive = gameMode || immersive;
   const roomRef = React.useRef<HTMLElement>(null);
+  const lastWindowTriggerRef = React.useRef<HTMLElement | null>(null);
   const [ambientActive, setAmbientActive] = React.useState(true);
+  const [openWindow, setOpenWindow] = React.useState<OpenOfficeWindow | null>(
+    null,
+  );
 
   const { data: overview, isLoading, isError } = useGetOfficeOverview();
   const {
@@ -256,6 +334,31 @@ export default function OfficeDashboard() {
       setEmergencyStop.mutate({ data: { active: nextState } });
   };
 
+  const openOfficeWindow = (
+    event: React.MouseEvent<HTMLAnchorElement>,
+    href: string,
+    title: string,
+  ) => {
+    if (
+      !gameMode ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return;
+    }
+    event.preventDefault();
+    lastWindowTriggerRef.current = event.currentTarget;
+    setOpenWindow({ href, title });
+  };
+
+  const closeOfficeWindow = React.useCallback(() => {
+    setOpenWindow(null);
+    window.requestAnimationFrame(() => lastWindowTriggerRef.current?.focus());
+  }, []);
+
   if (isLoading || agentsLoading) {
     return (
       <Shell>
@@ -354,8 +457,11 @@ export default function OfficeDashboard() {
   ];
 
   return (
-    <Shell immersive={immersive} onEnterImmersive={enterImmersive}>
-      <section className={`iso-office${immersive ? " is-immersive" : ""}`}>
+    <Shell
+      immersive={sceneImmersive}
+      onEnterImmersive={gameMode ? undefined : enterImmersive}
+    >
+      <section className={`iso-office${sceneImmersive ? " is-immersive" : ""}`}>
         <header className="iso-office__bar">
           <div className="iso-office__brand">
             <b>HOMARD</b>CLAW / yellow submarine office
@@ -388,7 +494,14 @@ export default function OfficeDashboard() {
               <div className="room-overflow" role="status" aria-live="polite">
                 +{overflowCount} agent{overflowCount !== 1 ? "s" : ""} in roster
                 beyond the visible stations ·{" "}
-                <Link href="/agents">view all</Link>
+                <Link
+                  href="/agents"
+                  onClick={(event) =>
+                    openOfficeWindow(event, "/agents", "Agent roster")
+                  }
+                >
+                  view all
+                </Link>
               </div>
             )}
             <div
@@ -420,6 +533,9 @@ export default function OfficeDashboard() {
                       }`}
                       data-label={spot.label}
                       aria-label={spot.ariaLabel}
+                      onClick={(event) =>
+                        openOfficeWindow(event, spot.href, spot.label)
+                      }
                       style={{
                         left: spot.left,
                         top: spot.top,
@@ -460,6 +576,13 @@ export default function OfficeDashboard() {
                         href={`/talk/${agent.id}`}
                         className="room-agent__link"
                         aria-label={`Talk to ${agent.name} at the ${seat.label}`}
+                        onClick={(event) =>
+                          openOfficeWindow(
+                            event,
+                            `/talk/${agent.id}`,
+                            `Talk with ${agent.name}`,
+                          )
+                        }
                       >
                         <MarlowLobster
                           pose={pose}
@@ -486,6 +609,13 @@ export default function OfficeDashboard() {
                       aria-hidden="true"
                       tabIndex={-1}
                       title={agent.name}
+                      onClick={(event) =>
+                        openOfficeWindow(
+                          event,
+                          `/talk/${agent.id}`,
+                          `Talk with ${agent.name}`,
+                        )
+                      }
                     >
                       {agent.name}
                     </Link>
@@ -514,13 +644,28 @@ export default function OfficeDashboard() {
             <section className="quiet-card">
               <h2>Office pulse</h2>
               <div className="summary">
-                <Link href="/agents">
+                <Link
+                  href="/agents"
+                  onClick={(event) =>
+                    openOfficeWindow(event, "/agents", "Agent roster")
+                  }
+                >
                   <b>{String(overview.agents).padStart(2, "0")}</b>agents
                 </Link>
-                <Link href="/tasks">
+                <Link
+                  href="/tasks"
+                  onClick={(event) =>
+                    openOfficeWindow(event, "/tasks", "Tasks")
+                  }
+                >
                   <b>{String(overview.activeTasks).padStart(2, "0")}</b>tasks
                 </Link>
-                <Link href="/approvals">
+                <Link
+                  href="/approvals"
+                  onClick={(event) =>
+                    openOfficeWindow(event, "/approvals", "Approvals")
+                  }
+                >
                   <b>{String(overview.pendingApprovals).padStart(2, "0")}</b>
                   reviews
                 </Link>
@@ -607,12 +752,25 @@ export default function OfficeDashboard() {
                   Nothing is waiting on your review.
                 </p>
               )}
-              <Link className="approval-link" href="/approvals">
+              <Link
+                className="approval-link"
+                href="/approvals"
+                onClick={(event) =>
+                  openOfficeWindow(event, "/approvals", "Approvals")
+                }
+              >
                 <ShieldCheck size={12} /> full approval desk
               </Link>
             </section>
           </aside>
         </main>
+
+        {gameMode && openWindow && (
+          <ParchmentWindow
+            windowState={openWindow}
+            onClose={closeOfficeWindow}
+          />
+        )}
       </section>
     </Shell>
   );

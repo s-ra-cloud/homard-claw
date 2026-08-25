@@ -1,10 +1,30 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useUser, useClerk } from "@clerk/react";
-import { LogOut, Home, Users, CheckSquare, Settings, Activity, Palmtree, Menu, X, Brain, Network, Phone, CalendarClock, Bell, BarChart3, Maximize2, Plug } from "lucide-react";
+import {
+  LogOut,
+  Home,
+  Users,
+  CheckSquare,
+  Settings,
+  Activity,
+  Palmtree,
+  Menu,
+  X,
+  Brain,
+  Network,
+  Phone,
+  CalendarClock,
+  Bell,
+  BarChart3,
+  Maximize2,
+  Plug,
+} from "lucide-react";
 import { useListNotifications } from "@workspace/api-client-react";
 import { useLiveUpdates } from "@/lib/useLiveUpdates";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { isOfficeWindowFrame } from "@/lib/office-window";
+import "./office-window.css";
 
 const navItems = [
   { href: "/office", label: "Office", icon: Home },
@@ -29,7 +49,23 @@ interface ShellProps {
   /** Called when the user activates the Fullscreen nav action. */
   onEnterImmersive?: () => void;
 }
-export function Shell({ children, immersive = false, onEnterImmersive }: ShellProps) {
+export function Shell(props: ShellProps) {
+  if (isOfficeWindowFrame()) {
+    return (
+      <div className="office-embed-shell">
+        <main className="office-embed-shell__content">{props.children}</main>
+      </div>
+    );
+  }
+
+  return <StandardShell {...props} />;
+}
+
+function StandardShell({
+  children,
+  immersive = false,
+  onEnterImmersive,
+}: ShellProps) {
   const [location] = useLocation();
   const { user } = useUser();
   const { signOut } = useClerk();
@@ -40,7 +76,12 @@ export function Shell({ children, immersive = false, onEnterImmersive }: ShellPr
   // only a fallback when the stream is down.
   const { data: notificationData } = useListNotifications(
     { limit: 1 },
-    { query: { queryKey: ["/api/notifications", "badge"], refetchInterval: 60_000 } },
+    {
+      query: {
+        queryKey: ["/api/notifications", "badge"],
+        refetchInterval: 60_000,
+      },
+    },
   );
   const unread = notificationData?.unread ?? 0;
   // The office diorama is a wide isometric scene: on a phone it is neither
@@ -101,7 +142,10 @@ export function Shell({ children, immersive = false, onEnterImmersive }: ShellPr
       const last = focusables[focusables.length - 1];
       const active = document.activeElement;
 
-      if (event.shiftKey && (active === first || !navRef.current.contains(active))) {
+      if (
+        event.shiftKey &&
+        (active === first || !navRef.current.contains(active))
+      ) {
         event.preventDefault();
         last.focus();
       } else if (!event.shiftKey && active === last) {
@@ -144,7 +188,9 @@ export function Shell({ children, immersive = false, onEnterImmersive }: ShellPr
             <div className="w-8 h-8 bg-primary pixel-shadow flex items-center justify-center shrink-0">
               <span className="font-display text-white text-xs">HC</span>
             </div>
-            <h1 className="font-display text-sm text-primary uppercase tracking-tighter">HomardClaw</h1>
+            <h1 className="font-display text-sm text-primary uppercase tracking-tighter">
+              HomardClaw
+            </h1>
             <button
               type="button"
               ref={closeButtonRef}
@@ -155,12 +201,15 @@ export function Shell({ children, immersive = false, onEnterImmersive }: ShellPr
               <X className="w-5 h-5" />
             </button>
           </div>
-          <div className="mt-2 text-[10px] text-muted-foreground uppercase">Control Room v1.0</div>
+          <div className="mt-2 text-[10px] text-muted-foreground uppercase">
+            Control Room v1.0
+          </div>
         </div>
 
         <nav className="flex-1 overflow-y-auto p-4 py-6 grid grid-cols-2 gap-3 content-start sm:grid-cols-3 lg:flex lg:flex-col lg:gap-2">
           {visibleNavItems.map((item) => {
-            const isActive = location === item.href || location.startsWith(item.href + "/");
+            const isActive =
+              location === item.href || location.startsWith(item.href + "/");
             return (
               <Link key={item.href} href={item.href} className="block h-full">
                 <div
@@ -171,7 +220,9 @@ export function Shell({ children, immersive = false, onEnterImmersive }: ShellPr
                   }`}
                 >
                   <item.icon className="w-4 h-4 shrink-0" />
-                  <span className="font-bold text-sm tracking-wide uppercase truncate">{item.label}</span>
+                  <span className="font-bold text-sm tracking-wide uppercase truncate">
+                    {item.label}
+                  </span>
                   {item.href === "/inbox" && unread > 0 && (
                     <span
                       className={`ml-auto min-w-[1.25rem] px-1 py-0.5 text-center text-[10px] font-bold leading-none ${
@@ -201,7 +252,9 @@ export function Shell({ children, immersive = false, onEnterImmersive }: ShellPr
               title="Opens the immersive office scene — press Escape to exit"
             >
               <Maximize2 className="w-4 h-4 shrink-0" aria-hidden="true" />
-              <span className="font-bold text-sm tracking-wide uppercase">Fullscreen</span>
+              <span className="font-bold text-sm tracking-wide uppercase">
+                Fullscreen
+              </span>
             </button>
           )}
         </nav>
@@ -210,7 +263,12 @@ export function Shell({ children, immersive = false, onEnterImmersive }: ShellPr
           <div className="flex items-center gap-3 mb-4">
             <div className="w-10 h-10 bg-secondary pixel-shadow border-2 border-border overflow-hidden flex items-center justify-center shrink-0">
               {user?.imageUrl ? (
-                <img src={user.imageUrl} alt="" className="w-full h-full object-cover" style={{ imageRendering: "pixelated" }} />
+                <img
+                  src={user.imageUrl}
+                  alt=""
+                  className="w-full h-full object-cover"
+                  style={{ imageRendering: "pixelated" }}
+                />
               ) : (
                 <span className="font-display text-[10px] text-secondary-foreground uppercase">
                   {(user?.firstName ?? "D").slice(0, 1)}
@@ -218,8 +276,12 @@ export function Shell({ children, immersive = false, onEnterImmersive }: ShellPr
               )}
             </div>
             <div className="overflow-hidden">
-              <div className="text-xs font-bold truncate text-accent">{user?.firstName || "Director"}</div>
-              <div className="text-[10px] text-muted-foreground truncate">{user?.primaryEmailAddress?.emailAddress}</div>
+              <div className="text-xs font-bold truncate text-accent">
+                {user?.firstName || "Director"}
+              </div>
+              <div className="text-[10px] text-muted-foreground truncate">
+                {user?.primaryEmailAddress?.emailAddress}
+              </div>
             </div>
           </div>
           <button
