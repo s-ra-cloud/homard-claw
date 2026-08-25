@@ -164,6 +164,8 @@ export const teamMembersTable = pgTable(
 export type TaskFile = {
   name: string;
   content: string;
+  mimeType?: string;
+  encoding?: "text" | "base64";
 };
 
 /** A memory or knowledge-file source injected into a task's prompt. */

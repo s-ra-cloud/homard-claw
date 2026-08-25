@@ -2026,6 +2026,11 @@ components:
           maxItems: 20
           items:
             $ref: "#/components/schemas/ConverseTurn"
+        attachments:
+          type: array
+          maxItems: 4
+          items:
+            $ref: "#/components/schemas/InputAttachment"
     ConverseResponse:
       type: object
       required: [reply, proposedTaskObjective, voice]
@@ -2177,6 +2182,19 @@ components:
         continueConversation:
           type: boolean
           description: Continue the agent's most recent provider thread instead of starting a new one.
+        attachments:
+          type: array
+          maxItems: 4
+          items:
+            $ref: "#/components/schemas/InputAttachment"
+    InputAttachment:
+      type: object
+      required: [name, mimeType, encoding, content]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 160 }
+        mimeType: { type: string, minLength: 1, maxLength: 100 }
+        encoding: { type: string, enum: [text, base64] }
+        content: { type: string, minLength: 1, maxLength: 3000000 }
     TaskEstimateInput:
       type: object
       required: [agentId, objective]

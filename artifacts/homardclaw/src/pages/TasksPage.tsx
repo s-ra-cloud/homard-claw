@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   useListTasks,
   useCreateTask,
@@ -23,13 +23,14 @@ import {
   type Task,
   type TaskEstimate,
   type TaskLog,
+  type InputAttachment,
 } from "@workspace/api-client-react";
 import { Shell } from "@/components/layout/Shell";
 import { AppActionList } from "@/components/app-action-list";
 import { PixelCard } from "@/components/ui/pixel-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Activity, Play, Clock, AlertTriangle, CheckCircle, Calculator, Ban, RotateCcw, ScrollText, XCircle, Network, AppWindow } from "lucide-react";
+import { Activity, Play, Clock, AlertTriangle, CheckCircle, Calculator, Ban, RotateCcw, ScrollText, XCircle, Network, AppWindow, Paperclip, FileText, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
@@ -48,6 +49,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { formatDistanceToNow } from "date-fns";
+import { ATTACHMENT_ACCEPT, MAX_ATTACHMENTS, attachmentLabel, readAttachment } from "@/lib/attachments";
 
 const selectTriggerClass =
   "bg-background border-4 border-border rounded-none focus:ring-0 focus:border-primary font-mono text-sm uppercase";
@@ -528,7 +530,7 @@ function TaskDetailDialog({
             {task.files.length > 0 && (
               <div>
                 <div className="text-[10px] font-bold uppercase text-muted-foreground mb-1">
-                  Files
+                  Attached files
                 </div>
                 <div className="space-y-2">
                   {task.files.map((file) => (
@@ -536,9 +538,7 @@ function TaskDetailDialog({
                       <summary className="font-mono text-xs px-3 py-2 cursor-pointer uppercase">
                         {file.name}
                       </summary>
-                      <pre className="font-mono text-xs p-3 whitespace-pre-wrap max-h-48 overflow-y-auto border-t-2 border-border/50">
-                        {file.content}
-                      </pre>
+                      <pre className="font-mono text-xs p-3 whitespace-pre-wrap max-h-48 overflow-y-auto border-t-2 border-border/50">{file.content}</pre>
                     </details>
                   ))}
                 </div>
@@ -878,7 +878,10 @@ export default function TasksPage() {
   });
   const { data: agents } = useListAgents();
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [taskAttachments, setTaskAttachments] = useState<InputAttachment[]>([]);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
   const [inspectedTaskId, setInspectedTaskId] = useState<string | null>(null);
 
   const [newTask, setNewTask] = useState({
@@ -915,6 +918,7 @@ export default function TasksPage() {
         queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
         queryClient.invalidateQueries({ queryKey: ["/api/office/overview"] });
         setIsDialogOpen(false);
+        setTaskAttachments([]);
         setNewTask({
           agentId: "",
           objective: "",
@@ -942,6 +946,27 @@ export default function TasksPage() {
     newTask.budgetDollars.trim() !== "" &&
     (!Number.isFinite(budgetCents) || (budgetCents ?? 0) <= 0);
 
+  const addTaskAttachments = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    const available = MAX_ATTACHMENTS - taskAttachments.length;
+    if (selected.length > available) {
+      toast({ title: `You can attach up to ${MAX_ATTACHMENTS} files`, variant: "destructive" });
+    }
+    for (const file of selected.slice(0, available)) {
+      try {
+        const attachment = await readAttachment(file);
+        setTaskAttachments((current) => [...current, attachment]);
+      } catch (error) {
+        toast({
+          title: "Attachment rejected",
+          description: error instanceof Error ? error.message : "The file could not be read.",
+          variant: "destructive",
+        });
+      }
+    }
+  };
+
   const handleCreateTask = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTask.agentId || !newTask.objective || budgetInvalid) return;
@@ -962,11 +987,13 @@ export default function TasksPage() {
         ...(codexSelected && newTask.continueConversation
           ? { continueConversation: true }
           : {}),
+        ...(taskAttachments.length ? { attachments: taskAttachments } : {}),
       }
     });
   };
 
   const replicateTask = (task: Task) => {
+    setTaskAttachments([]);
     setNewTask({
       agentId: task.agentId,
       objective: task.objective,
@@ -1044,6 +1071,43 @@ export default function TasksPage() {
                     rows={4}
                     className="font-mono text-sm bg-background border-4 border-border rounded-none focus-visible:ring-0 focus-visible:border-primary resize-none"
                   />
+                  <input
+                    ref={attachmentInputRef}
+                    type="file"
+                    multiple
+                    accept={ATTACHMENT_ACCEPT}
+                    onChange={addTaskAttachments}
+                    className="hidden"
+                    data-testid="input-task-attachments"
+                  />
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => attachmentInputRef.current?.click()}
+                      disabled={taskAttachments.length >= MAX_ATTACHMENTS}
+                      data-testid="button-task-attach"
+                    >
+                      <Paperclip className="w-3.5 h-3.5 mr-1" /> Attach files
+                    </Button>
+                    <span className="text-[10px] text-muted-foreground uppercase font-mono">
+                      Images, PDF, or text · 2 MB each
+                    </span>
+                  </div>
+                  {taskAttachments.length > 0 && (
+                    <div className="flex gap-2 flex-wrap">
+                      {taskAttachments.map((attachment, index) => (
+                        <span key={`${attachment.name}-${index}`} className="inline-flex items-center gap-1.5 border-2 border-border bg-muted px-2 py-1 text-[10px] font-mono">
+                          <FileText className="w-3 h-3 text-accent" />
+                          <span className="max-w-40 truncate">{attachmentLabel(attachment)}</span>
+                          <button type="button" aria-label={`Remove ${attachment.name}`} onClick={() => setTaskAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))}>
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

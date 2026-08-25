@@ -9,7 +9,7 @@
  * extra AudioContext.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import type { Agent } from "@workspace/api-client-react";
+import type { Agent, InputAttachment } from "@workspace/api-client-react";
 import {
   getGetTalkHistoryQueryKey,
   transcribeAudio,
@@ -44,6 +44,8 @@ import {
   Loader2,
   Mic,
   MicOff,
+  Paperclip,
+  FileText,
   RotateCcw,
   Send,
   Square,
@@ -52,6 +54,7 @@ import {
   X,
 } from "lucide-react";
 import { presenceForStatus } from "./agent-presence";
+import { ATTACHMENT_ACCEPT, MAX_ATTACHMENTS, attachmentLabel, readAttachment } from "@/lib/attachments";
 
 export type Turn = {
   role: "user" | "agent";
@@ -60,6 +63,7 @@ export type Turn = {
   key: string;
   /** Set when this outgoing message never got a reply; shows a resend button. */
   failed?: boolean;
+  attachments?: InputAttachment[];
 };
 type Phase = "idle" | "recording" | "thinking" | "speaking";
 
@@ -157,11 +161,13 @@ export function CallView({
   const [micError, setMicError] = useState<string | null>(null);
   const [flowError, setFlowError] = useState<string | null>(null);
   const [textDraft, setTextDraft] = useState("");
+  const [attachments, setAttachments] = useState<InputAttachment[]>([]);
   const [proposedTask, setProposedTask] = useState<string | null>(null);
   const [liveTranscript, setLiveTranscript] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
   const turnsRef = useRef<Turn[]>([]);
   turnsRef.current = turns;
   const proposedRef = useRef<string | null>(null);
@@ -407,7 +413,7 @@ export function CallView({
    * — a resend retries only this message and never duplicates the turn.
    */
   const deliverText = useCallback(
-    (text: string, turnKey: string) => {
+    (text: string, turnKey: string, turnAttachments: InputAttachment[] = []) => {
       setFlowError(null);
       setTurnFailed(turnKey, false);
       setPhase("thinking");
@@ -417,7 +423,12 @@ export function CallView({
           agentId,
           // The turn key is the idempotency id: a resend of this exact turn
           // returns the already-generated reply instead of a duplicate.
-          data: { text, history: contextTurns(), clientMessageId: turnKey },
+          data: {
+            text,
+            history: contextTurns(),
+            clientMessageId: turnKey,
+            ...(turnAttachments.length ? { attachments: turnAttachments } : {}),
+          },
         })
         .then((data) => {
           if (epochRef.current !== epoch) return; // the call was ended
@@ -435,21 +446,44 @@ export function CallView({
     [agentId, appendTurn, contextTurns, setTurnFailed, textConverse],
   );
 
+  const addAttachments = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    const available = MAX_ATTACHMENTS - attachments.length;
+    if (selected.length > available) {
+      toast({ title: `You can attach up to ${MAX_ATTACHMENTS} files`, variant: "destructive" });
+    }
+    for (const file of selected.slice(0, available)) {
+      try {
+        const attachment = await readAttachment(file);
+        setAttachments((current) => [...current, attachment]);
+      } catch (error) {
+        toast({
+          title: "Attachment rejected",
+          description: error instanceof Error ? error.message : "The file could not be read.",
+          variant: "destructive",
+        });
+      }
+    }
+  };
+
   const sendText = (event: React.FormEvent) => {
     event.preventDefault();
-    const text = textDraft.trim();
+    const text = textDraft.trim() || (attachments.length ? "Please review the attached file(s)." : "");
     if (!text || phase !== "idle" || !historyReady) return;
     setTextDraft("");
+    const sentAttachments = attachments;
+    setAttachments([]);
     setFlowError(null);
-    const key = appendTurn({ role: "user", text });
+    const key = appendTurn({ role: "user", text, attachments: sentAttachments });
     if (resolveProposal(text)) return;
-    deliverText(text, key);
+    deliverText(text, key, sentAttachments);
   };
 
   const resendTurn = useCallback(
     (turn: Turn) => {
       if (phase !== "idle") return;
-      deliverText(turn.text, turn.key);
+      deliverText(turn.text, turn.key, turn.attachments);
     },
     [deliverText, phase],
   );
@@ -727,6 +761,15 @@ export function CallView({
               {turn.role === "user" ? "You" : agent.name}
             </span>
             {turn.text}
+            {turn.attachments && turn.attachments.length > 0 && (
+              <span className="mt-2 flex flex-wrap gap-1.5">
+                {turn.attachments.map((attachment, index) => (
+                  <span key={`${attachment.name}-${index}`} className="inline-flex items-center gap-1 border border-current/30 px-1.5 py-0.5 text-[9px] font-mono">
+                    <FileText className="w-3 h-3" aria-hidden="true" /> {attachmentLabel(attachment)}
+                  </span>
+                ))}
+              </span>
+            )}
             {turn.failed && (
               <span className="mt-2 flex items-center gap-2 text-[10px] font-mono uppercase">
                 <span className="text-destructive-foreground/90">Not delivered</span>
@@ -850,7 +893,40 @@ export function CallView({
           </p>
         )}
 
+        <input
+          ref={attachmentInputRef}
+          type="file"
+          multiple
+          accept={ATTACHMENT_ACCEPT}
+          onChange={addAttachments}
+          className="hidden"
+          data-testid="input-talk-attachments"
+        />
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {attachments.map((attachment, index) => (
+              <span key={`${attachment.name}-${index}`} className="inline-flex items-center gap-1.5 border-2 border-border bg-muted px-2 py-1 text-[10px] font-mono">
+                <FileText className="w-3 h-3 text-accent" />
+                <span className="max-w-40 truncate">{attachmentLabel(attachment)}</span>
+                <button type="button" aria-label={`Remove ${attachment.name}`} onClick={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))}>
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         <form onSubmit={sendText} className="flex gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            onClick={() => attachmentInputRef.current?.click()}
+            disabled={phase === "recording" || attachments.length >= MAX_ATTACHMENTS}
+            aria-label="Attach images or documents"
+            title="Attach images, PDF, or text files (2 MB each)"
+          >
+            <Paperclip className="w-4 h-4" aria-hidden="true" />
+          </Button>
           <Input
             value={textDraft}
             onChange={(e) => setTextDraft(e.target.value)}
@@ -861,7 +937,7 @@ export function CallView({
           />
           <Button
             type="submit"
-            disabled={!textDraft.trim() || phase !== "idle" || !historyReady}
+            disabled={(!textDraft.trim() && attachments.length === 0) || phase !== "idle" || !historyReady}
             aria-label="Send message"
           >
             <Send className="w-4 h-4" aria-hidden="true" />

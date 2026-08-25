@@ -1191,6 +1191,12 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
           model: task.model ?? "",
           system,
           prompt: promptFor(),
+          attachments: task.files.map((file) => ({
+            name: file.name,
+            mimeType: file.mimeType ?? "text/plain",
+            encoding: file.encoding ?? "text",
+            content: file.content,
+          })),
           maxOutputTokens,
           signal: controller.signal,
           reasoningEffort: task.reasoningEffort,

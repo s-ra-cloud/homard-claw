@@ -1107,6 +1107,15 @@ export interface ConverseInput {
   clientMessageId?: string;
   /** @maxItems 20 */
   history?: ConverseTurn[];
+  /** @maxItems 4 */
+  attachments?: InputAttachment[];
+}
+
+export interface InputAttachment {
+  name: string;
+  mimeType: string;
+  encoding: 'text' | 'base64';
+  content: string;
 }
 
 export interface ConverseResponse {
@@ -1250,6 +1259,8 @@ export interface TaskInput {
   reasoningOverride?: TaskInputReasoningOverride;
   /** Continue the agent's most recent provider thread instead of starting a new one. */
   continueConversation?: boolean;
+  /** @maxItems 4 */
+  attachments?: InputAttachment[];
 }
 
 export type TaskEstimateInputProviderOverride = typeof TaskEstimateInputProviderOverride[keyof typeof TaskEstimateInputProviderOverride];

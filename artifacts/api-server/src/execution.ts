@@ -1,3 +1,6 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+
 /**
  * Provider execution: one authorized chat-completion call per task attempt.
  *
@@ -69,6 +72,13 @@ export type ProviderCallResult = {
   threadId?: string | null;
 };
 
+export type InputAttachment = {
+  name: string;
+  mimeType: string;
+  encoding: "text" | "base64";
+  content: string;
+};
+
 /**
  * Coarse execution phase, surfaced to the office while a task runs. The
  * durable `status` column stays authoritative for the lifecycle.
@@ -89,6 +99,7 @@ export type ProviderCallRequest = {
   model: string;
   system: string;
   prompt: string;
+  attachments?: InputAttachment[];
   maxOutputTokens: number;
   signal: AbortSignal;
   /** Codex reasoning effort; ignored by providers that have none. */
@@ -263,6 +274,80 @@ function mapNetworkError(error: unknown, signal: AbortSignal): ProviderCallError
   );
 }
 
+function textAttachmentBlock(attachment: InputAttachment): string {
+  return `\n\n--- ATTACHED DOCUMENT: ${attachment.name} (${attachment.mimeType}) ---\n${attachment.content}\n--- END ATTACHMENT ---`;
+}
+
+function claudeContent(prompt: string, attachments: InputAttachment[] = []): unknown {
+  if (attachments.length === 0) return prompt;
+  const blocks: unknown[] = [{ type: "text", text: prompt }];
+  for (const attachment of attachments) {
+    if (attachment.encoding === "text") {
+      blocks.push({ type: "text", text: textAttachmentBlock(attachment) });
+    } else if (attachment.mimeType === "application/pdf") {
+      blocks.push({
+        type: "document",
+        source: { type: "base64", media_type: attachment.mimeType, data: attachment.content },
+        title: attachment.name,
+      });
+    } else {
+      blocks.push({
+        type: "image",
+        source: { type: "base64", media_type: attachment.mimeType, data: attachment.content },
+      });
+    }
+  }
+  return blocks;
+}
+
+function openRouterContent(prompt: string, attachments: InputAttachment[] = []): unknown {
+  if (attachments.length === 0) return prompt;
+  const parts: unknown[] = [{ type: "text", text: prompt }];
+  for (const attachment of attachments) {
+    if (attachment.encoding === "text") {
+      parts.push({ type: "text", text: textAttachmentBlock(attachment) });
+    } else if (attachment.mimeType === "application/pdf") {
+      parts.push({
+        type: "file",
+        file: {
+          filename: attachment.name,
+          file_data: `data:${attachment.mimeType};base64,${attachment.content}`,
+        },
+      });
+    } else {
+      parts.push({
+        type: "image_url",
+        image_url: { url: `data:${attachment.mimeType};base64,${attachment.content}` },
+      });
+    }
+  }
+  return parts;
+}
+
+async function materializeCodexAttachments(
+  workingDirectory: string,
+  attachments: InputAttachment[] = [],
+): Promise<{ promptSuffix: string }> {
+  if (attachments.length === 0) return { promptSuffix: "" };
+  const folder = path.join(workingDirectory, ".homardclaw-attachments");
+  await mkdir(folder, { recursive: true });
+  const paths: string[] = [];
+  for (const [index, attachment] of attachments.entries()) {
+    const safeName = attachment.name.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120) || `file-${index + 1}`;
+    const relative = `.homardclaw-attachments/${index + 1}-${safeName}`;
+    await writeFile(
+      path.join(workingDirectory, relative),
+      attachment.encoding === "base64"
+        ? Buffer.from(attachment.content, "base64")
+        : attachment.content,
+    );
+    paths.push(`${attachment.name}: ${relative}`);
+  }
+  return {
+    promptSuffix: `\n\nThe owner attached these files inside your private workspace. Read or inspect them as part of the request:\n${paths.join("\n")}`,
+  };
+}
+
 async function callClaude(req: ProviderCallRequest): Promise<ProviderCallResult> {
   const token = credentialFor("claude_max");
   let res: globalThis.Response;
@@ -280,7 +365,7 @@ async function callClaude(req: ProviderCallRequest): Promise<ProviderCallResult>
         model: req.model,
         max_tokens: req.maxOutputTokens,
         system: req.system,
-        messages: [{ role: "user", content: req.prompt }],
+        messages: [{ role: "user", content: claudeContent(req.prompt, req.attachments) }],
       }),
     });
   } catch (error) {
@@ -326,7 +411,7 @@ async function callOpenRouter(req: ProviderCallRequest): Promise<ProviderCallRes
         max_tokens: req.maxOutputTokens,
         messages: [
           { role: "system", content: req.system },
-          { role: "user", content: req.prompt },
+          { role: "user", content: openRouterContent(req.prompt, req.attachments) },
         ],
       }),
     });
@@ -410,9 +495,13 @@ const codexAdapter: ProviderAdapter = {
       );
     }
     try {
+      const attachmentContext = await materializeCodexAttachments(
+        req.workingDirectory,
+        req.attachments,
+      );
       const result = await runCodexTurn({
         system: req.system,
-        prompt: req.prompt,
+        prompt: req.prompt + attachmentContext.promptSuffix,
         model: req.model,
         reasoningEffort: req.reasoningEffort ?? "medium",
         workingDirectory: req.workingDirectory,

@@ -4,6 +4,7 @@ import {
   callProvider,
   ProviderCallError,
   type ProviderCallResult,
+  type InputAttachment,
 } from "./execution";
 import { codexAuthFingerprint } from "./codex/runtime";
 import { codexLeaseHeartbeatMs, codexLeaseTtlMs } from "./codex/config";
@@ -176,6 +177,7 @@ export type CodexTalkRequest = {
   reasoningEffort: string | null;
   system: string;
   prompt: string;
+  attachments?: InputAttachment[];
   maxOutputTokens: number;
   signal: AbortSignal;
 };
@@ -316,6 +318,7 @@ export async function runCodexTalkTurn(
           model: input.model,
           system: input.system,
           prompt: input.prompt,
+          attachments: input.attachments,
           maxOutputTokens: input.maxOutputTokens,
           signal: controller.signal,
           reasoningEffort: input.reasoningEffort,

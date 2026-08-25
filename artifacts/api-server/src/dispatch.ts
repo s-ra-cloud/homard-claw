@@ -5,6 +5,7 @@ import {
   tasksTable,
   workspaceSettingsTable,
 } from "@workspace/db";
+import type { TaskFile } from "@workspace/db";
 import { and, eq } from "drizzle-orm";
 import { recordAudit } from "./audit";
 import { publish } from "./events";
@@ -47,6 +48,7 @@ export type DispatchInput = {
    */
   workspaceId?: string;
   objective: string;
+  attachments?: TaskFile[];
   priority?: string;
   budgetCents?: number | null;
   providerOverride?: ProviderId;
@@ -171,6 +173,7 @@ export async function dispatchTask(input: DispatchInput): Promise<DispatchOutcom
           workspaceId: agent.workspaceId,
           agentId: agent.id,
           objective: input.objective,
+          files: input.attachments ?? [],
           priority: input.priority ?? "normal",
           budgetCents: input.budgetCents ?? null,
           provider: routing.provider,

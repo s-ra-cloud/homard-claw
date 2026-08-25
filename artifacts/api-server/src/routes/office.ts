@@ -262,6 +262,12 @@ function toTaskJson(
 ) {
   return {
     ...task,
+    // Binary inputs stay server-side for the agent; never send multi-megabyte
+    // base64 payloads back through every task-list refresh.
+    files: task.files.map((file) => ({
+      name: file.name,
+      content: file.encoding === "base64" ? `[${file.mimeType ?? "binary file"} attachment]` : file.content,
+    })),
     agentName,
     teamName: lineage?.teamName ?? null,
     delegatedByAgentName: lineage?.delegatedByAgentName ?? null,
@@ -1074,6 +1080,7 @@ router.post("/tasks", async (req, res): Promise<void> => {
     agentId: parsed.data.agentId,
     workspaceId: req.workspaceId!,
     objective: parsed.data.objective,
+    attachments: parsed.data.attachments,
     priority: parsed.data.priority,
     budgetCents: parsed.data.budgetCents ?? null,
     providerOverride: parsed.data.providerOverride as ProviderId | undefined,

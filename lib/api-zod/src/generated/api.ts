@@ -1124,6 +1124,21 @@ export const createTaskBodyBudgetCentsMax = 1000000;
 
 export const createTaskBodyModelOverrideMax = 200;
 
+const InputAttachmentSchema = zod.object({
+  name: zod.string().min(1).max(160),
+  mimeType: zod.string().min(1).max(100),
+  encoding: zod.enum(['text', 'base64']),
+  content: zod.string().min(1).max(3000000),
+}).superRefine((attachment, ctx) => {
+  const binaryTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/pdf'];
+  if (attachment.encoding === 'base64' && !binaryTypes.includes(attachment.mimeType)) {
+    ctx.addIssue({ code: 'custom', message: 'Unsupported binary attachment type' });
+  }
+  if (attachment.encoding === 'base64' && !/^[A-Za-z0-9+/]+={0,2}$/.test(attachment.content)) {
+    ctx.addIssue({ code: 'custom', message: 'Invalid base64 attachment' });
+  }
+});
+
 
 
 export const CreateTaskBody = zod.object({
@@ -1134,7 +1149,8 @@ export const CreateTaskBody = zod.object({
   "providerOverride": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter']).optional(),
   "modelOverride": zod.string().max(createTaskBodyModelOverrideMax).optional(),
   "reasoningOverride": zod.enum(['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']).optional(),
-  "continueConversation": zod.boolean().optional().describe('Continue the agent\'s most recent provider thread instead of starting a new one.')
+  "continueConversation": zod.boolean().optional().describe('Continue the agent\'s most recent provider thread instead of starting a new one.'),
+  "attachments": zod.array(InputAttachmentSchema).max(4).optional()
 })
 
 export const CreateTaskResponse = zod.object({
@@ -1674,7 +1690,8 @@ export const ConverseWithAgentBody = zod.object({
   "history": zod.array(zod.object({
   "role": zod.enum(['user', 'agent']),
   "text": zod.string().max(converseWithAgentBodyHistoryItemTextMax)
-})).max(converseWithAgentBodyHistoryMax).optional()
+})).max(converseWithAgentBodyHistoryMax).optional(),
+  "attachments": zod.array(InputAttachmentSchema).max(4).optional()
 })
 
 export const ConverseWithAgentResponse = zod.object({
@@ -2924,5 +2941,4 @@ export const StartGithubOauthResponse = zod.object({
 export const DisconnectGithubAccountResponse = zod.object({
   "disconnected": zod.boolean()
 })
-
 

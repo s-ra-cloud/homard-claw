@@ -331,6 +331,7 @@ async function generateReply(
   userText: string,
   history: ConverseTurn[],
   signal: AbortSignal,
+  attachments: Array<{ name: string; mimeType: string; encoding: "text" | "base64"; content: string }> = [],
 ): Promise<{ reply: string; taskObjective: string | null }> {
   const routing = await resolveRouting(workspaceId, agent);
 
@@ -353,6 +354,7 @@ async function generateReply(
       reasoningEffort: routing.reasoningEffort,
       system: buildSystemPrompt(agent),
       prompt: buildPrompt(history, userText, agent.name),
+      attachments,
       maxOutputTokens: REPLY_MAX_TOKENS,
       signal,
     });
@@ -365,6 +367,7 @@ async function generateReply(
       model: routing.model,
       system: buildSystemPrompt(agent),
       prompt: buildPrompt(history, userText, agent.name),
+      attachments,
       maxOutputTokens: REPLY_MAX_TOKENS,
       signal,
     });
@@ -776,6 +779,7 @@ router.post("/agents/:agentId/converse", async (req: Request, res: Response) => 
       parsed.data.text,
       history,
       controller.signal,
+      parsed.data.attachments,
     );
     const payload = {
       reply,
