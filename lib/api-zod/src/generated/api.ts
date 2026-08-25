@@ -1124,20 +1124,13 @@ export const createTaskBodyBudgetCentsMax = 1000000;
 
 export const createTaskBodyModelOverrideMax = 200;
 
-const InputAttachmentSchema = zod.object({
-  name: zod.string().min(1).max(160),
-  mimeType: zod.string().min(1).max(100),
-  encoding: zod.enum(['text', 'base64']),
-  content: zod.string().min(1).max(3000000),
-}).superRefine((attachment, ctx) => {
-  const binaryTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/pdf'];
-  if (attachment.encoding === 'base64' && !binaryTypes.includes(attachment.mimeType)) {
-    ctx.addIssue({ code: 'custom', message: 'Unsupported binary attachment type' });
-  }
-  if (attachment.encoding === 'base64' && !/^[A-Za-z0-9+/]+={0,2}$/.test(attachment.content)) {
-    ctx.addIssue({ code: 'custom', message: 'Invalid base64 attachment' });
-  }
-});
+export const createTaskBodyAttachmentsItemNameMax = 160;
+
+export const createTaskBodyAttachmentsItemMimeTypeMax = 100;
+
+export const createTaskBodyAttachmentsItemContentMax = 3000000;
+
+export const createTaskBodyAttachmentsMax = 4;
 
 
 
@@ -1150,7 +1143,12 @@ export const CreateTaskBody = zod.object({
   "modelOverride": zod.string().max(createTaskBodyModelOverrideMax).optional(),
   "reasoningOverride": zod.enum(['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']).optional(),
   "continueConversation": zod.boolean().optional().describe('Continue the agent\'s most recent provider thread instead of starting a new one.'),
-  "attachments": zod.array(InputAttachmentSchema).max(4).optional()
+  "attachments": zod.array(zod.object({
+  "name": zod.string().min(1).max(createTaskBodyAttachmentsItemNameMax),
+  "mimeType": zod.string().min(1).max(createTaskBodyAttachmentsItemMimeTypeMax),
+  "encoding": zod.enum(['text', 'base64']),
+  "content": zod.string().min(1).max(createTaskBodyAttachmentsItemContentMax)
+})).max(createTaskBodyAttachmentsMax).optional()
 })
 
 export const CreateTaskResponse = zod.object({
@@ -1656,6 +1654,35 @@ export const UpdateVoiceSettingsResponse = zod.object({
 
 
 /**
+ * @summary Store this workspace's OpenAI API key that pays for voice speech services
+ */
+export const setVoiceCredentialBodyCredentialMin = 8;
+export const setVoiceCredentialBodyCredentialMax = 4000;
+
+
+
+export const SetVoiceCredentialBody = zod.object({
+  "credential": zod.string().min(setVoiceCredentialBodyCredentialMin).max(setVoiceCredentialBodyCredentialMax)
+}).describe('A provider API key or OAuth token belonging to this workspace\'s own account. It is encrypted before storage, never returned by any endpoint, and never exposed to an agent\'s tools or prompts.')
+
+export const SetVoiceCredentialResponse = zod.object({
+  "available": zod.boolean(),
+  "reason": zod.string().nullable(),
+  "transcriptsEnabled": zod.boolean()
+})
+
+
+/**
+ * @summary Remove this workspace's stored voice OpenAI API key
+ */
+export const DeleteVoiceCredentialResponse = zod.object({
+  "available": zod.boolean(),
+  "reason": zod.string().nullable(),
+  "transcriptsEnabled": zod.boolean()
+})
+
+
+/**
  * @summary Transcribe a (possibly in-progress) recording for live captions
  */
 export const TranscribeAudioBody = zod.object({
@@ -1682,6 +1709,14 @@ export const converseWithAgentBodyHistoryItemTextMax = 8000;
 
 export const converseWithAgentBodyHistoryMax = 20;
 
+export const converseWithAgentBodyAttachmentsItemNameMax = 160;
+
+export const converseWithAgentBodyAttachmentsItemMimeTypeMax = 100;
+
+export const converseWithAgentBodyAttachmentsItemContentMax = 3000000;
+
+export const converseWithAgentBodyAttachmentsMax = 4;
+
 
 
 export const ConverseWithAgentBody = zod.object({
@@ -1691,7 +1726,12 @@ export const ConverseWithAgentBody = zod.object({
   "role": zod.enum(['user', 'agent']),
   "text": zod.string().max(converseWithAgentBodyHistoryItemTextMax)
 })).max(converseWithAgentBodyHistoryMax).optional(),
-  "attachments": zod.array(InputAttachmentSchema).max(4).optional()
+  "attachments": zod.array(zod.object({
+  "name": zod.string().min(1).max(converseWithAgentBodyAttachmentsItemNameMax),
+  "mimeType": zod.string().min(1).max(converseWithAgentBodyAttachmentsItemMimeTypeMax),
+  "encoding": zod.enum(['text', 'base64']),
+  "content": zod.string().min(1).max(converseWithAgentBodyAttachmentsItemContentMax)
+})).max(converseWithAgentBodyAttachmentsMax).optional()
 })
 
 export const ConverseWithAgentResponse = zod.object({
@@ -1891,6 +1931,59 @@ export const ListProviderModelsResponse = zod.object({
   "promptCentsPerMTok": zod.number().nullish(),
   "completionCentsPerMTok": zod.number().nullish()
 }))
+})
+
+
+/**
+ * @summary Store this workspace's own credential for a provider
+ */
+export const SetProviderCredentialParams = zod.object({
+  "provider": zod.enum(['claude_max', 'openrouter'])
+})
+
+export const setProviderCredentialBodyCredentialMin = 8;
+export const setProviderCredentialBodyCredentialMax = 4000;
+
+
+
+export const SetProviderCredentialBody = zod.object({
+  "credential": zod.string().min(setProviderCredentialBodyCredentialMin).max(setProviderCredentialBodyCredentialMax)
+}).describe('A provider API key or OAuth token belonging to this workspace\'s own account. It is encrypted before storage, never returned by any endpoint, and never exposed to an agent\'s tools or prompts.')
+
+export const SetProviderCredentialResponse = zod.object({
+  "provider": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter']),
+  "label": zod.string(),
+  "billing": zod.enum(['subscription', 'metered']),
+  "enabled": zod.boolean().describe('False when a server-side feature flag hides this provider.'),
+  "configured": zod.boolean(),
+  "healthy": zod.boolean(),
+  "message": zod.string().optional(),
+  "authMode": zod.union([zod.literal('chatgpt'),zod.literal('api_key'),zod.literal('unknown'),zod.literal(null)]).nullable().describe('Codex only. Only \"chatgpt\" draws on the ChatGPT Codex allowance; \"api_key\" means the stored credential bills OpenAI\'s API instead.'),
+  "usesSubscriptionAllowance": zod.boolean().describe('Confirmed from stored credentials, never assumed from the provider id.'),
+  "allowanceBalanceKnown": zod.boolean().describe('Whether the remaining plan allowance can be reported at all.'),
+  "reasoningLevels": zod.array(zod.string()).describe('Reasoning effort levels this provider accepts, from server configuration. Empty when it has no such control.')
+})
+
+
+/**
+ * @summary Remove this workspace's stored credential for a provider
+ */
+export const DeleteProviderCredentialParams = zod.object({
+  "provider": zod.enum(['claude_max', 'openrouter'])
+})
+
+export const DeleteProviderCredentialResponse = zod.object({
+  "provider": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter']),
+  "label": zod.string(),
+  "billing": zod.enum(['subscription', 'metered']),
+  "enabled": zod.boolean().describe('False when a server-side feature flag hides this provider.'),
+  "configured": zod.boolean(),
+  "healthy": zod.boolean(),
+  "message": zod.string().optional(),
+  "authMode": zod.union([zod.literal('chatgpt'),zod.literal('api_key'),zod.literal('unknown'),zod.literal(null)]).nullable().describe('Codex only. Only \"chatgpt\" draws on the ChatGPT Codex allowance; \"api_key\" means the stored credential bills OpenAI\'s API instead.'),
+  "usesSubscriptionAllowance": zod.boolean().describe('Confirmed from stored credentials, never assumed from the provider id.'),
+  "allowanceBalanceKnown": zod.boolean().describe('Whether the remaining plan allowance can be reported at all.'),
+  "reasoningLevels": zod.array(zod.string()).describe('Reasoning effort levels this provider accepts, from server configuration. Empty when it has no such control.')
 })
 
 
@@ -2941,4 +3034,5 @@ export const StartGithubOauthResponse = zod.object({
 export const DisconnectGithubAccountResponse = zod.object({
   "disconnected": zod.boolean()
 })
+
 

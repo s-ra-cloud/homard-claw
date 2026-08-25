@@ -555,6 +555,35 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/VoiceStatus"
+  /voice/credential:
+    put:
+      operationId: setVoiceCredential
+      tags: [office]
+      summary: Store this workspace's OpenAI API key that pays for voice speech services
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderCredentialInput"
+      responses:
+        "200":
+          description: Updated voice status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VoiceStatus"
+    delete:
+      operationId: deleteVoiceCredential
+      tags: [office]
+      summary: Remove this workspace's stored voice OpenAI API key
+      responses:
+        "200":
+          description: Updated voice status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VoiceStatus"
   /voice/transcribe:
     post:
       operationId: transcribeAudio
@@ -778,6 +807,45 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProviderModels"
+  /providers/{provider}/credential:
+    put:
+      operationId: setProviderCredential
+      tags: [office]
+      summary: Store this workspace's own credential for a provider
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema: { type: string, enum: [claude_max, openrouter] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderCredentialInput"
+      responses:
+        "200":
+          description: Refreshed provider status for this workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderStatus"
+    delete:
+      operationId: deleteProviderCredential
+      tags: [office]
+      summary: Remove this workspace's stored credential for a provider
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema: { type: string, enum: [claude_max, openrouter] }
+      responses:
+        "200":
+          description: Refreshed provider status for this workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderStatus"
   /tasks/{taskId}:
     get:
       operationId: getTask
@@ -2342,6 +2410,15 @@ components:
       required: [authJson]
       properties:
         authJson: { type: string, minLength: 2, maxLength: 20000 }
+    ProviderCredentialInput:
+      type: object
+      description: >-
+        A provider API key or OAuth token belonging to this workspace's own
+        account. It is encrypted before storage, never returned by any
+        endpoint, and never exposed to an agent's tools or prompts.
+      required: [credential]
+      properties:
+        credential: { type: string, minLength: 8, maxLength: 4000 }
     ProviderSettings:
       type: object
       required:

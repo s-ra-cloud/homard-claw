@@ -7,6 +7,8 @@ import {
   useTestCodexConnection,
   useConnectCodex,
   useDisconnectCodex,
+  useSetProviderCredential,
+  useDeleteProviderCredential,
   getGetProvidersQueryKey,
   getGetProviderSettingsQueryKey,
   ProviderSettingsDefaultProvider,
@@ -485,6 +487,113 @@ function CodexActions({ provider }: { provider: ProviderStatus }) {
   );
 }
 
+/**
+ * Paste-your-own-key actions for Claude and OpenRouter. Each workspace stores
+ * its own encrypted credential; there is no shared server key to fall back on.
+ */
+function ProviderKeyActions({ provider }: { provider: ProviderStatus }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [keyDraft, setKeyDraft] = useState("");
+  const providerId = provider.provider as "claude_max" | "openrouter";
+  const isClaude = providerId === "claude_max";
+
+  const refresh = () =>
+    queryClient.invalidateQueries({ queryKey: getGetProvidersQueryKey() });
+
+  const save = useSetProviderCredential({
+    mutation: {
+      onSuccess: () => {
+        refresh();
+        toast({
+          title: `${provider.label} key saved`,
+          description: "Stored encrypted for this workspace. It is never shown again.",
+        });
+      },
+      onError: (error) =>
+        toast({
+          variant: "destructive",
+          title: "Could not save the key",
+          description: error.message,
+        }),
+    },
+  });
+
+  const remove = useDeleteProviderCredential({
+    mutation: {
+      onSuccess: () => {
+        refresh();
+        toast({ title: `${provider.label} key removed` });
+      },
+      onError: (error) =>
+        toast({
+          variant: "destructive",
+          title: "Could not remove the key",
+          description: error.message,
+        }),
+    },
+  });
+
+  const pending = save.isPending || remove.isPending;
+
+  return (
+    <div className="mt-4 border-t-2 border-border/30 pt-4 space-y-3">
+      <div className="space-y-2">
+        <label
+          className="uppercase font-bold text-xs"
+          htmlFor={`credential-${providerId}`}
+        >
+          {provider.configured
+            ? `Replace your ${provider.label} ${isClaude ? "token" : "API key"}`
+            : `Connect your ${provider.label} account`}
+        </label>
+        <p className="text-[10px] text-muted-foreground uppercase font-bold leading-relaxed">
+          {isClaude
+            ? "Paste a Claude Code OAuth token from your own Anthropic account."
+            : "Paste an API key from your own OpenRouter account."}{" "}
+          It is encrypted before it is stored and is never shown again.
+        </p>
+        <Input
+          id={`credential-${providerId}`}
+          type="password"
+          value={keyDraft}
+          onChange={(event) => setKeyDraft(event.target.value)}
+          placeholder={isClaude ? "sk-ant-oat..." : "sk-or-..."}
+          spellCheck={false}
+          autoComplete="off"
+          className="font-mono bg-background border-4 border-border rounded-none focus-visible:ring-0 focus-visible:border-primary text-xs"
+          data-testid={`input-credential-${providerId}`}
+        />
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          onClick={() => {
+            const pasted = keyDraft.trim();
+            // Cleared as it leaves the browser, success or not — a key has
+            // no business sitting in a text box.
+            setKeyDraft("");
+            save.mutate({ provider: providerId, data: { credential: pasted } });
+          }}
+          disabled={pending || keyDraft.trim().length < 8}
+          data-testid={`button-save-credential-${providerId}`}
+        >
+          {save.isPending ? "SAVING..." : provider.configured ? "REPLACE KEY" : "SAVE KEY"}
+        </Button>
+        {provider.configured ? (
+          <Button
+            variant="outline"
+            onClick={() => remove.mutate({ provider: providerId })}
+            disabled={pending}
+            data-testid={`button-remove-credential-${providerId}`}
+          >
+            {remove.isPending ? "REMOVING..." : "REMOVE KEY"}
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 /** Codex-only rows: what the credential actually bills, and what we cannot know. */
 function CodexStatusRows({ provider }: { provider: ProviderStatus }) {
   const apiBilled = provider.authMode === "api_key";
@@ -627,12 +736,10 @@ export default function ProvidersPage() {
                     )}
                   </div>
 
-                  {isCodex ? <CodexActions provider={provider} /> : null}
-
-                  {!provider.configured && !isCodex && (
-                    <div className="mt-4 text-[10px] text-muted-foreground uppercase text-center border-t-2 border-border/30 pt-4">
-                      Add the required environment variables in the Replit Secrets tool to enable this provider.
-                    </div>
+                  {isCodex ? (
+                    <CodexActions provider={provider} />
+                  ) : (
+                    <ProviderKeyActions provider={provider} />
                   )}
                 </PixelCard>
               )

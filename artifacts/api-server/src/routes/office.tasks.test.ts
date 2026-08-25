@@ -32,6 +32,11 @@ import {
   runTask,
 } from "../worker";
 import { clearProviderCaches } from "../providers";
+import {
+  deleteProviderCredential,
+  saveProviderCredential,
+} from "../provider-credentials";
+import { providerCredentialsTable } from "@workspace/db";
 
 const app = express();
 app.use(express.json());
@@ -45,6 +50,7 @@ const RUN_TAG = `HC Tasks ${Date.now()}`;
 const createdAgentIds: string[] = [];
 let createdOwnerRow = false;
 let wsId = "";
+let priorCredentialRows: (typeof providerCredentialsTable.$inferSelect)[] = [];
 let createdWorkspace = false;
 
 async function createAgent(name: string, extra: Record<string, unknown> = {}) {
@@ -160,15 +166,20 @@ beforeAll(async () => {
     .limit(1);
   wsId = ws.id;
   createdWorkspace = !existingWorkspace;
+  priorCredentialRows = await db
+    .select()
+    .from(providerCredentialsTable)
+    .where(eq(providerCredentialsTable.workspaceId, wsId));
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   fetchMock.mockReset();
   fetchMock.mockImplementation(async () => {
     throw new Error("network disabled in tests");
   });
-  vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
-  vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", "test-claude-token");
+  // Provider credentials are workspace rows now, not env vars.
+  await saveProviderCredential(wsId, "openrouter", "test-openrouter-key");
+  await saveProviderCredential(wsId, "claude_max", "test-claude-token");
   clearProviderCaches();
 });
 
@@ -204,6 +215,13 @@ function completionCalls() {
 
 afterAll(async () => {
   vi.unstubAllEnvs();
+  // Restore the workspace's credential rows exactly as we found them.
+  await db
+    .delete(providerCredentialsTable)
+    .where(eq(providerCredentialsTable.workspaceId, wsId));
+  if (priorCredentialRows.length > 0) {
+    await db.insert(providerCredentialsTable).values(priorCredentialRows);
+  }
   if (createdAgentIds.length > 0) {
     await db
       .delete(tasksTable)
@@ -249,7 +267,7 @@ describe("task creation with priority and budget", () => {
   });
 
   it("blocks creation explicitly when the provider is not configured", async () => {
-    vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", "");
+    await deleteProviderCredential(wsId, "claude_max");
     const agent = await createAgent(`${RUN_TAG} Unconfigured`);
     const res = await request(app).post("/api/tasks").send({
       agentId: agent.id,
@@ -528,7 +546,7 @@ describe("worker execution", () => {
   });
 
   it("blocks explicitly when the provider is not configured", async () => {
-    vi.stubEnv("OPENROUTER_API_KEY", "");
+    await deleteProviderCredential(wsId, "openrouter");
     const agent = await createAgent(`${RUN_TAG} Keyless`);
     const task = await insertTask(agent.id, { status: "running", attempts: 1 });
 

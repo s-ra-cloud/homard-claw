@@ -32,6 +32,8 @@ import {
   saveTaskOutcomeMemory,
 } from "../memory-context";
 import { clearProviderCaches } from "../providers";
+import { saveProviderCredential } from "../provider-credentials";
+import { providerCredentialsTable } from "@workspace/db";
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
@@ -46,6 +48,7 @@ const createdAgentIds: string[] = [];
 let createdOwnerRow = false;
 let ownerId = "";
 let wsId = "";
+let priorCredentialRows: (typeof providerCredentialsTable.$inferSelect)[] = [];
 let createdWorkspace = false;
 
 async function createAgent(name: string) {
@@ -110,20 +113,32 @@ beforeAll(async () => {
     .limit(1);
   wsId = ws.id;
   createdWorkspace = !existingWorkspace;
+  priorCredentialRows = await db
+    .select()
+    .from(providerCredentialsTable)
+    .where(eq(providerCredentialsTable.workspaceId, wsId));
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   authState.userId = ownerId;
   fetchMock.mockReset();
   fetchMock.mockImplementation(async () => {
     throw new Error("network disabled in tests");
   });
-  vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
+  // Provider credentials are workspace rows now, not env vars.
+  await saveProviderCredential(wsId, "openrouter", "test-openrouter-key");
   clearProviderCaches();
 });
 
 afterAll(async () => {
   vi.unstubAllEnvs();
+  // Restore the workspace's credential rows exactly as we found them.
+  await db
+    .delete(providerCredentialsTable)
+    .where(eq(providerCredentialsTable.workspaceId, wsId));
+  if (priorCredentialRows.length > 0) {
+    await db.insert(providerCredentialsTable).values(priorCredentialRows);
+  }
   await db.delete(memoriesTable).where(like(memoriesTable.content, `%${RUN_TAG}%`));
   await db
     .delete(knowledgeFilesTable)

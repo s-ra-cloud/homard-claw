@@ -93,6 +93,11 @@ vi.mock("../workspace", async (importOriginal) => {
 
 import officeRouter from "./office";
 import { clearProviderCaches } from "../providers";
+import {
+  deleteProviderCredential,
+  saveProviderCredential,
+} from "../provider-credentials";
+import { providerCredentialsTable } from "@workspace/db";
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));
@@ -107,6 +112,7 @@ const createdAgentIds: string[] = [];
 let createdOwnerRow = false;
 let priorTranscriptsValue: string | null | undefined;
 let wsId = "";
+let priorCredentialRows: (typeof providerCredentialsTable.$inferSelect)[] = [];
 
 /** Minimal RIFF/WAVE header so format detection skips ffmpeg conversion. */
 const FAKE_WAV_BASE64 = Buffer.concat([
@@ -115,8 +121,6 @@ const FAKE_WAV_BASE64 = Buffer.concat([
   Buffer.from("WAVEfmt "),
   Buffer.alloc(32),
 ]).toString("base64");
-
-const OPENAI_TEST_BASE = "https://openai.test/v1";
 
 async function createAgent(name: string, extra: Record<string, unknown> = {}) {
   const res = await request(app)
@@ -185,10 +189,13 @@ function mockProviders({
         ],
       });
     }
-    if (target.includes("openai.test") && target.includes("/audio/transcriptions")) {
+    // Workspace voice keys go straight to api.openai.com (no managed base
+    // URL), so speech traffic is recognized by the OpenAI host or the
+    // transcription path.
+    if (target.includes("/audio/transcriptions")) {
       return jsonResponse({ text: transcript });
     }
-    if (target.includes("openai.test") && target.includes("/chat/completions")) {
+    if (target.includes("api.openai.com") && target.includes("/chat/completions")) {
       // Streaming TTS: two PCM16 chunks.
       return sseResponse([
         '{"choices":[{"delta":{"audio":{"data":"QUFBQQ=="}}}]}',
@@ -241,22 +248,35 @@ beforeAll(async () => {
     )
     .limit(1);
   priorTranscriptsValue = transcripts?.value ?? null;
+  // Snapshot any real stored credentials so the suite can restore them.
+  priorCredentialRows = await db
+    .select()
+    .from(providerCredentialsTable)
+    .where(eq(providerCredentialsTable.workspaceId, wsId));
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   fetchMock.mockReset();
   fetchMock.mockImplementation(async () => {
     throw new Error("network disabled in tests");
   });
-  vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
-  vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", "test-claude-token");
-  vi.stubEnv("AI_INTEGRATIONS_OPENAI_BASE_URL", OPENAI_TEST_BASE);
-  vi.stubEnv("AI_INTEGRATIONS_OPENAI_API_KEY", "test-openai-key");
+  // Voice and provider access are paid for by workspace-stored credentials
+  // now — there are no server-environment fallbacks to stub.
+  await saveProviderCredential(wsId, "openrouter", "test-openrouter-key");
+  await saveProviderCredential(wsId, "claude_max", "test-claude-token");
+  await saveProviderCredential(wsId, "openai_voice", "test-openai-key");
   clearProviderCaches();
 });
 
 afterAll(async () => {
   vi.unstubAllEnvs();
+  // Put the workspace's credential rows back exactly as we found them.
+  await db
+    .delete(providerCredentialsTable)
+    .where(eq(providerCredentialsTable.workspaceId, wsId));
+  if (priorCredentialRows.length > 0) {
+    await db.insert(providerCredentialsTable).values(priorCredentialRows);
+  }
   if (createdAgentIds.length > 0) {
     await db
       .delete(talkExchangesTable)
@@ -324,18 +344,37 @@ async function setTranscripts(enabled: boolean) {
 }
 
 describe("voice status and settings", () => {
-  it("reports availability from the managed speech env vars", async () => {
+  it("reports availability from the workspace's stored voice key", async () => {
     const res = await request(app).get("/api/voice/status");
     expect(res.status).toBe(200);
     expect(res.body.available).toBe(true);
     expect(res.body.reason).toBeNull();
   });
 
-  it("reports a clear reason when the speech service is not provisioned", async () => {
-    vi.stubEnv("AI_INTEGRATIONS_OPENAI_BASE_URL", "");
+  it("reports a clear reason when the workspace has no voice key", async () => {
+    await deleteProviderCredential(wsId, "openai_voice");
     const res = await request(app).get("/api/voice/status");
     expect(res.body.available).toBe(false);
-    expect(res.body.reason).toMatch(/not provisioned/i);
+    expect(res.body.reason).toMatch(/add your openai api key/i);
+  });
+
+  it("stores and removes the voice key through the credential routes", async () => {
+    const removed = await request(app).delete("/api/voice/credential");
+    expect(removed.status).toBe(200);
+    expect(removed.body.available).toBe(false);
+
+    const rejected = await request(app)
+      .put("/api/voice/credential")
+      .send({ credential: "short" });
+    expect(rejected.status).toBe(400);
+
+    const stored = await request(app)
+      .put("/api/voice/credential")
+      .send({ credential: "sk-test-voice-key-123" });
+    expect(stored.status).toBe(200);
+    expect(stored.body.available).toBe(true);
+    // The key itself must never be echoed back.
+    expect(JSON.stringify(stored.body)).not.toContain("sk-test-voice-key-123");
   });
 
   it("toggles transcript storage", async () => {
@@ -381,8 +420,8 @@ describe("live-caption transcription", () => {
     expect(res.body.error).toMatch(/transcription failed/i);
   });
 
-  it("503s when speech services are unavailable", async () => {
-    vi.stubEnv("AI_INTEGRATIONS_OPENAI_API_KEY", "");
+  it("503s when the workspace has no voice key", async () => {
+    await deleteProviderCredential(wsId, "openai_voice");
     const res = await request(app)
       .post("/api/voice/transcribe")
       .send({ audio: FAKE_WAV_BASE64 });
@@ -1075,7 +1114,7 @@ describe("text conversations", () => {
 
   it("maps a missing provider key to a clear 503", async () => {
     const agent = await createAgent(`${RUN_TAG} Unprovisioned`);
-    vi.stubEnv("OPENROUTER_API_KEY", "");
+    await deleteProviderCredential(wsId, "openrouter");
     clearProviderCaches();
     mockProviders();
 
@@ -1088,14 +1127,14 @@ describe("text conversations", () => {
 });
 
 describe("voice conversations", () => {
-  it("503s with a clear reason when speech services are unavailable", async () => {
+  it("503s with a clear reason when the workspace has no voice key", async () => {
     const agent = await createAgent(`${RUN_TAG} NoSpeech`);
-    vi.stubEnv("AI_INTEGRATIONS_OPENAI_API_KEY", "");
+    await deleteProviderCredential(wsId, "openai_voice");
     const res = await request(app)
       .post(`/api/agents/${agent.id}/voice-converse`)
       .send({ audio: FAKE_WAV_BASE64 });
     expect(res.status).toBe(503);
-    expect(res.body.error).toMatch(/not provisioned/i);
+    expect(res.body.error).toMatch(/add your openai api key/i);
   });
 
   it("rejects garbage audio payloads", async () => {

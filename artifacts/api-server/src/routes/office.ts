@@ -53,6 +53,11 @@ import {
   SetAgentArchivedResponse,
   SetEmergencyStopBody,
   SetEmergencyStopResponse,
+  SetProviderCredentialBody,
+  SetProviderCredentialParams,
+  SetProviderCredentialResponse,
+  DeleteProviderCredentialParams,
+  DeleteProviderCredentialResponse,
   TestCodexConnectionResponse,
   UpdateAgentBody,
   UpdateAgentParams,
@@ -96,6 +101,11 @@ import {
   updateProviderSettings,
   type ProviderId,
 } from "../providers";
+import {
+  deleteProviderCredential,
+  ProviderCredentialError,
+  saveProviderCredential,
+} from "../provider-credentials";
 import { testCodexConnection } from "../codex/execute";
 import {
   bootstrapCodexHome,
@@ -152,7 +162,7 @@ router.use(capabilitiesRouter);
 
 router.get("/runtime/health", async (req: Request, res: Response) => {
   const [runtimes, queue, stop] = await Promise.all([
-    listRuntimeHealth(),
+    listRuntimeHealth(req.workspaceId!),
     queueHealth(),
     getWorkspaceSetting(req.workspaceId!, "emergency_stop"),
   ]);
@@ -1717,14 +1727,78 @@ router.get("/audit/verify", async (req, res): Promise<void> => {
   res.json(VerifyAuditResponse.parse(await verifyAuditChain(req.workspaceId!)));
 });
 
-router.get("/providers", async (_req, res): Promise<void> => {
+router.get("/providers", async (req, res): Promise<void> => {
   // Every known provider is reported, including one whose flag is off:
   // hiding it entirely would leave an agent that still references it
   // looking mysteriously broken. `enabled: false` tells the UI to hide it.
+  // Health is scoped to the caller's workspace: it reflects only the
+  // credentials THIS workspace has stored, never anyone else's.
   const statuses = await Promise.all(
-    PROVIDER_IDS.map((provider) => getProviderHealth(provider)),
+    PROVIDER_IDS.map((provider) => getProviderHealth(req.workspaceId!, provider)),
   );
   res.json(GetProvidersResponse.parse(statuses));
+});
+
+/**
+ * Store this workspace's own Claude Code token or OpenRouter API key.
+ * The value is encrypted per workspace, never logged, never echoed back,
+ * and never mentioned in audit entries — only the outcome is.
+ */
+router.put("/providers/:provider/credential", async (req, res): Promise<void> => {
+  const params = SetProviderCredentialParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: "Unknown provider" });
+    return;
+  }
+  const provider = params.data.provider as "claude_max" | "openrouter";
+  const parsed = SetProviderCredentialBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "A credential of at least 8 characters is required." });
+    return;
+  }
+  try {
+    await saveProviderCredential(req.workspaceId!, provider, parsed.data.credential);
+  } catch (error) {
+    if (error instanceof ProviderCredentialError) {
+      res.status(503).json({ error: error.message });
+      return;
+    }
+    throw error;
+  }
+  clearProviderCaches();
+  await recordAudit(
+    req.workspaceId!,
+    "providers.credential_set",
+    `A ${providerLabel(provider)} credential was stored for this workspace.`,
+  );
+  res.json(
+    SetProviderCredentialResponse.parse(
+      await getProviderHealth(req.workspaceId!, provider),
+    ),
+  );
+});
+
+router.delete("/providers/:provider/credential", async (req, res): Promise<void> => {
+  const params = DeleteProviderCredentialParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: "Unknown provider" });
+    return;
+  }
+  const provider = params.data.provider as "claude_max" | "openrouter";
+  const removed = await deleteProviderCredential(req.workspaceId!, provider);
+  clearProviderCaches();
+  await recordAudit(
+    req.workspaceId!,
+    "providers.credential_removed",
+    removed
+      ? `The workspace's ${providerLabel(provider)} credential was removed.`
+      : `A ${providerLabel(provider)} credential removal was requested, but none was stored.`,
+  );
+  res.json(
+    DeleteProviderCredentialResponse.parse(
+      await getProviderHealth(req.workspaceId!, provider),
+    ),
+  );
 });
 
 /**
@@ -1871,7 +1945,10 @@ router.get("/providers/:provider/models", async (req, res): Promise<void> => {
     res.status(400).json({ error: "Unknown provider" });
     return;
   }
-  const catalog = await getModelCatalog(params.data.provider as ProviderId);
+  const catalog = await getModelCatalog(
+    req.workspaceId!,
+    params.data.provider as ProviderId,
+  );
   res.json(ListProviderModelsResponse.parse(catalog));
 });
 

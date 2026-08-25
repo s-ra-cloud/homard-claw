@@ -71,6 +71,7 @@ import type {
   NotificationList,
   OfficeOverview,
   PauseInput,
+  ProviderCredentialInput,
   ProviderModels,
   ProviderSettings,
   ProviderSettingsInput,
@@ -2438,6 +2439,148 @@ export const useUpdateVoiceSettings = <TError = ErrorType<unknown>,
       return useMutation(getUpdateVoiceSettingsMutationOptions(options));
     }
 
+export const getSetVoiceCredentialUrl = () => {
+
+
+
+
+  return `/api/voice/credential`
+}
+
+/**
+ * @summary Store this workspace's OpenAI API key that pays for voice speech services
+ */
+export const setVoiceCredential = async (providerCredentialInput: ProviderCredentialInput, options?: Parameters<typeof customFetch>[1]): Promise<VoiceStatus> => {
+
+  return customFetch<VoiceStatus>(getSetVoiceCredentialUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(providerCredentialInput)
+  }
+);}
+
+
+
+
+
+export const getSetVoiceCredentialMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setVoiceCredential>>, TError,{data: BodyType<ProviderCredentialInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setVoiceCredential>>, TError,{data: BodyType<ProviderCredentialInput>}, TContext> => {
+
+const mutationKey = ['setVoiceCredential'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setVoiceCredential>>, {data: BodyType<ProviderCredentialInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  setVoiceCredential(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetVoiceCredentialMutationResult = NonNullable<Awaited<ReturnType<typeof setVoiceCredential>>>
+    export type SetVoiceCredentialMutationBody = BodyType<ProviderCredentialInput>
+    export type SetVoiceCredentialMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Store this workspace's OpenAI API key that pays for voice speech services
+ */
+export const useSetVoiceCredential = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setVoiceCredential>>, TError,{data: BodyType<ProviderCredentialInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof setVoiceCredential>>,
+        TError,
+        {data: BodyType<ProviderCredentialInput>},
+        TContext
+      > => {
+      return useMutation(getSetVoiceCredentialMutationOptions(options));
+    }
+
+export const getDeleteVoiceCredentialUrl = () => {
+
+
+
+
+  return `/api/voice/credential`
+}
+
+/**
+ * @summary Remove this workspace's stored voice OpenAI API key
+ */
+export const deleteVoiceCredential = async ( options?: Parameters<typeof customFetch>[1]): Promise<VoiceStatus> => {
+
+  return customFetch<VoiceStatus>(getDeleteVoiceCredentialUrl(),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteVoiceCredentialMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteVoiceCredential>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteVoiceCredential>>, TError,void, TContext> => {
+
+const mutationKey = ['deleteVoiceCredential'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteVoiceCredential>>, void> = () => {
+
+
+          return  deleteVoiceCredential(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteVoiceCredentialMutationResult = NonNullable<Awaited<ReturnType<typeof deleteVoiceCredential>>>
+
+    export type DeleteVoiceCredentialMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Remove this workspace's stored voice OpenAI API key
+ */
+export const useDeleteVoiceCredential = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteVoiceCredential>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteVoiceCredential>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getDeleteVoiceCredentialMutationOptions(options));
+    }
+
 export const getTranscribeAudioUrl = () => {
 
 
@@ -3386,6 +3529,149 @@ export function useListProviderModels<TData = Awaited<ReturnType<typeof listProv
 
 
 
+
+export const getSetProviderCredentialUrl = (provider: 'claude_max' | 'openrouter',) => {
+
+
+
+
+  return `/api/providers/${provider}/credential`
+}
+
+/**
+ * @summary Store this workspace's own credential for a provider
+ */
+export const setProviderCredential = async (provider: 'claude_max' | 'openrouter',
+    providerCredentialInput: ProviderCredentialInput, options?: Parameters<typeof customFetch>[1]): Promise<ProviderStatus> => {
+
+  return customFetch<ProviderStatus>(getSetProviderCredentialUrl(provider),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(providerCredentialInput)
+  }
+);}
+
+
+
+
+
+export const getSetProviderCredentialMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setProviderCredential>>, TError,{provider: 'claude_max' | 'openrouter';data: BodyType<ProviderCredentialInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setProviderCredential>>, TError,{provider: 'claude_max' | 'openrouter';data: BodyType<ProviderCredentialInput>}, TContext> => {
+
+const mutationKey = ['setProviderCredential'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setProviderCredential>>, {provider: 'claude_max' | 'openrouter';data: BodyType<ProviderCredentialInput>}> = (props) => {
+          const {provider,data} = props ?? {};
+
+          return  setProviderCredential(provider,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetProviderCredentialMutationResult = NonNullable<Awaited<ReturnType<typeof setProviderCredential>>>
+    export type SetProviderCredentialMutationBody = BodyType<ProviderCredentialInput>
+    export type SetProviderCredentialMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Store this workspace's own credential for a provider
+ */
+export const useSetProviderCredential = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setProviderCredential>>, TError,{provider: 'claude_max' | 'openrouter';data: BodyType<ProviderCredentialInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof setProviderCredential>>,
+        TError,
+        {provider: 'claude_max' | 'openrouter';data: BodyType<ProviderCredentialInput>},
+        TContext
+      > => {
+      return useMutation(getSetProviderCredentialMutationOptions(options));
+    }
+
+export const getDeleteProviderCredentialUrl = (provider: 'claude_max' | 'openrouter',) => {
+
+
+
+
+  return `/api/providers/${provider}/credential`
+}
+
+/**
+ * @summary Remove this workspace's stored credential for a provider
+ */
+export const deleteProviderCredential = async (provider: 'claude_max' | 'openrouter', options?: Parameters<typeof customFetch>[1]): Promise<ProviderStatus> => {
+
+  return customFetch<ProviderStatus>(getDeleteProviderCredentialUrl(provider),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteProviderCredentialMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteProviderCredential>>, TError,{provider: 'claude_max' | 'openrouter'}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteProviderCredential>>, TError,{provider: 'claude_max' | 'openrouter'}, TContext> => {
+
+const mutationKey = ['deleteProviderCredential'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteProviderCredential>>, {provider: 'claude_max' | 'openrouter'}> = (props) => {
+          const {provider} = props ?? {};
+
+          return  deleteProviderCredential(provider,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteProviderCredentialMutationResult = NonNullable<Awaited<ReturnType<typeof deleteProviderCredential>>>
+
+    export type DeleteProviderCredentialMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Remove this workspace's stored credential for a provider
+ */
+export const useDeleteProviderCredential = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteProviderCredential>>, TError,{provider: 'claude_max' | 'openrouter'}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteProviderCredential>>,
+        TError,
+        {provider: 'claude_max' | 'openrouter'},
+        TContext
+      > => {
+      return useMutation(getDeleteProviderCredentialMutationOptions(options));
+    }
 
 export const getGetTaskUrl = (taskId: string,) => {
 

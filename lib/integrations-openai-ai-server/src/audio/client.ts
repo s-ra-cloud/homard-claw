@@ -6,22 +6,44 @@ import { randomUUID } from "crypto";
 import { tmpdir } from "os";
 import { join } from "path";
 
-if (!process.env.AI_INTEGRATIONS_OPENAI_BASE_URL) {
-  throw new Error(
-    "AI_INTEGRATIONS_OPENAI_BASE_URL must be set. Did you forget to provision the OpenAI AI integration?",
-  );
+/**
+ * Explicit credentials for one call. When provided, the request goes to
+ * the caller's own OpenAI account (default api.openai.com unless a
+ * baseURL is given) — the managed integration environment is NOT
+ * consulted, so multi-tenant callers can guarantee whose account pays.
+ */
+export type OpenAICredentials = { apiKey: string; baseURL?: string };
+
+let envClientInstance: OpenAI | null = null;
+
+/**
+ * Lazy fallback client on the Replit-managed OpenAI integration. Only
+ * used when a call passes no explicit credentials; resolved at call time
+ * so importing this module never crashes a server that has workspace
+ * credentials but no managed integration.
+ */
+function envClient(): OpenAI {
+  if (envClientInstance) return envClientInstance;
+  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+  const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+  if (!apiKey || !baseURL) {
+    throw new Error(
+      "No OpenAI credentials were provided for this call and the managed OpenAI AI integration is not provisioned.",
+    );
+  }
+  envClientInstance = new OpenAI({ apiKey, baseURL });
+  return envClientInstance;
 }
 
-if (!process.env.AI_INTEGRATIONS_OPENAI_API_KEY) {
-  throw new Error(
-    "AI_INTEGRATIONS_OPENAI_API_KEY must be set. Did you forget to provision the OpenAI AI integration?",
-  );
+function clientFor(credentials?: OpenAICredentials): OpenAI {
+  if (credentials) {
+    return new OpenAI({
+      apiKey: credentials.apiKey,
+      baseURL: credentials.baseURL,
+    });
+  }
+  return envClient();
 }
-
-export const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
 
 export type AudioFormat = "wav" | "mp3" | "webm" | "mp4" | "ogg" | "unknown";
 
@@ -113,10 +135,11 @@ export async function voiceChat(
   audioBuffer: Buffer,
   voice: "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer" = "alloy",
   inputFormat: "wav" | "mp3" = "wav",
-  outputFormat: "wav" | "mp3" = "mp3"
+  outputFormat: "wav" | "mp3" = "mp3",
+  credentials?: OpenAICredentials
 ): Promise<{ transcript: string; audioResponse: Buffer }> {
   const audioBase64 = audioBuffer.toString("base64");
-  const response = await openai.chat.completions.create({
+  const response = await clientFor(credentials).chat.completions.create({
     model: "gpt-audio",
     modalities: ["text", "audio"],
     audio: { voice, format: outputFormat },
@@ -140,10 +163,11 @@ export async function voiceChat(
 export async function voiceChatStream(
   audioBuffer: Buffer,
   voice: "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer" = "alloy",
-  inputFormat: "wav" | "mp3" = "wav"
+  inputFormat: "wav" | "mp3" = "wav",
+  credentials?: OpenAICredentials
 ): Promise<AsyncIterable<{ type: "transcript" | "audio"; data: string }>> {
   const audioBase64 = audioBuffer.toString("base64");
-  const stream = await openai.chat.completions.create({
+  const stream = await clientFor(credentials).chat.completions.create({
     model: "gpt-audio",
     modalities: ["text", "audio"],
     audio: { voice, format: "pcm16" },
@@ -174,9 +198,10 @@ export async function voiceChatStream(
 export async function textToSpeech(
   text: string,
   voice: "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer" = "alloy",
-  format: "wav" | "mp3" | "flac" | "opus" | "pcm16" = "wav"
+  format: "wav" | "mp3" | "flac" | "opus" | "pcm16" = "wav",
+  credentials?: OpenAICredentials
 ): Promise<Buffer> {
-  const response = await openai.chat.completions.create({
+  const response = await clientFor(credentials).chat.completions.create({
     model: "gpt-audio",
     modalities: ["text", "audio"],
     audio: { voice, format },
@@ -193,9 +218,10 @@ export async function textToSpeech(
 export async function textToSpeechStream(
   text: string,
   voice: "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer" = "alloy",
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  credentials?: OpenAICredentials
 ): Promise<AsyncIterable<string>> {
-  const stream = await openai.chat.completions.create(
+  const stream = await clientFor(credentials).chat.completions.create(
     {
       model: "gpt-audio",
       modalities: ["text", "audio"],
@@ -224,10 +250,11 @@ export async function textToSpeechStream(
 export async function speechToText(
   audioBuffer: Buffer,
   format: "wav" | "mp3" | "webm" = "wav",
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  credentials?: OpenAICredentials
 ): Promise<string> {
   const file = await toFile(audioBuffer, `audio.${format}`);
-  const response = await openai.audio.transcriptions.create(
+  const response = await clientFor(credentials).audio.transcriptions.create(
     {
       file,
       model: "gpt-4o-mini-transcribe",
@@ -240,10 +267,11 @@ export async function speechToText(
 /** Streaming Speech-to-Text. */
 export async function speechToTextStream(
   audioBuffer: Buffer,
-  format: "wav" | "mp3" | "webm" = "wav"
+  format: "wav" | "mp3" | "webm" = "wav",
+  credentials?: OpenAICredentials
 ): Promise<AsyncIterable<string>> {
   const file = await toFile(audioBuffer, `audio.${format}`);
-  const stream = await openai.audio.transcriptions.create({
+  const stream = await clientFor(credentials).audio.transcriptions.create({
     file,
     model: "gpt-4o-mini-transcribe",
     stream: true,

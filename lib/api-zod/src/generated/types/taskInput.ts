@@ -5,6 +5,7 @@
  * HomardClaw private agent office API
  * OpenAPI spec version: 0.1.0
  */
+import type { InputAttachment } from './inputAttachment';
 import type { TaskInputPriority } from './taskInputPriority';
 import type { TaskInputProviderOverride } from './taskInputProviderOverride';
 import type { TaskInputReasoningOverride } from './taskInputReasoningOverride';
@@ -28,4 +29,6 @@ export interface TaskInput {
   reasoningOverride?: TaskInputReasoningOverride;
   /** Continue the agent's most recent provider thread instead of starting a new one. */
   continueConversation?: boolean;
+  /** @maxItems 4 */
+  attachments?: InputAttachment[];
 }

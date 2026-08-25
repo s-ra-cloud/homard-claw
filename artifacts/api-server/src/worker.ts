@@ -868,7 +868,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     // Authoritative readiness, re-checked immediately before dispatch: a
     // ChatGPT session that expired while the task sat in the queue must
     // fail closed here rather than be attempted.
-    const readiness = await providerReadiness(provider);
+    const readiness = await providerReadiness(workspaceId, provider);
     if (!readiness.ready) {
       await setTaskPhase(task.id, task.attempts, "auth_required", workspaceId);
       await finishIfStillRunning(task.id, task.attempts, {
@@ -998,7 +998,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     // task. Silently falling back to the built-in runtime would run work
     // somewhere it was never assigned.
     const runtime = getRuntime(task.runtime || DEFAULT_RUNTIME);
-    const runtimeStatus = await runtime.health();
+    const runtimeStatus = await runtime.health(workspaceId);
     if (!runtimeStatus.acceptsWork) {
       await finishIfStillRunning(task.id, task.attempts, {
         status: "blocked",
@@ -1187,6 +1187,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     try {
       for (let round = 1; round <= MAX_ACTION_ROUNDS; round += 1) {
         const result = await runtime.execute({
+          workspaceId,
           provider,
           model: task.model ?? "",
           system,
@@ -1698,7 +1699,7 @@ async function offerFallback(
   const healthy: ProviderId[] = [];
   for (const candidate of availableProviderIds()) {
     if (candidate === fromProvider) continue;
-    const readiness = await providerReadiness(candidate);
+    const readiness = await providerReadiness(task.workspaceId ?? "", candidate);
     if (readiness.ready) healthy.push(candidate);
   }
   const decision = await evaluateFallback({

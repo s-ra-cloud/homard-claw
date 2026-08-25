@@ -1,9 +1,9 @@
 export {
-  openai,
   detectAudioFormat,
   convertToWav,
   ensureCompatibleFormat,
   type AudioFormat,
+  type OpenAICredentials,
   voiceChat,
   voiceChatStream,
   textToSpeech,

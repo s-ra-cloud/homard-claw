@@ -55,7 +55,8 @@ export class RuntimeUnavailableError extends Error {
 export interface RuntimeAdapter {
   readonly id: RuntimeId;
   readonly label: string;
-  health(): Promise<RuntimeHealth>;
+  /** Health for one workspace: provider credentials are workspace-scoped. */
+  health(workspaceId: string): Promise<RuntimeHealth>;
   execute(
     input: RuntimeExecuteInput,
   ): ReturnType<typeof callProvider>;
@@ -65,9 +66,14 @@ export interface RuntimeAdapter {
 const nativeRuntime: RuntimeAdapter = {
   id: "native",
   label: "Built-in runtime",
-  async health() {
+  async health(workspaceId) {
+    const flags = await Promise.all(
+      availableProviderIds().map((provider) =>
+        isConfigured(workspaceId, provider),
+      ),
+    );
     const configured = availableProviderIds()
-      .filter((provider) => isConfigured(provider))
+      .filter((_, index) => flags[index])
       .map((provider) => providerLabel(provider));
     if (configured.length === 0) {
       return {
@@ -100,7 +106,7 @@ const nativeRuntime: RuntimeAdapter = {
 const openclawRuntime: RuntimeAdapter = {
   id: "openclaw",
   label: "OpenClaw gateway",
-  async health() {
+  async health(_workspaceId) {
     return {
       id: "openclaw",
       label: this.label,
@@ -138,8 +144,10 @@ export function getRuntime(id: string): RuntimeAdapter {
   return RUNTIMES[id];
 }
 
-export async function listRuntimeHealth(): Promise<RuntimeHealth[]> {
-  return Promise.all(RUNTIME_IDS.map((id) => RUNTIMES[id].health()));
+export async function listRuntimeHealth(
+  workspaceId: string,
+): Promise<RuntimeHealth[]> {
+  return Promise.all(RUNTIME_IDS.map((id) => RUNTIMES[id].health(workspaceId)));
 }
 
 export type QueueHealth = {

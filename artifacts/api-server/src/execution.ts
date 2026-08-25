@@ -95,6 +95,12 @@ export type ProviderPhase =
   | "cancelled";
 
 export type ProviderCallRequest = {
+  /**
+   * The workspace whose stored credential (and allowance) pays for this
+   * call. Always the durable owner of the work — the task's or agent's
+   * workspace — never anything a client supplied directly.
+   */
+  workspaceId: string;
   provider: ProviderId;
   model: string;
   system: string;
@@ -138,27 +144,44 @@ export interface ProviderAdapter {
   readonly label: string;
   readonly billing: ProviderBilling;
   /** Whether a run may be attempted right now, and why not if it may not. */
-  authStatus(): Promise<{ ready: boolean; message: string }>;
+  authStatus(workspaceId: string): Promise<{ ready: boolean; message: string }>;
   execute(req: ProviderCallRequest): Promise<ProviderCallResult>;
 }
 
 /** Hard ceiling on a single completion, independent of budget. */
 export const MAX_OUTPUT_TOKENS = 4096;
 
-function credentialFor(provider: "claude_max" | "openrouter"): string {
-  const env =
-    provider === "claude_max"
-      ? process.env.CLAUDE_CODE_OAUTH_TOKEN
-      : process.env.OPENROUTER_API_KEY;
-  if (!env || env.trim() === "") {
+/**
+ * Resolve the credential the CALLING WORKSPACE stored for this provider.
+ * There is deliberately no environment fallback: a workspace without its
+ * own credential fails closed with a clear configuration error instead of
+ * quietly spending someone else's allowance.
+ */
+async function credentialFor(
+  workspaceId: string,
+  provider: "claude_max" | "openrouter",
+): Promise<string> {
+  let stored: string | null;
+  try {
+    stored = await getProviderCredential(workspaceId, provider);
+  } catch (error) {
+    if (error instanceof ProviderCredentialError) {
+      throw new ProviderCallError(
+        error.kind === "reenter_required" ? "auth" : "not_configured",
+        error.message,
+      );
+    }
+    throw error;
+  }
+  if (!stored) {
     throw new ProviderCallError(
       "not_configured",
       provider === "claude_max"
-        ? "Claude is not configured. Add CLAUDE_CODE_OAUTH_TOKEN to run this task."
-        : "OpenRouter is not configured. Add OPENROUTER_API_KEY to run this task.",
+        ? "Claude Code is not configured for this workspace. Add your Claude Code OAuth token on the Providers page to run this task."
+        : "OpenRouter is not configured for this workspace. Add your OpenRouter API key on the Providers page to run this task.",
     );
   }
-  return env;
+  return stored;
 }
 
 /**
@@ -196,6 +219,10 @@ function mapHttpError(status: number): ProviderCallError {
 }
 
 import { sanitizeErrorMessage } from "./lib/sanitize";
+import {
+  getProviderCredential,
+  ProviderCredentialError,
+} from "./provider-credentials";
 import {
   PROVIDER_BILLING,
   PROVIDER_LABELS,
@@ -349,7 +376,7 @@ async function materializeCodexAttachments(
 }
 
 async function callClaude(req: ProviderCallRequest): Promise<ProviderCallResult> {
-  const token = credentialFor("claude_max");
+  const token = await credentialFor(req.workspaceId, "claude_max");
   let res: globalThis.Response;
   try {
     res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -396,7 +423,7 @@ async function callClaude(req: ProviderCallRequest): Promise<ProviderCallResult>
 }
 
 async function callOpenRouter(req: ProviderCallRequest): Promise<ProviderCallResult> {
-  const key = credentialFor("openrouter");
+  const key = await credentialFor(req.workspaceId, "openrouter");
   let res: globalThis.Response;
   try {
     res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -447,7 +474,7 @@ const claudeAdapter: ProviderAdapter = {
   id: "claude_max",
   label: PROVIDER_LABELS.claude_max,
   billing: PROVIDER_BILLING.claude_max,
-  authStatus: () => providerReadiness("claude_max"),
+  authStatus: (workspaceId) => providerReadiness(workspaceId, "claude_max"),
   execute: callClaude,
 };
 
@@ -455,7 +482,7 @@ const openrouterAdapter: ProviderAdapter = {
   id: "openrouter",
   label: PROVIDER_LABELS.openrouter,
   billing: PROVIDER_BILLING.openrouter,
-  authStatus: () => providerReadiness("openrouter"),
+  authStatus: (workspaceId) => providerReadiness(workspaceId, "openrouter"),
   execute: callOpenRouter,
 };
 
@@ -486,7 +513,7 @@ const codexAdapter: ProviderAdapter = {
   id: "codex_chatgpt",
   label: PROVIDER_LABELS.codex_chatgpt,
   billing: PROVIDER_BILLING.codex_chatgpt,
-  authStatus: () => providerReadiness("codex_chatgpt"),
+  authStatus: (workspaceId) => providerReadiness(workspaceId, "codex_chatgpt"),
   async execute(req) {
     if (!req.workingDirectory) {
       throw new ProviderCallError(

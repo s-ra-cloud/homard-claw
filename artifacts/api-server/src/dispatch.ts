@@ -152,7 +152,10 @@ export async function dispatchTask(input: DispatchInput): Promise<DispatchOutcom
             )
             .limit(1)
         : [undefined];
-      const configured = isConfigured(routing.provider);
+      const configured = await isConfigured(
+        agent.workspaceId ?? "",
+        routing.provider,
+      );
       // Unconfigured providers and the emergency stop block explicitly, with
       // a reason the owner can act on; a paused agent's tasks simply wait in
       // the queue until the agent resumes.

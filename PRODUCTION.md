@@ -27,18 +27,26 @@ verify a deployment.
 | `DATABASE_URL` | Postgres connection | yes |
 | `CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` | Owner authentication | yes |
 | `VITE_CLERK_PUBLISHABLE_KEY` | Web build-time Clerk key | yes (build) |
-| `SESSION_SECRET` | Session signing | yes |
-| `CLAUDE_CODE_OAUTH_TOKEN` | Claude provider execution | optional* |
-| `OPENROUTER_API_KEY` | OpenRouter provider execution | optional* |
-| `AI_INTEGRATIONS_OPENAI_BASE_URL`, `AI_INTEGRATIONS_OPENAI_API_KEY` | Voice (speech-to-text / text-to-speech) | optional* |
+| `SESSION_SECRET` | Session signing + encryption key for stored per-workspace credentials | yes |
 | `LOG_LEVEL` | Pino level (default `info`) | no |
 
-*Credential-dependent behavior: without a provider credential, agents can
-be created and tasks dispatched, but tasks block immediately with
-`not_configured` and a message telling the owner which secret to add.
-Without the OpenAI integration variables, voice endpoints report
-unavailable and the UI falls back to text. Nothing crashes; features
-degrade explicitly.
+AI provider credentials are **not** environment variables. Each workspace
+stores its own credentials through the app, encrypted (AES-256-GCM, key
+derived from `SESSION_SECRET`) in the `provider_credentials` table:
+
+- Claude Code OAuth token and OpenRouter API key — entered on the
+  Providers page.
+- OpenAI API key for voice (speech-to-text / text-to-speech) — entered in
+  the Talk call settings.
+
+Without a stored credential, tasks block immediately with
+`not_configured` and a message telling the user which key to add on which
+page; voice endpoints report unavailable and the UI falls back to text.
+Nothing crashes; features degrade explicitly. There is no shared
+server-level provider key, so one workspace can never spend another
+workspace's (or the operator's) allowance. Rotating `SESSION_SECRET`
+makes stored credentials undecryptable: users are asked to re-enter their
+keys, never silently routed to anything shared.
 
 ## Database schema strategy
 

@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ConverseTurn } from './converseTurn';
+import type { InputAttachment } from './inputAttachment';
 
 export interface ConverseInput {
   /**
@@ -20,4 +21,6 @@ export interface ConverseInput {
   clientMessageId?: string;
   /** @maxItems 20 */
   history?: ConverseTurn[];
+  /** @maxItems 4 */
+  attachments?: InputAttachment[];
 }

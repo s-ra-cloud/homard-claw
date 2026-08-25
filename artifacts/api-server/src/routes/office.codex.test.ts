@@ -43,6 +43,8 @@ vi.stubGlobal("fetch", fetchMock);
 import officeRouter from "./office";
 import { claimNextTask, recoverInterruptedTasks, runTask } from "../worker";
 import { clearProviderCaches } from "../providers";
+import { saveProviderCredential } from "../provider-credentials";
+import { providerCredentialsTable } from "@workspace/db";
 import {
   setCodexSdkLoader,
   type CodexClient,
@@ -86,6 +88,7 @@ const RUN_TAG = `HC Codex ${Date.now()}`;
 const createdAgentIds: string[] = [];
 let createdOwnerRow = false;
 let wsId = "";
+let priorCredentialRows: (typeof providerCredentialsTable.$inferSelect)[] = [];
 
 const SETTINGS_KEYS = [
   "provider.default",
@@ -324,6 +327,10 @@ beforeAll(async () => {
     .where(eq(workspacesTable.clerkUserId, authState.userId))
     .limit(1);
   wsId = ws.id;
+  priorCredentialRows = await db
+    .select()
+    .from(providerCredentialsTable)
+    .where(eq(providerCredentialsTable.workspaceId, wsId));
   savedSettings = await db
     .select()
     .from(workspaceSettingsTable)
@@ -356,8 +363,11 @@ beforeEach(async () => {
   // Fixed so the encryption key is deterministic across the file; the real
   // one is never read into a test.
   vi.stubEnv("SESSION_SECRET", "codex-test-session-secret");
-  vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", "test-claude-token");
-  vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
+  // Provider credentials are workspace rows now, not env vars. They are
+  // encrypted under the stubbed SESSION_SECRET above, which stays in force
+  // for every test in this file; afterAll restores the original rows.
+  await saveProviderCredential(wsId, "claude_max", "test-claude-token");
+  await saveProviderCredential(wsId, "openrouter", "test-openrouter-key");
   clearProviderCaches();
   resetCodexHealthCheck();
   sdkCalls.length = 0;
@@ -380,6 +390,13 @@ afterEach(async () => {
 afterAll(async () => {
   vi.unstubAllEnvs();
   setCodexSdkLoader(null);
+  // Restore the workspace's provider credential rows exactly as found.
+  await db
+    .delete(providerCredentialsTable)
+    .where(eq(providerCredentialsTable.workspaceId, wsId));
+  if (priorCredentialRows.length > 0) {
+    await db.insert(providerCredentialsTable).values(priorCredentialRows);
+  }
   // The fixture sign-in is stored, not just written to disk; leaving it
   // behind would hand the dev worker a fake ChatGPT session.
   await db
@@ -1507,19 +1524,18 @@ function talkTurn(reply = TALK_REPLY_JSON): ScriptedTurn {
   return successTurn(reply);
 }
 
-/** Route managed-speech traffic for voice-converse; everything else dies. */
-function mockSpeech(transcript: string): void {
-  vi.stubEnv("AI_INTEGRATIONS_OPENAI_BASE_URL", "https://openai.test/v1");
-  vi.stubEnv("AI_INTEGRATIONS_OPENAI_API_KEY", "test-openai-key");
+/** Route workspace-key speech traffic for voice-converse; everything else dies. */
+async function mockSpeech(transcript: string): Promise<void> {
+  await saveProviderCredential(wsId, "openai_voice", "test-openai-key");
   fetchMock.mockImplementation(async (url: unknown) => {
     const target = String(url);
-    if (target.includes("openai.test") && target.includes("/audio/transcriptions")) {
+    if (target.includes("/audio/transcriptions")) {
       return new Response(JSON.stringify({ text: transcript }), {
         status: 200,
         headers: { "content-type": "application/json" },
       });
     }
-    if (target.includes("openai.test") && target.includes("/chat/completions")) {
+    if (target.includes("api.openai.com") && target.includes("/chat/completions")) {
       const frames = ['{"choices":[{"delta":{"audio":{"data":"QUFBQQ=="}}}]}'];
       const body = frames.map((f) => `data: ${f}\n\n`).join("") + "data: [DONE]\n\n";
       return new Response(body, {
@@ -1959,7 +1975,7 @@ describe("Codex Talk conversations", () => {
 
   it("completes a voice round-trip through the same Codex context", async () => {
     const agent = await createAgent(`${RUN_TAG} Voicer`, { voiceStyle: "deep" });
-    mockSpeech("Status report please");
+    await mockSpeech("Status report please");
     turnScript = [talkTurn()];
 
     const res = await request(app)
@@ -2097,7 +2113,7 @@ describe("Codex Talk conversations", () => {
 
   it("sends the sanitized Codex failure over the voice SSE stream too", async () => {
     const agent = await createAgent(`${RUN_TAG} Voicefail`);
-    mockSpeech("Anything new?");
+    await mockSpeech("Anything new?");
     turnScript = [
       failingTurn("401 unauthorized: token=sk-live-123 run codex login"),
     ];

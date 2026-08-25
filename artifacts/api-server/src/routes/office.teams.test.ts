@@ -26,6 +26,8 @@ vi.stubGlobal("fetch", fetchMock);
 import officeRouter from "./office";
 import { claimNextTask, runTask } from "../worker";
 import { clearProviderCaches } from "../providers";
+import { saveProviderCredential } from "../provider-credentials";
+import { providerCredentialsTable } from "@workspace/db";
 import { getRuntime, listRuntimeHealth, queueHealth } from "../runtime";
 
 const app = express();
@@ -41,6 +43,7 @@ const createdAgentIds: string[] = [];
 const createdTeamIds: string[] = [];
 let createdOwnerRow = false;
 let wsId: string;
+let priorCredentialRows: (typeof providerCredentialsTable.$inferSelect)[] = [];
 
 /** Paused agents keep the live development worker away from test tasks. */
 async function createAgent(name: string, extra: Record<string, unknown> = {}) {
@@ -158,21 +161,33 @@ beforeAll(async () => {
     .where(eq(workspacesTable.clerkUserId, authState.userId))
     .limit(1);
   wsId = ws.id;
+  priorCredentialRows = await db
+    .select()
+    .from(providerCredentialsTable)
+    .where(eq(providerCredentialsTable.workspaceId, wsId));
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   fetchMock.mockReset();
   fetchMock.mockImplementation(async () => {
     throw new Error("network disabled in tests");
   });
   lastCompletionBody = {};
-  vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
-  vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", "test-claude-token");
+  // Provider credentials are workspace rows now, not env vars.
+  await saveProviderCredential(wsId, "openrouter", "test-openrouter-key");
+  await saveProviderCredential(wsId, "claude_max", "test-claude-token");
   clearProviderCaches();
 });
 
 afterAll(async () => {
   vi.unstubAllEnvs();
+  // Restore the workspace's credential rows exactly as we found them.
+  await db
+    .delete(providerCredentialsTable)
+    .where(eq(providerCredentialsTable.workspaceId, wsId));
+  if (priorCredentialRows.length > 0) {
+    await db.insert(providerCredentialsTable).values(priorCredentialRows);
+  }
   if (createdAgentIds.length > 0) {
     await db
       .delete(agentMessagesTable)
@@ -584,6 +599,7 @@ describe("runtime limits and health", () => {
   it("refuses to execute on the uninstalled runtime even if dispatched directly", async () => {
     await expect(
       getRuntime("openclaw").execute({
+        workspaceId: wsId,
         provider: "openrouter",
         model: "test-vendor/test-model",
         system: "s",
@@ -595,7 +611,7 @@ describe("runtime limits and health", () => {
   });
 
   it("reports every runtime honestly, with only the built-in one accepting work", async () => {
-    const runtimes = await listRuntimeHealth();
+    const runtimes = await listRuntimeHealth(wsId);
     const native = runtimes.find((runtime) => runtime.id === "native");
     const openclaw = runtimes.find((runtime) => runtime.id === "openclaw");
     expect(native?.acceptsWork).toBe(true);

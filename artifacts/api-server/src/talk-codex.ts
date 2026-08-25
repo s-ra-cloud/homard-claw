@@ -314,6 +314,7 @@ export async function runCodexTalkTurn(
       let result: ProviderCallResult;
       try {
         result = await callProvider({
+          workspaceId: input.agent.workspaceId,
           provider: "codex_chatgpt",
           model: input.model,
           system: input.system,

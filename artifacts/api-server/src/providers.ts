@@ -12,15 +12,24 @@ import {
 } from "./codex/config";
 import { codexRuntimeState } from "./codex/runtime";
 import { codexSdkAvailable } from "./codex/sdk";
+import {
+  getProviderCredential,
+  hasProviderCredential,
+  ProviderCredentialError,
+} from "./provider-credentials";
 
 /**
  * Server-side provider registry: credentials, health, model discovery,
  * routing defaults, and token/cost estimation.
  *
- * Credentials live exclusively in environment secrets (Claude Code,
- * OpenRouter) or in a private file-backed CODEX_HOME the Codex CLI owns,
- * and never leave this module — status payloads carry booleans and
- * human-readable messages only.
+ * Claude Code and OpenRouter credentials are stored per workspace,
+ * encrypted, and entered by each workspace's own user (see
+ * provider-credentials.ts); Codex uses a private file-backed CODEX_HOME
+ * the Codex CLI owns. There is no server-environment fallback: a
+ * workspace without its own credential is simply not configured, so it
+ * can never draw on the operator's or another workspace's allowance.
+ * Credentials never leave these modules — status payloads carry booleans
+ * and human-readable messages only.
  *
  * `claude_max` is the persisted identifier for the provider the office
  * calls "Claude Code". The stored value is deliberately unchanged so
@@ -73,11 +82,6 @@ export function availableProviderIds(): ProviderId[] {
     (provider) => provider !== "codex_chatgpt" || codexFeatureEnabled(),
   );
 }
-
-const CREDENTIAL_ENV: Record<"claude_max" | "openrouter", string> = {
-  claude_max: "CLAUDE_CODE_OAUTH_TOKEN",
-  openrouter: "OPENROUTER_API_KEY",
-};
 
 /** Built-in routing fallback when no workspace default model is set. */
 export const FALLBACK_MODEL: Record<ProviderId, string> = {
@@ -137,22 +141,21 @@ export type ProviderHealth = {
   reasoningLevels: string[];
 };
 
-function credential(provider: "claude_max" | "openrouter"): string | undefined {
-  const value = process.env[CREDENTIAL_ENV[provider]];
-  return value && value.trim() !== "" ? value : undefined;
-}
-
 /**
- * Cheap synchronous check used on the dispatch path. For Codex this only
- * answers "is it switched on" — whether the account has actually connected
- * a ChatGPT session is a database read, and that authoritative check runs
- * asynchronously immediately before execution.
+ * Cheap configured check used on the dispatch path: does THIS workspace
+ * hold a credential for the provider? For Codex this only answers "is it
+ * switched on" — whether the account has actually connected a ChatGPT
+ * session is a separate check that runs asynchronously immediately before
+ * execution.
  */
-export function isConfigured(provider: ProviderId): boolean {
+export async function isConfigured(
+  workspaceId: string,
+  provider: ProviderId,
+): Promise<boolean> {
   if (provider === "codex_chatgpt") {
     return codexFeatureEnabled();
   }
-  return Boolean(credential(provider));
+  return hasProviderCredential(workspaceId, provider);
 }
 
 /** Owner-facing name; never derive one from the persisted id in the UI. */
@@ -177,7 +180,8 @@ const MODELS_TTL_MS = 5 * 60_000;
 const FETCH_TIMEOUT_MS = 6_000;
 
 type Cached<T> = { at: number; value: T };
-const healthCache = new Map<ProviderId, Cached<ProviderHealth>>();
+/** Keyed by `${provider}:${workspaceId}` — health is per workspace now. */
+const healthCache = new Map<string, Cached<ProviderHealth>>();
 let openrouterModelsCache: Cached<ModelCatalog> | null = null;
 
 /** Test hook: drop caches so suites can exercise fresh lookups. */
@@ -196,11 +200,17 @@ async function timedFetch(url: string, init: RequestInit): Promise<globalThis.Re
   }
 }
 
+/**
+ * Fixed classification only — never the raw error message. Health probes
+ * send a decrypted workspace credential in request headers, and some
+ * transport/SDK errors echo request headers back, so quoting the message
+ * here could hand the credential to the browser in a status payload.
+ */
 function describeFailure(error: unknown): string {
   if (error instanceof Error && error.name === "AbortError") {
     return "Request timed out";
   }
-  return error instanceof Error ? error.message : "Unknown network error";
+  return "Network error";
 }
 
 /** Shared shape so every health payload answers the same questions. */
@@ -221,15 +231,24 @@ function baseHealth(provider: ProviderId): ProviderHealth {
   };
 }
 
-async function checkClaude(): Promise<ProviderHealth> {
+async function checkClaude(workspaceId: string): Promise<ProviderHealth> {
   const base = baseHealth("claude_max");
-  const token = credential("claude_max");
+  let token: string | null;
+  try {
+    token = await getProviderCredential(workspaceId, "claude_max");
+  } catch (error) {
+    if (error instanceof ProviderCredentialError) {
+      return { ...base, configured: true, healthy: false, message: error.message };
+    }
+    throw error;
+  }
   if (!token) {
     return {
       ...base,
       configured: false,
       healthy: false,
-      message: "Add CLAUDE_CODE_OAUTH_TOKEN to enable Claude Code execution.",
+      message:
+        "Add your Claude Code OAuth token on the Providers page to enable Claude Code execution.",
     };
   }
   try {
@@ -255,7 +274,7 @@ async function checkClaude(): Promise<ProviderHealth> {
       healthy: false,
       message:
         res.status === 401 || res.status === 403
-          ? `Claude rejected the credential (HTTP ${res.status}). Re-issue CLAUDE_CODE_OAUTH_TOKEN.`
+          ? `Claude rejected the credential (HTTP ${res.status}). Enter a fresh Claude Code OAuth token.`
           : `Claude endpoint returned HTTP ${res.status}.`,
     };
   } catch (error) {
@@ -328,32 +347,24 @@ function centsPerMTok(usdPerToken: string | undefined): number | null {
   return perToken * 1_000_000 * 100;
 }
 
+/**
+ * The OpenRouter model catalog (names, context lengths, pricing) is public
+ * data served without authentication, so it is fetched once for the whole
+ * server and never with any workspace's key. Workspace credentials only
+ * come into play for health checks and actual completions.
+ */
 async function fetchOpenRouterCatalog(): Promise<ModelCatalog> {
-  const key = credential("openrouter");
-  if (!key) {
-    return {
-      provider: "openrouter",
-      available: false,
-      message: "Add OPENROUTER_API_KEY to load the OpenRouter model catalog.",
-      models: [],
-    };
-  }
   if (openrouterModelsCache && Date.now() - openrouterModelsCache.at < MODELS_TTL_MS) {
     return openrouterModelsCache.value;
   }
   let catalog: ModelCatalog;
   try {
-    const res = await timedFetch("https://openrouter.ai/api/v1/models", {
-      headers: { Authorization: `Bearer ${key}` },
-    });
+    const res = await timedFetch("https://openrouter.ai/api/v1/models", {});
     if (!res.ok) {
       catalog = {
         provider: "openrouter",
         available: false,
-        message:
-          res.status === 401 || res.status === 403
-            ? `OpenRouter rejected the credential (HTTP ${res.status}). Check OPENROUTER_API_KEY.`
-            : `OpenRouter model listing failed with HTTP ${res.status}.`,
+        message: `OpenRouter model listing failed with HTTP ${res.status}.`,
         models: [],
       };
     } else {
@@ -386,18 +397,23 @@ async function fetchOpenRouterCatalog(): Promise<ModelCatalog> {
   return catalog;
 }
 
-export async function getModelCatalog(provider: ProviderId): Promise<ModelCatalog> {
+export async function getModelCatalog(
+  workspaceId: string,
+  provider: ProviderId,
+): Promise<ModelCatalog> {
   if (provider === "claude_max") {
-    const health = await getProviderHealth("claude_max");
+    const configured = await isConfigured(workspaceId, "claude_max");
     return {
       provider: "claude_max",
-      available: health.configured,
-      message: health.healthy ? null : health.message,
+      available: configured,
+      message: configured
+        ? null
+        : "Add your Claude Code OAuth token on the Providers page to enable Claude Code execution.",
       models: CLAUDE_CATALOG,
     };
   }
   if (provider === "codex_chatgpt") {
-    const health = await getProviderHealth("codex_chatgpt");
+    const health = await getProviderHealth(workspaceId, "codex_chatgpt");
     return {
       provider: "codex_chatgpt",
       available: health.enabled && health.configured,
@@ -416,47 +432,101 @@ export async function getModelCatalog(provider: ProviderId): Promise<ModelCatalo
   return fetchOpenRouterCatalog();
 }
 
-export async function getProviderHealth(provider: ProviderId): Promise<ProviderHealth> {
-  const cached = healthCache.get(provider);
+/**
+ * OpenRouter health for one workspace: is a key stored, and does
+ * OpenRouter accept it? The probe hits the key-status endpoint, which
+ * costs nothing and never runs a completion.
+ */
+async function checkOpenRouter(workspaceId: string): Promise<ProviderHealth> {
+  const base = baseHealth("openrouter");
+  let key: string | null;
+  try {
+    key = await getProviderCredential(workspaceId, "openrouter");
+  } catch (error) {
+    if (error instanceof ProviderCredentialError) {
+      return { ...base, configured: true, healthy: false, message: error.message };
+    }
+    throw error;
+  }
+  if (!key) {
+    return {
+      ...base,
+      configured: false,
+      healthy: false,
+      message:
+        "Add your OpenRouter API key on the Providers page to enable OpenRouter execution.",
+    };
+  }
+  try {
+    const res = await timedFetch("https://openrouter.ai/api/v1/key", {
+      headers: { Authorization: `Bearer ${key}` },
+    });
+    if (res.ok) {
+      return {
+        ...base,
+        configured: true,
+        healthy: true,
+        message: "OpenRouter reachable and credential accepted.",
+      };
+    }
+    return {
+      ...base,
+      configured: true,
+      healthy: false,
+      message:
+        res.status === 401 || res.status === 403
+          ? `OpenRouter rejected the credential (HTTP ${res.status}). Enter a fresh API key.`
+          : `OpenRouter returned HTTP ${res.status}.`,
+    };
+  } catch (error) {
+    return {
+      ...base,
+      configured: true,
+      healthy: false,
+      message: `OpenRouter unreachable: ${describeFailure(error)}.`,
+    };
+  }
+}
+
+export async function getProviderHealth(
+  workspaceId: string,
+  provider: ProviderId,
+): Promise<ProviderHealth> {
+  const cacheKey = `${provider}:${workspaceId}`;
+  const cached = healthCache.get(cacheKey);
   if (cached && Date.now() - cached.at < HEALTH_TTL_MS) return cached.value;
   let health: ProviderHealth;
   if (provider === "claude_max") {
-    health = await checkClaude();
+    health = await checkClaude(workspaceId);
   } else if (provider === "codex_chatgpt") {
     health = await checkCodex();
   } else {
-    const catalog = await fetchOpenRouterCatalog();
-    health = {
-      ...baseHealth("openrouter"),
-      configured: isConfigured("openrouter"),
-      healthy: catalog.available,
-      allowanceBalanceKnown: false,
-      message: catalog.available
-        ? `OpenRouter reachable; ${catalog.models.length} models available.`
-        : (catalog.message ?? "OpenRouter unavailable."),
-    };
+    health = await checkOpenRouter(workspaceId);
   }
-  healthCache.set(provider, { at: Date.now(), value: health });
+  healthCache.set(cacheKey, { at: Date.now(), value: health });
   return health;
 }
 
 /**
- * Authoritative pre-execution readiness. Unlike `isConfigured` this
- * re-verifies the Codex credential's `auth_mode` and freshness, so a
- * session that expired since the task was queued fails closed instead of
- * being attempted.
+ * Authoritative pre-execution readiness for one workspace. Unlike
+ * `isConfigured` this re-verifies the Codex credential's `auth_mode` and
+ * freshness, so a session that expired since the task was queued fails
+ * closed instead of being attempted.
  */
 export async function providerReadiness(
+  workspaceId: string,
   provider: ProviderId,
 ): Promise<{ ready: boolean; message: string }> {
   if (provider === "codex_chatgpt") {
     const health = await checkCodex();
     return { ready: health.healthy, message: health.message };
   }
-  if (isConfigured(provider)) return { ready: true, message: "" };
+  if (await isConfigured(workspaceId, provider)) {
+    return { ready: true, message: "" };
+  }
   return {
     ready: false,
-    message: `${PROVIDER_LABELS[provider]} is not configured; add the credential and retry.`,
+    message: `${PROVIDER_LABELS[provider]} is not configured for this workspace; add your own credential on the Providers page and retry.`,
   };
 }
 
@@ -761,12 +831,23 @@ export type ModelPricing = {
   completionCentsPerMTok: number | null;
 };
 
+/**
+ * Pricing is public catalog data (the built-in Claude table or the
+ * unauthenticated OpenRouter listing), so it needs no workspace identity —
+ * budget enforcement and usage costing work even for a workspace whose
+ * credential just failed.
+ */
 export async function getModelPricing(
   provider: ProviderId,
   model: string,
 ): Promise<ModelPricing> {
-  const catalog = await getModelCatalog(provider);
-  const row = catalog.models.find((m) => m.id === model);
+  const models =
+    provider === "claude_max"
+      ? CLAUDE_CATALOG
+      : provider === "openrouter"
+        ? (await fetchOpenRouterCatalog()).models
+        : [];
+  const row = models.find((m) => m.id === model);
   return {
     promptCentsPerMTok: row?.promptCentsPerMTok ?? null,
     completionCentsPerMTok: row?.completionCentsPerMTok ?? null,

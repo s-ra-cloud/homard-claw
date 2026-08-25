@@ -75,6 +75,7 @@ import {
   encryptRefreshToken,
 } from "../google/credentials";
 import { clearProviderCaches } from "../providers";
+import { saveProviderCredential } from "../provider-credentials";
 
 const app = express();
 app.use(express.json());
@@ -324,7 +325,7 @@ beforeAll(async () => {
   expect(enable.status).toBe(200);
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (url: unknown) => {
     throw new Error(`network disabled in tests: ${String(url)}`);
@@ -334,7 +335,9 @@ beforeEach(() => {
     ok: true,
     summary: "Message sent (id msg-123).",
   });
-  vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
+  // Provider credentials are workspace rows now, not env vars. This suite
+  // owns its workspace, so cascade deletion cleans the row up.
+  await saveProviderCredential(workspaceId, "openrouter", "test-openrouter-key");
   vi.stubEnv("GOOGLE_OAUTH_CLIENT_ID", "test-client-id");
   vi.stubEnv("GOOGLE_OAUTH_CLIENT_SECRET", "test-client-secret");
   clearGoogleTokenCache();

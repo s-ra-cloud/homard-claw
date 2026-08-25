@@ -1094,6 +1094,33 @@ export interface ClearTalkHistoryResult {
   deleted: number;
 }
 
+export type InputAttachmentEncoding = typeof InputAttachmentEncoding[keyof typeof InputAttachmentEncoding];
+
+
+export const InputAttachmentEncoding = {
+  text: 'text',
+  base64: 'base64',
+} as const;
+
+export interface InputAttachment {
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  name: string;
+  /**
+     * @minLength 1
+     * @maxLength 100
+     */
+  mimeType: string;
+  encoding: InputAttachmentEncoding;
+  /**
+     * @minLength 1
+     * @maxLength 3000000
+     */
+  content: string;
+}
+
 export interface ConverseInput {
   /**
      * @minLength 1
@@ -1109,13 +1136,6 @@ export interface ConverseInput {
   history?: ConverseTurn[];
   /** @maxItems 4 */
   attachments?: InputAttachment[];
-}
-
-export interface InputAttachment {
-  name: string;
-  mimeType: string;
-  encoding: 'text' | 'base64';
-  content: string;
 }
 
 export interface ConverseResponse {
@@ -1471,6 +1491,17 @@ export interface CodexCredentialInput {
      * @maxLength 20000
      */
   authJson: string;
+}
+
+/**
+ * A provider API key or OAuth token belonging to this workspace's own account. It is encrypted before storage, never returned by any endpoint, and never exposed to an agent's tools or prompts.
+ */
+export interface ProviderCredentialInput {
+  /**
+     * @minLength 8
+     * @maxLength 4000
+     */
+  credential: string;
 }
 
 export type ProviderSettingsDefaultProvider = typeof ProviderSettingsDefaultProvider[keyof typeof ProviderSettingsDefaultProvider];
