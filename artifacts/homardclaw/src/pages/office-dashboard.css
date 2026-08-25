@@ -194,11 +194,19 @@
 }
 /* Name tags are their own layer above every sprite, positioned per seat, so a
    nearer lobster can never cover a further one's tag. Long names are clipped
-   to a fixed share of the room, which keeps neighbouring tags from colliding. */
+   to a fixed share of the room, which keeps neighbouring tags from colliding.
+   A tag stays hidden until its own lobster is hovered or focused, so the scene
+   reads as artwork rather than a labelled diagram. They never take the
+   pointer: a tag sits under its lobster, so catching the cursor there would
+   end the sprite's hover and flicker the tag it is meant to show. */
 .room-agent__name {
   position: absolute;
   z-index: 20;
   transform: translateX(-50%);
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease-out;
   max-width: 5.4%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -213,6 +221,10 @@
   text-transform: uppercase;
   white-space: nowrap;
   box-shadow: 1px 1px 0 rgba(43, 39, 51, 0.55);
+}
+.room-agent__name.is-shown {
+  visibility: visible;
+  opacity: 1;
 }
 
 /* Agent link wrapper: covers the sprite, keyboard/click navigates to Talk. */

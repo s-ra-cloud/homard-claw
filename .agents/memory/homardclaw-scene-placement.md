@@ -36,12 +36,29 @@ excluded) and use the group mean for the chair poses. Trust the eye over the
 measurement where a pose is drawn with a bigger head: the floor pose measures
 1.17 against standing but only reads right at ~1.07.
 
+## Align a seat on the sprite's ground contact, not its box
+Every composite is a square box, but the furniture inside is not centred in it:
+the office chair's wheelbase sits ~7% of the box width left of centre, because
+the lobster's antennae widen the drawing to the right. Lining a seat's `left`
+up with the target in the artwork therefore parks the chair visibly off-axis.
+
+**How to apply:** crop the sprite's bottom rows (the wheels, the cushion) and
+take that strip's trim geometry — its centre is what must land on the target.
+Feed the difference back as a constant offset on the seat coordinate.
+
 ## Name tags belong in their own layer
 An agent wrapper that carries a `z-index` (or a transform) opens a stacking
 context, so a tag nested inside it can never rise above a nearer sibling
 sprite. Render the tags as a separate absolutely-positioned layer above every
 sprite, one per seat, and cap their width as a share of the scene with an
 ellipsis so two neighbouring tags cannot collide for long agent names.
+
+Because the layers are siblings, a tag cannot react to its own sprite through
+CSS alone (`:hover` cannot be correlated across two subtrees by attribute
+value). Hover/focus reveal has to go through a "which agent is pointed at"
+state on the page. Keep the tags `pointer-events: none`: they sit *under* their
+lobster, so a tag that catches the cursor ends the sprite's hover and flickers
+itself out of existence.
 
 ## Measure against the artwork, not the running app
 The office art leaves a wide band behind the front desks, a corridor pinched

@@ -25,30 +25,39 @@ import "./office-dashboard.css";
 /** The full 1586 × 992 submarine illustration is the scene coordinate plane. */
 const officeArt = `${import.meta.env.BASE_URL}images/submarine-office.png`;
 
-// Four wall computers inside the hull. These positions are deliberately clear
-// of the wall navigation targets and keep the existing seated lobster poses.
+// Four wall computers in the middle room. `left` is the monitor's own centre
+// in the artwork (42.0 / 47.6 / 53.6 / 59.5) plus 0.5, because the chair's
+// wheelbase sits that far left of its square sprite box; `top` puts the
+// lobster's head just under the desk shelf, whose front edge is at 39.4%.
 const DESK_SEATS = [
-  { left: 42.0, top: 47.5, label: "first submarine computer" },
-  { left: 48.2, top: 47.5, label: "second submarine computer" },
-  { left: 54.0, top: 47.5, label: "third submarine computer" },
-  { left: 60.0, top: 47.5, label: "fourth submarine computer" },
+  { left: 42.5, top: 43.4, label: "first submarine computer" },
+  { left: 48.1, top: 43.4, label: "second submarine computer" },
+  { left: 54.1, top: 43.4, label: "third submarine computer" },
+  { left: 60.0, top: 43.4, label: "fourth submarine computer" },
 ];
 
-// Clear deck positions. The floor-working pose already includes its cushion
-// and laptop, so the background intentionally contains no duplicate furniture.
+// Six cushion spots on open floor: four staggered across the middle room, one
+// in the port control room, one on the starboard server-room tiles. The
+// floor-working pose already includes its cushion and laptop, so the
+// background intentionally contains no duplicate furniture. Every spot was
+// verified by compositing the real sprite onto the real artwork: the middle
+// room's floor runs from ~48% down to the hull edge at ~69-71%, the control
+// room's clear wood is left of the chart table, and the server room's open
+// tile lies between the racks (~63%) and its hull edge (~72%).
 const FLOOR_SEATS = [
-  { left: 18.5, top: 59.0, label: "port control-room deck" },
-  { left: 27.5, top: 65.0, label: "port passage deck" },
-  { left: 41.5, top: 62.0, label: "centre deck" },
-  { left: 56.0, top: 64.0, label: "starboard deck" },
+  { left: 37.0, top: 57.5, label: "centre deck, port side" },
+  { left: 49.0, top: 57.0, label: "centre deck, starboard side" },
+  { left: 40.5, top: 66.0, label: "forward deck, port side" },
+  { left: 55.0, top: 65.0, label: "forward deck, starboard side" },
+  { left: 17.2, top: 60.8, label: "control-room deck" },
+  { left: 76.5, top: 67.8, label: "server-room deck" },
 ];
 
-// Sandboxed agents are physically separated from the hull on exterior pads.
+// Sandboxed agents are physically separated from the hull: one cushion on each
+// exterior platform, which is all the deck plating those two pads can hold.
 const EXTERIOR_SEATS = [
-  { left: 23.5, top: 74.8, label: "port exterior platform" },
-  { left: 67.5, top: 77.2, label: "starboard exterior platform" },
-  { left: 10.5, top: 88.0, label: "port seabed station" },
-  { left: 89.5, top: 87.0, label: "starboard reef station" },
+  { left: 23.9, top: 74.3, label: "port exterior platform" },
+  { left: 65.9, top: 79.6, label: "starboard exterior platform" },
 ];
 
 /** Character size as a share of the wide scene, preserving the old pixel size. */
@@ -63,7 +72,7 @@ function floorZIndex(top: number) {
 }
 
 const DESK_Z_INDEX = 12;
-const MAX_VISIBLE = DESK_SEATS.length + FLOOR_SEATS.length; // 8
+const MAX_VISIBLE = DESK_SEATS.length + FLOOR_SEATS.length; // 10
 
 /** Breaks an agent can take between tasks. */
 const IDLE_ACTIVITIES = [
@@ -281,6 +290,12 @@ export default function OfficeDashboard() {
     Record<string, IdleActivity>
   >({});
 
+  // Name tags stay out of the picture until you point at (or tab to) a
+  // lobster. The tags are their own layer above every sprite, so the two
+  // cannot be linked with a plain nested `:hover`; the pointed-at agent is
+  // tracked here and the matching tag in the other layer reveals itself.
+  const [namedAgentId, setNamedAgentId] = React.useState<string | null>(null);
+
   React.useEffect(() => {
     if (!agents) return;
     setIdleActivities((prev) => {
@@ -448,10 +463,12 @@ export default function OfficeDashboard() {
         : poseForAgent(agent.status, idleActivities[agent.id]),
       zIndex: DESK_Z_INDEX,
     })),
+    // Sandboxed agents work from their own cushion, exactly like the ones
+    // inside — the platform is the separation, not the posture.
     ...exteriorAgents.map((agent, index) => ({
       agent,
       seat: EXTERIOR_SEATS[index],
-      pose: "standing" as LobsterPose,
+      pose: "floor-working" as LobsterPose,
       zIndex: floorZIndex(EXTERIOR_SEATS[index].top),
     })),
   ];
@@ -571,11 +588,24 @@ export default function OfficeDashboard() {
                         width: `${spritePct(pose)}%`,
                         zIndex,
                       }}
+                      onMouseEnter={() => setNamedAgentId(agent.id)}
+                      onMouseLeave={() =>
+                        setNamedAgentId((current) =>
+                          current === agent.id ? null : current,
+                        )
+                      }
                     >
                       <Link
                         href={`/talk/${agent.id}`}
                         className="room-agent__link"
                         aria-label={`Talk to ${agent.name} at the ${seat.label}`}
+                        /* Keyboard users get the same tag the pointer does. */
+                        onFocus={() => setNamedAgentId(agent.id)}
+                        onBlur={() =>
+                          setNamedAgentId((current) =>
+                            current === agent.id ? null : current,
+                          )
+                        }
                         onClick={(event) =>
                           openOfficeWindow(
                             event,
@@ -595,30 +625,24 @@ export default function OfficeDashboard() {
                     </div>
                   ))}
 
-                  {/* ── Name tags, above every sprite so none can be hidden ── */}
+                  {/* ── Name tags: their own layer above every sprite, so none
+                       can be hidden, and only the pointed-at one is shown.
+                       Purely decorative — the sprite carries the link and the
+                       accessible name — so they never take the pointer. ── */}
                   {placedAgents.map(({ agent, seat, pose }) => (
-                    <Link
+                    <span
                       key={`${agent.id}-name`}
-                      href={`/talk/${agent.id}`}
-                      className="room-agent__name"
+                      className={`room-agent__name${
+                        namedAgentId === agent.id ? " is-shown" : ""
+                      }`}
                       style={{
                         left: `${seat.left}%`,
                         top: `calc(${seat.top + nameOffsetPct(pose)}% - 2px)`,
                       }}
-                      /* The sprite above already carries this agent's link. */
                       aria-hidden="true"
-                      tabIndex={-1}
-                      title={agent.name}
-                      onClick={(event) =>
-                        openOfficeWindow(
-                          event,
-                          `/talk/${agent.id}`,
-                          `Talk with ${agent.name}`,
-                        )
-                      }
                     >
                       {agent.name}
-                    </Link>
+                    </span>
                   ))}
                 </div>
               </div>
