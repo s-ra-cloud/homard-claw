@@ -53,6 +53,13 @@ export type CodexSandboxProfile = {
 };
 
 export type CodexRunInput = {
+  /**
+   * The Clerk account whose stored ChatGPT sign-in this turn runs on.
+   * Always resolved server-side (from the task's workspace or the signed-in
+   * session), never from client input, and never defaulted: a missing
+   * identity fails the run closed instead of borrowing someone's allowance.
+   */
+  clerkUserId: string;
   /** Combined HomardClaw system framing; injected as the turn preamble. */
   system: string;
   prompt: string;
@@ -306,9 +313,15 @@ export function describeCodexItem(item: CodexThreadItem): CodexProgress | null {
  * exposed; never invents a cost, a token count, or a remaining balance.
  */
 export async function runCodexTurn(input: CodexRunInput): Promise<CodexRunResult> {
+  if (!input.clerkUserId) {
+    throw new CodexRunError(
+      "not_configured",
+      "No account was resolved for this Codex run, so it was refused.",
+    );
+  }
   let state: CodexRuntimeState;
   try {
-    state = await requireCodexRuntime();
+    state = await requireCodexRuntime(input.clerkUserId);
   } catch (error) {
     const detail =
       error instanceof Error ? error.message : "Codex is not available.";

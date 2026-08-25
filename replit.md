@@ -14,17 +14,20 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ### Codex via ChatGPT Plus (optional third provider)
 
-Codex is off unless every variable below is set. It is a **single-owner**
-feature: it runs work against one person's ChatGPT Codex allowance, so it must
-never be enabled on a shared or multi-tenant deployment.
+Codex is off unless every variable below is set. Sign-ins are **per
+account**: each signed-in user connects their own ChatGPT session (encrypted
+in Postgres, keyed by their Clerk id), and every run — queued tasks, retries,
+recovery, Talk — executes as the account that owns the task's workspace,
+resolved server-side. There is no fallback identity: work whose owner cannot
+be resolved is refused rather than billed to someone else.
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `CODEX_ENABLED` | yes | Server-side feature flag. Unset ⇒ Codex is hidden in the UI and refuses to run. |
-| `CODEX_HOME` | yes | Absolute path to a **private, durable** directory holding `auth.json`. Created 0700; the file is kept 0600. Refused outright under `/tmp`, `/var/tmp`, `/dev/shm`, `/run`, or the OS temp dir. |
+| `CODEX_HOME` | yes | Absolute path to a **private** root; each account gets its own hashed subdirectory holding a temporary working copy of `auth.json` during runs (created 0700, file 0600). The credential itself lives encrypted in Postgres. Refused outright under `/tmp`, `/var/tmp`, `/dev/shm`, `/run`, or the OS temp dir. |
 | `CODEX_HOME_IS_PERSISTENT` | yes | Your attestation that `CODEX_HOME` is on a volume that survives a redeploy. Nothing inside the container can tell a Reserved VM disk from an instance disk, so Codex refuses to guess and stays off until this is set. |
 | `CODEX_WORKSPACE_ROOT` | yes | Absolute path under which each agent/conversation gets its own isolated working directory. |
-| `CODEX_AUTH_JSON` | first boot only | Contents of an existing `auth.json`, used **once** to seed an empty `CODEX_HOME`. Never overwrites an existing file. |
+| `CODEX_AUTH_JSON` | optional | Contents of an existing `auth.json`, used **once** to seed the **office owner's** account when it has no sign-in stored. It is never applied to any other account and never overwrites a stored sign-in. |
 | `CODEX_MODELS` | no | `id:name:context,…` override of the model catalog. |
 | `CODEX_DEFAULT_MODEL` | no | Defaults to `gpt-5.6-terra`. |
 | `CODEX_REASONING_LEVELS` | no | Subset of `low,medium,high`. |
@@ -49,11 +52,13 @@ programmatic ChatGPT sign-in, and HomardClaw deliberately implements none.
 
 1. On a machine with a browser: `npx @openai/codex login` (or `codex login`).
 2. Copy the resulting `~/.codex/auth.json`.
-3. Either place it at `$CODEX_HOME/auth.json` on the Reserved VM, or set
-   `CODEX_AUTH_JSON` to its contents and let the first boot seed it.
+3. Paste its contents into Providers → Codex → **Connect** while signed in
+   as the account that should own it (it is stored encrypted against that
+   account). The office owner may instead set `CODEX_AUTH_JSON` and press
+   **Bootstrap** — the seed only ever lands on the owner's own account.
 4. Confirm with Providers → Codex → **Test connection**. That check is
-   entirely local — it reads the file and resolves the SDK/CLI, and never
-   calls OpenAI, so it cannot spend allowance.
+   entirely local — it reads the stored sign-in's metadata and resolves the
+   SDK/CLI, and never calls OpenAI, so it cannot spend allowance.
 
 Re-run steps 1–3 whenever the status reports authentication expired. Only
 Codex's own SDK refresh path may rewrite `auth.json`; HomardClaw never does.

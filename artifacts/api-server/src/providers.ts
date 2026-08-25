@@ -12,6 +12,7 @@ import {
 } from "./codex/config";
 import { codexRuntimeState } from "./codex/runtime";
 import { codexSdkAvailable } from "./codex/sdk";
+import { clerkUserIdForWorkspace } from "./workspace";
 import {
   getProviderCredential,
   hasProviderCredential,
@@ -288,14 +289,22 @@ async function checkClaude(workspaceId: string): Promise<ProviderHealth> {
 }
 
 /**
- * Codex health. Everything here is local: the private CODEX_HOME, the
- * `auth_mode` the Codex CLI itself recorded, and whether the SDK can be
- * loaded. No request is made to OpenAI, so checking status never spends
- * the owner's allowance.
+ * Codex health for one workspace's account. Everything here is local: the
+ * private CODEX_HOME, the `auth_mode` the Codex CLI itself recorded, and
+ * whether the SDK can be loaded. No request is made to OpenAI, so checking
+ * status never spends anyone's allowance. The account checked is the owner
+ * of the workspace being asked about — never a global fallback.
  */
-async function checkCodex(): Promise<ProviderHealth> {
+async function checkCodex(workspaceId: string): Promise<ProviderHealth> {
+  return checkCodexAccount(await clerkUserIdForWorkspace(workspaceId));
+}
+
+/** Codex health for one exact account (a task's queue-time owner snapshot). */
+async function checkCodexAccount(
+  clerkUserId: string | null,
+): Promise<ProviderHealth> {
   const base = baseHealth("codex_chatgpt");
-  const state = await codexRuntimeState();
+  const state = await codexRuntimeState(clerkUserId);
   if (!state.enabled) {
     return {
       ...base,
@@ -499,7 +508,7 @@ export async function getProviderHealth(
   if (provider === "claude_max") {
     health = await checkClaude(workspaceId);
   } else if (provider === "codex_chatgpt") {
-    health = await checkCodex();
+    health = await checkCodex(workspaceId);
   } else {
     health = await checkOpenRouter(workspaceId);
   }
@@ -516,9 +525,19 @@ export async function getProviderHealth(
 export async function providerReadiness(
   workspaceId: string,
   provider: ProviderId,
+  /**
+   * Codex only: verify this exact account — a task's queue-time owner
+   * snapshot — instead of the workspace's current owner, so a workspace
+   * hand-over neither blocks nor rebinds already-queued work. `null`
+   * fails closed; omit it for workspace-level status displays.
+   */
+  codexAccountId?: string | null,
 ): Promise<{ ready: boolean; message: string }> {
   if (provider === "codex_chatgpt") {
-    const health = await checkCodex();
+    const health =
+      codexAccountId === undefined
+        ? await checkCodex(workspaceId)
+        : await checkCodexAccount(codexAccountId);
     return { ready: health.healthy, message: health.message };
   }
   if (await isConfigured(workspaceId, provider)) {

@@ -101,6 +101,14 @@ export type ProviderCallRequest = {
    * workspace — never anything a client supplied directly.
    */
   workspaceId: string;
+  /**
+   * The account the run executes (and bills) as, for account-scoped
+   * providers such as Codex. Resolved server-side by the caller — the
+   * worker or Talk — from the workspace row at the same moment it derives
+   * the credential lease key, so the lease and the run can never disagree
+   * about whose session is being spent. Never taken from client input.
+   */
+  clerkUserId?: string | null;
   provider: ProviderId;
   model: string;
   system: string;
@@ -521,12 +529,26 @@ const codexAdapter: ProviderAdapter = {
         "Codex needs an isolated working directory, and none was prepared for this task.",
       );
     }
+    // The identity a Codex run bills arrives with the request — resolved
+    // server-side by the caller from the workspace row at the same moment
+    // it keyed the credential lease. It is deliberately NOT re-resolved
+    // here: a legacy-workspace hand-over between two lookups could
+    // otherwise run account B's session under account A's lease. No
+    // identity supplied means nothing to run as.
+    const clerkUserId = req.clerkUserId ?? null;
+    if (!clerkUserId) {
+      throw new ProviderCallError(
+        "not_configured",
+        "No account was resolved for this Codex run, so it was refused.",
+      );
+    }
     try {
       const attachmentContext = await materializeCodexAttachments(
         req.workingDirectory,
         req.attachments,
       );
       const result = await runCodexTurn({
+        clerkUserId,
         system: req.system,
         prompt: req.prompt + attachmentContext.promptSuffix,
         model: req.model,

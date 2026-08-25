@@ -271,6 +271,9 @@ async function insertTask(
     .insert(tasksTable)
     .values({
       workspaceId: wsId,
+      // Mirrors production dispatch: the billing identity is snapshotted
+      // onto the task at queue time.
+      ownerClerkUserId: authState.userId,
       agentId,
       objective: `${RUN_TAG} scripted objective`,
       provider: "codex_chatgpt",
@@ -379,7 +382,7 @@ beforeEach(async () => {
 afterEach(async () => {
   setCodexSdkLoader(null);
   // Never leave a lease behind for the next test (or the live worker).
-  const fingerprint = await codexAuthFingerprint();
+  const fingerprint = await codexAuthFingerprint(authState.userId);
   if (fingerprint) {
     await db
       .delete(providerLeasesTable)
@@ -449,7 +452,7 @@ afterAll(async () => {
 /* ------------------------------------------------------------------ */
 
 // eslint-disable-next-line import/order -- test-only import for the pure sandbox mapper
-import { codexSandboxFor } from "../codex/execute";
+import { codexSandboxFor, runCodexTurn } from "../codex/execute";
 
 describe("Codex sandbox derivation", () => {
   it("forces the strictest sandbox for a sensitive-data agent, beating preset, autonomy, and the network env flag", () => {
@@ -481,7 +484,7 @@ describe("Codex sandbox derivation", () => {
 
 describe("Codex credential storage", () => {
   it("reports the ChatGPT allowance only for a chatgpt-mode credential", async () => {
-    const state = await codexRuntimeState();
+    const state = await codexRuntimeState(authState.userId);
     expect(state.enabled).toBe(true);
     expect(state.storageReady).toBe(true);
     expect(state.authMode).toBe("chatgpt");
@@ -495,7 +498,7 @@ describe("Codex credential storage", () => {
 
   it("refuses to call an API-key credential a ChatGPT allowance", async () => {
     await connectAuth({ OPENAI_API_KEY: "sk-live-not-a-subscription" });
-    const state = await codexRuntimeState();
+    const state = await codexRuntimeState(authState.userId);
     expect(state.authMode).toBe("api_key");
     expect(state.usesChatGptAllowance).toBe(false);
     expect(state.ready).toBe(false);
@@ -505,7 +508,7 @@ describe("Codex credential storage", () => {
   it("treats an expired session as not ready without deleting it", async () => {
     const old = new Date(Date.now() - 400 * 24 * 60 * 60 * 1000).toISOString();
     await connectAuth({ ...CHATGPT_AUTH, last_refresh: old });
-    const state = await codexRuntimeState();
+    const state = await codexRuntimeState(authState.userId);
     expect(state.authExpired).toBe(true);
     expect(state.ready).toBe(false);
     // The stored sign-in survives: only Codex's own refresh path may
@@ -519,7 +522,7 @@ describe("Codex credential storage", () => {
 
   it("asks the account to connect a session rather than failing obscurely", async () => {
     await disconnectCodexCredential(authState.userId);
-    const state = await codexRuntimeState();
+    const state = await codexRuntimeState(authState.userId);
     // Storage is fine — there is simply nobody signed in to Codex yet, and
     // the difference matters to whoever reads the message.
     expect(state.storageReady).toBe(true);
@@ -637,7 +640,7 @@ describe("Codex credential storage", () => {
       mode: 0o600,
     });
     expect(await persistCodexRefresh(authState.userId, revision)).toBe(false);
-    expect((await codexRuntimeState()).authPresent).toBe(false);
+    expect((await codexRuntimeState(authState.userId)).authPresent).toBe(false);
   });
 
   it("keeps each account's session separate", async () => {
@@ -677,7 +680,7 @@ describe("Codex credential storage", () => {
     const { home } = await materializeCodexHome(authState.userId);
     expect(await disconnectCodexCredential(authState.userId)).toBe(true);
     await expect(stat(path.join(home, "auth.json"))).rejects.toThrow();
-    const state = await codexRuntimeState();
+    const state = await codexRuntimeState(authState.userId);
     expect(state.authPresent).toBe(false);
     expect(state.ready).toBe(false);
   });
@@ -686,7 +689,7 @@ describe("Codex credential storage", () => {
     // Rotating SESSION_SECRET must surface as "reconnect Codex", never as
     // a run that quietly proceeds without a session.
     vi.stubEnv("SESSION_SECRET", "a-different-session-secret");
-    const state = await codexRuntimeState();
+    const state = await codexRuntimeState(authState.userId);
     expect(state.ready).toBe(false);
     expect(state.detail).toMatch(/reconnect/i);
   });
@@ -707,7 +710,7 @@ describe("Codex credential storage", () => {
     expect(response.status).toBe(200);
     expect(response.body.action).toBe("connected");
     expect(JSON.stringify(response.body)).not.toContain("rt-test-refresh-token");
-    expect((await codexRuntimeState()).ready).toBe(true);
+    expect((await codexRuntimeState(authState.userId)).ready).toBe(true);
 
     // An API-key file is stored but never passed off as a subscription.
     const apiKey = await connectCodexCredential(
@@ -715,7 +718,7 @@ describe("Codex credential storage", () => {
       JSON.stringify({ OPENAI_API_KEY: "sk-api-billing" }),
     );
     expect(apiKey.detail).toMatch(/api key/i);
-    expect((await codexRuntimeState()).usesChatGptAllowance).toBe(false);
+    expect((await codexRuntimeState(authState.userId)).usesChatGptAllowance).toBe(false);
   });
 
   it("bootstrap never overwrites a session Codex has since refreshed", async () => {
@@ -725,7 +728,7 @@ describe("Codex credential storage", () => {
       ...CHATGPT_AUTH,
       tokens: { ...CHATGPT_AUTH.tokens, account_id: "refreshed" },
     });
-    const outcome = await bootstrapCodexHome();
+    const outcome = await bootstrapCodexHome(authState.userId);
     expect(outcome.action).toBe("preserved");
     const { home } = await materializeCodexHome(authState.userId);
     const after = JSON.parse(
@@ -736,9 +739,9 @@ describe("Codex credential storage", () => {
 
   it("reports Codex as unavailable rather than throwing when the flag is off", async () => {
     vi.stubEnv("CODEX_ENABLED", "");
-    const outcome = await bootstrapCodexHome();
+    const outcome = await bootstrapCodexHome(authState.userId);
     expect(outcome.action).toBe("unavailable");
-    const state = await codexRuntimeState();
+    const state = await codexRuntimeState(authState.userId);
     expect(state.enabled).toBe(false);
     expect(state.ready).toBe(false);
   });
@@ -1198,7 +1201,7 @@ describe("Codex task dispatch over HTTP", () => {
 describe("Codex serialization and recovery", () => {
   it("queues a second Codex task behind the one holding the credential", async () => {
     const agent = await createAgent(`${RUN_TAG} Serial`);
-    const fingerprint = (await codexAuthFingerprint())!;
+    const fingerprint = (await codexAuthFingerprint(authState.userId))!;
     // Simulate another run already holding this auth file's lease.
     const held = await acquireProviderLease(
       codexLeaseKey(fingerprint),
@@ -1225,7 +1228,7 @@ describe("Codex serialization and recovery", () => {
     await insertTask(agent.id);
     await drainOne([agent.id]);
 
-    const fingerprint = (await codexAuthFingerprint())!;
+    const fingerprint = (await codexAuthFingerprint(authState.userId))!;
     const leases = await db
       .select()
       .from(providerLeasesTable)
@@ -1242,7 +1245,7 @@ describe("Codex serialization and recovery", () => {
     const otherAgent = await createAgent(`${RUN_TAG} Free OpenRouter`, {
       provider: "openrouter",
     });
-    const fingerprint = (await codexAuthFingerprint())!;
+    const fingerprint = (await codexAuthFingerprint(authState.userId))!;
     await acquireProviderLease(
       codexLeaseKey(fingerprint),
       "00000000-0000-4000-8000-00000000cafe",
@@ -1308,7 +1311,7 @@ describe("Codex serialization and recovery", () => {
     expect(row.status).toBe("cancelled");
     // An interrupted turn is never recorded as completed.
     expect(row.status).not.toBe("completed");
-    const fingerprint = (await codexAuthFingerprint())!;
+    const fingerprint = (await codexAuthFingerprint(authState.userId))!;
     const leases = await db
       .select()
       .from(providerLeasesTable)
@@ -1320,7 +1323,7 @@ describe("Codex serialization and recovery", () => {
     const agent = await createAgent(`${RUN_TAG} Heartbeat`);
     turnScript = [{ events: [], hangUntilAborted: true }];
     const task = await insertTask(agent.id);
-    const fingerprint = (await codexAuthFingerprint())!;
+    const fingerprint = (await codexAuthFingerprint(authState.userId))!;
     // Beat far faster than the minute-floor TTL so the renewal path runs
     // several times inside the test rather than being taken on trust.
     setCodexLeaseHeartbeatMs(25);
@@ -1363,7 +1366,7 @@ describe("Codex serialization and recovery", () => {
     const agent = await createAgent(`${RUN_TAG} Lease Lost`);
     turnScript = [{ events: [], hangUntilAborted: true }];
     const task = await insertTask(agent.id);
-    const fingerprint = (await codexAuthFingerprint())!;
+    const fingerprint = (await codexAuthFingerprint(authState.userId))!;
     setCodexLeaseHeartbeatMs(25);
     try {
       const claimed = await claimNextTask({
@@ -1398,7 +1401,7 @@ describe("Codex serialization and recovery", () => {
 
   it("requeues instead of completing when the lease is lost as the call returns", async () => {
     const agent = await createAgent(`${RUN_TAG} Lease Race`);
-    const fingerprint = (await codexAuthFingerprint())!;
+    const fingerprint = (await codexAuthFingerprint(authState.userId))!;
     // The turn succeeds normally; the lease disappears during it. The run
     // therefore reaches the success path holding a credential it no longer
     // owns — the window a catch-block-only check would miss entirely.
@@ -1512,6 +1515,266 @@ describe("Codex health check", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(sdkCalls).toHaveLength(0);
   });
+
+  it("watches every account that connected a session, not just the owner", async () => {
+    const second = `${authState.userId}-second`;
+    try {
+      // The owner disconnects; a different account's session must still be
+      // monitored — there is no privileged "the" credential.
+      await disconnectCodexCredential(authState.userId);
+      expect(await runCodexHealthCheck()).toBe(false);
+      resetCodexHealthCheck();
+      await connectAuth(CHATGPT_AUTH, second);
+      expect(await runCodexHealthCheck()).toBe(true);
+    } finally {
+      await disconnectCodexCredential(second);
+    }
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Identity isolation across workspaces                                */
+/* ------------------------------------------------------------------ */
+
+describe("Codex identity isolation", () => {
+  it("fails closed when no account can be resolved, rather than borrowing one", async () => {
+    // No fallback identity: an anonymous runtime state is not ready…
+    const anonymous = await codexRuntimeState();
+    expect(anonymous.ready).toBe(false);
+    expect(anonymous.clerkUserId).toBeNull();
+    expect(anonymous.detail).toMatch(/no account/i);
+    // …the lease key cannot be derived…
+    expect(await codexAuthFingerprint()).toBeNull();
+    // …and a turn with a missing identity is refused before anything runs.
+    await expect(
+      runCodexTurn({
+        clerkUserId: "",
+        system: "system",
+        prompt: "prompt",
+        model: "gpt-5.6-terra",
+        reasoningEffort: "medium",
+        workingDirectory: workspaceRoot,
+        threadId: null,
+        sandbox: {
+          sandboxMode: "read-only",
+          networkAccessEnabled: false,
+          webSearchMode: "disabled",
+          approvalPolicy: "never",
+        },
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toMatchObject({ kind: "not_configured" });
+    expect(sdkCalls).toHaveLength(0);
+  });
+
+  it("only seeds CODEX_AUTH_JSON into the office owner's account", async () => {
+    vi.stubEnv("CODEX_AUTH_JSON", JSON.stringify(CHATGPT_AUTH));
+    const stranger = `${authState.userId}-second`;
+    try {
+      // A signed-in non-owner without a sign-in of their own is told to
+      // paste one: the operator's seed is not theirs to spend.
+      const outcome = await bootstrapCodexHome(stranger);
+      expect(outcome.action).toBe("skipped");
+      expect(outcome.detail).toMatch(/your own auth\.json/i);
+      expect((await codexRuntimeState(stranger)).authPresent).toBe(false);
+
+      // Nobody resolved at all: unavailable, nothing stored anywhere.
+      expect((await bootstrapCodexHome()).action).toBe("unavailable");
+
+      // The owner's empty account is exactly what the seed is for.
+      await disconnectCodexCredential(authState.userId);
+      const seeded = await bootstrapCodexHome(authState.userId);
+      expect(seeded.action).toBe("connected");
+      expect((await codexRuntimeState(authState.userId)).authPresent).toBe(true);
+    } finally {
+      await disconnectCodexCredential(stranger);
+    }
+  });
+
+  it("runs a queued task on the credential of the workspace that queued it", async () => {
+    const ownerId = authState.userId;
+    const tenantB = `${ownerId}-second`;
+    try {
+      // Boot tenant B's own workspace and agent through the same HTTP
+      // surface a real session uses; the workspace owner is resolved
+      // server-side from the session, never from the request body.
+      authState.userId = tenantB;
+      const boot = await request(app).get("/api/agents");
+      expect(boot.status).toBe(200);
+      const agentB = await createAgent(`${RUN_TAG} Tenant B Runner`);
+      await connectAuth(
+        {
+          ...CHATGPT_AUTH,
+          tokens: { ...CHATGPT_AUTH.tokens, account_id: "acct_tenant_b" },
+        },
+        tenantB,
+      );
+      const [wsB] = await db
+        .select({ id: workspacesTable.id })
+        .from(workspacesTable)
+        .where(eq(workspacesTable.clerkUserId, tenantB))
+        .limit(1);
+      expect(wsB).toBeDefined();
+
+      // The owner's session is busy the whole time; that must not delay
+      // tenant B by a single tick — the leases are per account.
+      const ownerFingerprint = (await codexAuthFingerprint(ownerId))!;
+      await db.insert(providerLeasesTable).values({
+        key: codexLeaseKey(ownerFingerprint),
+        taskId: randomUUID(),
+        holder: "owner-task-still-running",
+        acquiredAt: new Date(),
+        heartbeatAt: new Date(),
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+
+      turnScript = [successTurn("Filed for tenant B.")];
+      const task = await insertTask(agentB.id, { workspaceId: wsB!.id });
+      expect(await drainOne([agentB.id])).toBe(true);
+      const finished = await getTaskRow(task.id);
+      expect(finished.status).toBe("completed");
+
+      // The run materialized tenant B's own private home — never the
+      // owner's — so it spent tenant B's allowance.
+      expect(sdkCalls).toHaveLength(1);
+      expect(sdkCalls[0]!.env?.CODEX_HOME).toBe(codexHomeFor(tenantB));
+      expect(sdkCalls[0]!.env?.CODEX_HOME).not.toBe(codexHomeFor(ownerId));
+
+      // Tenant B's lease was taken and released; the owner's untouched
+      // lease still belongs to its own holder.
+      const bFingerprint = (await codexAuthFingerprint(tenantB))!;
+      expect(bFingerprint).not.toBe(ownerFingerprint);
+      const bLeases = await db
+        .select()
+        .from(providerLeasesTable)
+        .where(eq(providerLeasesTable.key, codexLeaseKey(bFingerprint)));
+      expect(bLeases).toHaveLength(0);
+      const [ownerLease] = await db
+        .select()
+        .from(providerLeasesTable)
+        .where(eq(providerLeasesTable.key, codexLeaseKey(ownerFingerprint)));
+      expect(ownerLease?.holder).toBe("owner-task-still-running");
+    } finally {
+      authState.userId = ownerId;
+      await disconnectCodexCredential(tenantB);
+      // Tenant B's workspace cascades its agents, tasks, conversations,
+      // and settings away; the fixture leaves nothing behind.
+      await db
+        .delete(workspacesTable)
+        .where(eq(workspacesTable.clerkUserId, tenantB));
+    }
+  });
+
+  it("keeps billing the queuer after the workspace is handed to another account", async () => {
+    const ownerId = authState.userId;
+    const tenantB = `${ownerId}-second`;
+    const handedTo = `${ownerId}-third`;
+    let wsBId: string | null = null;
+    try {
+      // Tenant B queues work in their own workspace…
+      authState.userId = tenantB;
+      await request(app).get("/api/agents");
+      const agentB = await createAgent(`${RUN_TAG} Handover Runner`);
+      await connectAuth(
+        {
+          ...CHATGPT_AUTH,
+          tokens: { ...CHATGPT_AUTH.tokens, account_id: "acct_tenant_b" },
+        },
+        tenantB,
+      );
+      const [wsB] = await db
+        .select({ id: workspacesTable.id })
+        .from(workspacesTable)
+        .where(eq(workspacesTable.clerkUserId, tenantB))
+        .limit(1);
+      wsBId = wsB!.id;
+      turnScript = [successTurn("Still tenant B's run.")];
+      const task = await insertTask(agentB.id, {
+        workspaceId: wsBId,
+        // Queue-time snapshot, exactly as production dispatch stamps it.
+        ownerClerkUserId: tenantB,
+      });
+
+      // …then the workspace changes hands before the queue drains.
+      await db
+        .update(workspacesTable)
+        .set({ clerkUserId: handedTo })
+        .where(eq(workspacesTable.id, wsBId));
+
+      expect(await drainOne([agentB.id])).toBe(true);
+      const finished = await getTaskRow(task.id);
+      expect(finished.status).toBe("completed");
+
+      // The run still billed the account that queued it — the snapshot —
+      // not the workspace's new owner (who has no sign-in at all).
+      expect(sdkCalls).toHaveLength(1);
+      expect(sdkCalls[0]!.env?.CODEX_HOME).toBe(codexHomeFor(tenantB));
+      expect(sdkCalls[0]!.env?.CODEX_HOME).not.toBe(codexHomeFor(handedTo));
+    } finally {
+      authState.userId = ownerId;
+      await disconnectCodexCredential(tenantB);
+      if (wsBId) {
+        await db.delete(workspacesTable).where(eq(workspacesTable.id, wsBId));
+      }
+    }
+  });
+
+  it("serializes enqueue with a hand-over so a fresh task cannot carry a stale owner", async () => {
+    const ownerId = authState.userId;
+    const handedTo = `${ownerId}-second`;
+    const agent = await createAgent(`${RUN_TAG} Enqueue Race`);
+    const client = await pool.connect();
+    let committed = false;
+    try {
+      // A workspace hand-over is in flight, holding the row lock…
+      await client.query("BEGIN");
+      await client.query(
+        "UPDATE workspaces SET clerk_user_id = $1 WHERE id = $2",
+        [handedTo, wsId],
+      );
+      // …while a task is queued through the real dispatch route. Its
+      // snapshot read locks the same row, so it must wait for the
+      // hand-over to finish instead of reading the pre-hand-over owner.
+      const pending = request(app)
+        .post("/api/tasks")
+        .send({ agentId: agent.id, objective: `${RUN_TAG} race objective` })
+        .then((res) => res);
+      const first = await Promise.race([
+        pending.then(() => "created" as const),
+        new Promise<"waiting">((r) => setTimeout(() => r("waiting"), 400)),
+      ]);
+      expect(first).toBe("waiting");
+
+      await client.query("COMMIT");
+      committed = true;
+      const res = await pending;
+      expect(res.status).toBe(201);
+      const row = await getTaskRow(res.body.id);
+      // The snapshot is the owner at enqueue commit — never the stale one.
+      expect(row.ownerClerkUserId).toBe(handedTo);
+    } finally {
+      if (!committed) await client.query("ROLLBACK").catch(() => {});
+      client.release();
+      // Undo the hand-over: this is the shared fixture workspace.
+      await db
+        .update(workspacesTable)
+        .set({ clerkUserId: ownerId })
+        .where(eq(workspacesTable.id, wsId));
+    }
+  });
+
+  it("refuses a legacy queued task that carries no owner snapshot", async () => {
+    const agent = await createAgent(`${RUN_TAG} Legacy Row`);
+    // A row queued before per-account billing existed: workspace known,
+    // billing identity not recorded. Guessing (e.g. from the workspace's
+    // current owner) could bill an account that never queued it.
+    const task = await insertTask(agent.id, { ownerClerkUserId: null });
+    expect(await drainOne([agent.id])).toBe(true);
+    const finished = await getTaskRow(task.id);
+    expect(finished.status).not.toBe("completed");
+    expect(finished.errorMessage ?? "").toMatch(/owner snapshot|re-create/i);
+    expect(sdkCalls).toHaveLength(0);
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -1596,7 +1859,7 @@ describe("Codex Talk conversations", () => {
     expect(call.input).toContain("How is the kelp doing?");
 
     // The lease is released the moment the turn ends.
-    const fingerprint = await codexAuthFingerprint();
+    const fingerprint = await codexAuthFingerprint(authState.userId);
     const leases = await db
       .select()
       .from(providerLeasesTable)
@@ -2000,7 +2263,7 @@ describe("Codex Talk conversations", () => {
   it("returns a clear busy message when another run holds the ChatGPT credential", async () => {
     const agent = await createAgent(`${RUN_TAG} Queued`);
     setCodexTalkLeaseWait({ totalMs: 250, intervalMs: 100 });
-    const fingerprint = await codexAuthFingerprint();
+    const fingerprint = await codexAuthFingerprint(authState.userId);
     await db.insert(providerLeasesTable).values({
       key: codexLeaseKey(fingerprint!),
       taskId: randomUUID(),
@@ -2028,7 +2291,7 @@ describe("Codex Talk conversations", () => {
   it("waits briefly and proceeds once the credential frees up", async () => {
     const agent = await createAgent(`${RUN_TAG} Patient`);
     setCodexTalkLeaseWait({ totalMs: 2_000, intervalMs: 50 });
-    const fingerprint = await codexAuthFingerprint();
+    const fingerprint = await codexAuthFingerprint(authState.userId);
     const key = codexLeaseKey(fingerprint!);
     await db.insert(providerLeasesTable).values({
       key,

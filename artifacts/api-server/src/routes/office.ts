@@ -1808,8 +1808,13 @@ router.delete("/providers/:provider/credential", async (req, res): Promise<void>
  * ChatGPT allowance or leave a stray session behind.
  */
 router.post("/providers/codex/test", async (req, res): Promise<void> => {
+  const testUserId = getAuth(req)?.userId;
+  if (!testUserId) {
+    res.status(401).json({ error: "Sign in to test a Codex connection." });
+    return;
+  }
   clearProviderCaches();
-  const result = await testCodexConnection(getAuth(req)?.userId);
+  const result = await testCodexConnection(testUserId);
   await recordAudit(
     req.workspaceId!,
     "providers.codex_tested",
@@ -1887,7 +1892,12 @@ router.delete("/providers/codex/credential", async (req, res): Promise<void> => 
  * sign-in so a session Codex has since refreshed is never rolled back.
  */
 router.post("/providers/codex/bootstrap", async (req, res): Promise<void> => {
-  const outcome = await bootstrapCodexHome(getAuth(req)?.userId);
+  const bootstrapUserId = getAuth(req)?.userId;
+  if (!bootstrapUserId) {
+    res.status(401).json({ error: "Sign in to bootstrap a Codex sign-in." });
+    return;
+  }
+  const outcome = await bootstrapCodexHome(bootstrapUserId);
   clearProviderCaches();
   await recordAudit(
     req.workspaceId!,

@@ -26,6 +26,7 @@ import {
   tasksTable,
   teamMembersTable,
   teamsTable,
+  workspacesTable,
 } from "@workspace/db";
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { Router, type IRouter, type Request, type Response } from "express";
@@ -401,11 +402,22 @@ router.post("/tasks/:taskId/delegate", async (req: Request, res: Response) => {
     if (!target) return { status: 404 as const, error: "Agent not found" };
     const routing = await resolveRouting(req.workspaceId!, target as AgentRow);
 
+    // Billing identity snapshot, same rule as direct dispatch: read under
+    // a row lock in the insert transaction so a concurrent hand-over
+    // serializes with this enqueue, and the delegated child bills the
+    // account that owned the workspace at enqueue commit.
+    const [wsOwner] = await tx
+      .select({ clerkUserId: workspacesTable.clerkUserId })
+      .from(workspacesTable)
+      .where(eq(workspacesTable.id, req.workspaceId!))
+      .limit(1)
+      .for("update");
     const [child] = await tx
       .insert(tasksTable)
       .values({
         agentId: body.agentId,
         workspaceId: req.workspaceId!,
+        ownerClerkUserId: wsOwner?.clerkUserId ?? null,
         objective: body.objective,
         priority: body.priority ?? parent.task.priority,
         budgetCents: body.budgetCents ?? null,

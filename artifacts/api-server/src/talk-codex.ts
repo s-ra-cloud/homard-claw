@@ -7,6 +7,7 @@ import {
   type InputAttachment,
 } from "./execution";
 import { codexAuthFingerprint } from "./codex/runtime";
+import { clerkUserIdForWorkspace } from "./workspace";
 import { codexLeaseHeartbeatMs, codexLeaseTtlMs } from "./codex/config";
 import {
   acquireProviderLease,
@@ -191,12 +192,20 @@ export type CodexTalkRequest = {
 export async function runCodexTalkTurn(
   input: CodexTalkRequest,
 ): Promise<ProviderCallResult> {
-  // Keyed by the account whose ChatGPT session the turn will use. No
-  // account resolved means there is nothing to run as; fail closed with a
-  // setup error, not a missing-API-key one.
+  // Keyed by the account whose ChatGPT session the turn will use — the
+  // owner of the agent's workspace, resolved server-side. No account
+  // resolved means there is nothing to run as; fail closed with a setup
+  // error, not a missing-API-key one.
+  // Resolved once, here, and carried into the provider call unchanged:
+  // the lease below and the turn itself must key off the same account
+  // even if workspace ownership were handed over mid-flight. A Talk turn
+  // has no queue delay — this moment is both when the work is created and
+  // when it runs, so this resolution is its owner snapshot.
+  let codexUser: string | null = null;
   let fingerprint: string | null;
   try {
-    fingerprint = await codexAuthFingerprint();
+    codexUser = await clerkUserIdForWorkspace(input.agent.workspaceId);
+    fingerprint = codexUser ? await codexAuthFingerprint(codexUser) : null;
   } catch (error) {
     throw toTalkError(error);
   }
@@ -315,6 +324,7 @@ export async function runCodexTalkTurn(
       try {
         result = await callProvider({
           workspaceId: input.agent.workspaceId,
+          clerkUserId: codexUser,
           provider: "codex_chatgpt",
           model: input.model,
           system: input.system,

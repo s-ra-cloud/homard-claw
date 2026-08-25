@@ -66,9 +66,14 @@ keys, never silently routed to anything shared.
 
 ## Security posture
 
-- Every `/api` route except `/api/healthz` is owner-gated: 401 without a
-  session, 403 for any authenticated non-owner. First authenticated caller
-  becomes the owner (single-tenant by design).
+- Every `/api` route except `/api/healthz` requires a Clerk session (401
+  without one). Each signed-in user gets their own workspace; all data and
+  provider credentials are scoped to it, and foreign workspace ids 404.
+  Provider execution — including Codex — always runs as the account that
+  owned the task's workspace **when the task was queued** (snapshotted onto
+  the task row, server-side); a later workspace hand-over never rebinds
+  queued work, and there is no fallback to a global owner. `OWNER_EMAIL`
+  only decides which account inherits the legacy (pre-workspace) data.
 - CORS only allows the deployment's own hostnames (from `REPLIT_DOMAINS` /
   `REPLIT_DEV_DOMAIN`) plus localhost; arbitrary origins are refused, so
   other websites cannot ride the owner's credentials.

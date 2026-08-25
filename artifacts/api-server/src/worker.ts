@@ -867,8 +867,27 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
   try {
     // Authoritative readiness, re-checked immediately before dispatch: a
     // ChatGPT session that expired while the task sat in the queue must
-    // fail closed here rather than be attempted.
-    const readiness = await providerReadiness(workspaceId, provider);
+    // fail closed here rather than be attempted. For Codex the check is
+    // against the task's queue-time owner snapshot — the account the run
+    // will bill — never the workspace's current owner, which a hand-over
+    // could have changed while the task waited.
+    if (provider === "codex_chatgpt" && !task.ownerClerkUserId) {
+      const message =
+        "This task predates per-account Codex billing and carries no owner snapshot; re-create it to run it with Codex.";
+      await setTaskPhase(task.id, task.attempts, "auth_required", workspaceId);
+      await finishIfStillRunning(task.id, task.attempts, {
+        status: "blocked",
+        errorKind: "not_configured",
+        errorMessage: message,
+      });
+      await addTaskLog(task.id, "error", message);
+      return;
+    }
+    const readiness = await providerReadiness(
+      workspaceId,
+      provider,
+      provider === "codex_chatgpt" ? (task.ownerClerkUserId ?? null) : undefined,
+    );
     if (!readiness.ready) {
       await setTaskPhase(task.id, task.attempts, "auth_required", workspaceId);
       await finishIfStillRunning(task.id, task.attempts, {
@@ -1019,17 +1038,31 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     let conversationId: string | null = task.conversationId;
     let workingDirectory: string | null = null;
     let threadId: string | null = null;
+    // Resolved once, here, and carried into the provider call unchanged:
+    // the lease below and the run itself must key off the same account
+    // even if workspace ownership were handed over mid-flight.
+    let codexClerkUserId: string | null = null;
     if (provider === "codex_chatgpt") {
-      // Keyed by the account whose ChatGPT session the run will use, so two
-      // accounts never queue behind each other. No account resolved means
-      // nothing to run as; fail closed.
-      const fingerprint = await codexAuthFingerprint();
+      // Keyed by the account snapshotted onto the task when it was queued —
+      // never the workspace's current owner, which a legacy hand-over could
+      // change while the task waited. Every attempt, retry, and recovery of
+      // this task bills exactly the account that queued it. A legacy row
+      // without a snapshot fails closed rather than guessing.
+      const codexUser = task.ownerClerkUserId ?? null;
+      if (!codexUser) {
+        throw new ProviderCallError(
+          "not_configured",
+          "This task predates per-account Codex billing and carries no owner snapshot; re-create it to run it with Codex.",
+        );
+      }
+      const fingerprint = await codexAuthFingerprint(codexUser);
       if (!fingerprint) {
         throw new ProviderCallError(
           "not_configured",
           "No account with a Codex sign-in could be resolved for this task, so the run was refused.",
         );
       }
+      codexClerkUserId = codexUser;
       const key = codexLeaseKey(fingerprint);
       const lease = await acquireProviderLease(key, task.id, codexLeaseTtlMs());
       if (!lease.acquired) {
@@ -1188,6 +1221,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
       for (let round = 1; round <= MAX_ACTION_ROUNDS; round += 1) {
         const result = await runtime.execute({
           workspaceId,
+          clerkUserId: codexClerkUserId,
           provider,
           model: task.model ?? "",
           system,
@@ -1699,7 +1733,13 @@ async function offerFallback(
   const healthy: ProviderId[] = [];
   for (const candidate of availableProviderIds()) {
     if (candidate === fromProvider) continue;
-    const readiness = await providerReadiness(task.workspaceId ?? "", candidate);
+    // A fallback TO Codex would bill the task's snapshotted owner, so
+    // candidate health is judged against that same account.
+    const readiness = await providerReadiness(
+      task.workspaceId ?? "",
+      candidate,
+      candidate === "codex_chatgpt" ? (task.ownerClerkUserId ?? null) : undefined,
+    );
     if (readiness.ready) healthy.push(candidate);
   }
   const decision = await evaluateFallback({

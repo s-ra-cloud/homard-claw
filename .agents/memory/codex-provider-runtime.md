@@ -122,3 +122,14 @@ the catch block that already worked.
 **How to apply:** confirm ownership explicitly once after the call returns
 and before the first write, treating "cannot confirm" as lost. Verify any
 guard of this kind by deleting it and watching the test fail.
+
+## Identity travels with the lease
+The account a Codex run bills is snapshotted when the work is created (queue
+time for tasks, turn start for Talk) and reused verbatim for the lease key,
+the runtime, and every retry/recovery; nothing re-resolves it later.
+**Why:** workspace ownership can change (legacy hand-over), and a second
+lookup could run one account's session under another account's lease or bill
+an account that never queued the work. Rows without a snapshot fail closed.
+**How to apply:** any new Codex entry point must capture the owner once at
+creation and carry it through; never derive it again from the workspace row
+at execution time.

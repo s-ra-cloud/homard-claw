@@ -190,6 +190,15 @@ export const tasksTable = pgTable("tasks", {
   workspaceId: uuid("workspace_id").references(() => workspacesTable.id, {
     onDelete: "cascade",
   }),
+  /**
+   * The Clerk account that owned the workspace when this task was queued.
+   * Account-scoped providers (Codex) bill exactly this identity for every
+   * attempt, retry, and crash recovery of the task — a later workspace
+   * hand-over must never rebind queued work to a different account's
+   * credential. Legacy rows without a snapshot fail closed for such
+   * providers rather than guessing.
+   */
+  ownerClerkUserId: text("owner_clerk_user_id"),
   agentId: uuid("agent_id")
     .notNull()
     .references(() => agentsTable.id),

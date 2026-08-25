@@ -98,16 +98,15 @@ export class CodexRuntimeError extends Error {
 }
 
 /**
- * Which account a Codex operation runs as. Requests pass the signed-in
- * user; background work (the worker, the scheduler's health check) passes
- * nothing and falls back to the office owner, because tasks do not carry an
- * owner of their own yet.
+ * Which account a Codex operation runs as. Every caller must say so
+ * explicitly: requests pass the signed-in user, task execution passes the
+ * owner of the task's workspace, and the health check iterates the accounts
+ * that actually stored a sign-in. There is deliberately no fallback — an
+ * unknown identity must fail closed rather than quietly run (and bill)
+ * whoever happened to set the office up first.
  */
-export async function resolveCodexUser(
-  explicit?: string | null,
-): Promise<string | null> {
-  if (explicit) return explicit;
-  return officeOwnerClerkId();
+function resolveCodexUser(explicit?: string | null): string | null {
+  return explicit ?? null;
 }
 
 /**
@@ -134,7 +133,7 @@ export function codexAuthFilePathFor(clerkUserId: string): string {
 export async function codexAuthFingerprint(
   explicitUserId?: string | null,
 ): Promise<string | null> {
-  const clerkUserId = await resolveCodexUser(explicitUserId);
+  const clerkUserId = resolveCodexUser(explicitUserId);
   if (!clerkUserId) return null;
   return createHash("sha256")
     .update(`codex-session:${clerkUserId}`)
@@ -232,6 +231,11 @@ export async function disconnectCodexCredential(
  * operators who prefer to configure one rather than paste it in the app.
  * Only ever fills an *absent* credential: overwriting would roll the
  * session back to a refresh token Codex has already spent.
+ *
+ * The seed is the *operator's* credential, so it may only ever land on the
+ * office owner's account. Any other signed-in account is told to paste its
+ * own auth.json instead — CODEX_AUTH_JSON must never quietly hand the
+ * operator's ChatGPT allowance to whoever pressed the bootstrap button.
  */
 export async function bootstrapCodexHome(
   explicitUserId?: string | null,
@@ -242,11 +246,11 @@ export async function bootstrapCodexHome(
       detail: "Codex is switched off (CODEX_ENABLED is not set), so nothing was stored.",
     };
   }
-  const clerkUserId = await resolveCodexUser(explicitUserId);
+  const clerkUserId = resolveCodexUser(explicitUserId);
   if (!clerkUserId) {
     return {
       action: "unavailable",
-      detail: "No account could be resolved to attach a Codex sign-in to.",
+      detail: "No signed-in account could be resolved to attach a Codex sign-in to.",
     };
   }
   if (await codexCredentialSummary(clerkUserId)) {
@@ -264,7 +268,31 @@ export async function bootstrapCodexHome(
         "No Codex sign-in is connected yet. Run `codex login` on a desktop and paste the auth.json it produces, or set CODEX_AUTH_JSON.",
     };
   }
-  return connectCodexCredential(clerkUserId, seed);
+  const owner = await officeOwnerClerkId();
+  if (!owner || owner !== clerkUserId) {
+    return {
+      action: "skipped",
+      detail:
+        "CODEX_AUTH_JSON belongs to the office owner's setup, so it was not applied to this account. Run `codex login` on a desktop and paste your own auth.json to connect Codex.",
+    };
+  }
+  const outcome = await connectCodexCredential(clerkUserId, seed);
+  if (outcome.action === "connected") {
+    // The owner check above races a concurrent legacy hand-over: ownership
+    // could move between the read and the store, landing the operator's
+    // seed on an account that is no longer the owner. Re-verify and undo
+    // rather than leave the seed on the wrong account.
+    const ownerAfter = await officeOwnerClerkId();
+    if (ownerAfter !== clerkUserId) {
+      await deleteCodexCredential(clerkUserId);
+      return {
+        action: "skipped",
+        detail:
+          "Office ownership changed while the seed was being stored, so it was removed again. Sign in as the current owner and retry, or paste your own auth.json.",
+      };
+    }
+  }
+  return outcome;
 }
 
 /**
@@ -296,11 +324,12 @@ export async function codexRuntimeState(
       detail: "Codex is turned off for this workspace (CODEX_ENABLED is not set).",
     };
   }
-  const clerkUserId = await resolveCodexUser(explicitUserId);
+  const clerkUserId = resolveCodexUser(explicitUserId);
   if (!clerkUserId) {
     return {
       ...base,
-      detail: "No account is signed in, so there is no Codex session to use.",
+      detail:
+        "No account was resolved for this Codex operation, so there is no session to use and nothing was run.",
     };
   }
   const home = codexHomeFor(clerkUserId);

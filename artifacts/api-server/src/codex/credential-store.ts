@@ -111,6 +111,18 @@ export type CodexCredentialSummary = {
   updatedAt: Date;
 };
 
+/**
+ * Every account that has a Codex sign-in stored. Metadata only — used by
+ * the background health check to watch each connected session instead of
+ * assuming a single global one.
+ */
+export async function listCodexAccountIds(): Promise<string[]> {
+  const rows = await db
+    .select({ clerkUserId: codexCredentialsTable.clerkUserId })
+    .from(codexCredentialsTable);
+  return rows.map((row) => row.clerkUserId);
+}
+
 /** Metadata only — this never decrypts, so it is safe on every request. */
 export async function codexCredentialSummary(
   clerkUserId: string,

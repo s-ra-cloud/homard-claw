@@ -17,6 +17,7 @@ import {
   codexHealthCheckMinutes,
 } from "./codex/config";
 import { codexRuntimeState } from "./codex/runtime";
+import { listCodexAccountIds } from "./codex/credential-store";
 import { addTaskLog } from "./worker";
 import type { ProviderId } from "./providers";
 
@@ -296,14 +297,23 @@ export async function runDueSchedules(
  *
  * Its only job is to notice a session that has stopped refreshing before
  * a task does, and say so once per transition rather than every tick.
+ *
+ * Sign-ins are stored per account, so the check walks every account that
+ * connected one and inspects each explicitly — there is no global "the"
+ * credential, and no fallback identity.
  */
 let lastCodexHealthAt = 0;
-let lastCodexHealthy: boolean | null = null;
+const lastCodexHealthyByAccount = new Map<string, boolean>();
+/** Round-robin position so a large tenant count never hogs one tick. */
+let codexHealthCursor = 0;
+/** Accounts inspected per interval; the cursor picks up where it left off. */
+const CODEX_HEALTH_BATCH_LIMIT = 25;
 
 /** Test hook: forget the throttle and the last reported state. */
 export function resetCodexHealthCheck(): void {
   lastCodexHealthAt = 0;
-  lastCodexHealthy = null;
+  lastCodexHealthyByAccount.clear();
+  codexHealthCursor = 0;
 }
 
 export async function runCodexHealthCheck(now = Date.now()): Promise<boolean> {
@@ -312,21 +322,49 @@ export async function runCodexHealthCheck(now = Date.now()): Promise<boolean> {
   if (now - lastCodexHealthAt < intervalMs) return false;
   lastCodexHealthAt = now;
 
-  const state = await codexRuntimeState();
-  // Nobody has connected a ChatGPT session, so there is no credential whose
-  // health could decay — reporting it as unhealthy would be noise, not news.
-  if (!state.authPresent) return false;
-  const healthy = state.ready;
-  if (healthy === lastCodexHealthy) return true;
-  lastCodexHealthy = healthy;
-  if (healthy) {
-    logger.info({ provider: "codex_chatgpt" }, "Codex credential is healthy");
-  } else {
-    // `detail` is already owner-facing and redacted at the source.
-    logger.warn(
-      { provider: "codex_chatgpt", detail: state.detail },
-      "Codex credential needs attention",
-    );
+  // Only accounts that actually stored a sign-in are watched. Nobody
+  // connected means there is no credential whose health could decay —
+  // reporting that would be noise, not news.
+  const accountIds = await listCodexAccountIds();
+  // Forget accounts that disconnected, so the state map cannot grow
+  // without bound across tenant churn.
+  const known = new Set(accountIds);
+  for (const key of [...lastCodexHealthyByAccount.keys()]) {
+    if (!known.has(key)) lastCodexHealthyByAccount.delete(key);
   }
-  return true;
+  if (accountIds.length === 0) return false;
+
+  // A bounded, rotating slice per interval: with many tenants this check
+  // must never monopolize a scheduler tick at the expense of real work.
+  const start = codexHealthCursor % accountIds.length;
+  const batchSize = Math.min(CODEX_HEALTH_BATCH_LIMIT, accountIds.length);
+  const batch = accountIds
+    .concat(accountIds)
+    .slice(start, start + batchSize);
+  codexHealthCursor = (start + batchSize) % accountIds.length;
+
+  let checkedAny = false;
+  for (const clerkUserId of batch) {
+    const state = await codexRuntimeState(clerkUserId);
+    if (!state.authPresent) {
+      // Disconnected between the listing and the check; nothing to watch.
+      lastCodexHealthyByAccount.delete(clerkUserId);
+      continue;
+    }
+    checkedAny = true;
+    const healthy = state.ready;
+    if (healthy === lastCodexHealthyByAccount.get(clerkUserId)) continue;
+    lastCodexHealthyByAccount.set(clerkUserId, healthy);
+    if (healthy) {
+      logger.info({ provider: "codex_chatgpt" }, "Codex credential is healthy");
+    } else {
+      // `detail` is already owner-facing and redacted at the source. The
+      // account id is an opaque Clerk identifier, not credential material.
+      logger.warn(
+        { provider: "codex_chatgpt", clerkUserId, detail: state.detail },
+        "Codex credential needs attention",
+      );
+    }
+  }
+  return checkedAny;
 }
