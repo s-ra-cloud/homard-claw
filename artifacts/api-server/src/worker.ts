@@ -49,6 +49,7 @@ import {
 import { codexAuthFingerprint } from "./codex/runtime";
 import { codexLeaseHeartbeatMs, codexLeaseTtlMs } from "./codex/config";
 import {
+  ensureConversationWorkspace,
   getConversation,
   recordThreadId,
   resolveConversation,
@@ -1065,8 +1066,15 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         provider,
         conversationId ? "continue" : "new",
       );
-      const chosen = conversationId
-        ? ((await getConversation(conversationId)) ?? conversation)
+      // A retried or restart-recovered task pins its conversation by id.
+      // The row survives a restart, but its scratch workspace directory may
+      // not — re-ensure it so a resumed thread never starts in a missing
+      // working directory.
+      const pinned = conversationId
+        ? await getConversation(conversationId)
+        : null;
+      const chosen = pinned
+        ? await ensureConversationWorkspace(pinned)
         : conversation;
       conversationId = chosen.id;
       workingDirectory = chosen.workspacePath;

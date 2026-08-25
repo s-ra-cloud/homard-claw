@@ -47,7 +47,7 @@ export async function resolveConversation(
 ): Promise<ProviderConversationRecord> {
   if (mode === "continue") {
     const existing = await latestConversation(agentId, provider);
-    if (existing) return existing;
+    if (existing) return ensureConversationWorkspace(existing);
   }
   const [created] = await db
     .insert(providerConversationsTable)
@@ -66,6 +66,37 @@ export async function resolveConversation(
     .where(eq(providerConversationsTable.id, created.id))
     .returning();
   return updated ?? { ...created, workspacePath };
+}
+
+/**
+ * Recreate a conversation's isolated directory if it has gone missing.
+ *
+ * Workspaces live under scratch storage, so a server restart or a
+ * temporary-directory sweep can delete them while the conversation row —
+ * and its resumable thread id — survive in the database. Every reuse of an
+ * existing conversation must therefore re-ensure the directory, exactly as
+ * the account's Codex home is re-materialized before each run; otherwise a
+ * resumed task hands the SDK a working directory that no longer exists and
+ * the run dies before producing anything.
+ *
+ * The directory is derived from the agent and conversation ids (the same
+ * derivation that named it at creation), so a row whose stored path has
+ * drifted is healed to the canonical location.
+ */
+export async function ensureConversationWorkspace(
+  conversation: ProviderConversationRecord,
+): Promise<ProviderConversationRecord> {
+  const workspacePath = await ensureCodexWorkspace(
+    conversation.agentId,
+    conversation.id,
+  );
+  if (conversation.workspacePath === workspacePath) return conversation;
+  const [updated] = await db
+    .update(providerConversationsTable)
+    .set({ workspacePath })
+    .where(eq(providerConversationsTable.id, conversation.id))
+    .returning();
+  return updated ?? { ...conversation, workspacePath };
 }
 
 /** Persist the SDK-issued thread id the first time it is emitted. */

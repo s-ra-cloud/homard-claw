@@ -1433,6 +1433,43 @@ describe("Codex serialization and recovery", () => {
     expect(row.providerThreadId).toBe("thr_interrupted");
     await request(app).post(`/api/tasks/${task.id}/cancel`);
   });
+
+  it("rebuilds scratch directories wiped by a restart before resuming a thread", async () => {
+    const agent = await createAgent(`${RUN_TAG} Wiped`);
+    turnScript = [successTurn("Before restart."), successTurn("After restart.")];
+
+    const first = await insertTask(agent.id);
+    await drainOne([agent.id]);
+    const firstRow = await getTaskRow(first.id);
+    expect(firstRow.status).toBe("completed");
+    expect(firstRow.conversationId).toBeTruthy();
+    const firstDir = sdkCalls.at(-1)!.options?.workingDirectory as string;
+    expect(firstDir).toBeTruthy();
+
+    // Simulate a restart wiping scratch storage: the conversation workspace
+    // and the per-account Codex home both vanish, while the database rows
+    // (conversation, thread id, encrypted credential) survive.
+    await rm(firstDir, { recursive: true, force: true });
+    await rm(codexHomeFor(authState.userId), { recursive: true, force: true });
+
+    const second = await insertTask(agent.id, {
+      conversationId: firstRow.conversationId,
+    });
+    await drainOne([agent.id]);
+    const secondRow = await getTaskRow(second.id);
+    expect(secondRow.status).toBe("completed");
+    expect(secondRow.output).toContain("After restart");
+
+    // The run resumed the original thread inside a recreated directory.
+    const resumed = sdkCalls.at(-1)!;
+    expect(resumed.kind).toBe("resume");
+    expect(resumed.threadId).toBe(firstRow.providerThreadId);
+    expect(resumed.options?.workingDirectory).toBe(firstDir);
+    expect((await stat(firstDir)).isDirectory()).toBe(true);
+    // The credential was re-materialized from the database into the
+    // recreated private home, not lost with the wiped filesystem.
+    expect((await stat(codexHomeFor(authState.userId))).isDirectory()).toBe(true);
+  });
 });
 
 describe("Codex health check", () => {
