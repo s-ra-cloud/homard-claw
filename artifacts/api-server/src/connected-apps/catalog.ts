@@ -134,7 +134,8 @@ export const APP_OPERATIONS: AppOperation[] = [
     name: "google_drive.read_file",
     app: "google_drive",
     level: "read",
-    description: "Read a file's text content; params: fileId",
+    description:
+      "Read a file's text content (Google Sheets return rows as CSV text); params: fileId",
     params: [str("fileId", true, 200)],
     target: (p) => `Drive file ${p.fileId}`,
   },

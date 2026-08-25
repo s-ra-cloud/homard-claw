@@ -500,6 +500,18 @@ async function driveSearch(
 /** Google-native docs must be exported; everything else downloads as-is. */
 const DRIVE_EXPORTABLE_PREFIX = "application/vnd.google-apps.";
 
+/** Google Sheets reject a text/plain export; CSV keeps rows readable. */
+const DRIVE_SPREADSHEET_MIME = "application/vnd.google-apps.spreadsheet";
+
+/**
+ * Pick the Drive export format a Google-native file actually supports.
+ * Sheets only export to tabular formats (CSV keeps rows as readable text);
+ * Docs and other Google-native types keep the plain-text export.
+ */
+function driveExportMime(mime: string): string {
+  return mime === DRIVE_SPREADSHEET_MIME ? "text/csv" : "text/plain";
+}
+
 async function driveReadFile(
   params: Record<string, unknown>,
   ctx: ExecutionContext,
@@ -513,7 +525,7 @@ async function driveReadFile(
   const file = meta.data as { name?: string; mimeType?: string };
   const mime = file.mimeType ?? "";
   const path = mime.startsWith(DRIVE_EXPORTABLE_PREFIX)
-    ? `/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent("text/plain")}`
+    ? `/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent(driveExportMime(mime))}`
     : `/drive/v3/files/${fileId}?alt=media`;
   const content = await driveJson(ctx.workspaceId, path);
   if (!content.ok) return content.outcome;

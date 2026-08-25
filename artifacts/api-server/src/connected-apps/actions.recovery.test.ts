@@ -318,6 +318,108 @@ describe("idempotency markers on write executors", () => {
   });
 });
 
+describe("drive reads by MIME type", () => {
+  const readOp = () => findOperation("google_drive.read_file")!;
+  const ctx = () => ({ actionId: null, workspaceId });
+
+  /** Answer the metadata request with the given file, then the read. */
+  function stubDriveFile(input: {
+    mimeType: string;
+    exportBody?: string;
+    mediaBody?: string;
+    readStatus?: number;
+    readErrorBody?: unknown;
+  }) {
+    proxyState.handler = (call) => {
+      if (call.path.includes("fields=")) {
+        return {
+          status: 200,
+          body: { id: "f1", name: "Budget", mimeType: input.mimeType },
+        };
+      }
+      if (input.readStatus && input.readStatus !== 200) {
+        return { status: input.readStatus, body: input.readErrorBody ?? { error: "nope" } };
+      }
+      return { status: 200, body: input.exportBody ?? input.mediaBody ?? "" };
+    };
+  }
+
+  const driveCalls = () => proxyState.calls.filter((c) => c.connector === "google_drive");
+
+  it("exports a Google Sheet as CSV and returns its rows", async () => {
+    stubDriveFile({
+      mimeType: "application/vnd.google-apps.spreadsheet",
+      exportBody: "item,cost\nrent,1200\ncoffee,7",
+    });
+    const outcome = await executeOperation(readOp(), { fileId: "f1" }, ctx());
+    expect(outcome.ok).toBe(true);
+    const readCall = driveCalls()[1];
+    expect(readCall.path).toContain("/export?mimeType=text%2Fcsv");
+    expect(readCall.path).not.toContain("text%2Fplain");
+    if (outcome.ok) {
+      expect(outcome.summary).toContain('"Budget"');
+      expect(outcome.summary).toContain("application/vnd.google-apps.spreadsheet");
+      expect(outcome.summary).toContain("rent,1200");
+      expect(outcome.summary).toContain("coffee,7");
+    }
+  });
+
+  it("still exports a Google Doc as plain text", async () => {
+    stubDriveFile({
+      mimeType: "application/vnd.google-apps.document",
+      exportBody: "Meeting notes",
+    });
+    const outcome = await executeOperation(readOp(), { fileId: "f1" }, ctx());
+    expect(outcome.ok).toBe(true);
+    expect(driveCalls()[1].path).toContain("/export?mimeType=text%2Fplain");
+    if (outcome.ok) expect(outcome.summary).toContain("Meeting notes");
+  });
+
+  it("downloads an ordinary uploaded file as-is", async () => {
+    stubDriveFile({ mimeType: "text/markdown", mediaBody: "# Readme" });
+    const outcome = await executeOperation(readOp(), { fileId: "f1" }, ctx());
+    expect(outcome.ok).toBe(true);
+    expect(driveCalls()[1].path).toContain("alt=media");
+    expect(driveCalls()[1].path).not.toContain("/export");
+    if (outcome.ok) expect(outcome.summary).toContain("# Readme");
+  });
+
+  it("truncates an oversized spreadsheet export", async () => {
+    stubDriveFile({
+      mimeType: "application/vnd.google-apps.spreadsheet",
+      exportBody: "col\n" + "x".repeat(10_000),
+    });
+    const outcome = await executeOperation(readOp(), { fileId: "f1" }, ctx());
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      expect(outcome.summary).toContain("[truncated]");
+      expect(outcome.summary.length).toBeLessThan(6_000);
+    }
+  });
+
+  it("surfaces a provider failure on the export as a failed outcome", async () => {
+    stubDriveFile({
+      mimeType: "application/vnd.google-apps.spreadsheet",
+      readStatus: 500,
+      readErrorBody: { error: "backend" },
+    });
+    const outcome = await executeOperation(readOp(), { fileId: "f1" }, ctx());
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.kind).toBe("failed");
+  });
+
+  it("surfaces a revoked authorization as an auth outcome", async () => {
+    stubDriveFile({
+      mimeType: "application/vnd.google-apps.spreadsheet",
+      readStatus: 403,
+      readErrorBody: { error: "insufficient scope" },
+    });
+    const outcome = await executeOperation(readOp(), { fileId: "f1" }, ctx());
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.kind).toBe("auth");
+  });
+});
+
 describe("reconcileStaleExecutingActions", () => {
   it("confirms a stranded send the provider proves happened — without re-sending", async () => {
     const approvalId = await insertApproval();
