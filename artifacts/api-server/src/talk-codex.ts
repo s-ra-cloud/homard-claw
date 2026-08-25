@@ -161,7 +161,10 @@ function looksLikeThreadResumeFailure(error: CodexTalkError): boolean {
   const message = error.message.toLowerCase();
   const aboutThread = /(session|rollout|thread|conversation)/.test(message);
   const looksMissing =
-    /(not found|no such|missing|does not exist|unable to|failed to (resume|load|find|read)|corrupt)/.test(
+    // "no rollout found" and "thread/resume failed" are the exact
+    // production shapes of a wiped Codex session (JSON-RPC code -32600):
+    // `thread/resume failed: no rollout found for thread id ...`.
+    /(not found|no such|missing|does not exist|unable to|failed to (resume|load|find|read)|no rollout|rollout not found|thread\/resume failed|corrupt)/.test(
       message,
     );
   return aboutThread && looksMissing;

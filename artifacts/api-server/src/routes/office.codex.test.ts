@@ -1662,6 +1662,146 @@ describe("Codex Talk conversations", () => {
     expect(fresh.threadId).toMatch(/^thr_/);
   });
 
+  it("recovers onto a fresh thread on the exact production missing-rollout error", async () => {
+    // Regression for the exact production failure: George's Talk requests
+    // returned 503 forever because the classifier matched neither
+    // "no rollout found" nor "thread/resume failed", so the dead thread
+    // was never retired.
+    const production =
+      "thread/resume failed: no rollout found for thread id 0199a7f2-1c2b-7d3e-9a4f-5b6c7d8e9f01 (code -32600)";
+    const george = await createAgent(`${RUN_TAG} George`);
+    const jeanPierre = await createAgent(`${RUN_TAG} JeanPierre`);
+    turnScript = [talkTurn(), talkTurn()];
+    expect(
+      (
+        await request(app)
+          .post(`/api/agents/${george.id}/converse`)
+          .send({ text: "Warm up George." })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await request(app)
+          .post(`/api/agents/${jeanPierre.id}/converse`)
+          .send({ text: "Warm up Jean-Pierre." })
+      ).status,
+    ).toBe(200);
+    const georgeBefore = await talkConversationRows(george.id);
+    const staleId = georgeBefore[0]!.id;
+
+    // The provider reports the failure before turn.started — proof no
+    // allowance was spent — so this very turn replays on a fresh thread.
+    turnScript = [
+      { events: [{ type: "error", message: production }] },
+      talkTurn(),
+    ];
+    const second = await request(app)
+      .post(`/api/agents/${george.id}/converse`)
+      .send({ text: "After the rollout vanished." });
+    expect(second.status).toBe(200);
+    expect(sdkCalls).toHaveLength(4);
+    expect(sdkCalls[2]!.kind).toBe("resume");
+    expect(sdkCalls[3]!.kind).toBe("start");
+
+    // Only George's stale conversation was retired; the fresh one resumes.
+    const georgeRows = await talkConversationRows(george.id);
+    expect(georgeRows).toHaveLength(2);
+    expect(georgeRows.find((row) => row.id === staleId)!.resumable).toBe(false);
+    const fresh = georgeRows.find((row) => row.id !== staleId)!;
+    expect(fresh.resumable).toBe(true);
+    expect(fresh.threadId).toMatch(/^thr_/);
+
+    // Jean-Pierre's conversation is untouched and still resumable.
+    const jpRows = await talkConversationRows(jeanPierre.id);
+    expect(jpRows).toHaveLength(1);
+    expect(jpRows[0]!.resumable).toBe(true);
+
+    // The next turn resumes George's fresh thread, not another new one.
+    turnScript = [talkTurn()];
+    const third = await request(app)
+      .post(`/api/agents/${george.id}/converse`)
+      .send({ text: "Carry on." });
+    expect(third.status).toBe(200);
+    expect(sdkCalls[4]!.kind).toBe("resume");
+    expect(sdkCalls[4]!.threadId).toBe(fresh.threadId);
+  });
+
+  it("fails closed but retires the thread when the production missing-rollout error arrives as a promise rejection", async () => {
+    // A rejected runStreamed() promise proves nothing about remote
+    // execution, so even the exact production message must not trigger an
+    // automatic replay — only retirement, so the owner's resend recovers.
+    const production =
+      "thread/resume failed: no rollout found for thread id 0199a7f2-1c2b-7d3e-9a4f-5b6c7d8e9f01 (code -32600)";
+    const agent = await createAgent(`${RUN_TAG} GeorgeRejected`);
+    turnScript = [talkTurn()];
+    expect(
+      (
+        await request(app)
+          .post(`/api/agents/${agent.id}/converse`)
+          .send({ text: "Warm up." })
+      ).status,
+    ).toBe(200);
+
+    turnScript = [{ events: [], throws: new Error(production) }];
+    const second = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Rollout gone, via rejection." });
+    expect(second.status).toBe(503);
+    // No automatic replay happened...
+    expect(sdkCalls).toHaveLength(2);
+    // ...but the dead thread was retired,
+    let rows = await talkConversationRows(agent.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.resumable).toBe(false);
+
+    // so the first resend starts fresh and succeeds,
+    turnScript = [talkTurn()];
+    const third = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Resend." });
+    expect(third.status).toBe(200);
+    expect(sdkCalls).toHaveLength(3);
+    expect(sdkCalls[2]!.kind).toBe("start");
+
+    // and a repeated resend resumes that healthy fresh thread.
+    rows = await talkConversationRows(agent.id);
+    const freshThreadId = rows.find((row) => row.resumable)!.threadId;
+    turnScript = [talkTurn()];
+    const fourth = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Resend again." });
+    expect(fourth.status).toBe(200);
+    expect(sdkCalls[3]!.kind).toBe("resume");
+    expect(sdkCalls[3]!.threadId).toBe(freshThreadId);
+  });
+
+  it("never replays the missing-rollout message once the turn has started", async () => {
+    // Even the exact production message must fail closed when it arrives
+    // after turn.started — the provider may have charged the turn.
+    const production =
+      "thread/resume failed: no rollout found for thread id 0199a7f2-1c2b-7d3e-9a4f-5b6c7d8e9f01 (code -32600)";
+    const agent = await createAgent(`${RUN_TAG} GeorgePostStart`);
+    turnScript = [talkTurn()];
+    expect(
+      (
+        await request(app)
+          .post(`/api/agents/${agent.id}/converse`)
+          .send({ text: "Warm up." })
+      ).status,
+    ).toBe(200);
+
+    turnScript = [failingTurn(production)];
+    const second = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Post-start failure." });
+    expect(second.status).toBe(503);
+    expect(sdkCalls).toHaveLength(2);
+    // The thread is not retired: the turn ran, so the thread may be fine.
+    const rows = await talkConversationRows(agent.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.resumable).toBe(true);
+  });
+
   it("fails closed on a resume-shaped promise rejection but retires the thread so the resend recovers", async () => {
     // A rejected runStreamed() promise proves nothing about remote
     // execution — the request may have been accepted (and charged) before

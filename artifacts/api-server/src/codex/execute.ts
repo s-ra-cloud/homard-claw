@@ -159,6 +159,21 @@ export async function ensureCodexWorkspace(
   return dir;
 }
 
+/**
+ * Messages that identify a broken thread resume — the provider says the
+ * stored rollout/session no longer exists (production form:
+ * `thread/resume failed: no rollout found for thread id ... (code -32600)`).
+ * These are checked before the generic hint buckets because the message
+ * echoes the raw thread id, whose digits could otherwise collide with a
+ * numeric hint like "429" or "401" and misclassify a dead thread as a
+ * rate-limit or auth failure.
+ */
+const THREAD_RESUME_HINTS = [
+  "no rollout found",
+  "rollout not found",
+  "thread/resume failed",
+];
+
 const RATE_LIMIT_HINTS = ["rate limit", "rate_limit", "429", "too many requests"];
 const ALLOWANCE_HINTS = [
   "usage limit",
@@ -188,6 +203,9 @@ const AUTH_HINTS = [
 export function classifyCodexError(rawMessage: string): CodexRunError {
   const message = sanitizeErrorMessage(rawMessage);
   const haystack = message.toLowerCase();
+  if (THREAD_RESUME_HINTS.some((hint) => haystack.includes(hint))) {
+    return new CodexRunError("provider_error", message);
+  }
   if (ALLOWANCE_HINTS.some((hint) => haystack.includes(hint))) {
     return new CodexRunError(
       "allowance",
