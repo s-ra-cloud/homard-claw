@@ -84,6 +84,15 @@ export type CodexFailureKind =
   | "provider_error";
 
 export class CodexRunError extends Error {
+  /**
+   * Whether the model turn had started when this failure surfaced.
+   * `false` is positive evidence the failure happened before execution
+   * (nothing ran, no allowance was spent — e.g. a failed thread resume);
+   * `true` means the turn ran; `null` means unknown, which callers must
+   * treat as "may have run".
+   */
+  turnStarted: boolean | null = null;
+
   constructor(
     readonly kind: CodexFailureKind,
     message: string,
@@ -337,6 +346,13 @@ async function runTurnWithState(
   await input.onPhase?.("starting");
 
   const turnInput = `${input.system}\n\n---\n\n${input.prompt}`;
+  // Tracks whether the model turn ever began. Only a terminal error event
+  // *streamed back by the provider* before `turn.started` counts as proof
+  // of pre-execution failure (`turnStarted = false`): the server itself
+  // reported the turn never ran, so no allowance was spent. A rejected
+  // promise proves nothing — the request may have been accepted remotely
+  // before the client-side failure — and stays `null` (unknown).
+  let turnStarted = false;
   let streamed;
   try {
     streamed = await thread.runStreamed(turnInput, { signal: input.signal });
@@ -358,6 +374,7 @@ async function runTurnWithState(
           await input.onThreadId?.(event.thread_id);
           break;
         case "turn.started":
+          turnStarted = true;
           await input.onPhase?.("running");
           break;
         case "turn.completed":
@@ -365,9 +382,11 @@ async function runTurnWithState(
           break;
         case "turn.failed":
           failure = classifyCodexError(event.error.message);
+          failure.turnStarted = turnStarted;
           break;
         case "error":
           failure = classifyCodexError(event.message);
+          failure.turnStarted = turnStarted;
           break;
         case "item.completed": {
           if (event.item.type === "agent_message") {
@@ -384,7 +403,13 @@ async function runTurnWithState(
       }
     }
   } catch (error) {
-    throw toRunError(error, input.signal);
+    const runError = toRunError(error, input.signal);
+    // A stream that breaks mid-iteration only yields safe knowledge in one
+    // direction: if the turn was seen starting, record that so nobody
+    // replays it. Its absence proves nothing (the connection may have died
+    // after remote acceptance), so the flag stays unknown.
+    if (runError.turnStarted === null && turnStarted) runError.turnStarted = true;
+    throw runError;
   }
 
   if (input.signal.aborted) {

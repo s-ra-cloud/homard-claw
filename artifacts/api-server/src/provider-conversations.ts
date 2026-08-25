@@ -99,14 +99,19 @@ export async function ensureConversationWorkspace(
   return updated ?? { ...conversation, workspacePath };
 }
 
-/** Persist the SDK-issued thread id the first time it is emitted. */
+/**
+ * Persist the SDK-issued thread id the moment it is emitted. A freshly
+ * issued thread id is resumable by definition, so recording one also heals
+ * a conversation that was previously marked unresumable (a pinned task that
+ * started a new thread after its old one's session files were wiped).
+ */
 export async function recordThreadId(
   conversationId: string,
   threadId: string,
 ): Promise<void> {
   await db
     .update(providerConversationsTable)
-    .set({ threadId, lastUsedAt: new Date() })
+    .set({ threadId, resumable: true, lastUsedAt: new Date() })
     .where(eq(providerConversationsTable.id, conversationId));
 }
 

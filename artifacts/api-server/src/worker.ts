@@ -1078,7 +1078,10 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         : conversation;
       conversationId = chosen.id;
       workingDirectory = chosen.workspacePath;
-      threadId = chosen.threadId;
+      // A pinned conversation may have been marked unresumable (its thread's
+      // session files were wiped, e.g. by a deploy restart). Keep the
+      // workspace but start a fresh thread instead of resuming a dead one.
+      threadId = chosen.resumable ? chosen.threadId : null;
       if (task.conversationId !== conversationId) {
         await db
           .update(tasksTable)

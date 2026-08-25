@@ -93,6 +93,23 @@ write can be syntactically valid JSON with the mode field intact and no
 tokens. Accepting it lets that fragment overwrite a working session on
 write-back and lets status report a sign-in that authenticates nobody.
 
+## Thread resume depends on scratch session files — retire, don't blindly replay
+
+A stored Codex thread id is only resumable while its session/rollout files
+survive under the scratch CODEX_HOME; every deploy restart wipes them while
+the conversation row lives on, so resumes fail instantly and forever.
+
+**Why:** Talk resumed the latest thread unconditionally and surfaced the
+failure as a generic provider error on every send, while fresh tasks worked.
+
+**How to apply:** on a resume-shaped failure, mark the conversation
+unresumable so the next attempt starts fresh. Automatically replaying the
+turn requires positive protocol proof the model turn never started (a
+terminal provider event before turn.started → turnStarted=false); a rejected
+SDK promise proves nothing and must fail closed — a subscription turn that
+may have run must never be replayed, or the allowance is double-spent.
+Recording a fresh SDK-issued thread id heals the row (resumable=true).
+
 ## A lease check belongs before the write, not only in the catch
 
 **Why:** a heartbeat fires on a timer, so it cannot cover the window between

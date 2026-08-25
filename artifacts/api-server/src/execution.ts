@@ -34,6 +34,13 @@ export class ProviderCallError extends Error {
    */
   readonly retryable: boolean;
 
+  /**
+   * Whether the provider's model turn had started when the failure
+   * surfaced. `false` is positive evidence nothing ran (no allowance was
+   * spent); `null` means unknown and must be treated as "may have run".
+   */
+  turnStarted: boolean | null = null;
+
   constructor(kind: ProviderCallErrorKind, message: string) {
     super(message);
     this.name = "ProviderCallError";
@@ -371,7 +378,9 @@ const openrouterAdapter: ProviderAdapter = {
 function toCallError(error: unknown): ProviderCallError {
   if (error instanceof ProviderCallError) return error;
   if (error instanceof CodexRunError) {
-    return new ProviderCallError(error.kind, error.message);
+    const mapped = new ProviderCallError(error.kind, error.message);
+    mapped.turnStarted = error.turnStarted;
+    return mapped;
   }
   if (error instanceof Error && error.name === "CodexRuntimeError") {
     const kind = (error as { kind?: string }).kind;

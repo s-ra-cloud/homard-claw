@@ -14,11 +14,13 @@ import {
   renewProviderLease,
 } from "./provider-leases";
 import {
+  markConversationUnresumable,
   recordThreadId,
   resolveConversation,
   touchConversation,
 } from "./provider-conversations";
 import { loadAgentAppAccess } from "./connected-apps/authorize";
+import { sanitizeErrorMessage } from "./lib/sanitize";
 
 /**
  * Codex execution context for Talk (typed and voice conversations).
@@ -49,6 +51,13 @@ export type CodexTalkFailureKind =
   | "provider";
 
 export class CodexTalkError extends Error {
+  /**
+   * Whether the model turn had started when the failure surfaced.
+   * `false` proves nothing ran (no allowance spent); `null` is unknown
+   * and must be treated as "may have run".
+   */
+  turnStarted: boolean | null = null;
+
   constructor(
     readonly kind: CodexTalkFailureKind,
     message: string,
@@ -100,27 +109,33 @@ function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
 function toTalkError(error: unknown): CodexTalkError {
   if (error instanceof CodexTalkError) return error;
   if (error instanceof ProviderCallError) {
-    switch (error.kind) {
-      case "auth":
-        return new CodexTalkError("auth", error.message);
-      case "not_configured":
-        return new CodexTalkError("setup", error.message);
-      case "allowance":
-        return new CodexTalkError("allowance", error.message);
-      case "rate_limit":
-        return new CodexTalkError("rate_limit", error.message);
-      case "timeout":
-        return new CodexTalkError("timeout", error.message);
-      case "cancelled":
-        return new CodexTalkError("cancelled", error.message);
-      default:
-        return new CodexTalkError("provider", error.message);
-    }
+    const mapped = mapProviderError(error);
+    mapped.turnStarted = error.turnStarted;
+    return mapped;
   }
   return new CodexTalkError(
     "provider",
     error instanceof Error ? error.message : "Unknown Codex error",
   );
+}
+
+function mapProviderError(error: ProviderCallError): CodexTalkError {
+  switch (error.kind) {
+    case "auth":
+      return new CodexTalkError("auth", error.message);
+    case "not_configured":
+      return new CodexTalkError("setup", error.message);
+    case "allowance":
+      return new CodexTalkError("allowance", error.message);
+    case "rate_limit":
+      return new CodexTalkError("rate_limit", error.message);
+    case "timeout":
+      return new CodexTalkError("timeout", error.message);
+    case "cancelled":
+      return new CodexTalkError("cancelled", error.message);
+    default:
+      return new CodexTalkError("provider", error.message);
+  }
 }
 
 export type CodexTalkAgent = {
@@ -130,6 +145,27 @@ export type CodexTalkAgent = {
   autonomy: string;
   sensitiveDataSandbox: boolean;
 };
+
+/**
+ * Whether a provider failure looks like a broken thread resume rather than
+ * a real model failure. Codex keeps its resumable session files on scratch
+ * disk, so every deployment restart wipes them while the conversation row
+ * (and its thread id) survive in the database. Resuming then dies almost
+ * instantly — before the model runs, so no allowance was spent and it is
+ * safe to fall back to a fresh thread. Only generic provider failures are
+ * eligible: auth, allowance, rate-limit, timeout, and busy failures are
+ * real answers about the account, not the thread.
+ */
+function looksLikeThreadResumeFailure(error: CodexTalkError): boolean {
+  if (error.kind !== "provider" && error.kind !== "workspace") return false;
+  const message = error.message.toLowerCase();
+  const aboutThread = /(session|rollout|thread|conversation)/.test(message);
+  const looksMissing =
+    /(not found|no such|missing|does not exist|unable to|failed to (resume|load|find|read)|corrupt)/.test(
+      message,
+    );
+  return aboutThread && looksMissing;
+}
 
 export type CodexTalkRequest = {
   agent: CodexTalkAgent;
@@ -227,26 +263,6 @@ export async function runCodexTalkTurn(
   heartbeat.unref?.();
 
   try {
-    // The agent's most recent resumable conversation keeps continuity with
-    // its task history; a fresh agent gets a fresh workspace. Conversations
-    // are keyed per agent, so no workspace or thread ever crosses agents.
-    let conversation;
-    try {
-      conversation = await resolveConversation(
-        input.agent.id,
-        "codex_chatgpt",
-        "continue",
-      );
-    } catch (error) {
-      throw new CodexTalkError(
-        "workspace",
-        error instanceof Error
-          ? error.message
-          : "The Codex workspace could not be prepared.",
-      );
-    }
-    const conversationId = conversation.id;
-
     // Sandbox inputs are loaded fresh so a sensitive-data flag toggled a
     // moment ago applies to this very turn. A load failure fails closed to
     // the agent row's own persisted flag.
@@ -263,42 +279,112 @@ export async function runCodexTalkTurn(
       );
     }
 
-    let result: ProviderCallResult;
-    try {
-      result = await callProvider({
-        provider: "codex_chatgpt",
-        model: input.model,
-        system: input.system,
-        prompt: input.prompt,
-        maxOutputTokens: input.maxOutputTokens,
-        signal: controller.signal,
-        reasoningEffort: input.reasoningEffort,
-        threadId: conversation.threadId,
-        workingDirectory: conversation.workspacePath,
-        sandbox: {
-          securityPreset: input.agent.securityPreset,
-          autonomy: input.agent.autonomy,
-          sensitiveDataSandbox,
-        },
-        onThreadId: async (emitted) => {
-          // Persisted the moment the SDK issues it, so a dropped
-          // connection mid-turn still leaves a resumable thread behind.
-          await recordThreadId(conversationId, emitted);
-        },
-      });
-    } catch (error) {
-      if (leaseLost) {
+    // Two attempts at most: "continue" resumes the agent's latest thread
+    // for continuity; if that resume is what failed (a wiped scratch disk
+    // leaves stale thread ids behind after every deploy), the conversation
+    // is marked unresumable and the turn runs once more on a fresh thread.
+    let mode: "continue" | "new" = "continue";
+    for (let attempt = 0; ; attempt++) {
+      // The agent's most recent resumable conversation keeps continuity
+      // with its task history; a fresh agent gets a fresh workspace.
+      // Conversations are keyed per agent, so no workspace or thread ever
+      // crosses agents.
+      let conversation;
+      try {
+        conversation = await resolveConversation(
+          input.agent.id,
+          "codex_chatgpt",
+          mode,
+        );
+      } catch (error) {
         throw new CodexTalkError(
-          "busy",
-          "The ChatGPT Codex session was taken over by another run.",
+          "workspace",
+          error instanceof Error
+            ? error.message
+            : "The Codex workspace could not be prepared.",
         );
       }
-      throw toTalkError(error);
+      const conversationId = conversation.id;
+
+      let result: ProviderCallResult;
+      try {
+        result = await callProvider({
+          provider: "codex_chatgpt",
+          model: input.model,
+          system: input.system,
+          prompt: input.prompt,
+          maxOutputTokens: input.maxOutputTokens,
+          signal: controller.signal,
+          reasoningEffort: input.reasoningEffort,
+          threadId: conversation.threadId,
+          workingDirectory: conversation.workspacePath,
+          sandbox: {
+            securityPreset: input.agent.securityPreset,
+            autonomy: input.agent.autonomy,
+            sensitiveDataSandbox,
+          },
+          onThreadId: async (emitted) => {
+            // Persisted the moment the SDK issues it, so a dropped
+            // connection mid-turn still leaves a resumable thread behind.
+            await recordThreadId(conversationId, emitted);
+          },
+        });
+      } catch (error) {
+        if (leaseLost) {
+          throw new CodexTalkError(
+            "busy",
+            "The ChatGPT Codex session was taken over by another run.",
+          );
+        }
+        const talkError = toTalkError(error);
+        const resumeSuspected =
+          attempt === 0 &&
+          conversation.threadId !== null &&
+          !controller.signal.aborted &&
+          looksLikeThreadResumeFailure(talkError);
+        if (resumeSuspected && talkError.turnStarted === false) {
+          // The provider itself reported the turn failed before starting:
+          // nothing ran, no allowance was spent, so the turn is safe to
+          // replay once on a fresh thread.
+          logger.warn(
+            {
+              agentId: input.agent.id,
+              conversationId,
+              kind: talkError.kind,
+              detail: sanitizeErrorMessage(talkError.message).slice(0, 500),
+            },
+            "Codex Talk thread resume failed; retrying on a fresh thread",
+          );
+          // The broken thread must never be picked again — by Talk or by a
+          // queued task. Best-effort: even if the mark fails, this turn
+          // still runs on a fresh conversation.
+          await markConversationUnresumable(conversationId).catch(() => {});
+          mode = "new";
+          continue;
+        }
+        if (resumeSuspected && talkError.turnStarted !== true) {
+          // The failure looks like a broken resume but there is no proof
+          // the remote turn never started, so replaying it here could
+          // double-spend the allowance. Fail closed: retire the suspect
+          // thread so the owner's resend runs on a fresh one instead.
+          logger.warn(
+            {
+              agentId: input.agent.id,
+              conversationId,
+              kind: talkError.kind,
+              detail: sanitizeErrorMessage(talkError.message).slice(0, 500),
+            },
+            "Codex Talk thread resume suspected broken; retired the thread for the next resend",
+          );
+          await markConversationUnresumable(conversationId).catch(() => {});
+        }
+        throw talkError;
+      }
+      await touchConversation(conversationId).catch(() => {
+        // Continuity bookkeeping must never fail a turn that succeeded.
+      });
+      return result;
     }
-    await touchConversation(conversationId).catch(() => {
-      // Continuity bookkeeping must never fail a turn that succeeded.
-    });
-    return result;
   } finally {
     clearInterval(heartbeat);
     input.signal.removeEventListener("abort", forwardAbort);

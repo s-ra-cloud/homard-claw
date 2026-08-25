@@ -1615,6 +1615,136 @@ describe("Codex Talk conversations", () => {
     );
   });
 
+  it("recovers onto a fresh thread when the stored thread can no longer be resumed", async () => {
+    // Regression: Codex session files live on scratch disk, so a deploy
+    // restart wipes them while the conversation row (and its thread id)
+    // survive. Talk always resumed that stale thread, failed instantly,
+    // and reported a generic provider error forever.
+    const agent = await createAgent(`${RUN_TAG} Restarted`);
+    turnScript = [talkTurn()];
+    const first = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Before the deploy." });
+    expect(first.status).toBe(200);
+    const beforeRows = await talkConversationRows(agent.id);
+    expect(beforeRows).toHaveLength(1);
+    const staleId = beforeRows[0]!.id;
+
+    turnScript = [
+      // The provider streams back a terminal error before the turn ever
+      // starts — protocol-level proof that nothing ran and no allowance
+      // was spent, which is what the automatic replay requires.
+      {
+        events: [
+          { type: "error", message: "The session rollout file was not found on disk." },
+        ],
+      },
+      talkTurn(),
+    ];
+    const second = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "After the deploy." });
+    expect(second.status).toBe(200);
+    expect(second.body.reply).toBe("Claws crossed, boss.");
+
+    // The failed resume was followed by one fresh start — never a third try.
+    expect(sdkCalls).toHaveLength(3);
+    expect(sdkCalls[1]!.kind).toBe("resume");
+    expect(sdkCalls[2]!.kind).toBe("start");
+
+    // The broken conversation can never be picked again; the new one is.
+    const rows = await talkConversationRows(agent.id);
+    expect(rows).toHaveLength(2);
+    const stale = rows.find((row) => row.id === staleId)!;
+    expect(stale.resumable).toBe(false);
+    const fresh = rows.find((row) => row.id !== staleId)!;
+    expect(fresh.resumable).toBe(true);
+    expect(fresh.threadId).toMatch(/^thr_/);
+  });
+
+  it("fails closed on a resume-shaped promise rejection but retires the thread so the resend recovers", async () => {
+    // A rejected runStreamed() promise proves nothing about remote
+    // execution — the request may have been accepted (and charged) before
+    // the client-side failure. The turn must NOT be replayed automatically;
+    // instead the suspect thread is retired so the owner's resend starts
+    // fresh.
+    const agent = await createAgent(`${RUN_TAG} Rejected`);
+    turnScript = [talkTurn()];
+    const first = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Warm up the thread." });
+    expect(first.status).toBe(200);
+
+    turnScript = [
+      { events: [], throws: new Error("The session rollout file was not found on disk.") },
+    ];
+    const second = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "After a wipe, via rejection." });
+    expect(second.status).toBe(503);
+    // No automatic fresh-thread call happened.
+    expect(sdkCalls).toHaveLength(2);
+    // But the suspect thread was retired...
+    const rows = await talkConversationRows(agent.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.resumable).toBe(false);
+
+    // ...so the owner's resend recovers on a fresh thread.
+    turnScript = [talkTurn()];
+    const third = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Resend after the failure." });
+    expect(third.status).toBe(200);
+    expect(sdkCalls).toHaveLength(3);
+    expect(sdkCalls[2]!.kind).toBe("start");
+  });
+
+  it("never replays a failure that happened after the turn started, even when its message mentions the session", async () => {
+    // Adversarial case: the message matches every resume-failure hint, but
+    // the turn had already started — the provider may have charged it, so
+    // replaying it could double-spend the plan allowance.
+    const agent = await createAgent(`${RUN_TAG} Ambiguous`);
+    turnScript = [talkTurn()];
+    const first = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Warm up the thread." });
+    expect(first.status).toBe(200);
+
+    turnScript = [failingTurn("Unable to process conversation session: state not found.")];
+    const second = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Ambiguous failure." });
+    expect(second.status).toBe(503);
+    expect(sdkCalls).toHaveLength(2);
+    const rows = await talkConversationRows(agent.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.resumable).toBe(true);
+  });
+
+  it("does not retry a real provider failure on a fresh thread", async () => {
+    const agent = await createAgent(`${RUN_TAG} RealFailure`);
+    turnScript = [talkTurn()];
+    const first = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Warm up the thread." });
+    expect(first.status).toBe(200);
+
+    // A genuine model failure on a resumed thread must not be replayed —
+    // the call ran, so a retry could double-spend the plan allowance.
+    turnScript = [failingTurn("The model returned malformed output.")];
+    const second = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "This one fails for real." });
+    expect(second.status).toBe(503);
+    expect(second.body.error).toMatch(/Codex provider error/i);
+    expect(sdkCalls).toHaveLength(2);
+
+    // The conversation stays resumable: the thread itself is fine.
+    const rows = await talkConversationRows(agent.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.resumable).toBe(true);
+  });
+
   it("never shares a workspace or thread across agents", async () => {
     const crab = await createAgent(`${RUN_TAG} Crab`);
     const prawn = await createAgent(`${RUN_TAG} Prawn`);

@@ -24,6 +24,8 @@ import {
 import { and, desc, eq, or, sql } from "drizzle-orm";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { recordAudit } from "../audit";
+import { logger } from "../lib/logger";
+import { sanitizeErrorMessage } from "../lib/sanitize";
 import { callProvider, ProviderCallError } from "../execution";
 import { resolveRouting } from "../providers";
 import { CodexTalkError, runCodexTalkTurn } from "../talk-codex";
@@ -422,6 +424,34 @@ async function persistTranscript(
   } else {
     await db.transaction(run);
   }
+}
+
+/**
+ * Server-side record of what actually went wrong. The response only ever
+ * carries the fixed sanitized text, so without this line a production
+ * failure is undiagnosable — the owner sees the category and the logs hold
+ * the (already sanitized) underlying detail.
+ */
+function logTalkFailure(agentId: string, surface: "text" | "voice", err: unknown): void {
+  const kind =
+    err instanceof CodexTalkError
+      ? `codex:${err.kind}`
+      : err instanceof ProviderCallError
+        ? `provider:${err.kind}`
+        : "unknown";
+  // Sanitized and bounded: provider errors can echo the failing request,
+  // and unknown errors may carry anything.
+  logger.warn(
+    {
+      agentId,
+      surface,
+      failureKind: kind,
+      detail: sanitizeErrorMessage(
+        err instanceof Error ? err.message : String(err),
+      ).slice(0, 500),
+    },
+    "Talk turn failed",
+  );
 }
 
 /** Fixed, sanitized messages only — never echo upstream provider detail. */
@@ -828,6 +858,7 @@ router.post("/agents/:agentId/converse", async (req: Request, res: Response) => 
         )
         .catch(() => {});
     }
+    logTalkFailure(agent.id, "text", err);
     const { status, message } = providerErrorMessage(err);
     if (!res.headersSent) res.status(status).json({ error: message });
   } finally {
@@ -927,6 +958,7 @@ router.post("/agents/:agentId/voice-converse", async (req: Request, res: Respons
         controller.signal,
       ));
     } catch (err) {
+      logTalkFailure(agent.id, "voice", err);
       sseWrite(res, {
         type: "error",
         fatal: true,
