@@ -7,6 +7,7 @@ import {
   AgentSecurityPreset,
   useGetProviderSettings,
   useGetProviders,
+  useListCapabilities,
   useListConnectedApps,
   useListProviderModels,
 } from "@workspace/api-client-react";
@@ -174,16 +175,13 @@ export const emptyAgentFormValues: AgentFormValues = {
 /** Convert the form's app→level map into the API's grant list. */
 export function appGrantsPayload(
   data: AgentFormValues,
-): { app: "gmail" | "google_drive" | "github"; accessLevel: "read" | "draft" | "write" }[] {
+): { app: string; accessLevel: "read" | "draft" | "write" }[] {
   return Object.entries(data.appGrants)
     .filter(
       (entry): entry is [string, "read" | "draft" | "write"] =>
         entry[1] !== "none",
     )
-    .map(([app, accessLevel]) => ({
-      app: app as "gmail" | "google_drive" | "github",
-      accessLevel,
-    }));
+    .map(([app, accessLevel]) => ({ app, accessLevel }));
 }
 
 /** Convert an agent's grant list into the form's app→level map. */
@@ -603,8 +601,14 @@ const ACCESS_LEVEL_OPTIONS = [
  */
 function ConnectedAppsFields({ form }: { form: UseFormReturn<AgentFormValues> }) {
   const { data: connectedApps } = useListConnectedApps();
+  const { data: capabilities } = useListCapabilities();
   const apps = connectedApps?.apps ?? [];
-  if (apps.length === 0) return null;
+  // Installed optional capability packages (e.g. Web Research) are granted
+  // exactly like the built-in apps: explicit, per agent, default nothing.
+  const packages = (capabilities?.packages ?? []).filter(
+    (pkg) => !pkg.builtin && pkg.installed && pkg.status === "active",
+  );
+  if (apps.length === 0 && packages.length === 0) return null;
   return (
     <div className="border-4 border-border bg-muted/20 p-4 space-y-3">
       <div>
@@ -665,6 +669,51 @@ function ConnectedAppsFields({ form }: { form: UseFormReturn<AgentFormValues> })
                         </Link>
                       </p>
                     ) : null}
+                    <p className="text-[9px] text-muted-foreground uppercase font-bold mt-1">
+                      {ACCESS_LEVEL_OPTIONS.find((o) => o.value === level)?.blurb}
+                    </p>
+                  </div>
+                  <Select onValueChange={field.onChange} value={level}>
+                    <FormControl>
+                      <SelectTrigger className={`${selectTriggerClass} sm:w-44`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent className={selectContentClass}>
+                      {ACCESS_LEVEL_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value} className={selectItemClass}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage className={messageClass} />
+                </FormItem>
+              );
+            }}
+          />
+        ))}
+        {packages.map((pkg) => (
+          <FormField
+            key={pkg.packageId}
+            control={form.control}
+            name={`appGrants.${pkg.packageId}` as const}
+            render={({ field }) => {
+              const level = field.value ?? "none";
+              return (
+                <FormItem className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 border-2 border-border/50 bg-background/50 p-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold uppercase text-xs">{pkg.displayName}</span>
+                      <Badge variant="outline">Package</Badge>
+                      {!pkg.enabled ? (
+                        <Badge variant="destructive">Disabled</Badge>
+                      ) : pkg.health === "connected" || pkg.health === "none_required" ? (
+                        <Badge variant="success">Ready</Badge>
+                      ) : (
+                        <Badge variant="warning">Not Connected</Badge>
+                      )}
+                    </div>
                     <p className="text-[9px] text-muted-foreground uppercase font-bold mt-1">
                       {ACCESS_LEVEL_OPTIONS.find((o) => o.value === level)?.blurb}
                     </p>

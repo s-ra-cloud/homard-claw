@@ -37,7 +37,7 @@ export function isConnectedAppId(value: string): value is ConnectedAppId {
   return (CONNECTED_APP_IDS as readonly string[]).includes(value);
 }
 
-type ParamSpec = {
+export type ParamSpec = {
   name: string;
   required: boolean;
   kind: "string" | "number";
@@ -204,7 +204,7 @@ export function findOperation(name: string): AppOperation | null {
  * a connector call) or a human-readable error.
  */
 export function validateParams(
-  op: AppOperation,
+  op: Pick<AppOperation, "params">,
   raw: unknown,
 ): { ok: true; params: Record<string, unknown> } | { ok: false; error: string } {
   const input =
@@ -266,15 +266,42 @@ export function validateParams(
  * are listed — the model never sees an operation it would be denied.
  */
 export function buildAppsPromptSection(
-  grants: ReadonlyMap<ConnectedAppId, AppAccessLevel>,
-  options?: { sensitiveDataSandbox?: boolean },
+  grants: ReadonlyMap<string, AppAccessLevel>,
+  options?: {
+    sensitiveDataSandbox?: boolean;
+    /**
+     * The workspace's resolved capability tools. When provided, the prompt
+     * advertises exactly this catalog (built-ins plus installed packages);
+     * without it, it falls back to the built-in operations alone.
+     */
+    tools?: readonly {
+      name: string;
+      packageId: string;
+      level: AppAccessLevel;
+      description: string;
+      /** True for MCP/network-backed tools (non-builtin executor). */
+      external?: boolean;
+    }[];
+  },
 ): string | null {
   const sandboxed = options?.sensitiveDataSandbox === true;
-  const allowed = APP_OPERATIONS.filter((op) => {
-    const granted = grants.get(op.app);
+  const catalog =
+    options?.tools ??
+    APP_OPERATIONS.map((op) => ({
+      name: op.name,
+      packageId: op.app as string,
+      level: op.level,
+      description: op.description,
+    }));
+  const allowed = catalog.filter((op) => {
+    const granted = grants.get(op.packageId);
     if (granted === undefined || !levelAllows(granted, op.level)) return false;
-    // Sandboxed agents never see draft/write operations in their prompt.
+    // Sandboxed agents never see draft/write operations — nor any
+    // network-backed (MCP) tool, which would be an exfiltration channel.
     // (Presentation only — authorizeAppAction denies forged requests too.)
+    if (sandboxed && ("external" in op ? op.external === true : false)) {
+      return false;
+    }
     return sandboxed ? op.level === "read" : true;
   });
   if (allowed.length === 0) return null;

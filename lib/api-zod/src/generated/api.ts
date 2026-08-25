@@ -119,7 +119,7 @@ export const ListAgentsResponseItem = zod.object({
   "maxSubtasksPerTask": zod.number().min(listAgentsResponsePermissionOverridesOneMaxSubtasksPerTaskMin).nullish()
 }).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
   "appGrants": zod.array(zod.object({
-  "app": zod.enum(['gmail', 'google_drive', 'github']),
+  "app": zod.string().describe('Capability package id — a built-in app (gmail, google_drive, github) or an installed package such as web_research. Unknown ids are dropped by the server.'),
   "accessLevel": zod.enum(['read', 'draft', 'write'])
 }).describe('Explicit permission for one agent to use one connected app. \"read\" only looks, \"draft\" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), \"write\" may take externally visible actions — those always pass through the approval desk before running.')),
   "sensitiveDataSandbox": zod.boolean().describe('Sensitive data sandbox. When true the server keeps this agent\'s granted read-only app operations but denies connected-app drafts and writes, blocks internet\/web access for Codex runs, forbids delegating or receiving delegated work, and excludes shared memories and knowledge from its prompts.'),
@@ -210,7 +210,7 @@ export const CreateAgentBody = zod.object({
   "maxSubtasksPerTask": zod.number().min(createAgentBodyPermissionOverridesOneMaxSubtasksPerTaskMin).nullish()
 }).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
   "appGrants": zod.array(zod.object({
-  "app": zod.enum(['gmail', 'google_drive', 'github']),
+  "app": zod.string().describe('Capability package id — a built-in app (gmail, google_drive, github) or an installed package such as web_research. Unknown ids are dropped by the server.'),
   "accessLevel": zod.enum(['read', 'draft', 'write'])
 }).describe('Explicit permission for one agent to use one connected app. \"read\" only looks, \"draft\" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), \"write\" may take externally visible actions — those always pass through the approval desk before running.')).optional(),
   "sensitiveDataSandbox": zod.boolean().optional(),
@@ -302,7 +302,7 @@ export const CreateAgentResponse = zod.object({
   "maxSubtasksPerTask": zod.number().min(createAgentResponsePermissionOverridesOneMaxSubtasksPerTaskMin).nullish()
 }).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
   "appGrants": zod.array(zod.object({
-  "app": zod.enum(['gmail', 'google_drive', 'github']),
+  "app": zod.string().describe('Capability package id — a built-in app (gmail, google_drive, github) or an installed package such as web_research. Unknown ids are dropped by the server.'),
   "accessLevel": zod.enum(['read', 'draft', 'write'])
 }).describe('Explicit permission for one agent to use one connected app. \"read\" only looks, \"draft\" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), \"write\" may take externally visible actions — those always pass through the approval desk before running.')),
   "sensitiveDataSandbox": zod.boolean().describe('Sensitive data sandbox. When true the server keeps this agent\'s granted read-only app operations but denies connected-app drafts and writes, blocks internet\/web access for Codex runs, forbids delegating or receiving delegated work, and excludes shared memories and knowledge from its prompts.'),
@@ -406,7 +406,7 @@ export const GetAgentResponse = zod.object({
   "maxSubtasksPerTask": zod.number().min(getAgentResponseAgentPermissionOverridesOneMaxSubtasksPerTaskMin).nullish()
 }).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
   "appGrants": zod.array(zod.object({
-  "app": zod.enum(['gmail', 'google_drive', 'github']),
+  "app": zod.string().describe('Capability package id — a built-in app (gmail, google_drive, github) or an installed package such as web_research. Unknown ids are dropped by the server.'),
   "accessLevel": zod.enum(['read', 'draft', 'write'])
 }).describe('Explicit permission for one agent to use one connected app. \"read\" only looks, \"draft\" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), \"write\" may take externally visible actions — those always pass through the approval desk before running.')),
   "sensitiveDataSandbox": zod.boolean().describe('Sensitive data sandbox. When true the server keeps this agent\'s granted read-only app operations but denies connected-app drafts and writes, blocks internet\/web access for Codex runs, forbids delegating or receiving delegated work, and excludes shared memories and knowledge from its prompts.'),
@@ -570,7 +570,7 @@ export const UpdateAgentBody = zod.object({
   "maxSubtasksPerTask": zod.number().min(updateAgentBodyPermissionOverridesOneMaxSubtasksPerTaskMin).nullish()
 }).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
   "appGrants": zod.array(zod.object({
-  "app": zod.enum(['gmail', 'google_drive', 'github']),
+  "app": zod.string().describe('Capability package id — a built-in app (gmail, google_drive, github) or an installed package such as web_research. Unknown ids are dropped by the server.'),
   "accessLevel": zod.enum(['read', 'draft', 'write'])
 }).describe('Explicit permission for one agent to use one connected app. \"read\" only looks, \"draft\" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), \"write\" may take externally visible actions — those always pass through the approval desk before running.')).optional(),
   "sensitiveDataSandbox": zod.boolean().optional(),
@@ -662,7 +662,7 @@ export const UpdateAgentResponse = zod.object({
   "maxSubtasksPerTask": zod.number().min(updateAgentResponsePermissionOverridesOneMaxSubtasksPerTaskMin).nullish()
 }).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
   "appGrants": zod.array(zod.object({
-  "app": zod.enum(['gmail', 'google_drive', 'github']),
+  "app": zod.string().describe('Capability package id — a built-in app (gmail, google_drive, github) or an installed package such as web_research. Unknown ids are dropped by the server.'),
   "accessLevel": zod.enum(['read', 'draft', 'write'])
 }).describe('Explicit permission for one agent to use one connected app. \"read\" only looks, \"draft\" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), \"write\" may take externally visible actions — those always pass through the approval desk before running.')),
   "sensitiveDataSandbox": zod.boolean().describe('Sensitive data sandbox. When true the server keeps this agent\'s granted read-only app operations but denies connected-app drafts and writes, blocks internet\/web access for Codex runs, forbids delegating or receiving delegated work, and excludes shared memories and knowledge from its prompts.'),
@@ -775,7 +775,7 @@ export const DuplicateAgentResponse = zod.object({
   "maxSubtasksPerTask": zod.number().min(duplicateAgentResponsePermissionOverridesOneMaxSubtasksPerTaskMin).nullish()
 }).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
   "appGrants": zod.array(zod.object({
-  "app": zod.enum(['gmail', 'google_drive', 'github']),
+  "app": zod.string().describe('Capability package id — a built-in app (gmail, google_drive, github) or an installed package such as web_research. Unknown ids are dropped by the server.'),
   "accessLevel": zod.enum(['read', 'draft', 'write'])
 }).describe('Explicit permission for one agent to use one connected app. \"read\" only looks, \"draft\" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), \"write\" may take externally visible actions — those always pass through the approval desk before running.')),
   "sensitiveDataSandbox": zod.boolean().describe('Sensitive data sandbox. When true the server keeps this agent\'s granted read-only app operations but denies connected-app drafts and writes, blocks internet\/web access for Codex runs, forbids delegating or receiving delegated work, and excludes shared memories and knowledge from its prompts.'),
@@ -882,7 +882,7 @@ export const SetAgentArchivedResponse = zod.object({
   "maxSubtasksPerTask": zod.number().min(setAgentArchivedResponsePermissionOverridesOneMaxSubtasksPerTaskMin).nullish()
 }).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
   "appGrants": zod.array(zod.object({
-  "app": zod.enum(['gmail', 'google_drive', 'github']),
+  "app": zod.string().describe('Capability package id — a built-in app (gmail, google_drive, github) or an installed package such as web_research. Unknown ids are dropped by the server.'),
   "accessLevel": zod.enum(['read', 'draft', 'write'])
 }).describe('Explicit permission for one agent to use one connected app. \"read\" only looks, \"draft\" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), \"write\" may take externally visible actions — those always pass through the approval desk before running.')),
   "sensitiveDataSandbox": zod.boolean().describe('Sensitive data sandbox. When true the server keeps this agent\'s granted read-only app operations but denies connected-app drafts and writes, blocks internet\/web access for Codex runs, forbids delegating or receiving delegated work, and excludes shared memories and knowledge from its prompts.'),
@@ -989,7 +989,7 @@ export const PauseAgentResponse = zod.object({
   "maxSubtasksPerTask": zod.number().min(pauseAgentResponsePermissionOverridesOneMaxSubtasksPerTaskMin).nullish()
 }).describe('Custom limits overriding the security preset profile. Omitted fields fall back to the profile.'),zod.null()]).optional(),
   "appGrants": zod.array(zod.object({
-  "app": zod.enum(['gmail', 'google_drive', 'github']),
+  "app": zod.string().describe('Capability package id — a built-in app (gmail, google_drive, github) or an installed package such as web_research. Unknown ids are dropped by the server.'),
   "accessLevel": zod.enum(['read', 'draft', 'write'])
 }).describe('Explicit permission for one agent to use one connected app. \"read\" only looks, \"draft\" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), \"write\" may take externally visible actions — those always pass through the approval desk before running.')),
   "sensitiveDataSandbox": zod.boolean().describe('Sensitive data sandbox. When true the server keeps this agent\'s granted read-only app operations but denies connected-app drafts and writes, blocks internet\/web access for Codex runs, forbids delegating or receiving delegated work, and excludes shared memories and knowledge from its prompts.'),
@@ -2796,6 +2796,97 @@ export const UpdateConnectedAppResponse = zod.object({
   "statusDetail": zod.string().nullable(),
   "accountLabel": zod.string().nullable().describe('Human-readable identity of the connected account (email or login) when the platform exposes one. Never a credential.'),
   "grantedAgents": zod.number()
+})
+
+
+/**
+ * @summary Vetted capability-package catalog with install state, tools, health, and pending updates
+ */
+export const ListCapabilitiesResponse = zod.object({
+  "packages": zod.array(zod.object({
+  "packageId": zod.string(),
+  "displayName": zod.string(),
+  "description": zod.string(),
+  "publisher": zod.string(),
+  "builtin": zod.boolean(),
+  "connection": zod.enum(['gmail', 'google_drive', 'github', 'mcp', 'none']),
+  "installed": zod.boolean(),
+  "installedVersion": zod.string().nullable(),
+  "registryVersion": zod.string(),
+  "status": zod.enum(['active', 'update_review', 'quarantined', 'not_installed']),
+  "enabled": zod.boolean(),
+  "quarantineReason": zod.string().nullable(),
+  "pendingVersion": zod.string().nullable(),
+  "pendingDiff": zod.union([zod.record(zod.string(), zod.unknown()),zod.null()]),
+  "health": zod.enum(['connected', 'expired', 'not_connected', 'unavailable', 'none_required']),
+  "healthDetail": zod.string().nullable(),
+  "grantedAgents": zod.number(),
+  "tools": zod.array(zod.object({
+  "name": zod.string(),
+  "description": zod.string(),
+  "level": zod.enum(['read', 'draft', 'write']),
+  "recovery": zod.enum(['retry_safe', 'provider_verifiable', 'non_retryable']).describe('Crash-recovery classification declared by the package: retry_safe operations may be re-run after an interruption, provider_verifiable writes are confirmed with the provider first, and non_retryable interruptions always settle as unknown.'),
+  "needsApproval": zod.boolean()
+})),
+  "skills": zod.array(zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "triggers": zod.array(zod.string())
+}))
+}))
+})
+
+
+/**
+ * @summary Enable or disable a capability package for every agent at once
+ */
+export const UpdateCapabilityParams = zod.object({
+  "packageId": zod.coerce.string()
+})
+
+export const UpdateCapabilityBody = zod.object({
+  "enabled": zod.boolean()
+})
+
+export const UpdateCapabilityResponse = zod.object({
+  "packageId": zod.string(),
+  "enabled": zod.boolean()
+})
+
+
+/**
+ * @summary Install a vetted capability package, pinned at the registry version
+ */
+export const InstallCapabilityParams = zod.object({
+  "packageId": zod.coerce.string()
+})
+
+export const InstallCapabilityResponse = zod.object({
+  "installed": zod.boolean()
+})
+
+
+/**
+ * @summary Apply a pending permission-expanding package update after review
+ */
+export const ApplyCapabilityUpdateParams = zod.object({
+  "packageId": zod.coerce.string()
+})
+
+export const ApplyCapabilityUpdateResponse = zod.object({
+  "updated": zod.boolean()
+})
+
+
+/**
+ * @summary Uninstall an optional capability package
+ */
+export const UninstallCapabilityParams = zod.object({
+  "packageId": zod.coerce.string()
+})
+
+export const UninstallCapabilityResponse = zod.object({
+  "uninstalled": zod.boolean()
 })
 
 

@@ -173,15 +173,6 @@ export interface AgentPermissionOverrides {
   maxSubtasksPerTask?: number | null;
 }
 
-export type AppGrantApp = typeof AppGrantApp[keyof typeof AppGrantApp];
-
-
-export const AppGrantApp = {
-  gmail: 'gmail',
-  google_drive: 'google_drive',
-  github: 'github',
-} as const;
-
 export type AppGrantAccessLevel = typeof AppGrantAccessLevel[keyof typeof AppGrantAccessLevel];
 
 
@@ -195,7 +186,8 @@ export const AppGrantAccessLevel = {
  * Explicit permission for one agent to use one connected app. "read" only looks, "draft" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), "write" may take externally visible actions — those always pass through the approval desk before running.
  */
 export interface AppGrant {
-  app: AppGrantApp;
+  /** Capability package id — a built-in app (gmail, google_drive, github) or an installed package such as web_research. Unknown ids are dropped by the server. */
+  app: string;
   accessLevel: AppGrantAccessLevel;
 }
 
@@ -784,6 +776,127 @@ export interface ConnectedAppList {
 
 export interface ConnectedAppUpdate {
   enabled: boolean;
+}
+
+export type CapabilityToolLevel = typeof CapabilityToolLevel[keyof typeof CapabilityToolLevel];
+
+
+export const CapabilityToolLevel = {
+  read: 'read',
+  draft: 'draft',
+  write: 'write',
+} as const;
+
+/**
+ * Crash-recovery classification declared by the package: retry_safe operations may be re-run after an interruption, provider_verifiable writes are confirmed with the provider first, and non_retryable interruptions always settle as unknown.
+ */
+export type CapabilityToolRecovery = typeof CapabilityToolRecovery[keyof typeof CapabilityToolRecovery];
+
+
+export const CapabilityToolRecovery = {
+  retry_safe: 'retry_safe',
+  provider_verifiable: 'provider_verifiable',
+  non_retryable: 'non_retryable',
+} as const;
+
+export interface CapabilityTool {
+  name: string;
+  description: string;
+  level: CapabilityToolLevel;
+  /** Crash-recovery classification declared by the package: retry_safe operations may be re-run after an interruption, provider_verifiable writes are confirmed with the provider first, and non_retryable interruptions always settle as unknown. */
+  recovery: CapabilityToolRecovery;
+  needsApproval: boolean;
+}
+
+export interface CapabilitySkill {
+  id: string;
+  title: string;
+  triggers: string[];
+}
+
+export type CapabilityPackageConnection = typeof CapabilityPackageConnection[keyof typeof CapabilityPackageConnection];
+
+
+export const CapabilityPackageConnection = {
+  gmail: 'gmail',
+  google_drive: 'google_drive',
+  github: 'github',
+  mcp: 'mcp',
+  none: 'none',
+} as const;
+
+export type CapabilityPackageStatus = typeof CapabilityPackageStatus[keyof typeof CapabilityPackageStatus];
+
+
+export const CapabilityPackageStatus = {
+  active: 'active',
+  update_review: 'update_review',
+  quarantined: 'quarantined',
+  not_installed: 'not_installed',
+} as const;
+
+export type CapabilityPackagePendingDiff = { [key: string]: unknown } | null;
+
+export type CapabilityPackageHealth = typeof CapabilityPackageHealth[keyof typeof CapabilityPackageHealth];
+
+
+export const CapabilityPackageHealth = {
+  connected: 'connected',
+  expired: 'expired',
+  not_connected: 'not_connected',
+  unavailable: 'unavailable',
+  none_required: 'none_required',
+} as const;
+
+export interface CapabilityPackage {
+  packageId: string;
+  displayName: string;
+  description: string;
+  publisher: string;
+  builtin: boolean;
+  connection: CapabilityPackageConnection;
+  installed: boolean;
+  /** @nullable */
+  installedVersion: string | null;
+  registryVersion: string;
+  status: CapabilityPackageStatus;
+  enabled: boolean;
+  /** @nullable */
+  quarantineReason: string | null;
+  /** @nullable */
+  pendingVersion: string | null;
+  pendingDiff: CapabilityPackagePendingDiff;
+  health: CapabilityPackageHealth;
+  /** @nullable */
+  healthDetail: string | null;
+  grantedAgents: number;
+  tools: CapabilityTool[];
+  skills: CapabilitySkill[];
+}
+
+export interface CapabilityList {
+  packages: CapabilityPackage[];
+}
+
+export interface CapabilityUpdate {
+  enabled: boolean;
+}
+
+export interface CapabilitySwitch {
+  packageId: string;
+  enabled: boolean;
+}
+
+export interface CapabilityInstallResult {
+  installed: boolean;
+}
+
+export interface CapabilityUpdateResult {
+  updated: boolean;
+}
+
+export interface CapabilityUninstallResult {
+  uninstalled: boolean;
 }
 
 export interface ArchiveInput {

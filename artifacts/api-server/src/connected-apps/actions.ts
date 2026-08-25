@@ -6,14 +6,28 @@ import {
 } from "@workspace/db";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { recordAudit } from "../audit";
-import { APP_CATALOG, findOperation, type ConnectedAppId } from "./catalog";
+import { executeCapabilityTool } from "../capabilities/execute";
+import { findRegistryEntry } from "../capabilities/registry";
 import {
-  executeOperation,
+  loadWorkspaceCapabilities,
+  type ResolvedCapabilityTool,
+} from "../capabilities/service";
+import { APP_CATALOG, type ConnectedAppId } from "./catalog";
+import {
   hasOutcomeVerifier,
   verifierConsistency,
   verifyOperationOutcome,
   type ExecutionOutcome,
 } from "./connections";
+
+/** Resolve one operation against the workspace's pinned capability catalog. */
+async function resolveTool(
+  operation: string,
+  workspaceId: string | null,
+): Promise<ResolvedCapabilityTool | null> {
+  const capabilities = await loadWorkspaceCapabilities(workspaceId);
+  return capabilities.tools.get(operation) ?? null;
+}
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type DbLike = Tx | typeof db;
@@ -53,7 +67,7 @@ export async function recordDeniedAction(input: {
   agentId: string;
   agentName: string;
   workspaceId: string | null;
-  app: ConnectedAppId | null;
+  app: string | null;
   operation: string;
   params: Record<string, unknown> | null;
   reason: string;
@@ -93,7 +107,7 @@ export async function runAllowedAction(input: {
   agentId: string;
   agentName: string;
   workspaceId: string | null;
-  app: ConnectedAppId;
+  app: string;
   operation: string;
   params: Record<string, unknown>;
   targetSummary: string;
@@ -112,9 +126,9 @@ export async function runAllowedAction(input: {
       executingAt: new Date(),
     })
     .returning();
-  const op = findOperation(input.operation);
-  const outcome: ExecutionOutcome = op
-    ? await executeOperation(op, input.params, {
+  const tool = await resolveTool(input.operation, input.workspaceId);
+  const outcome: ExecutionOutcome = tool
+    ? await executeCapabilityTool(tool, input.params, {
         actionId: pending.id,
         workspaceId: input.workspaceId,
       })
@@ -252,7 +266,41 @@ async function reconcileOneStaleAction(
     resolution: "unknown",
   });
 
-  if (!hasOutcomeVerifier(action.operation)) return settleUnknown();
+  if (!hasOutcomeVerifier(action.operation)) {
+    // No provider verifier. The pinned manifest's recovery class decides:
+    // retry-safe tools (idempotent reads/queries) may be re-run — under the
+    // original action identity when an approval exists, or settled as
+    // provably-not-delivered otherwise so the agent can simply ask again.
+    // Everything else (non_retryable, unresolvable, unclassified) settles
+    // as unknown: replaying an ambiguous external write is how an email
+    // gets sent twice.
+    const tool = await resolveTool(action.operation, workspaceId);
+    if (tool?.recovery !== "retry_safe") return settleUnknown();
+    if (!action.approvalId) {
+      return {
+        action: await finalizeAction(
+          action.id,
+          agentName,
+          {
+            ok: false,
+            kind: "failed",
+            message:
+              "A previous run was interrupted mid-execution. This tool is classified retry-safe, so it was not replayed automatically — request it again if still needed.",
+          },
+          workspaceId,
+        ),
+        resolution: "not_executed",
+      };
+    }
+    if (action.recoveryRequeuedAt) {
+      return settleUnknown(
+        "it was already retried once after an earlier crash; it will not be retried again",
+      );
+    }
+    const requeued = await requeueForApprovalRetry(action, agentName, workspaceId);
+    if (requeued) return { action: requeued, resolution: "requeued" };
+    return settleUnknown("the row was concurrently modified");
+  }
 
   const verdict = await verifyOperationOutcome(
     action.operation,
@@ -298,27 +346,7 @@ async function reconcileOneStaleAction(
         "it was already retried once after an earlier crash; it will not be retried again",
       );
     }
-    const requeued = await db.transaction(async (tx) => {
-      const [row] = await tx
-        .update(appActionsTable)
-        .set({ status: "approved", recoveryRequeuedAt: new Date() })
-        .where(
-          and(
-            eq(appActionsTable.id, action.id),
-            eq(appActionsTable.status, "executing"),
-          ),
-        )
-        .returning();
-      if (row) {
-        await recordAudit(
-          workspaceId,
-          "app_action.requeued",
-          `An interrupted action by ${agentName} (${action.operation}: ${action.targetSummary}) was verified as never delivered and re-queued for a safe retry.`,
-          tx,
-        );
-      }
-      return row ?? null;
-    });
+    const requeued = await requeueForApprovalRetry(action, agentName, workspaceId);
     if (requeued) return { action: requeued, resolution: "requeued" };
     // Someone else already moved the row; report it as-is without settling.
     return settleUnknown("the row was concurrently modified");
@@ -338,15 +366,48 @@ async function reconcileOneStaleAction(
     resolution: "not_executed",
   };
 }
+/**
+ * Move an interrupted, owner-approved action back to "approved" for one safe
+ * retry under the SAME action id (and therefore the same idempotency
+ * marker). recoveryRequeuedAt is the durable single-retry fence.
+ */
+async function requeueForApprovalRetry(
+  action: AppActionRecord,
+  agentName: string,
+  workspaceId: string | null,
+): Promise<AppActionRecord | null> {
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(appActionsTable)
+      .set({ status: "approved", recoveryRequeuedAt: new Date() })
+      .where(
+        and(
+          eq(appActionsTable.id, action.id),
+          eq(appActionsTable.status, "executing"),
+        ),
+      )
+      .returning();
+    if (row) {
+      await recordAudit(
+        workspaceId,
+        "app_action.requeued",
+        `An interrupted action by ${agentName} (${action.operation}: ${action.targetSummary}) was determined safe to retry and re-queued.`,
+        tx,
+      );
+    }
+    return row ?? null;
+  });
+}
+
 /** Execute a claimed (status "executing") action and finalize its row. */
 export async function executeClaimedAction(
   action: AppActionRecord,
   agentName: string,
   workspaceId: string | null,
 ): Promise<{ action: AppActionRecord; outcome: ExecutionOutcome }> {
-  const op = findOperation(action.operation);
-  const outcome: ExecutionOutcome = op
-    ? await executeOperation(op, action.params ?? {}, {
+  const tool = await resolveTool(action.operation, workspaceId);
+  const outcome: ExecutionOutcome = tool
+    ? await executeCapabilityTool(tool, action.params ?? {}, {
         actionId: action.id,
         workspaceId,
       })
@@ -415,7 +476,10 @@ export async function settleActionForApproval(
 
 /** One line per settled action, replayed to the model on follow-up rounds. */
 export function describeActionForModel(action: AppActionRecord): string {
-  const label = APP_CATALOG[action.app as ConnectedAppId]?.displayName ?? action.app;
+  const label =
+    APP_CATALOG[action.app as ConnectedAppId]?.displayName ??
+    findRegistryEntry(action.app)?.manifest.displayName ??
+    action.app;
   switch (action.status) {
     case "executed":
       return `[${label}] ${action.operation} (${action.targetSummary}) → SUCCESS:\n${action.resultSummary ?? "(no output)"}`;

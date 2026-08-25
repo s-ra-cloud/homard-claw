@@ -120,7 +120,9 @@ import {
   listTaskActions,
   settleActionForApproval,
 } from "../connected-apps/actions";
+import { findRegistryEntry } from "../capabilities/registry";
 import connectedAppsRouter from "./connected-apps";
+import capabilitiesRouter from "./capabilities";
 import eventsRouter from "./events";
 import memoryRouter from "./memory";
 import notificationsRouter from "./notifications";
@@ -146,6 +148,7 @@ router.use(notificationsRouter);
 router.use(reportsRouter);
 router.use(eventsRouter);
 router.use(connectedAppsRouter);
+router.use(capabilitiesRouter);
 
 router.get("/runtime/health", async (req: Request, res: Response) => {
   const [runtimes, queue, stop] = await Promise.all([
@@ -170,14 +173,22 @@ router.get("/runtime/health", async (req: Request, res: Response) => {
   );
 });
 
-type AppGrantJson = { app: ConnectedAppId; accessLevel: AppAccessLevel };
+type AppGrantJson = { app: string; accessLevel: AppAccessLevel };
 
-/** Last entry wins when a payload repeats an app; order is normalized. */
+/**
+ * Last entry wins when a payload repeats an app; order is normalized.
+ * Grants may target any vetted capability package (built-in app or
+ * installed package); anything outside the registry is dropped — a grant
+ * to an unknown package could never authorize anything anyway.
+ */
 function dedupeGrants(
   grants: readonly AppGrantJson[],
 ): AppGrantJson[] {
-  const byApp = new Map<ConnectedAppId, AppAccessLevel>();
-  for (const grant of grants) byApp.set(grant.app, grant.accessLevel);
+  const byApp = new Map<string, AppAccessLevel>();
+  for (const grant of grants) {
+    if (!findRegistryEntry(grant.app)) continue;
+    byApp.set(grant.app, grant.accessLevel);
+  }
   return [...byApp.entries()]
     .map(([app, accessLevel]) => ({ app, accessLevel }))
     .sort((a, b) => a.app.localeCompare(b.app));
@@ -201,7 +212,7 @@ async function grantsByAgent(
   for (const row of rows) {
     const list = map.get(row.agentId) ?? [];
     list.push({
-      app: row.app as ConnectedAppId,
+      app: row.app,
       accessLevel: row.accessLevel as AppAccessLevel,
     });
     map.set(row.agentId, list);
@@ -585,7 +596,7 @@ router.patch("/agents/:agentId", async (req, res): Promise<void> => {
           .from(agentAppGrantsTable)
           .where(eq(agentAppGrantsTable.agentId, existing.id))
         ).map((row) => ({
-          app: row.app as ConnectedAppId,
+          app: row.app,
           accessLevel: row.accessLevel as AppAccessLevel,
         }));
       }

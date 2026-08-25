@@ -725,6 +725,64 @@ export const workspaceConnectedAppsTable = pgTable(
   (table) => [primaryKey({ columns: [table.workspaceId, table.app] })],
 );
 /**
+ * One installed capability package per workspace. The row pins exactly what
+ * the workspace runs: the manifest snapshot taken at install/update time and
+ * its fingerprint. The vetted registry may move on — this row does not, until
+ * the owner reviews the diff and applies the update. A fingerprint mismatch
+ * between the pinned snapshot and the registry at the same version means the
+ * registry content changed under our feet: the package is quarantined rather
+ * than silently serving different tools.
+ *
+ * Built-in packages (gmail, google_drive, github) are implicitly installed
+ * and never need a row; rows exist only for optional packages.
+ */
+export const capabilityPackagesTable = pgTable(
+  "capability_packages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspacesTable.id, { onDelete: "cascade" }),
+    packageId: text("package_id").notNull(),
+    installedVersion: text("installed_version").notNull(),
+    /** sha256 fingerprint of the pinned manifest snapshot. */
+    fingerprint: text("fingerprint").notNull(),
+    /** The exact manifest this workspace runs, frozen at install/update. */
+    manifest: jsonb("manifest").$type<Record<string, unknown>>().notNull(),
+    // active | update_review | quarantined
+    status: text("status").notNull().default("active"),
+    /** Version awaiting owner review (permission-expanding updates park here). */
+    pendingVersion: text("pending_version"),
+    pendingFingerprint: text("pending_fingerprint"),
+    pendingManifest: jsonb("pending_manifest").$type<Record<string, unknown>>(),
+    /** Human-reviewable permission diff for the pending update. */
+    pendingDiff: jsonb("pending_diff").$type<Record<string, unknown>>(),
+    quarantineReason: text("quarantine_reason"),
+    /**
+     * Server-held HMAC over (workspaceId, packageId, version, fingerprint).
+     * Authenticates the pinned snapshot: a DB actor cannot forge it without
+     * the server's signing key, so tampered rows quarantine instead of serve.
+     */
+    installSignature: text("install_signature").notNull().default(""),
+    installedAt: timestamp("installed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("capability_packages_ws_pkg_unique").on(
+      table.workspaceId,
+      table.packageId,
+    ),
+  ],
+);
+
+export type CapabilityPackageRecord =
+  typeof capabilityPackagesTable.$inferSelect;
+
+/**
  * Durable record of every connected-app action an agent requested. The status
  * column doubles as the exactly-once fence for externally visible writes:
  * waiting_approval → approved → executing → executed/failed, with the

@@ -6,11 +6,13 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type AppGrantApp = typeof AppGrantApp[keyof typeof AppGrantApp];
+export type CapabilityPackageConnection = typeof CapabilityPackageConnection[keyof typeof CapabilityPackageConnection];
 
 
-export const AppGrantApp = {
+export const CapabilityPackageConnection = {
   gmail: 'gmail',
   google_drive: 'google_drive',
   github: 'github',
+  mcp: 'mcp',
+  none: 'none',
 } as const;

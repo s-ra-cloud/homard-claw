@@ -30,6 +30,12 @@ import type {
   ArchiveInput,
   AuditPage,
   AuditVerification,
+  CapabilityInstallResult,
+  CapabilityList,
+  CapabilitySwitch,
+  CapabilityUninstallResult,
+  CapabilityUpdate,
+  CapabilityUpdateResult,
   ClearMemoriesParams,
   ClearMemoriesResult,
   ClearTalkHistoryResult,
@@ -5229,6 +5235,368 @@ export const useUpdateConnectedApp = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getUpdateConnectedAppMutationOptions(options));
+    }
+
+export const getListCapabilitiesUrl = () => {
+
+
+
+
+  return `/api/capabilities`
+}
+
+/**
+ * @summary Vetted capability-package catalog with install state, tools, health, and pending updates
+ */
+export const listCapabilities = async ( options?: Parameters<typeof customFetch>[1]): Promise<CapabilityList> => {
+
+  return customFetch<CapabilityList>(getListCapabilitiesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListCapabilitiesQueryKey = () => {
+    return [
+    `/api/capabilities`
+    ] as const;
+    }
+
+
+export const getListCapabilitiesQueryOptions = <TData = Awaited<ReturnType<typeof listCapabilities>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCapabilities>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListCapabilitiesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listCapabilities>>> = ({ signal }) => listCapabilities({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listCapabilities>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListCapabilitiesQueryResult = NonNullable<Awaited<ReturnType<typeof listCapabilities>>>
+export type ListCapabilitiesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Vetted capability-package catalog with install state, tools, health, and pending updates
+ */
+
+export function useListCapabilities<TData = Awaited<ReturnType<typeof listCapabilities>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCapabilities>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListCapabilitiesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateCapabilityUrl = (packageId: string,) => {
+
+
+
+
+  return `/api/capabilities/${packageId}`
+}
+
+/**
+ * @summary Enable or disable a capability package for every agent at once
+ */
+export const updateCapability = async (packageId: string,
+    capabilityUpdate: CapabilityUpdate, options?: Parameters<typeof customFetch>[1]): Promise<CapabilitySwitch> => {
+
+  return customFetch<CapabilitySwitch>(getUpdateCapabilityUrl(packageId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(capabilityUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdateCapabilityMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCapability>>, TError,{packageId: string;data: BodyType<CapabilityUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateCapability>>, TError,{packageId: string;data: BodyType<CapabilityUpdate>}, TContext> => {
+
+const mutationKey = ['updateCapability'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateCapability>>, {packageId: string;data: BodyType<CapabilityUpdate>}> = (props) => {
+          const {packageId,data} = props ?? {};
+
+          return  updateCapability(packageId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateCapabilityMutationResult = NonNullable<Awaited<ReturnType<typeof updateCapability>>>
+    export type UpdateCapabilityMutationBody = BodyType<CapabilityUpdate>
+    export type UpdateCapabilityMutationError = ErrorType<void>
+
+    /**
+ * @summary Enable or disable a capability package for every agent at once
+ */
+export const useUpdateCapability = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCapability>>, TError,{packageId: string;data: BodyType<CapabilityUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateCapability>>,
+        TError,
+        {packageId: string;data: BodyType<CapabilityUpdate>},
+        TContext
+      > => {
+      return useMutation(getUpdateCapabilityMutationOptions(options));
+    }
+
+export const getInstallCapabilityUrl = (packageId: string,) => {
+
+
+
+
+  return `/api/capabilities/${packageId}/install`
+}
+
+/**
+ * @summary Install a vetted capability package, pinned at the registry version
+ */
+export const installCapability = async (packageId: string, options?: Parameters<typeof customFetch>[1]): Promise<CapabilityInstallResult> => {
+
+  return customFetch<CapabilityInstallResult>(getInstallCapabilityUrl(packageId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getInstallCapabilityMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof installCapability>>, TError,{packageId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof installCapability>>, TError,{packageId: string}, TContext> => {
+
+const mutationKey = ['installCapability'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof installCapability>>, {packageId: string}> = (props) => {
+          const {packageId} = props ?? {};
+
+          return  installCapability(packageId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type InstallCapabilityMutationResult = NonNullable<Awaited<ReturnType<typeof installCapability>>>
+
+    export type InstallCapabilityMutationError = ErrorType<void>
+
+    /**
+ * @summary Install a vetted capability package, pinned at the registry version
+ */
+export const useInstallCapability = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof installCapability>>, TError,{packageId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof installCapability>>,
+        TError,
+        {packageId: string},
+        TContext
+      > => {
+      return useMutation(getInstallCapabilityMutationOptions(options));
+    }
+
+export const getApplyCapabilityUpdateUrl = (packageId: string,) => {
+
+
+
+
+  return `/api/capabilities/${packageId}/update`
+}
+
+/**
+ * @summary Apply a pending permission-expanding package update after review
+ */
+export const applyCapabilityUpdate = async (packageId: string, options?: Parameters<typeof customFetch>[1]): Promise<CapabilityUpdateResult> => {
+
+  return customFetch<CapabilityUpdateResult>(getApplyCapabilityUpdateUrl(packageId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getApplyCapabilityUpdateMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyCapabilityUpdate>>, TError,{packageId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof applyCapabilityUpdate>>, TError,{packageId: string}, TContext> => {
+
+const mutationKey = ['applyCapabilityUpdate'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof applyCapabilityUpdate>>, {packageId: string}> = (props) => {
+          const {packageId} = props ?? {};
+
+          return  applyCapabilityUpdate(packageId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApplyCapabilityUpdateMutationResult = NonNullable<Awaited<ReturnType<typeof applyCapabilityUpdate>>>
+
+    export type ApplyCapabilityUpdateMutationError = ErrorType<void>
+
+    /**
+ * @summary Apply a pending permission-expanding package update after review
+ */
+export const useApplyCapabilityUpdate = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyCapabilityUpdate>>, TError,{packageId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof applyCapabilityUpdate>>,
+        TError,
+        {packageId: string},
+        TContext
+      > => {
+      return useMutation(getApplyCapabilityUpdateMutationOptions(options));
+    }
+
+export const getUninstallCapabilityUrl = (packageId: string,) => {
+
+
+
+
+  return `/api/capabilities/${packageId}/uninstall`
+}
+
+/**
+ * @summary Uninstall an optional capability package
+ */
+export const uninstallCapability = async (packageId: string, options?: Parameters<typeof customFetch>[1]): Promise<CapabilityUninstallResult> => {
+
+  return customFetch<CapabilityUninstallResult>(getUninstallCapabilityUrl(packageId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getUninstallCapabilityMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uninstallCapability>>, TError,{packageId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof uninstallCapability>>, TError,{packageId: string}, TContext> => {
+
+const mutationKey = ['uninstallCapability'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof uninstallCapability>>, {packageId: string}> = (props) => {
+          const {packageId} = props ?? {};
+
+          return  uninstallCapability(packageId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UninstallCapabilityMutationResult = NonNullable<Awaited<ReturnType<typeof uninstallCapability>>>
+
+    export type UninstallCapabilityMutationError = ErrorType<void>
+
+    /**
+ * @summary Uninstall an optional capability package
+ */
+export const useUninstallCapability = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uninstallCapability>>, TError,{packageId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof uninstallCapability>>,
+        TError,
+        {packageId: string},
+        TContext
+      > => {
+      return useMutation(getUninstallCapabilityMutationOptions(options));
     }
 
 export const getStartGoogleOauthUrl = () => {

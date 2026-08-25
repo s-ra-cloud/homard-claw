@@ -7,7 +7,14 @@ import {
   useStartGithubOauth,
   useDisconnectGithubAccount,
   getListConnectedAppsQueryKey,
+  useListCapabilities,
+  useInstallCapability,
+  useUninstallCapability,
+  useUpdateCapability,
+  useApplyCapabilityUpdate,
+  getListCapabilitiesQueryKey,
   type ConnectedApp,
+  type CapabilityPackage,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Shell } from "@/components/layout/Shell";
@@ -22,6 +29,9 @@ import {
   Plug,
   ShieldCheck,
   RefreshCw,
+  Package,
+  Globe,
+  AlertTriangle,
 } from "lucide-react";
 
 const APP_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -243,8 +253,198 @@ function AppCard({ app }: { app: ConnectedApp }) {
   );
 }
 
+const PACKAGE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  web_research: Globe,
+};
+
+function PackageHealthBadge({ pkg }: { pkg: CapabilityPackage }) {
+  if (pkg.status === "quarantined")
+    return <Badge variant="destructive">Quarantined</Badge>;
+  if (pkg.status === "update_review")
+    return <Badge variant="warning">Update Needs Review</Badge>;
+  if (!pkg.installed) return <Badge variant="outline">Not Installed</Badge>;
+  if (pkg.health === "connected" || pkg.health === "none_required")
+    return <Badge variant="success">Ready</Badge>;
+  if (pkg.health === "unavailable")
+    return <Badge variant="destructive">Unavailable</Badge>;
+  return <Badge variant="warning">Not Connected</Badge>;
+}
+
+/**
+ * One vetted capability package: version, tools with risk levels, health,
+ * install/enable switches, and the permission-diff review gate for updates.
+ */
+function CapabilityCard({ pkg }: { pkg: CapabilityPackage }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const refresh = () =>
+    queryClient.invalidateQueries({ queryKey: getListCapabilitiesQueryKey() });
+  const onError = (error: Error) =>
+    toast({ variant: "destructive", title: "Change failed", description: error.message });
+  const install = useInstallCapability({ mutation: { onSuccess: refresh, onError } });
+  const uninstall = useUninstallCapability({ mutation: { onSuccess: refresh, onError } });
+  const update = useUpdateCapability({ mutation: { onSuccess: refresh, onError } });
+  const applyUpdate = useApplyCapabilityUpdate({
+    mutation: { onSuccess: refresh, onError },
+  });
+  const Icon = PACKAGE_ICONS[pkg.packageId] ?? Package;
+  const pendingDiff = pkg.pendingDiff as {
+    addedTools?: { name: string; level: string }[];
+    removedTools?: string[];
+    levelChanges?: { name: string; from: string; to: string }[];
+    recoveryChanges?: { name: string; from: string; to: string }[];
+    schemaChanges?: string[];
+    connectionChange?: { from: string; to: string } | null;
+    routingChanges?: string[];
+  } | null;
+
+  return (
+    <PixelCard>
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 sm:gap-4">
+        <div className="flex items-start gap-3 min-w-0">
+          <div className="border-4 border-border bg-muted/30 p-2 shrink-0">
+            <Icon className="w-6 h-6" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-display uppercase text-sm">{pkg.displayName}</span>
+              <PackageHealthBadge pkg={pkg} />
+              {pkg.installed && !pkg.enabled ? (
+                <Badge variant="destructive">Disabled</Badge>
+              ) : null}
+              {pkg.builtin ? <Badge variant="outline">Built-in</Badge> : null}
+            </div>
+            <p className="text-[10px] text-muted-foreground uppercase font-bold mt-1">
+              {pkg.description}
+            </p>
+            <p className="text-[10px] text-muted-foreground uppercase font-bold mt-1">
+              {pkg.installed
+                ? `v${pkg.installedVersion ?? pkg.registryVersion} · ${pkg.publisher} · ${
+                    pkg.grantedAgents === 0
+                      ? "no agents have access"
+                      : `${pkg.grantedAgents} agent${pkg.grantedAgents === 1 ? "" : "s"} with access`
+                  }`
+                : `v${pkg.registryVersion} · ${pkg.publisher}`}
+            </p>
+            {pkg.healthDetail || pkg.quarantineReason ? (
+              <p className="text-[10px] text-destructive font-mono mt-1 break-words">
+                {pkg.quarantineReason ?? pkg.healthDetail}
+              </p>
+            ) : null}
+            <div className="mt-2 flex flex-wrap gap-1">
+              {pkg.tools.map((tool) => (
+                <span
+                  key={tool.name}
+                  className="text-[9px] font-mono border-2 border-border/50 px-1 py-0.5 uppercase"
+                  title={`${tool.description} (recovery: ${tool.recovery})`}
+                >
+                  {tool.name} · {tool.level}
+                  {tool.needsApproval ? " · approval" : ""}
+                </span>
+              ))}
+            </div>
+            {pkg.status === "update_review" && pendingDiff ? (
+              <div className="mt-2 border-2 border-warning/60 bg-warning/10 p-2 text-[10px]">
+                <p className="font-bold uppercase flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3" />
+                  Update to v{pkg.pendingVersion} expands permissions — review before it activates:
+                </p>
+                {(pendingDiff.addedTools ?? []).map((t) => (
+                  <p key={t.name} className="font-mono">+ {t.name} ({t.level})</p>
+                ))}
+                {(pendingDiff.levelChanges ?? []).map((c) => (
+                  <p key={c.name} className="font-mono">
+                    {c.name}: access {c.from} → {c.to}
+                  </p>
+                ))}
+                {(pendingDiff.recoveryChanges ?? []).map((c) => (
+                  <p key={c.name} className="font-mono">
+                    {c.name}: recovery {c.from} → {c.to}
+                  </p>
+                ))}
+                {(pendingDiff.schemaChanges ?? []).map((name) => (
+                  <p key={name} className="font-mono">{name}: input schema changed</p>
+                ))}
+                {pendingDiff.connectionChange ? (
+                  <p className="font-mono">
+                    connection: {pendingDiff.connectionChange.from} →{" "}
+                    {pendingDiff.connectionChange.to}
+                  </p>
+                ) : null}
+                {(pendingDiff.routingChanges ?? []).map((line) => (
+                  <p key={line} className="font-mono">routing: {line}</p>
+                ))}
+                {(pendingDiff.removedTools ?? []).map((name) => (
+                  <p key={name} className="font-mono">- {name} (removed)</p>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </div>
+        <div className="flex gap-2 shrink-0 flex-wrap items-start">
+          {!pkg.installed ? (
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={install.isPending}
+              onClick={() => install.mutate({ packageId: pkg.packageId })}
+            >
+              {install.isPending ? "..." : "INSTALL"}
+            </Button>
+          ) : (
+            <>
+              {pkg.status === "update_review" ? (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={applyUpdate.isPending}
+                  onClick={() => applyUpdate.mutate({ packageId: pkg.packageId })}
+                >
+                  {applyUpdate.isPending ? "..." : "ACCEPT UPDATE"}
+                </Button>
+              ) : null}
+              <Button
+                variant={pkg.enabled ? "outline" : "primary"}
+                size="sm"
+                disabled={update.isPending}
+                onClick={() =>
+                  update.mutate({
+                    packageId: pkg.packageId,
+                    data: { enabled: !pkg.enabled },
+                  })
+                }
+              >
+                {update.isPending ? "..." : pkg.enabled ? "DISABLE" : "ENABLE"}
+              </Button>
+              {!pkg.builtin ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={uninstall.isPending}
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        "Uninstall this package? Agents immediately lose its tools; per-agent grants become inert until it is reinstalled.",
+                      )
+                    ) {
+                      uninstall.mutate({ packageId: pkg.packageId });
+                    }
+                  }}
+                >
+                  {uninstall.isPending ? "..." : "UNINSTALL"}
+                </Button>
+              ) : null}
+            </>
+          )}
+        </div>
+      </div>
+    </PixelCard>
+  );
+}
+
 export default function ConnectedAppsPage() {
   const { data, isLoading, error, refetch, isFetching } = useListConnectedApps();
+  const capabilitiesQuery = useListCapabilities();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -347,6 +547,35 @@ export default function ConnectedAppsPage() {
           <div className="space-y-4">
             {data.apps.map((app) => (
               <AppCard key={app.app} app={app} />
+            ))}
+          </div>
+        )}
+
+        <div className="border-b-4 border-border pb-4 pt-2">
+          <h2 className="font-display text-base sm:text-xl text-foreground uppercase mb-1">
+            Capabilities
+          </h2>
+          <p className="text-muted-foreground text-sm">
+            Vetted capability packages add skills and tools your agents can be
+            granted — installed and updated here, never by changing the app.
+            Updates that expand permissions wait for your review; nothing new
+            activates silently.
+          </p>
+        </div>
+        {capabilitiesQuery.isLoading ? (
+          <PixelCard className="animate-pulse h-24 bg-muted/50">
+            <div className="w-full h-full"></div>
+          </PixelCard>
+        ) : capabilitiesQuery.error || !capabilitiesQuery.data ? (
+          <PixelCard className="text-center p-6">
+            <p className="text-muted-foreground text-sm">
+              The capability catalog could not be loaded. Try again in a moment.
+            </p>
+          </PixelCard>
+        ) : (
+          <div className="space-y-4">
+            {capabilitiesQuery.data.packages.map((pkg) => (
+              <CapabilityCard key={pkg.packageId} pkg={pkg} />
             ))}
           </div>
         )}

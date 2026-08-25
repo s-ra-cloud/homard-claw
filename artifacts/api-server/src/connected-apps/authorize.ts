@@ -4,23 +4,26 @@ import {
   db,
   workspaceConnectedAppsTable,
   type AppAccessLevel,
-  type ConnectedAppId,
 } from "@workspace/db";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
-  APP_CATALOG,
-  CONNECTED_APP_IDS,
+  builtinCapabilities,
+  loadWorkspaceCapabilities,
+  capabilityTarget,
+  type ResolvedCapabilityTool,
+  type WorkspaceCapabilities,
+} from "../capabilities/service";
+import { buildSkillsPromptSection } from "../capabilities/skills";
+import {
   buildAppsPromptSection,
-  findOperation,
-  isConnectedAppId,
   levelAllows,
   validateParams,
-  type AppOperation,
 } from "./catalog";
+
 /** Everything the worker needs to know about one agent's app access. */
 export type AgentAppAccess = {
-  /** app → granted level, only for apps the workspace has enabled. */
-  grants: Map<ConnectedAppId, AppAccessLevel>;
+  /** package/app id → granted level, only for packages the workspace has enabled. */
+  grants: Map<string, AppAccessLevel>;
   /** System-prompt section, or null when the agent can use nothing. */
   promptSection: string | null;
   /**
@@ -31,18 +34,29 @@ export type AgentAppAccess = {
    * approved before the sandbox was switched on.
    */
   sensitiveDataSandbox: boolean;
+  /**
+   * The workspace's resolved capability catalog (built-in packages plus
+   * pinned, active installs), loaded in the same breath as the grants so
+   * authorization always judges requests against the exact tool set the
+   * prompt advertised.
+   */
+  capabilities: WorkspaceCapabilities;
 };
 
 /**
- * Load an agent's effective app access: explicit grants minus apps the
- * owner has switched off workspace-wide. Loaded fresh per task attempt so
- * a revoked grant applies to the very next action, not the next task.
+ * Load an agent's effective app access: explicit grants minus packages the
+ * owner has switched off workspace-wide, resolved against the workspace's
+ * installed capability catalog. Loaded fresh per task attempt so a revoked
+ * grant or a quarantined package applies to the very next action, not the
+ * next task. Pass the task objective to also select relevant package skills
+ * into the prompt section.
  */
 export async function loadAgentAppAccess(
   agentId: string,
   workspaceId: string | null,
+  options?: { objective?: string },
 ): Promise<AgentAppAccess> {
-  const [grantRows, settingRows, agentRows] = await Promise.all([
+  const [grantRows, settingRows, agentRows, capabilities] = await Promise.all([
     db
       .select({
         app: agentAppGrantsTable.app,
@@ -60,12 +74,7 @@ export async function loadAgentAppAccess(
       ? db
           .select()
           .from(workspaceConnectedAppsTable)
-          .where(
-            and(
-              eq(workspaceConnectedAppsTable.workspaceId, workspaceId),
-              inArray(workspaceConnectedAppsTable.app, [...CONNECTED_APP_IDS]),
-            ),
-          )
+          .where(eq(workspaceConnectedAppsTable.workspaceId, workspaceId))
       : Promise.resolve(
           [] as (typeof workspaceConnectedAppsTable.$inferSelect)[],
         ),
@@ -79,26 +88,51 @@ export async function loadAgentAppAccess(
         ),
       )
       .limit(1),
+    loadWorkspaceCapabilities(workspaceId),
   ]);
   // Fail closed: an agent row we cannot read is treated as sandboxed.
   const sensitiveDataSandbox = agentRows[0]?.sensitiveDataSandbox ?? true;
   const disabled = new Set(
     settingRows.filter((row) => !row.enabled).map((row) => row.app),
   );
-  const grants = new Map<ConnectedAppId, AppAccessLevel>();
+  const grants = new Map<string, AppAccessLevel>();
   // Fail closed: an agent without a workspace has no app access at all —
-  // there is no owner whose credentials it could legitimately use.
+  // there is no owner whose credentials it could legitimately use. A grant
+  // only counts when its package actually resolves for THIS workspace: a
+  // stale grant to an uninstalled or quarantined package is dead weight.
   if (workspaceId) {
     for (const row of grantRows) {
-      if (!isConnectedAppId(row.app)) continue;
+      if (!capabilities.packages.has(row.app)) continue;
       if (disabled.has(row.app)) continue;
       grants.set(row.app, row.accessLevel as AppAccessLevel);
     }
   }
+  const appsSection = buildAppsPromptSection(grants, {
+    sensitiveDataSandbox,
+    tools: [...capabilities.tools.values()].map((tool) => ({
+      name: tool.name,
+      packageId: tool.packageId,
+      level: tool.level,
+      description: tool.description,
+      external: tool.def.executor.kind !== "builtin",
+    })),
+  });
+  const skillsSection = options?.objective
+    ? buildSkillsPromptSection(
+        capabilities.packages.values(),
+        new Set(grants.keys()),
+        options.objective,
+      )
+    : null;
+  const promptSection =
+    appsSection && skillsSection
+      ? `${appsSection}\n\n${skillsSection}`
+      : (appsSection ?? null);
   return {
     grants,
-    promptSection: buildAppsPromptSection(grants, { sensitiveDataSandbox }),
+    promptSection,
     sensitiveDataSandbox,
+    capabilities,
   };
 }
 
@@ -106,7 +140,8 @@ export type AppActionDecision =
   | { kind: "deny"; reason: string }
   | {
       kind: "allow" | "needs_approval";
-      op: AppOperation;
+      op: { app: string; name: string; level: AppAccessLevel };
+      tool: ResolvedCapabilityTool;
       params: Record<string, unknown>;
       targetSummary: string;
     };
@@ -114,27 +149,34 @@ export type AppActionDecision =
 /**
  * The server-side gate every requested action passes through, regardless of
  * what any prompt claimed. Pure over its inputs so the deny matrix is
- * directly testable: unknown operations, unassigned apps, and requests
+ * directly testable: unknown operations, unassigned packages, and requests
  * broader than the grant all die here; externally visible writes survive
- * only as approval requests.
+ * only as approval requests. Neither an MCP description nor a skill text
+ * can widen anything: the decision reads only the pinned catalog, the
+ * grants, and the sandbox flag.
  */
 export function authorizeAppAction(
-  access: Pick<AgentAppAccess, "grants" | "sensitiveDataSandbox">,
+  access: Pick<AgentAppAccess, "grants" | "sensitiveDataSandbox"> & {
+    capabilities?: WorkspaceCapabilities;
+  },
   operationName: string,
   rawParams: unknown,
 ): AppActionDecision {
-  const op = findOperation(operationName);
-  if (!op) {
+  // Without an explicit catalog (older callers/tests), judge against the
+  // built-in packages alone — exactly the pre-package behavior.
+  const catalog = access.capabilities ?? builtinCapabilities();
+  const tool = catalog.tools.get(operationName) ?? null;
+  if (!tool) {
     return {
       kind: "deny",
       reason: `"${operationName}" is not a supported operation.`,
     };
   }
-  const granted = access.grants.get(op.app);
+  const granted = access.grants.get(tool.packageId);
   if (granted === undefined) {
     return {
       kind: "deny",
-      reason: `This agent has no access to ${APP_CATALOG[op.app].displayName}. The owner must grant it (and the app must be enabled) first.`,
+      reason: `This agent has no access to ${tool.packageDisplayName}. The owner must grant it (and the package must be enabled) first.`,
     };
   }
   // The sensitive-data sandbox caps every grant at read, regardless of the
@@ -142,28 +184,39 @@ export function authorizeAppAction(
   // when a request first arrives and when the worker re-authorizes an
   // approved action just before execution, so enabling the sandbox stops
   // pending drafts/writes too.
-  if (access.sensitiveDataSandbox && op.level !== "read") {
+  if (access.sensitiveDataSandbox && tool.def.executor.kind !== "builtin") {
+    // The sandbox's no-internet guarantee: MCP/network-backed tools are
+    // denied outright, even at read level — a web-search query is an
+    // exfiltration channel for whatever confidential content the agent
+    // has already read.
     return {
       kind: "deny",
-      reason: `This agent is in the sensitive data sandbox: it may only read from connected apps, and ${op.name} would ${op.level === "write" ? "take an external action" : "create content"}.`,
+      reason: `This agent is in the sensitive data sandbox: it cannot use network-backed capability tools like ${tool.name}.`,
     };
   }
-  if (!levelAllows(granted, op.level)) {
+  if (access.sensitiveDataSandbox && tool.level !== "read") {
     return {
       kind: "deny",
-      reason: `This agent's ${APP_CATALOG[op.app].displayName} access is "${granted}", but ${op.name} needs "${op.level}".`,
+      reason: `This agent is in the sensitive data sandbox: it may only read from connected apps, and ${tool.name} would ${tool.level === "write" ? "take an external action" : "create content"}.`,
     };
   }
-  const validated = validateParams(op, rawParams);
+  if (!levelAllows(granted, tool.level)) {
+    return {
+      kind: "deny",
+      reason: `This agent's ${tool.packageDisplayName} access is "${granted}", but ${tool.name} needs "${tool.level}".`,
+    };
+  }
+  const validated = validateParams({ params: tool.def.params }, rawParams);
   if (!validated.ok) {
     return { kind: "deny", reason: `Invalid request: ${validated.error}` };
   }
-  const targetSummary = op.target(validated.params).slice(0, 300);
+  const targetSummary = capabilityTarget(tool, validated.params);
   // Externally visible writes never run on the agent's own authority: the
   // owner sees exactly what would happen and decides.
   return {
-    kind: op.level === "write" ? "needs_approval" : "allow",
-    op,
+    kind: tool.level === "write" ? "needs_approval" : "allow",
+    op: { app: tool.packageId, name: tool.name, level: tool.level },
+    tool,
     params: validated.params,
     targetSummary,
   };

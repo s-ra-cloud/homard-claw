@@ -1229,6 +1229,106 @@ paths:
                 $ref: "#/components/schemas/ConnectedApp"
         "404":
           description: Unknown app
+  /capabilities:
+    get:
+      operationId: listCapabilities
+      tags: [office]
+      summary: Vetted capability-package catalog with install state, tools, health, and pending updates
+      responses:
+        "200":
+          description: Capability package inventory
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapabilityList"
+  /capabilities/{packageId}:
+    patch:
+      operationId: updateCapability
+      tags: [office]
+      summary: Enable or disable a capability package for every agent at once
+      parameters:
+        - name: packageId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CapabilityUpdate"
+      responses:
+        "200":
+          description: Updated package switch
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapabilitySwitch"
+        "404":
+          description: Unknown package
+  /capabilities/{packageId}/install:
+    post:
+      operationId: installCapability
+      tags: [office]
+      summary: Install a vetted capability package, pinned at the registry version
+      parameters:
+        - name: packageId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "201":
+          description: Package installed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapabilityInstallResult"
+        "404":
+          description: Not in the vetted registry
+        "409":
+          description: Already installed or built-in
+  /capabilities/{packageId}/update:
+    post:
+      operationId: applyCapabilityUpdate
+      tags: [office]
+      summary: Apply a pending permission-expanding package update after review
+      parameters:
+        - name: packageId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Update applied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapabilityUpdateResult"
+        "404":
+          description: Not installed
+        "409":
+          description: No pending update, or the registry changed since review
+  /capabilities/{packageId}/uninstall:
+    post:
+      operationId: uninstallCapability
+      tags: [office]
+      summary: Uninstall an optional capability package
+      parameters:
+        - name: packageId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Package uninstalled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapabilityUninstallResult"
+        "404":
+          description: Not installed
+        "409":
+          description: Built-in packages cannot be uninstalled
   /google/oauth/start:
     post:
       operationId: startGoogleOauth
@@ -1522,7 +1622,12 @@ components:
         desk before running.
       required: [app, accessLevel]
       properties:
-        app: { type: string, enum: [gmail, google_drive, github] }
+        app:
+          type: string
+          description: >-
+            Capability package id — a built-in app (gmail, google_drive,
+            github) or an installed package such as web_research. Unknown
+            ids are dropped by the server.
         accessLevel: { type: string, enum: [read, draft, write] }
     GoogleOauthStartRequest:
       type: object
@@ -1590,6 +1695,105 @@ components:
       required: [enabled]
       properties:
         enabled: { type: boolean }
+    CapabilityTool:
+      type: object
+      required: [name, description, level, recovery, needsApproval]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        level: { type: string, enum: [read, draft, write] }
+        recovery:
+          type: string
+          enum: [retry_safe, provider_verifiable, non_retryable]
+          description: >-
+            Crash-recovery classification declared by the package: retry_safe
+            operations may be re-run after an interruption, provider_verifiable
+            writes are confirmed with the provider first, and non_retryable
+            interruptions always settle as unknown.
+        needsApproval: { type: boolean }
+    CapabilitySkill:
+      type: object
+      required: [id, title, triggers]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        triggers:
+          type: array
+          items: { type: string }
+    CapabilityPackage:
+      type: object
+      required:
+        [packageId, displayName, description, publisher, builtin, connection,
+         installed, installedVersion, registryVersion, status, enabled,
+         quarantineReason, pendingVersion, pendingDiff, health, healthDetail,
+         grantedAgents, tools, skills]
+      properties:
+        packageId: { type: string }
+        displayName: { type: string }
+        description: { type: string }
+        publisher: { type: string }
+        builtin: { type: boolean }
+        connection:
+          type: string
+          enum: [gmail, google_drive, github, mcp, none]
+        installed: { type: boolean }
+        installedVersion: { type: ["string", "null"] }
+        registryVersion: { type: string }
+        status:
+          type: string
+          enum: [active, update_review, quarantined, not_installed]
+        enabled: { type: boolean }
+        quarantineReason: { type: ["string", "null"] }
+        pendingVersion: { type: ["string", "null"] }
+        pendingDiff:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: "null"
+        health:
+          type: string
+          enum: [connected, expired, not_connected, unavailable, none_required]
+        healthDetail: { type: ["string", "null"] }
+        grantedAgents: { type: number }
+        tools:
+          type: array
+          items: { $ref: "#/components/schemas/CapabilityTool" }
+        skills:
+          type: array
+          items: { $ref: "#/components/schemas/CapabilitySkill" }
+    CapabilityList:
+      type: object
+      required: [packages]
+      properties:
+        packages:
+          type: array
+          items: { $ref: "#/components/schemas/CapabilityPackage" }
+    CapabilityUpdate:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
+    CapabilitySwitch:
+      type: object
+      required: [packageId, enabled]
+      properties:
+        packageId: { type: string }
+        enabled: { type: boolean }
+    CapabilityInstallResult:
+      type: object
+      required: [installed]
+      properties:
+        installed: { type: boolean }
+    CapabilityUpdateResult:
+      type: object
+      required: [updated]
+      properties:
+        updated: { type: boolean }
+    CapabilityUninstallResult:
+      type: object
+      required: [uninstalled]
+      properties:
+        uninstalled: { type: boolean }
     ArchiveInput:
       type: object
       required: [archived]

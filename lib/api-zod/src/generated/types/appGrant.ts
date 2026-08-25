@@ -6,12 +6,12 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { AppGrantAccessLevel } from './appGrantAccessLevel';
-import type { AppGrantApp } from './appGrantApp';
 
 /**
  * Explicit permission for one agent to use one connected app. "read" only looks, "draft" may prepare content nobody outside the workspace account sees (email drafts, new Drive files), "write" may take externally visible actions — those always pass through the approval desk before running.
  */
 export interface AppGrant {
-  app: AppGrantApp;
+  /** Capability package id — a built-in app (gmail, google_drive, github) or an installed package such as web_research. Unknown ids are dropped by the server. */
+  app: string;
   accessLevel: AppGrantAccessLevel;
 }

@@ -16,4 +16,5 @@
 - [Drizzle lazy queries](drizzle-lazy-queries.md) — A drizzle builder chain executes only when awaited/.then()'d; `void db.delete(...)` silently does nothing.
 - [Workspace tenancy](workspace-tenancy.md) — Per-Clerk-user workspaces scope everything; foreign IDs 404, tests must stamp workspaceId on direct inserts.
 - [Gmail HTML email bodies](gmail-html-email.md) — outbound email goes through the shared sanitizer + multipart builder; base64 parts block boundary/header injection.
+- [Capability packages](capability-packages.md) — new capabilities are signed data-only manifests in the compiled registry; never mutate a published version, expansions park for owner review.
 - [Per-user OAuth credentials](google-oauth-credentials.md) — Gmail/Drive share one Google account (incremental consent, scope union); GitHub has its own OAuth-app flow; all per-workspace, encrypted, no connector.
