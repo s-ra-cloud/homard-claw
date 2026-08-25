@@ -977,6 +977,10 @@ export interface TalkHistory {
   turns: TalkHistoryTurn[];
 }
 
+export interface ClearTalkHistoryResult {
+  deleted: number;
+}
+
 export interface ConverseInput {
   /**
      * @minLength 1

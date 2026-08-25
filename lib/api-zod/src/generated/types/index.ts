@@ -43,6 +43,7 @@ export * from './auditVerification';
 export * from './avatarConfig';
 export * from './clearMemoriesParams';
 export * from './clearMemoriesResult';
+export * from './clearTalkHistoryResult';
 export * from './codexBootstrapResult';
 export * from './codexBootstrapResultAction';
 export * from './codexConnectionCheck';

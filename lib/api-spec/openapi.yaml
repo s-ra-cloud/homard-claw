@@ -648,6 +648,21 @@ paths:
                 $ref: "#/components/schemas/TalkHistory"
         "404":
           description: Agent not found
+    delete:
+      operationId: clearTalkHistory
+      tags: [office]
+      summary: Clear the stored Talk conversation history with an agent
+      parameters:
+        - $ref: "#/components/parameters/AgentId"
+      responses:
+        "200":
+          description: Number of stored turns deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClearTalkHistoryResult"
+        "404":
+          description: Agent not found
   /providers:
     get:
       operationId: getProviders
@@ -1785,6 +1800,11 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/TalkHistoryTurn"
+    ClearTalkHistoryResult:
+      type: object
+      required: [deleted]
+      properties:
+        deleted: { type: number }
     ConverseInput:
       type: object
       required: [text]

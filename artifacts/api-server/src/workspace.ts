@@ -220,7 +220,22 @@ export async function getWorkspaceSetting(
   workspaceId: string,
   key: string,
 ): Promise<string | undefined> {
-  const [row] = await db
+  return getWorkspaceSettingVia(db, workspaceId, key);
+}
+
+/**
+ * Same lookup through a caller-supplied executor. Inside a transaction this
+ * MUST be used with the transaction itself: reading via the global `db`
+ * while holding a transaction's connection acquires a second pool
+ * connection, and enough concurrent transactions doing that deadlocks the
+ * whole pool.
+ */
+export async function getWorkspaceSettingVia(
+  executor: Pick<typeof db, "select">,
+  workspaceId: string,
+  key: string,
+): Promise<string | undefined> {
+  const [row] = await executor
     .select()
     .from(workspaceSettingsTable)
     .where(

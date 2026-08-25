@@ -14,14 +14,24 @@ import {
   UpdateVoiceSettingsBody,
   VoiceConverseWithAgentBody,
 } from "@workspace/api-zod";
-import { agentMessagesTable, agentsTable, db, talkExchangesTable } from "@workspace/db";
-import { and, desc, eq, or } from "drizzle-orm";
+import {
+  agentMessagesTable,
+  agentsTable,
+  db,
+  talkExchangesTable,
+  workspaceSettingsTable,
+} from "@workspace/db";
+import { and, desc, eq, or, sql } from "drizzle-orm";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { recordAudit } from "../audit";
 import { callProvider, ProviderCallError } from "../execution";
 import { resolveRouting } from "../providers";
 import { CodexTalkError, runCodexTalkTurn } from "../talk-codex";
-import { getWorkspaceSetting, setWorkspaceSetting } from "../workspace";
+import {
+  getWorkspaceSetting,
+  getWorkspaceSettingVia,
+  setWorkspaceSetting,
+} from "../workspace";
 const router: IRouter = Router();
 
 const TRANSCRIPTS_KEY = "voice_transcripts_enabled";
@@ -71,6 +81,57 @@ function speechAvailability(): { available: boolean; reason: string | null } {
 async function transcriptsEnabled(workspaceId: string): Promise<boolean> {
   return (await getWorkspaceSetting(workspaceId, TRANSCRIPTS_KEY)) === "true";
 }
+
+/**
+ * Clear-vs-persist ordering: each agent has a clear epoch — a counter that
+ * every clear-history increments inside its own transaction (DB-ordered, no
+ * host clocks involved). A converse request captures the epoch as its very
+ * first await, and the transcript persist re-reads it under the per-agent
+ * lock just before inserting: any clear that landed in between changed the
+ * epoch, so the persist is skipped instead of silently repopulating history
+ * the owner just wiped.
+ */
+const clearedMarkerKey = (agentId: string) => `voice_history_cleared:${agentId}`;
+
+async function readClearEpoch(workspaceId: string, agentId: string): Promise<number> {
+  const raw = await getWorkspaceSetting(workspaceId, clearedMarkerKey(agentId));
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/**
+ * Epoch read bound to a specific executor. Inside persistTranscript this
+ * MUST be the transaction that holds the advisory lock: reading through the
+ * global `db` there would check out a second pool connection per in-flight
+ * transaction and deadlock the pool under concurrent Talk turns.
+ */
+async function readClearEpochVia(
+  executor: Pick<typeof db, "select">,
+  workspaceId: string,
+  agentId: string,
+): Promise<number> {
+  const raw = await getWorkspaceSettingVia(executor, workspaceId, clearedMarkerKey(agentId));
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/**
+ * Per-agent transaction-scoped advisory lock class serializing history
+ * clears against transcript persists. Distinct from the worker lease
+ * (0x484f4d41), memory/knowledge quota locks (872_001/872_002), and the
+ * audit chain lock (872_004) — see the advisory-lock key registry.
+ */
+const TALK_HISTORY_LOCK = 872_005;
+
+function lockTalkHistory(
+  executor: { execute: (query: ReturnType<typeof sql>) => Promise<unknown> },
+  agentId: string,
+): Promise<unknown> {
+  return executor.execute(
+    sql`SELECT pg_advisory_xact_lock(${TALK_HISTORY_LOCK}, hashtext(${agentId}))`,
+  );
+}
+
 
 async function emergencyStopEngaged(workspaceId: string): Promise<boolean> {
   return (await getWorkspaceSetting(workspaceId, "emergency_stop")) === "true";
@@ -337,14 +398,30 @@ async function persistTranscript(
   agent: AgentRow,
   userText: string,
   reply: string,
+  clearEpoch: number,
   force = false,
-  executor: Pick<typeof db, "insert"> = db,
+  tx?: Pick<typeof db, "insert" | "execute" | "select">,
 ) {
   if (!force && !(await transcriptsEnabled(workspaceId))) return;
-  await executor.insert(agentMessagesTable).values([
-    { fromAgentId: null, toAgentId: agent.id, kind: "voice", body: userText },
-    { fromAgentId: agent.id, toAgentId: null, kind: "voice", body: reply },
-  ]);
+  // Serialize against clear-history: the epoch check and the insert hold
+  // the per-agent advisory lock in one transaction, and clearing bumps the
+  // epoch + deletes under the same lock. A turn whose request began before
+  // a clear therefore either commits before the delete (and its rows are
+  // deleted with the rest) or observes the changed epoch and skips
+  // persisting — it can never repopulate history the owner just wiped.
+  const run = async (executor: Pick<typeof db, "insert" | "execute" | "select">) => {
+    await lockTalkHistory(executor, agent.id);
+    if ((await readClearEpochVia(executor, workspaceId, agent.id)) !== clearEpoch) return;
+    await executor.insert(agentMessagesTable).values([
+      { fromAgentId: null, toAgentId: agent.id, kind: "voice", body: userText },
+      { fromAgentId: agent.id, toAgentId: null, kind: "voice", body: reply },
+    ]);
+  };
+  if (tx) {
+    await run(tx);
+  } else {
+    await db.transaction(run);
+  }
 }
 
 /** Fixed, sanitized messages only — never echo upstream provider detail. */
@@ -491,6 +568,67 @@ router.get("/agents/:agentId/talk-history", async (req: Request, res: Response) 
 });
 
 /**
+ * Clear the stored Talk history with one agent. Workspace-scoped: the agent
+ * must belong to the caller's workspace, and only that agent's kind='voice'
+ * rows are removed. Like reading history, clearing works even for retired
+ * agents or during an emergency stop — it never starts a conversation.
+ */
+router.delete("/agents/:agentId/talk-history", async (req: Request, res: Response) => {
+  const agentId = String(req.params.agentId);
+  const [agent] = await db
+    .select({ id: agentsTable.id, name: agentsTable.name, archived: agentsTable.archived })
+    .from(agentsTable)
+    .where(
+      and(eq(agentsTable.id, agentId), eq(agentsTable.workspaceId, req.workspaceId!)),
+    )
+    .limit(1);
+  if (!agent || agent.archived) {
+    res.status(404).json({ error: "Agent not found." });
+    return;
+  }
+  // One transaction under the per-agent advisory lock: bump the clear epoch
+  // and delete the rows atomically. persistTranscript takes the same lock
+  // around its epoch check + insert, so an in-flight turn either commits
+  // before this delete (and its rows go with the rest) or sees the changed
+  // epoch afterwards and skips persisting. The increment is DB-ordered —
+  // no host clock is ever compared.
+  const deleted = await db.transaction(async (tx) => {
+    await lockTalkHistory(tx, agentId);
+    await tx
+      .insert(workspaceSettingsTable)
+      .values({
+        workspaceId: req.workspaceId!,
+        key: clearedMarkerKey(agentId),
+        value: "1",
+      })
+      .onConflictDoUpdate({
+        target: [workspaceSettingsTable.workspaceId, workspaceSettingsTable.key],
+        set: {
+          value: sql`(${workspaceSettingsTable.value}::bigint + 1)::text`,
+        },
+      });
+    return tx
+      .delete(agentMessagesTable)
+      .where(
+        and(
+          eq(agentMessagesTable.kind, "voice"),
+          or(
+            eq(agentMessagesTable.fromAgentId, agentId),
+            eq(agentMessagesTable.toAgentId, agentId),
+          ),
+        ),
+      )
+      .returning({ id: agentMessagesTable.id });
+  });
+  await recordAudit(
+    req.workspaceId!,
+    "voice.history_cleared",
+    `The Talk history with ${agent.name} was cleared (${deleted.length} stored turns).`,
+  );
+  res.json({ deleted: deleted.length });
+});
+
+/**
  * Resend idempotency: a reply can be generated and persisted while the
  * client's connection drops, so a resend of the same message must return the
  * already-generated reply instead of creating a duplicate exchange.
@@ -567,6 +705,12 @@ router.post("/agents/:agentId/converse", async (req: Request, res: Response) => 
     res.status(400).json({ error: "A text message is required." });
     return;
   }
+  // Captured before any other await: a clear that lands anywhere after this
+  // point changes the epoch and vetoes this request's transcript persist.
+  const clearEpoch = await readClearEpoch(
+    req.workspaceId!,
+    String(req.params.agentId),
+  );
   const agent = await loadConversableAgent(
     req.workspaceId!,
     String(req.params.agentId),
@@ -628,7 +772,7 @@ router.post("/agents/:agentId/converse", async (req: Request, res: Response) => 
           )
           .returning({ id: talkExchangesTable.id });
         if (updated.length === 0) return false;
-        await persistTranscript(req.workspaceId!, agent, parsed.data.text, reply, true, tx);
+        await persistTranscript(req.workspaceId!, agent, parsed.data.text, reply, clearEpoch, true, tx);
         return true;
       });
       // Ownership is consumed either way: nothing past this point may
@@ -661,7 +805,7 @@ router.post("/agents/:agentId/converse", async (req: Request, res: Response) => 
         return;
       }
     } else {
-      await persistTranscript(req.workspaceId!, agent, parsed.data.text, reply, true);
+      await persistTranscript(req.workspaceId!, agent, parsed.data.text, reply, clearEpoch, true);
     }
     await recordAudit(
       req.workspaceId!,
@@ -710,6 +854,12 @@ router.post("/agents/:agentId/voice-converse", async (req: Request, res: Respons
     res.status(400).json({ error: "A base64 audio recording is required." });
     return;
   }
+  // Captured before any other await: a clear that lands anywhere after this
+  // point changes the epoch and vetoes this request's transcript persist.
+  const clearEpoch = await readClearEpoch(
+    req.workspaceId!,
+    String(req.params.agentId),
+  );
   const agent = await loadConversableAgent(
     req.workspaceId!,
     String(req.params.agentId),
@@ -793,7 +943,7 @@ router.post("/agents/:agentId/voice-converse", async (req: Request, res: Respons
       voice,
     });
 
-    await persistTranscript(req.workspaceId!, agent, userText, reply);
+    await persistTranscript(req.workspaceId!, agent, userText, reply, clearEpoch);
     await recordAudit(
       req.workspaceId!,
       "voice.converse",

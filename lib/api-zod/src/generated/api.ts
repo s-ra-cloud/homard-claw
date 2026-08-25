@@ -1726,6 +1726,18 @@ export const GetTalkHistoryResponse = zod.object({
 
 
 /**
+ * @summary Clear the stored Talk conversation history with an agent
+ */
+export const ClearTalkHistoryParams = zod.object({
+  "agentId": zod.coerce.string()
+})
+
+export const ClearTalkHistoryResponse = zod.object({
+  "deleted": zod.number()
+})
+
+
+/**
  * @summary Get configured provider health
  */
 export const GetProvidersResponseItem = zod.object({

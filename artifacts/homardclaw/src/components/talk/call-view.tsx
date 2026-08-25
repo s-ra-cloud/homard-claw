@@ -13,10 +13,22 @@ import type { Agent } from "@workspace/api-client-react";
 import {
   getGetTalkHistoryQueryKey,
   transcribeAudio,
+  useClearTalkHistory,
   useConverseWithAgent,
   useCreateTask,
   useGetTalkHistory,
 } from "@workspace/api-client-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import type {
   useAudioPlayback,
   useVoiceRecorder,
@@ -35,6 +47,7 @@ import {
   RotateCcw,
   Send,
   Square,
+  Trash2,
   Volume2,
   X,
 } from "lucide-react";
@@ -357,6 +370,37 @@ export function CallView({
 
   const textConverse = useConverseWithAgent();
 
+  const clearHistory = useClearTalkHistory({
+    mutation: {
+      onSuccess: () => {
+        // Invalidate the conversation epoch and abort anything still in
+        // flight, so a late reply handler can never repopulate the
+        // transcript we are about to wipe.
+        epochRef.current += 1;
+        abortRef.current?.abort();
+        abortRef.current = null;
+        playbackRef.current.clear();
+        setPhase("idle");
+        // Wipe the on-screen transcript (stored and optimistic turns alike)
+        // and any in-progress proposal, then refresh the cached history so a
+        // remount hydrates empty.
+        setTurns([]);
+        setProposedTask(null);
+        setFlowError(null);
+        queryClient.invalidateQueries({
+          queryKey: getGetTalkHistoryQueryKey(agentId),
+        });
+        toast({ title: "History cleared", description: `Your conversation with ${agent.name} was deleted.` });
+      },
+      onError: (err) =>
+        toast({
+          title: "Could not clear history",
+          description: errorText(err, "Try again in a moment."),
+          variant: "destructive",
+        }),
+    },
+  });
+
   /**
    * Deliver one user turn (already in the transcript, identified by its key)
    * as a text message. Used for both fresh sends and resends of failed turns
@@ -606,7 +650,51 @@ export function CallView({
             {agent.title} · {phaseLabel}
           </p>
         </div>
-        {headerAction && <div className="ml-auto">{headerAction}</div>}
+        <div className="ml-auto flex items-center gap-2">
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <button
+                type="button"
+                disabled={
+                  clearHistory.isPending ||
+                  turns.length === 0 ||
+                  phase !== "idle" ||
+                  !historyReady
+                }
+                className="flex items-center justify-center w-9 h-9 shrink-0 border-2 border-border bg-muted/40 text-foreground pixel-shadow disabled:opacity-50"
+                aria-label={`Clear conversation history with ${agent.name}`}
+                data-testid="button-clear-history"
+              >
+                {clearHistory.isPending ? (
+                  <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Trash2 className="w-4 h-4" aria-hidden="true" />
+                )}
+              </button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Clear this conversation?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Your entire Talk history with {agent.name} will be deleted,
+                  including saved voice transcripts. This cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel data-testid="button-clear-history-cancel">
+                  Keep history
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => clearHistory.mutate({ agentId })}
+                  data-testid="button-clear-history-confirm"
+                >
+                  Clear history
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+          {headerAction}
+        </div>
       </header>
 
       <div

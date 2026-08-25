@@ -47,6 +47,50 @@ vi.mock("../audit", async (importOriginal) => {
   };
 });
 
+// Interleaving hook for the clear-vs-persist race tests. Each converse
+// request reads the clear-epoch key twice: once at request start (epoch
+// capture, before any other await) and once inside persistTranscript under
+// the per-agent lock. `armAt` picks which occurrence to pause AFTER the
+// value has been read, so tests can wedge a DELETE into either window.
+const markerGate = vi.hoisted(() => ({
+  armAt: 0,
+  seen: 0,
+  release: null as null | (() => void),
+}));
+vi.mock("../workspace", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("../workspace")>();
+  const maybePause = async (key: string) => {
+    if (key.startsWith("voice_history_cleared:") && markerGate.armAt > 0) {
+      markerGate.seen += 1;
+      if (markerGate.seen === markerGate.armAt) {
+        markerGate.armAt = 0;
+        await new Promise<void>((resolve) => {
+          markerGate.release = resolve;
+        });
+      }
+    }
+  };
+  return {
+    ...mod,
+    // Occurrence 1 per request: the epoch capture at request start.
+    getWorkspaceSetting: async (workspaceId: string, key: string) => {
+      const value = await mod.getWorkspaceSetting(workspaceId, key);
+      await maybePause(key);
+      return value;
+    },
+    // Occurrence 2: the persist-side epoch re-check under the agent lock.
+    getWorkspaceSettingVia: async (
+      executor: Parameters<typeof mod.getWorkspaceSettingVia>[0],
+      workspaceId: string,
+      key: string,
+    ) => {
+      const value = await mod.getWorkspaceSettingVia(executor, workspaceId, key);
+      await maybePause(key);
+      return value;
+    },
+  };
+});
+
 import officeRouter from "./office";
 import { clearProviderCaches } from "../providers";
 
@@ -223,6 +267,14 @@ afterAll(async () => {
         or(
           inArray(agentMessagesTable.fromAgentId, createdAgentIds),
           inArray(agentMessagesTable.toAgentId, createdAgentIds),
+        ),
+      );
+    await db
+      .delete(workspaceSettingsTable)
+      .where(
+        inArray(
+          workspaceSettingsTable.key,
+          createdAgentIds.map((id) => `voice_history_cleared:${id}`),
         ),
       );
     await db.delete(agentsTable).where(inArray(agentsTable.id, createdAgentIds));
@@ -454,6 +506,217 @@ describe("text conversations", () => {
       authState.userId = originalUser;
       await db.delete(workspacesTable).where(eq(workspacesTable.clerkUserId, outsider));
     }
+  });
+
+  it("clears only the agent's own voice history and returns the deleted count", async () => {
+    const agent = await createAgent(`${RUN_TAG} Cleared`);
+    const bystander = await createAgent(`${RUN_TAG} Bystander`);
+    mockProviders();
+    await request(app).post(`/api/agents/${agent.id}/converse`).send({ text: "Wipe me" });
+    await request(app)
+      .post(`/api/agents/${bystander.id}/converse`)
+      .send({ text: "Keep me" });
+    // A non-voice message to the same agent must survive the clear.
+    const [nonVoice] = await db
+      .insert(agentMessagesTable)
+      .values({ fromAgentId: null, toAgentId: agent.id, kind: "note", body: `${RUN_TAG} task note` })
+      .returning({ id: agentMessagesTable.id });
+
+    const res = await request(app).delete(`/api/agents/${agent.id}/talk-history`);
+    expect(res.status).toBe(200);
+    expect(res.body.deleted).toBe(2);
+
+    const history = await request(app).get(`/api/agents/${agent.id}/talk-history`);
+    expect(history.body.turns).toEqual([]);
+    const bystanderHistory = await request(app).get(
+      `/api/agents/${bystander.id}/talk-history`,
+    );
+    expect(
+      bystanderHistory.body.turns.some((t: { text: string }) => t.text === "Keep me"),
+    ).toBe(true);
+    const survivors = await db
+      .select()
+      .from(agentMessagesTable)
+      .where(eq(agentMessagesTable.id, nonVoice.id));
+    expect(survivors).toHaveLength(1);
+  });
+
+  it("a clear during an in-flight converse wins: the late reply is not persisted", async () => {
+    const agent = await createAgent(`${RUN_TAG} Clear Racer`);
+    // Gate the provider's reply so the DELETE can land mid-conversation.
+    let releaseReply!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseReply = resolve;
+    });
+    fetchMock.mockImplementation(async (url: unknown) => {
+      const target = String(url);
+      if (target.includes("/models")) {
+        return jsonResponse({
+          data: [
+            {
+              id: "test-vendor/test-model",
+              name: "Test Model",
+              context_length: 8192,
+              pricing: { prompt: "0.000001", completion: "0.00001" },
+            },
+          ],
+        });
+      }
+      if (target.includes("/chat/completions")) {
+        await gate;
+        return jsonResponse({
+          choices: [
+            { message: { content: '{"reply":"Too late.","taskObjective":null}' } },
+          ],
+          usage: { prompt_tokens: 50, completion_tokens: 20 },
+        });
+      }
+      throw new Error(`unexpected fetch in test: ${target}`);
+    });
+
+    const inFlight = request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Racing message" })
+      .then((r) => r);
+    // Give the converse handler time to reach the (gated) provider call.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    const cleared = await request(app).delete(`/api/agents/${agent.id}/talk-history`);
+    expect(cleared.status).toBe(200);
+
+    releaseReply();
+    const res = await inFlight;
+    expect(res.status).toBe(200);
+    expect(res.body.reply).toBe("Too late.");
+
+    // The reply was delivered but never persisted: history stays cleared.
+    const history = await request(app).get(`/api/agents/${agent.id}/talk-history`);
+    expect(history.body.turns).toEqual([]);
+    const rows = await db
+      .select()
+      .from(agentMessagesTable)
+      .where(
+        and(
+          eq(agentMessagesTable.kind, "voice"),
+          or(
+            eq(agentMessagesTable.fromAgentId, agent.id),
+            eq(agentMessagesTable.toAgentId, agent.id),
+          ),
+        ),
+      );
+    expect(rows).toHaveLength(0);
+  });
+
+  it("a clear issued between marker verification and insert still leaves history empty", async () => {
+    const agent = await createAgent(`${RUN_TAG} Interleaver`);
+    mockProviders();
+
+    // Pause the persist right after it verified the epoch (while it holds
+    // the per-agent lock), fire the DELETE (which must queue on that lock),
+    // then release the insert. The delete runs after the insert commits,
+    // so history must end up empty either way.
+    markerGate.seen = 0;
+    markerGate.armAt = 2;
+    const inFlight = request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Squeeze past the clear" })
+      .then((r) => r);
+    await vi.waitFor(() => {
+      if (!markerGate.release) throw new Error("persist not paused yet");
+    });
+    const clearing = request(app)
+      .delete(`/api/agents/${agent.id}/talk-history`)
+      .then((r) => r);
+    // Give the DELETE time to reach (and block on) the advisory lock.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    markerGate.release!();
+    markerGate.release = null;
+
+    const [reply, cleared] = await Promise.all([inFlight, clearing]);
+    expect(reply.status).toBe(200);
+    expect(cleared.status).toBe(200);
+    // The racing exchange's two rows were committed first, then deleted.
+    expect(cleared.body.deleted).toBe(2);
+    const history = await request(app).get(`/api/agents/${agent.id}/talk-history`);
+    expect(history.body.turns).toEqual([]);
+  });
+
+  it("a clear that fully completes during the request's epoch capture still vetoes the persist", async () => {
+    const agent = await createAgent(`${RUN_TAG} Early Racer`);
+    mockProviders();
+    // Seed one exchange so the DELETE has something real to remove.
+    const seed = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Seed message" });
+    expect(seed.status).toBe(200);
+
+    // Pause the racing request at its very first await — the clear-epoch
+    // capture, before agent lookup or any provider work. The DELETE holds no
+    // conflict with a request paused there, so it runs to completion; the
+    // released request must then see the bumped epoch at persist time.
+    markerGate.seen = 0;
+    markerGate.armAt = 1;
+    const inFlight = request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Straggler" })
+      .then((r) => r);
+    await vi.waitFor(() => {
+      if (!markerGate.release) throw new Error("capture not paused yet");
+    });
+    const cleared = await request(app).delete(`/api/agents/${agent.id}/talk-history`);
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.deleted).toBe(2);
+
+    markerGate.release!();
+    markerGate.release = null;
+    const reply = await inFlight;
+    expect(reply.status).toBe(200);
+
+    // The straggler's reply was delivered but never persisted.
+    const history = await request(app).get(`/api/agents/${agent.id}/talk-history`);
+    expect(history.body.turns).toEqual([]);
+  });
+
+  it("finalizing more concurrent turns than the pool holds connections cannot deadlock", async () => {
+    // Regression guard: the persist transaction must read the clear epoch
+    // through its own connection. If it grabbed a second pool connection per
+    // in-flight transaction, this fan-out (wider than the pool) would hang.
+    const agent = await createAgent(`${RUN_TAG} Pool Flood`);
+    mockProviders();
+    const width = 12; // default pg pool max is 10
+    const results = await Promise.all(
+      Array.from({ length: width }, (_, i) =>
+        request(app)
+          .post(`/api/agents/${agent.id}/converse`)
+          .send({ text: `Flood ${i}`, clientMessageId: `flood-${Date.now()}-${i}` }),
+      ),
+    );
+    for (const res of results) expect(res.status).toBe(200);
+    const history = await request(app).get(`/api/agents/${agent.id}/talk-history`);
+    expect(history.body.turns).toHaveLength(width * 2);
+  }, 30_000);
+
+  it("refuses to clear another workspace's agent history", async () => {
+    const agent = await createAgent(`${RUN_TAG} Guarded`);
+    mockProviders();
+    await request(app).post(`/api/agents/${agent.id}/converse`).send({ text: "Protected" });
+
+    const originalUser = authState.userId;
+    const outsider = `hc-voice-test-clear-outsider-${Date.now()}`;
+    authState.userId = outsider;
+    try {
+      const boot = await request(app).get("/api/agents");
+      expect(boot.status).toBe(200);
+      const res = await request(app).delete(`/api/agents/${agent.id}/talk-history`);
+      expect(res.status).toBe(404);
+    } finally {
+      authState.userId = originalUser;
+      await db.delete(workspacesTable).where(eq(workspacesTable.clerkUserId, outsider));
+    }
+    const history = await request(app).get(`/api/agents/${agent.id}/talk-history`);
+    expect(
+      history.body.turns.some((t: { text: string }) => t.text === "Protected"),
+    ).toBe(true);
   });
 
   it("resending with the same clientMessageId returns the cached reply without duplicating history", async () => {

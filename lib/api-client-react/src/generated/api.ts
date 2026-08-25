@@ -32,6 +32,7 @@ import type {
   AuditVerification,
   ClearMemoriesParams,
   ClearMemoriesResult,
+  ClearTalkHistoryResult,
   CodexBootstrapResult,
   CodexConnectionTest,
   CodexCredentialInput,
@@ -2722,6 +2723,77 @@ export function useGetTalkHistory<TData = Awaited<ReturnType<typeof getTalkHisto
 
 
 
+
+export const getClearTalkHistoryUrl = (agentId: string,) => {
+
+
+
+
+  return `/api/agents/${agentId}/talk-history`
+}
+
+/**
+ * @summary Clear the stored Talk conversation history with an agent
+ */
+export const clearTalkHistory = async (agentId: string, options?: Parameters<typeof customFetch>[1]): Promise<ClearTalkHistoryResult> => {
+
+  return customFetch<ClearTalkHistoryResult>(getClearTalkHistoryUrl(agentId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getClearTalkHistoryMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearTalkHistory>>, TError,{agentId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof clearTalkHistory>>, TError,{agentId: string}, TContext> => {
+
+const mutationKey = ['clearTalkHistory'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof clearTalkHistory>>, {agentId: string}> = (props) => {
+          const {agentId} = props ?? {};
+
+          return  clearTalkHistory(agentId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ClearTalkHistoryMutationResult = NonNullable<Awaited<ReturnType<typeof clearTalkHistory>>>
+
+    export type ClearTalkHistoryMutationError = ErrorType<void>
+
+    /**
+ * @summary Clear the stored Talk conversation history with an agent
+ */
+export const useClearTalkHistory = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearTalkHistory>>, TError,{agentId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof clearTalkHistory>>,
+        TError,
+        {agentId: string},
+        TContext
+      > => {
+      return useMutation(getClearTalkHistoryMutationOptions(options));
+    }
 
 export const getGetProvidersUrl = () => {
 
