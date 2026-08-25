@@ -199,7 +199,7 @@
   position: absolute;
   z-index: 20;
   transform: translateX(-50%);
-  max-width: 12%;
+  max-width: 6.3%;
   overflow: hidden;
   text-overflow: ellipsis;
   padding: 1px 4px;
@@ -207,7 +207,7 @@
   background: var(--paper);
   color: var(--ink);
   font:
-    700 7px "Space Mono",
+    700 6px "Space Mono",
     monospace;
   text-decoration: none;
   text-transform: uppercase;

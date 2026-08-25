@@ -26,19 +26,19 @@ const officeArt = `${import.meta.env.BASE_URL}images/submarine-office.png`;
 // Four wall computers inside the hull. These positions are deliberately clear
 // of the wall navigation targets and keep the existing seated lobster poses.
 const DESK_SEATS = [
-  { left: 42.3, top: 50.8, label: "first submarine computer" },
-  { left: 49.4, top: 50.8, label: "second submarine computer" },
-  { left: 56.4, top: 50.8, label: "third submarine computer" },
-  { left: 63.4, top: 50.8, label: "fourth submarine computer" },
+  { left: 42.2, top: 50.2, label: "first submarine computer" },
+  { left: 49.3, top: 50.2, label: "second submarine computer" },
+  { left: 56.3, top: 50.2, label: "third submarine computer" },
+  { left: 63.2, top: 50.2, label: "fourth submarine computer" },
 ];
 
 // Clear deck positions. The floor-working pose already includes its cushion
 // and laptop, so the background intentionally contains no duplicate furniture.
 const FLOOR_SEATS = [
-  { left: 34.0, top: 64.0, label: "port deck" },
-  { left: 44.0, top: 69.5, label: "centre-left deck" },
-  { left: 54.5, top: 69.5, label: "centre-right deck" },
-  { left: 64.0, top: 64.0, label: "starboard deck" },
+  { left: 18.5, top: 66.0, label: "port control-room deck" },
+  { left: 31.0, top: 66.0, label: "port passage deck" },
+  { left: 44.5, top: 66.5, label: "centre deck" },
+  { left: 58.5, top: 66.5, label: "starboard deck" },
 ];
 
 // Sandboxed agents are physically separated from the hull on exterior pads.
@@ -50,7 +50,8 @@ const EXTERIOR_SEATS = [
 ];
 
 /** Character size as a share of the wide scene, preserving the old pixel size. */
-const CHARACTER_PCT = 5.8;
+const CHARACTER_PCT = 4.6;
+const SCENE_ASPECT = 1586 / 992;
 /**
  * Floor cushions overlap by depth: the further back a mat sits, the lower it
  * draws. Everything stays below the desk agents, which own z-index 12.
@@ -479,7 +480,7 @@ export default function OfficeDashboard() {
                       className="room-agent__name"
                       style={{
                         left: `${seat.left}%`,
-                        top: `calc(${seat.top + spritePct(pose) / 2}% - 2px)`,
+                        top: `calc(${seat.top + nameOffsetPct(pose)}% - 2px)`,
                       }}
                       /* The sprite above already carries this agent's link. */
                       aria-hidden="true"
@@ -723,4 +724,9 @@ const SCENE_HOTSPOTS: SceneHotspot[] = [
 /** Sprite box a pose needs to show the character at CHARACTER_PCT. */
 function spritePct(pose: LobsterPose) {
   return CHARACTER_PCT * POSE_CHARACTER_SCALE[pose];
+}
+
+/** Convert square sprite width into vertical scene space for its nameplate. */
+function nameOffsetPct(pose: LobsterPose) {
+  return spritePct(pose) * SCENE_ASPECT * 0.43;
 }
