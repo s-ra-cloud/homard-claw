@@ -80,6 +80,16 @@ function blobToBase64(blob: Blob): Promise<string> {
 }
 
 function errorText(error: unknown, fallback: string): string {
+  // API errors carry the server's sanitized guidance in `data.error`.
+  // Prefer it over the Error message, which is prefixed with
+  // "HTTP 503 Service Unavailable:" noise that reads like a raw failure.
+  if (error && typeof error === "object" && "data" in error) {
+    const data = (error as { data?: unknown }).data;
+    if (data && typeof data === "object" && "error" in data) {
+      const detail = (data as { error?: unknown }).error;
+      if (typeof detail === "string" && detail.trim()) return detail;
+    }
+  }
   return error instanceof Error && error.message ? error.message : fallback;
 }
 

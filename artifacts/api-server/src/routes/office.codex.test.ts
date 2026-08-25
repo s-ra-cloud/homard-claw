@@ -1725,6 +1725,59 @@ describe("Codex Talk conversations", () => {
     expect(res.body.error).not.toMatch(/provider key/i);
   });
 
+  it("maps rate limiting to a try-again-shortly message", async () => {
+    const agent = await createAgent(`${RUN_TAG} Throttled`);
+    turnScript = [failingTurn("429 Too Many Requests, please slow down.")];
+
+    const res = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Quick one?" });
+    expect(res.status).toBe(503);
+    expect(res.body.error).toMatch(/rate limit/i);
+    expect(res.body.error).not.toMatch(/429|Too Many Requests/);
+  });
+
+  it("never leaks raw provider detail on an unknown Codex failure", async () => {
+    const agent = await createAgent(`${RUN_TAG} Exploded`);
+    turnScript = [
+      failingTurn(
+        "ECONNRESET at /home/runner/.codex/auth.json token=sk-secret-999",
+      ),
+    ];
+
+    const res = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Still there?" });
+    expect(res.status).toBe(503);
+    // A fixed, sanitized message — none of the raw path/token detail.
+    expect(res.body.error).toMatch(/Codex failed to answer/i);
+    expect(res.body.error).not.toMatch(/ECONNRESET|auth\.json|sk-secret/);
+  });
+
+  it("sends the sanitized Codex failure over the voice SSE stream too", async () => {
+    const agent = await createAgent(`${RUN_TAG} Voicefail`);
+    mockSpeech("Anything new?");
+    turnScript = [
+      failingTurn("401 unauthorized: token=sk-live-123 run codex login"),
+    ];
+
+    const res = await request(app)
+      .post(`/api/agents/${agent.id}/voice-converse`)
+      .send({ audio: FAKE_WAV_BASE64 })
+      .buffer(true)
+      .parse((response, callback) => {
+        let text = "";
+        response.on("data", (chunk: Buffer) => (text += chunk.toString()));
+        response.on("end", () => callback(null, text));
+      });
+    expect(res.status).toBe(200);
+    const body = res.body as unknown as string;
+    expect(body).toContain('"type":"error"');
+    expect(body).toMatch(/ChatGPT session/i);
+    expect(body).not.toContain("sk-live-123");
+    expect(body).not.toContain("codex login");
+  });
+
   it("reports a missing sign-in as a setup problem instead of a missing key", async () => {
     const agent = await createAgent(`${RUN_TAG} Signed Out`);
     await disconnectCodexCredential(authState.userId);
