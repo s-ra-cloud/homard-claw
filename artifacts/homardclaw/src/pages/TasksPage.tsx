@@ -417,9 +417,11 @@ function DelegationSection({ task }: { task: Task }) {
 function TaskDetailDialog({
   taskId,
   onClose,
+  onReplicate,
 }: {
   taskId: string;
   onClose: () => void;
+  onReplicate: (task: Task) => void;
 }) {
   const { data: detail } = useGetTask(taskId, {
     query: {
@@ -571,7 +573,7 @@ function TaskDetailDialog({
               <div className="text-[10px] font-mono text-muted-foreground uppercase">
                 Created {formatDistanceToNow(new Date(task.createdAt), { addSuffix: true })}
               </div>
-              <TaskActions task={task} />
+              <TaskActions task={task} onReplicate={onReplicate} />
             </div>
           </div>
         )}
@@ -581,7 +583,13 @@ function TaskDetailDialog({
 }
 
 /** Cancel / retry controls shared by cards and the detail dialog. */
-function TaskActions({ task }: { task: Task }) {
+function TaskActions({
+  task,
+  onReplicate,
+}: {
+  task: Task;
+  onReplicate?: (task: Task) => void;
+}) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const invalidate = () => {
@@ -616,9 +624,21 @@ function TaskActions({ task }: { task: Task }) {
           variant="outline"
           disabled={retryTask.isPending}
           onClick={() => retryTask.mutate({ taskId: task.id })}
+          data-testid="button-repeat-task"
         >
           <RotateCcw className="w-3 h-3 mr-1" />
-          {retryTask.isPending ? "RETRYING..." : "RETRY"}
+          {retryTask.isPending ? "REPEATING..." : "REPEAT"}
+        </Button>
+      )}
+      {onReplicate && (
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => onReplicate(task)}
+          data-testid="button-replicate-task"
+        >
+          <ScrollText className="w-3 h-3 mr-1" />
+          REPLICATE
         </Button>
       )}
     </div>
@@ -946,6 +966,21 @@ export default function TasksPage() {
     });
   };
 
+  const replicateTask = (task: Task) => {
+    setNewTask({
+      agentId: task.agentId,
+      objective: task.objective,
+      priority: task.priority as TaskInputPriority,
+      budgetDollars: task.budgetCents != null ? (task.budgetCents / 100).toFixed(2) : "",
+      providerOverride: (task.provider ?? "") as TaskInputProviderOverride | "",
+      modelOverride: task.model ?? "",
+      reasoningOverride: task.reasoningEffort ?? "",
+      continueConversation: false,
+    });
+    setInspectedTaskId(null);
+    setIsDialogOpen(true);
+  };
+
   const getStatusIcon = (status: TaskStatus) => {
     switch (status) {
       case 'queued': return <Clock className="w-5 h-5 text-muted-foreground" />;
@@ -1251,7 +1286,7 @@ export default function TasksPage() {
                         <ScrollText className="w-3 h-3 mr-1" />
                         DETAILS
                       </Button>
-                      <TaskActions task={task} />
+                      <TaskActions task={task} onReplicate={replicateTask} />
                     </div>
                   </div>
                 </div>
@@ -1264,6 +1299,7 @@ export default function TasksPage() {
           <TaskDetailDialog
             taskId={inspectedTaskId}
             onClose={() => setInspectedTaskId(null)}
+            onReplicate={replicateTask}
           />
         )}
       </div>
