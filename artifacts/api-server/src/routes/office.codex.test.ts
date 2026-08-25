@@ -1770,7 +1770,7 @@ describe("Codex Talk conversations", () => {
       .post(`/api/agents/${agent.id}/converse`)
       .send({ text: "Quick one?" });
     expect(res.status).toBe(503);
-    expect(res.body.error).toMatch(/rate limit/i);
+    expect(res.body.error).toMatch(/rate-limit error/i);
     expect(res.body.error).not.toMatch(/429|Too Many Requests/);
   });
 
@@ -1787,7 +1787,7 @@ describe("Codex Talk conversations", () => {
       .send({ text: "Still there?" });
     expect(res.status).toBe(503);
     // A fixed, sanitized message — none of the raw path/token detail.
-    expect(res.body.error).toMatch(/Codex failed to answer/i);
+    expect(res.body.error).toMatch(/Codex provider error/i);
     expect(res.body.error).not.toMatch(/ECONNRESET|auth\.json|sk-secret/);
   });
 
@@ -1823,7 +1823,7 @@ describe("Codex Talk conversations", () => {
       .post(`/api/agents/${agent.id}/converse`)
       .send({ text: "Hello?" });
     expect(res.status).toBe(503);
-    expect(res.body.error).toMatch(/ChatGPT connection|Providers page/i);
+    expect(res.body.error).toMatch(/reconnect ChatGPT|Providers/i);
     expect(res.body.error).not.toMatch(/provider key/i);
     expect(sdkCalls).toHaveLength(0);
   });

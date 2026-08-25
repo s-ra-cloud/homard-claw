@@ -100,6 +100,15 @@ function errorText(error: unknown, fallback: string): string {
       if (typeof detail === "string" && detail.trim()) return detail;
     }
   }
+  // A network-level failure never reached the server: the browser reports it
+  // as an opaque TypeError ("Failed to fetch" / "Load failed"). Translate it
+  // — the raw text explains nothing and looks like a bug.
+  if (
+    error instanceof TypeError ||
+    (error instanceof Error && /failed to fetch|load failed|networkerror/i.test(error.message))
+  ) {
+    return "The message could not reach the server — the connection dropped or the network is offline. Check your connection, then press Resend.";
+  }
   return error instanceof Error && error.message ? error.message : fallback;
 }
 

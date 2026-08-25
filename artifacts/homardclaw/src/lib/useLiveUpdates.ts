@@ -30,6 +30,12 @@ export function useLiveUpdates(): void {
 
     const connect = (): void => {
       if (closed) return;
+      // A hidden tab keeps its stream closed. Long-lived SSE connections
+      // count against the browser's small per-origin connection pool, and a
+      // few background tabs can starve it — at which point a Talk send dies
+      // with a bare "Failed to fetch" before ever reaching the server.
+      if (document.visibilityState === "hidden") return;
+      if (source) return; // never hold two streams from one tab
       source = new EventSource(`${import.meta.env.BASE_URL}api/events`);
       source.onopen = () => {
         retryDelay = 2_000;
@@ -68,9 +74,27 @@ export function useLiveUpdates(): void {
       };
     };
 
+    const onVisibilityChange = (): void => {
+      if (document.visibilityState === "hidden") {
+        // Release the connection while the tab is in the background; the
+        // pages fall back to their polling intervals when next visible.
+        if (retryTimer) {
+          clearTimeout(retryTimer);
+          retryTimer = null;
+        }
+        source?.close();
+        source = null;
+      } else {
+        retryDelay = 2_000;
+        connect();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
     connect();
     return () => {
       closed = true;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       if (retryTimer) clearTimeout(retryTimer);
       source?.close();
     };

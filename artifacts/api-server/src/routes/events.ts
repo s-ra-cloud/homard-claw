@@ -42,9 +42,19 @@ router.get("/events", (req, res): void => {
   }, 25_000);
   heartbeat.unref();
 
+  // End the stream cleanly before the deployment proxy's ~5 minute limit
+  // reaps it. EventSource reconnects automatically on a clean end, whereas
+  // a proxy abort leaves the client in an error/backoff loop and the dead
+  // connection lingering in the browser's per-origin pool.
+  const maxAge = setTimeout(() => {
+    res.end();
+  }, 4 * 60_000);
+  maxAge.unref();
+
   req.on("close", () => {
     unsubscribe();
     clearInterval(heartbeat);
+    clearTimeout(maxAge);
     if (flushTimer) clearTimeout(flushTimer);
   });
 });
