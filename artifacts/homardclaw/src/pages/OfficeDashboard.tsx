@@ -26,25 +26,25 @@ const officeArt = `${import.meta.env.BASE_URL}images/submarine-office.png`;
 // Four wall computers inside the hull. These positions are deliberately clear
 // of the wall navigation targets and keep the existing seated lobster poses.
 const DESK_SEATS = [
-  { left: 42.2, top: 50.2, label: "first submarine computer" },
-  { left: 49.3, top: 50.2, label: "second submarine computer" },
-  { left: 56.3, top: 50.2, label: "third submarine computer" },
-  { left: 63.2, top: 50.2, label: "fourth submarine computer" },
+  { left: 42.0, top: 47.5, label: "first submarine computer" },
+  { left: 48.2, top: 47.5, label: "second submarine computer" },
+  { left: 54.0, top: 47.5, label: "third submarine computer" },
+  { left: 60.0, top: 47.5, label: "fourth submarine computer" },
 ];
 
 // Clear deck positions. The floor-working pose already includes its cushion
 // and laptop, so the background intentionally contains no duplicate furniture.
 const FLOOR_SEATS = [
-  { left: 18.5, top: 66.0, label: "port control-room deck" },
-  { left: 31.0, top: 66.0, label: "port passage deck" },
-  { left: 44.5, top: 66.5, label: "centre deck" },
-  { left: 58.5, top: 66.5, label: "starboard deck" },
+  { left: 18.5, top: 59.0, label: "port control-room deck" },
+  { left: 27.5, top: 65.0, label: "port passage deck" },
+  { left: 41.5, top: 62.0, label: "centre deck" },
+  { left: 56.0, top: 64.0, label: "starboard deck" },
 ];
 
 // Sandboxed agents are physically separated from the hull on exterior pads.
 const EXTERIOR_SEATS = [
-  { left: 23.5, top: 79.5, label: "port exterior platform" },
-  { left: 68.0, top: 81.0, label: "starboard exterior platform" },
+  { left: 23.5, top: 74.8, label: "port exterior platform" },
+  { left: 67.5, top: 77.2, label: "starboard exterior platform" },
   { left: 10.5, top: 88.0, label: "port seabed station" },
   { left: 89.5, top: 87.0, label: "starboard reef station" },
 ];
