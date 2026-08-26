@@ -8,7 +8,13 @@
  * playback hooks live in the page above so a contact switch cannot leak an
  * extra AudioContext.
  */
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import type { Agent, InputAttachment } from "@workspace/api-client-react";
 import {
   getGetTalkHistoryQueryKey,
@@ -54,7 +60,12 @@ import {
   X,
 } from "lucide-react";
 import { presenceForStatus } from "./agent-presence";
-import { ATTACHMENT_ACCEPT, MAX_ATTACHMENTS, attachmentLabel, readAttachment } from "@/lib/attachments";
+import {
+  ATTACHMENT_ACCEPT,
+  MAX_ATTACHMENTS,
+  attachmentLabel,
+  readAttachment,
+} from "@/lib/attachments";
 
 export type Turn = {
   role: "user" | "agent";
@@ -73,14 +84,37 @@ type Phase = "idle" | "recording" | "thinking" | "speaking";
  * ("can you confirm the task?" goes to the agent like any other message).
  */
 const CONFIRM_PHRASES = new Set([
-  "confirm", "confirmed", "confirm it", "confirm that", "confirm the task",
-  "yes", "yep", "yes please", "yes confirm", "yes do it", "yes go ahead",
-  "do it", "go ahead", "queue it", "queue the task", "approve", "approve it",
+  "confirm",
+  "confirmed",
+  "confirm it",
+  "confirm that",
+  "confirm the task",
+  "yes",
+  "yep",
+  "yes please",
+  "yes confirm",
+  "yes do it",
+  "yes go ahead",
+  "do it",
+  "go ahead",
+  "queue it",
+  "queue the task",
+  "approve",
+  "approve it",
 ]);
 const CANCEL_PHRASES = new Set([
-  "cancel", "cancel it", "cancel that", "cancel the task",
-  "no", "nope", "no thanks", "never mind", "nevermind",
-  "dismiss", "dismiss it", "forget it",
+  "cancel",
+  "cancel it",
+  "cancel that",
+  "cancel the task",
+  "no",
+  "nope",
+  "no thanks",
+  "never mind",
+  "nevermind",
+  "dismiss",
+  "dismiss it",
+  "forget it",
 ]);
 
 function confirmationIntent(utterance: string): "confirm" | "cancel" | null {
@@ -122,7 +156,8 @@ function errorText(error: unknown, fallback: string): string {
   // — the raw text explains nothing and looks like a bug.
   if (
     error instanceof TypeError ||
-    (error instanceof Error && /failed to fetch|load failed|networkerror/i.test(error.message))
+    (error instanceof Error &&
+      /failed to fetch|load failed|networkerror/i.test(error.message))
   ) {
     return "The message could not reach the server — the connection dropped or the network is offline. Check your connection, then press Resend.";
   }
@@ -136,6 +171,8 @@ export interface CallViewProps {
   voiceOn: boolean;
   speechAvailable: boolean;
   recorderSupported: boolean;
+  /** Current setting; the server snapshots it when a Talk task is queued. */
+  autoApproveTalkTasks: boolean;
   /** Back to the contacts list; omitted when both panes are on screen. */
   onHangUp?: () => void;
   /** Settings gear, so the call screen is never a dead end on a phone. */
@@ -149,6 +186,7 @@ export function CallView({
   voiceOn,
   speechAvailable,
   recorderSupported,
+  autoApproveTalkTasks,
   onHangUp,
   headerAction,
 }: CallViewProps) {
@@ -189,7 +227,8 @@ export function CallView({
     return () => {
       epochRef.current += 1;
       liveSessionRef.current += 1;
-      if (liveTimerRef.current !== null) window.clearInterval(liveTimerRef.current);
+      if (liveTimerRef.current !== null)
+        window.clearInterval(liveTimerRef.current);
       abortRef.current?.abort();
       recorderRef.current.cancelRecording();
       playbackRef.current.clear();
@@ -197,7 +236,9 @@ export function CallView({
   }, []);
 
   useEffect(() => {
-    transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight });
+    transcriptRef.current?.scrollTo({
+      top: transcriptRef.current.scrollHeight,
+    });
   }, [turns, proposedTask, liveTranscript, phase]);
 
   // Keys for optimistic turns; hydrated turns use server ids. User turns'
@@ -222,33 +263,51 @@ export function CallView({
 
   const setTurnFailed = useCallback((key: string, failed: boolean) => {
     setTurns((prev) =>
-      prev.map((t) => (t.key === key ? { ...t, failed: failed || undefined } : t)),
+      prev.map((t) =>
+        t.key === key ? { ...t, failed: failed || undefined } : t,
+      ),
     );
   }, []);
 
   // Stored history: hydrate once per mount (the component is keyed by agent
   // id, so a contact switch remounts and re-hydrates for the new agent).
-  // Hydration waits for a FRESH fetch (not a stale cache hit that is being
-  // refetched), and sending is disabled until it settles, so stored and
-  // optimistic turns can never race into duplicates.
+  // Later live refetches append only task-linked recaps. Regular Talk turns
+  // are already optimistic in this component and have different server ids,
+  // so appending all refetched rows would duplicate the active conversation.
   const talkHistory = useGetTalkHistory(agentId, {
     query: {
       queryKey: getGetTalkHistoryQueryKey(agentId),
       refetchOnMount: "always",
+      // SSE makes this immediate in the normal case; polling covers a task
+      // finishing while the tab was hidden or the live stream reconnected.
+      refetchInterval: 5_000,
     },
   });
   const historyReady =
     talkHistory.isError || (talkHistory.isFetched && !talkHistory.isFetching);
   const hydratedRef = useRef(false);
+  const storedTurnIdsRef = useRef(new Set<string>());
   useEffect(() => {
-    if (hydratedRef.current || !historyReady || !talkHistory.data) return;
-    hydratedRef.current = true;
-    const stored: Turn[] = talkHistory.data.turns.map((t) => ({
-      role: t.role,
-      text: t.text,
-      key: t.id,
-    }));
-    if (stored.length > 0) setTurns((prev) => [...stored, ...prev]);
+    if (!historyReady || !talkHistory.data) return;
+    if (!hydratedRef.current) {
+      hydratedRef.current = true;
+      const stored: Turn[] = talkHistory.data.turns.map((t) => {
+        storedTurnIdsRef.current.add(t.id);
+        return { role: t.role, text: t.text, key: t.id };
+      });
+      if (stored.length > 0) setTurns((prev) => [...stored, ...prev]);
+      return;
+    }
+    const recaps: Turn[] = talkHistory.data.turns
+      .filter(
+        (turn) =>
+          turn.taskId !== null && !storedTurnIdsRef.current.has(turn.id),
+      )
+      .map((turn) => {
+        storedTurnIdsRef.current.add(turn.id);
+        return { role: turn.role, text: turn.text, key: turn.id };
+      });
+    if (recaps.length > 0) setTurns((prev) => [...prev, ...recaps]);
   }, [historyReady, talkHistory.data]);
 
   /** Context sent to the agent: recent settled turns, without failed sends. */
@@ -286,7 +345,9 @@ export function CallView({
       liveBusyRef.current = true;
       void (async () => {
         try {
-          const { text } = await transcribeAudio({ audio: await blobToBase64(partial) });
+          const { text } = await transcribeAudio({
+            audio: await blobToBase64(partial),
+          });
           if (liveSessionRef.current === session && text.trim()) {
             setLiveTranscript(text.trim());
           }
@@ -330,9 +391,16 @@ export function CallView({
         queryClient.invalidateQueries({ queryKey: ["/api/office/overview"] });
         appendTurn({
           role: "agent",
-          text: "Task queued. It follows the office's normal approval policy before any work starts.",
+          text: autoApproveTalkTasks
+            ? "Task queued. Talk auto-approval will handle its initial approval if one is required. I'll report back here when it finishes."
+            : "Task queued. It follows the office's normal approval policy before work starts. I'll report back here when it finishes.",
         });
-        toast({ title: "Task queued", description: "Approval policy applies as usual." });
+        toast({
+          title: "Task queued",
+          description: autoApproveTalkTasks
+            ? "Initial Talk approval is automatic; safety limits still apply."
+            : "Approval policy applies as usual.",
+        });
       },
       onError: (err) =>
         toast({
@@ -346,7 +414,7 @@ export function CallView({
   const queueProposedTask = useCallback(
     (objective: string) => {
       setProposedTask(null);
-      createTask.mutate({ data: { agentId, objective } });
+      createTask.mutate({ data: { agentId, objective, talkMode: true } });
     },
     [agentId, createTask],
   );
@@ -396,7 +464,10 @@ export function CallView({
         queryClient.invalidateQueries({
           queryKey: getGetTalkHistoryQueryKey(agentId),
         });
-        toast({ title: "History cleared", description: `Your conversation with ${agent.name} was deleted.` });
+        toast({
+          title: "History cleared",
+          description: `Your conversation with ${agent.name} was deleted.`,
+        });
       },
       onError: (err) =>
         toast({
@@ -413,7 +484,11 @@ export function CallView({
    * — a resend retries only this message and never duplicates the turn.
    */
   const deliverText = useCallback(
-    (text: string, turnKey: string, turnAttachments: InputAttachment[] = []) => {
+    (
+      text: string,
+      turnKey: string,
+      turnAttachments: InputAttachment[] = [],
+    ) => {
       setFlowError(null);
       setTurnFailed(turnKey, false);
       setPhase("thinking");
@@ -451,7 +526,10 @@ export function CallView({
     event.target.value = "";
     const available = MAX_ATTACHMENTS - attachments.length;
     if (selected.length > available) {
-      toast({ title: `You can attach up to ${MAX_ATTACHMENTS} files`, variant: "destructive" });
+      toast({
+        title: `You can attach up to ${MAX_ATTACHMENTS} files`,
+        variant: "destructive",
+      });
     }
     for (const file of selected.slice(0, available)) {
       try {
@@ -460,7 +538,10 @@ export function CallView({
       } catch (error) {
         toast({
           title: "Attachment rejected",
-          description: error instanceof Error ? error.message : "The file could not be read.",
+          description:
+            error instanceof Error
+              ? error.message
+              : "The file could not be read.",
           variant: "destructive",
         });
       }
@@ -469,13 +550,19 @@ export function CallView({
 
   const sendText = (event: React.FormEvent) => {
     event.preventDefault();
-    const text = textDraft.trim() || (attachments.length ? "Please review the attached file(s)." : "");
+    const text =
+      textDraft.trim() ||
+      (attachments.length ? "Please review the attached file(s)." : "");
     if (!text || phase !== "idle" || !historyReady) return;
     setTextDraft("");
     const sentAttachments = attachments;
     setAttachments([]);
     setFlowError(null);
-    const key = appendTurn({ role: "user", text, attachments: sentAttachments });
+    const key = appendTurn({
+      role: "user",
+      text,
+      attachments: sentAttachments,
+    });
     if (resolveProposal(text)) return;
     deliverText(text, key, sentAttachments);
   };
@@ -517,7 +604,9 @@ export function CallView({
       if (blob.size === 0) throw new Error("empty recording");
     } catch {
       stopLiveCaptions();
-      setFlowError("The recording failed. Try again, or type your message instead.");
+      setFlowError(
+        "The recording failed. Try again, or type your message instead.",
+      );
       setPhase("idle");
       return;
     }
@@ -538,12 +627,15 @@ export function CallView({
     let gotReply = false;
     try {
       const audio = await blobToBase64(blob);
-      const response = await fetch(`${import.meta.env.BASE_URL}api/agents/${agentId}/voice-converse`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ audio, history: contextTurns() }),
-        signal: controller.signal,
-      });
+      const response = await fetch(
+        `${import.meta.env.BASE_URL}api/agents/${agentId}/voice-converse`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ audio, history: contextTurns() }),
+          signal: controller.signal,
+        },
+      );
       if (!response.ok || !response.body) {
         const detail = await response
           .json()
@@ -596,7 +688,10 @@ export function CallView({
               break;
             }
             case "audio":
-              playback.pushSequencedAudio(Number(event.seq ?? 0), String(event.data ?? ""));
+              playback.pushSequencedAudio(
+                Number(event.seq ?? 0),
+                String(event.data ?? ""),
+              );
               setPhase("speaking");
               break;
             case "error":
@@ -604,7 +699,8 @@ export function CallView({
               // Fatal errors end the turn server-side; returning here keeps
               // the real message instead of a "connection dropped" fallback.
               if (event.fatal === true) {
-                if (spokenTurnKey && !gotReply) setTurnFailed(spokenTurnKey, true);
+                if (spokenTurnKey && !gotReply)
+                  setTurnFailed(spokenTurnKey, true);
                 return;
               }
               break;
@@ -615,14 +711,21 @@ export function CallView({
           }
         }
       }
-      if (!sawDone && !controller.signal.aborted && epochRef.current === epoch) {
+      if (
+        !sawDone &&
+        !controller.signal.aborted &&
+        epochRef.current === epoch
+      ) {
         setFlowError("The connection dropped mid-reply. Try again.");
         if (spokenTurnKey && !gotReply) setTurnFailed(spokenTurnKey, true);
       }
     } catch (err) {
       if (!controller.signal.aborted && epochRef.current === epoch) {
         setFlowError(
-          errorText(err, "The voice request failed. Check your connection and try again."),
+          errorText(
+            err,
+            "The voice request failed. Check your connection and try again.",
+          ),
         );
         if (spokenTurnKey && !gotReply) setTurnFailed(spokenTurnKey, true);
       }
@@ -700,7 +803,10 @@ export function CallView({
                 data-testid="button-clear-history"
               >
                 {clearHistory.isPending ? (
-                  <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                  <Loader2
+                    className="w-4 h-4 animate-spin"
+                    aria-hidden="true"
+                  />
                 ) : (
                   <Trash2 className="w-4 h-4" aria-hidden="true" />
                 )}
@@ -741,7 +847,9 @@ export function CallView({
       >
         {turns.length === 0 && (
           <p className="text-xs text-muted-foreground font-mono uppercase text-center">
-            {talkHistory.isLoading ? "Loading history…" : `Say hello to ${agent.name}`}
+            {talkHistory.isLoading
+              ? "Loading history…"
+              : `Say hello to ${agent.name}`}
           </p>
         )}
         {turns.map((turn) => (
@@ -764,15 +872,21 @@ export function CallView({
             {turn.attachments && turn.attachments.length > 0 && (
               <span className="mt-2 flex flex-wrap gap-1.5">
                 {turn.attachments.map((attachment, index) => (
-                  <span key={`${attachment.name}-${index}`} className="inline-flex items-center gap-1 border border-current/30 px-1.5 py-0.5 text-[9px] font-mono">
-                    <FileText className="w-3 h-3" aria-hidden="true" /> {attachmentLabel(attachment)}
+                  <span
+                    key={`${attachment.name}-${index}`}
+                    className="inline-flex items-center gap-1 border border-current/30 px-1.5 py-0.5 text-[9px] font-mono"
+                  >
+                    <FileText className="w-3 h-3" aria-hidden="true" />{" "}
+                    {attachmentLabel(attachment)}
                   </span>
                 ))}
               </span>
             )}
             {turn.failed && (
               <span className="mt-2 flex items-center gap-2 text-[10px] font-mono uppercase">
-                <span className="text-destructive-foreground/90">Not delivered</span>
+                <span className="text-destructive-foreground/90">
+                  Not delivered
+                </span>
                 <button
                   type="button"
                   onClick={() => resendTurn(turn)}
@@ -781,7 +895,10 @@ export function CallView({
                   data-testid={`button-resend-${turn.key}`}
                 >
                   {phase === "thinking" ? (
-                    <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+                    <Loader2
+                      className="w-3 h-3 animate-spin"
+                      aria-hidden="true"
+                    />
                   ) : (
                     <RotateCcw className="w-3 h-3" aria-hidden="true" />
                   )}
@@ -804,7 +921,10 @@ export function CallView({
           </div>
         )}
         {phase === "thinking" && (
-          <div className="mr-auto flex items-center gap-2 text-xs text-muted-foreground" role="status">
+          <div
+            className="mr-auto flex items-center gap-2 text-xs text-muted-foreground"
+            role="status"
+          >
             <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
             {agent.name} is thinking…
           </div>
@@ -814,11 +934,13 @@ export function CallView({
       {proposedTask && (
         <div className="shrink-0 border-t-4 border-border p-4 bg-accent/10 space-y-2">
           <p className="text-xs font-mono uppercase text-accent flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4" aria-hidden="true" /> Proposed task
+            <CheckCircle2 className="w-4 h-4" aria-hidden="true" /> Proposed
+            task
           </p>
           <p className="text-sm">{proposedTask}</p>
           <p className="text-[10px] text-muted-foreground">
-            Say “confirm” (or tap Queue) to create it. Approval policy still applies.
+            Say “confirm” (or tap Queue) to create it. Approval policy still
+            applies.
           </p>
           <div className="flex gap-2">
             <Button
@@ -828,7 +950,11 @@ export function CallView({
             >
               Queue task
             </Button>
-            <Button size="sm" variant="outline" onClick={() => setProposedTask(null)}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setProposedTask(null)}
+            >
               <X className="w-3 h-3 mr-1" aria-hidden="true" /> Dismiss
             </Button>
           </div>
@@ -853,32 +979,48 @@ export function CallView({
         {canRecord ? (
           <div className="flex items-center gap-3 flex-wrap">
             {phase === "recording" ? (
-              <Button onClick={finishRecording} className="bg-destructive text-destructive-foreground">
-                <Square className="w-4 h-4 mr-2" aria-hidden="true" /> Stop &amp; send
+              <Button
+                onClick={finishRecording}
+                className="bg-destructive text-destructive-foreground"
+              >
+                <Square className="w-4 h-4 mr-2" aria-hidden="true" /> Stop
+                &amp; send
               </Button>
             ) : (
               <Button
                 onClick={startRecording}
-                disabled={(phase !== "idle" && phase !== "speaking") || !historyReady}
+                disabled={
+                  (phase !== "idle" && phase !== "speaking") || !historyReady
+                }
                 aria-label={`Record a message for ${agent.name}`}
               >
                 <Mic className="w-4 h-4 mr-2" aria-hidden="true" /> Record
               </Button>
             )}
             {phase === "recording" && (
-              <span className="flex items-center gap-2 text-xs text-destructive font-mono uppercase" role="status">
-                <span className="w-2 h-2 bg-destructive animate-pulse" aria-hidden="true" />
+              <span
+                className="flex items-center gap-2 text-xs text-destructive font-mono uppercase"
+                role="status"
+              >
+                <span
+                  className="w-2 h-2 bg-destructive animate-pulse"
+                  aria-hidden="true"
+                />
                 Recording…
               </span>
             )}
             {phase === "speaking" && (
               <>
-                <span className="flex items-center gap-2 text-xs text-accent font-mono uppercase" role="status">
+                <span
+                  className="flex items-center gap-2 text-xs text-accent font-mono uppercase"
+                  role="status"
+                >
                   <Volume2 className="w-4 h-4" aria-hidden="true" />
                   {agent.name} is speaking
                 </span>
                 <Button size="sm" variant="outline" onClick={interrupt}>
-                  <MicOff className="w-3 h-3 mr-1" aria-hidden="true" /> Interrupt
+                  <MicOff className="w-3 h-3 mr-1" aria-hidden="true" />{" "}
+                  Interrupt
                 </Button>
               </>
             )}
@@ -905,10 +1047,23 @@ export function CallView({
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-2">
             {attachments.map((attachment, index) => (
-              <span key={`${attachment.name}-${index}`} className="inline-flex items-center gap-1.5 border-2 border-border bg-muted px-2 py-1 text-[10px] font-mono">
+              <span
+                key={`${attachment.name}-${index}`}
+                className="inline-flex items-center gap-1.5 border-2 border-border bg-muted px-2 py-1 text-[10px] font-mono"
+              >
                 <FileText className="w-3 h-3 text-accent" />
-                <span className="max-w-40 truncate">{attachmentLabel(attachment)}</span>
-                <button type="button" aria-label={`Remove ${attachment.name}`} onClick={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))}>
+                <span className="max-w-40 truncate">
+                  {attachmentLabel(attachment)}
+                </span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${attachment.name}`}
+                  onClick={() =>
+                    setAttachments((current) =>
+                      current.filter((_, itemIndex) => itemIndex !== index),
+                    )
+                  }
+                >
                   <X className="w-3 h-3" />
                 </button>
               </span>
@@ -921,7 +1076,9 @@ export function CallView({
             variant="outline"
             size="icon"
             onClick={() => attachmentInputRef.current?.click()}
-            disabled={phase === "recording" || attachments.length >= MAX_ATTACHMENTS}
+            disabled={
+              phase === "recording" || attachments.length >= MAX_ATTACHMENTS
+            }
             aria-label="Attach images or documents"
             title="Attach images, PDF, or text files (2 MB each)"
           >
@@ -937,7 +1094,11 @@ export function CallView({
           />
           <Button
             type="submit"
-            disabled={(!textDraft.trim() && attachments.length === 0) || phase !== "idle" || !historyReady}
+            disabled={
+              (!textDraft.trim() && attachments.length === 0) ||
+              phase !== "idle" ||
+              !historyReady
+            }
             aria-label="Send message"
           >
             <Send className="w-4 h-4" aria-hidden="true" />

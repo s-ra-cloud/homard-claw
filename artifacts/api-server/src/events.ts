@@ -20,6 +20,7 @@ export type LiveTopic =
   | "notifications"
   | "agents"
   | "schedules"
+  | "talk"
   | "overview";
 
 const bus = new EventEmitter();
@@ -52,8 +53,7 @@ export function subscribe(
   listener: (topics: LiveTopic[]) => void,
 ): () => void {
   const wrapped = (announcement: Announcement): void => {
-    if (announcement.workspaceId === workspaceId)
-      listener(announcement.topics);
+    if (announcement.workspaceId === workspaceId) listener(announcement.topics);
   };
   bus.on(EVENT, wrapped);
   return () => bus.off(EVENT, wrapped);

@@ -9,7 +9,7 @@ import {
   tasksTable,
   workspaceSettingsTable,
 } from "@workspace/db";
-import { and, asc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { recordAudit } from "./audit";
 import {
   effectivePermissions,
@@ -92,6 +92,10 @@ const RETRY_BACKOFF_MS = 30_000;
 const CALL_TIMEOUT_MS = 180_000;
 const POLL_INTERVAL_MS = 3_000;
 const APPROVAL_TTL_MS = 24 * 60 * 60 * 1000;
+const TALK_RECAP_RESULT_LIMIT = 4_000;
+const TALK_RECAP_ISSUE_LIMIT = 3;
+/** Shared advisory-lock class used by Talk history clears and inserts. */
+const TALK_HISTORY_LOCK = 872_005;
 
 const inFlight = new Map<string, AbortController>();
 
@@ -187,7 +191,10 @@ export async function recoverInterruptedTasks(): Promise<number> {
   // Another live instance's leases are untouched and expire on their own.
   const releasedLeases = await releaseOwnStaleLeases();
   if (releasedLeases > 0) {
-    logger.info({ count: releasedLeases }, "Released own stale provider leases");
+    logger.info(
+      { count: releasedLeases },
+      "Released own stale provider leases",
+    );
   }
 
   const recovered = await db
@@ -317,7 +324,9 @@ export type ClaimScope = {
  * rate-limit backoff via notBefore, and claims nothing while the emergency
  * stop is engaged. FOR UPDATE SKIP LOCKED keeps concurrent workers safe.
  */
-export async function claimNextTask(scope?: ClaimScope): Promise<ClaimedTask | null> {
+export async function claimNextTask(
+  scope?: ClaimScope,
+): Promise<ClaimedTask | null> {
   return db.transaction(async (tx) => {
     const [row] = await tx
       .select({ task: tasksTable, agent: agentsTable })
@@ -334,8 +343,13 @@ export async function claimNextTask(scope?: ClaimScope): Promise<ClaimedTask | n
               and ${workspaceSettingsTable.key} = 'emergency_stop'
               and ${workspaceSettingsTable.value} = 'true'
           )`,
-          or(isNull(tasksTable.notBefore), lte(tasksTable.notBefore, new Date())),
-          ...(scope?.includePausedAgents ? [] : [eq(agentsTable.paused, false)]),
+          or(
+            isNull(tasksTable.notBefore),
+            lte(tasksTable.notBefore, new Date()),
+          ),
+          ...(scope?.includePausedAgents
+            ? []
+            : [eq(agentsTable.paused, false)]),
           eq(agentsTable.archived, false),
           eq(agentsTable.retired, false),
           ...(scope?.agentIds ? [inArray(agentsTable.id, scope.agentIds)] : []),
@@ -363,7 +377,9 @@ export async function claimNextTask(scope?: ClaimScope): Promise<ClaimedTask | n
     await tx
       .update(agentsTable)
       .set({ status: "working" })
-      .where(and(eq(agentsTable.id, row.agent.id), eq(agentsTable.status, "idle")));
+      .where(
+        and(eq(agentsTable.id, row.agent.id), eq(agentsTable.status, "idle")),
+      );
     return { task, agent: row.agent };
   });
 }
@@ -393,19 +409,87 @@ async function finishIfStillRunning(
   attempts: number,
   set: Partial<typeof tasksTable.$inferInsert>,
 ): Promise<typeof tasksTable.$inferSelect | null> {
-  const [task] = await db
-    .update(tasksTable)
-    .set({ ...set, finishedAt: new Date() })
-    .where(
-      and(
-        eq(tasksTable.id, taskId),
-        eq(tasksTable.status, "running"),
-        eq(tasksTable.attempts, attempts),
-      ),
-    )
-    .returning();
+  const task = await db.transaction(async (tx) => {
+    const [finished] = await tx
+      .update(tasksTable)
+      .set({ ...set, finishedAt: new Date() })
+      .where(
+        and(
+          eq(tasksTable.id, taskId),
+          eq(tasksTable.status, "running"),
+          eq(tasksTable.attempts, attempts),
+        ),
+      )
+      .returning();
+    if (!finished) return null;
+
+    // A Talk-created task reports back into the same agent conversation.
+    // Keep this in the terminal-state transaction so a completed task can
+    // never exist without its one durable recap message (or vice versa).
+    if (finished.talkMode) {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(${TALK_HISTORY_LOCK}, hashtext(${finished.agentId}))`,
+      );
+      const issueRows = await tx
+        .select({ message: taskLogsTable.message })
+        .from(taskLogsTable)
+        .where(
+          and(
+            eq(taskLogsTable.taskId, finished.id),
+            inArray(taskLogsTable.level, ["warn", "error"]),
+          ),
+        )
+        .orderBy(desc(taskLogsTable.createdAt))
+        .limit(TALK_RECAP_ISSUE_LIMIT);
+      const issues = [
+        finished.errorMessage,
+        ...issueRows.map((row) => row.message),
+      ]
+        .filter((message): message is string => Boolean(message?.trim()))
+        .filter((message, index, all) => all.indexOf(message) === index)
+        .map((message) => message.slice(0, 500));
+      const objective = finished.objective.slice(0, 300);
+      const result = finished.output?.trim().slice(0, TALK_RECAP_RESULT_LIMIT);
+      const body =
+        finished.status === "completed"
+          ? [
+              `I finished the task you started here: “${objective}”`,
+              "What I did and the main result:",
+              result || "The task completed without a written result.",
+              "Issues:",
+              issues.length > 0
+                ? issues.map((issue) => `• ${issue}`).join("\n")
+                : "No issues were reported.",
+            ].join("\n\n")
+          : [
+              `I could not complete the task you started here: “${objective}”`,
+              "What I did:",
+              result ||
+                "I started the task, but it stopped before producing a final result.",
+              "Issues:",
+              issues.length > 0
+                ? issues.map((issue) => `• ${issue}`).join("\n")
+                : `The task ended with status ${finished.status}.`,
+              "Main result:",
+              "No completed result was produced.",
+            ].join("\n\n");
+      await tx.insert(agentMessagesTable).values({
+        fromAgentId: finished.agentId,
+        toAgentId: null,
+        taskId: finished.id,
+        kind: "voice",
+        body,
+      });
+    }
+    return finished;
+  });
   if (task) {
-    publish(task.workspaceId, "tasks", "overview");
+    publish(
+      task.workspaceId,
+      "tasks",
+      "overview",
+      ...(task.talkMode ? (["talk"] as const) : []),
+    );
     // Every terminal transition the owner asked to hear about flows through
     // here, so this is the single notification hook for worker outcomes.
     if (set.status === "completed") {
@@ -417,6 +501,73 @@ async function finishIfStillRunning(
     }
   }
   return task ?? null;
+}
+
+/**
+ * Record an owner-equivalent approval for the initial policy gate of a task
+ * whose Talk preference was stamped on dispatch. Hard denials have already
+ * run and connected-app actions retain their separate approval flow.
+ */
+async function autoApproveTalkTask(
+  { task, agent }: ClaimedTask,
+  reason: string,
+): Promise<boolean> {
+  const approved = await db.transaction(async (tx) => {
+    const [current] = await tx
+      .select({ id: tasksTable.id })
+      .from(tasksTable)
+      .where(
+        and(
+          eq(tasksTable.id, task.id),
+          eq(tasksTable.status, "running"),
+          eq(tasksTable.attempts, task.attempts),
+        ),
+      )
+      .limit(1);
+    if (!current) return false;
+    const [existing] = await tx
+      .select()
+      .from(approvalsTable)
+      .where(
+        and(
+          eq(approvalsTable.taskId, task.id),
+          inArray(approvalsTable.status, ["pending", "approved"]),
+        ),
+      )
+      .limit(1);
+    if (existing?.status === "pending") {
+      await tx
+        .update(approvalsTable)
+        .set({ status: "approved", decidedAt: new Date() })
+        .where(eq(approvalsTable.id, existing.id));
+    } else if (!existing) {
+      await tx.insert(approvalsTable).values({
+        agentId: agent.id,
+        taskId: task.id,
+        action: `Run task: ${task.objective.slice(0, 120)}`,
+        details: `${reason} Automatically approved because this task was confirmed in Talk while Talk auto-approval was enabled.`,
+        status: "approved",
+        decidedAt: new Date(),
+        expiresAt: new Date(Date.now() + APPROVAL_TTL_MS),
+      });
+    }
+    await recordAudit(
+      task.workspaceId!,
+      "approval.auto_approved",
+      `${agent.name}'s Talk-created task was automatically approved at its initial policy gate: ${reason}`,
+      tx,
+    );
+    return true;
+  });
+  if (approved) {
+    await addTaskLog(
+      task.id,
+      "info",
+      `Talk auto-approval accepted the initial task approval: ${reason}`,
+    );
+    publish(task.workspaceId, "approvals");
+  }
+  return approved;
 }
 
 async function settleAgentStatus(
@@ -634,9 +785,20 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     return;
   }
   if (decision.kind === "needs_approval") {
-    await parkForApproval({ task, agent }, decision.reason);
-    await settleAgentStatus(agent.id, workspaceId);
-    return;
+    if (task.talkMode && task.talkAutoApprove) {
+      const approved = await autoApproveTalkTask(
+        { task, agent },
+        decision.reason,
+      );
+      if (!approved) {
+        await settleAgentStatus(agent.id, workspaceId);
+        return;
+      }
+    } else {
+      await parkForApproval({ task, agent }, decision.reason);
+      await settleAgentStatus(agent.id, workspaceId);
+      return;
+    }
   }
 
   // Connected apps: grants are loaded fresh on every attempt so a revoked
@@ -655,7 +817,10 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
       objective: task.objective,
     });
   } catch (error) {
-    logger.warn({ taskId: task.id, error }, "Could not load connected-app grants");
+    logger.warn(
+      { taskId: task.id, error },
+      "Could not load connected-app grants",
+    );
     await addTaskLog(
       task.id,
       "warn",
@@ -867,27 +1032,8 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
   try {
     // Authoritative readiness, re-checked immediately before dispatch: a
     // ChatGPT session that expired while the task sat in the queue must
-    // fail closed here rather than be attempted. For Codex the check is
-    // against the task's queue-time owner snapshot — the account the run
-    // will bill — never the workspace's current owner, which a hand-over
-    // could have changed while the task waited.
-    if (provider === "codex_chatgpt" && !task.ownerClerkUserId) {
-      const message =
-        "This task predates per-account Codex billing and carries no owner snapshot; re-create it to run it with Codex.";
-      await setTaskPhase(task.id, task.attempts, "auth_required", workspaceId);
-      await finishIfStillRunning(task.id, task.attempts, {
-        status: "blocked",
-        errorKind: "not_configured",
-        errorMessage: message,
-      });
-      await addTaskLog(task.id, "error", message);
-      return;
-    }
-    const readiness = await providerReadiness(
-      workspaceId,
-      provider,
-      provider === "codex_chatgpt" ? (task.ownerClerkUserId ?? null) : undefined,
-    );
+    // fail closed here rather than be attempted.
+    const readiness = await providerReadiness(provider);
     if (!readiness.ready) {
       await setTaskPhase(task.id, task.attempts, "auth_required", workspaceId);
       await finishIfStillRunning(task.id, task.attempts, {
@@ -984,7 +1130,10 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
 
     // Token limit: never request more output than the agent is allowed,
     // whatever the budget maths above worked out.
-    if (perms.maxOutputTokens !== null && perms.maxOutputTokens < maxOutputTokens) {
+    if (
+      perms.maxOutputTokens !== null &&
+      perms.maxOutputTokens < maxOutputTokens
+    ) {
       maxOutputTokens = perms.maxOutputTokens;
       await addTaskLog(
         task.id,
@@ -1010,14 +1159,16 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     // never later than the global call timeout.
     const runLimitMs = Math.min(
       CALL_TIMEOUT_MS,
-      perms.maxRunSeconds !== null ? perms.maxRunSeconds * 1000 : CALL_TIMEOUT_MS,
+      perms.maxRunSeconds !== null
+        ? perms.maxRunSeconds * 1000
+        : CALL_TIMEOUT_MS,
     );
 
     // An unrecognized runtime id throws, and the catch below blocks the
     // task. Silently falling back to the built-in runtime would run work
     // somewhere it was never assigned.
     const runtime = getRuntime(task.runtime || DEFAULT_RUNTIME);
-    const runtimeStatus = await runtime.health(workspaceId);
+    const runtimeStatus = await runtime.health();
     if (!runtimeStatus.acceptsWork) {
       await finishIfStillRunning(task.id, task.attempts, {
         status: "blocked",
@@ -1038,31 +1189,17 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     let conversationId: string | null = task.conversationId;
     let workingDirectory: string | null = null;
     let threadId: string | null = null;
-    // Resolved once, here, and carried into the provider call unchanged:
-    // the lease below and the run itself must key off the same account
-    // even if workspace ownership were handed over mid-flight.
-    let codexClerkUserId: string | null = null;
     if (provider === "codex_chatgpt") {
-      // Keyed by the account snapshotted onto the task when it was queued —
-      // never the workspace's current owner, which a legacy hand-over could
-      // change while the task waited. Every attempt, retry, and recovery of
-      // this task bills exactly the account that queued it. A legacy row
-      // without a snapshot fails closed rather than guessing.
-      const codexUser = task.ownerClerkUserId ?? null;
-      if (!codexUser) {
-        throw new ProviderCallError(
-          "not_configured",
-          "This task predates per-account Codex billing and carries no owner snapshot; re-create it to run it with Codex.",
-        );
-      }
-      const fingerprint = await codexAuthFingerprint(codexUser);
+      // Keyed by the account whose ChatGPT session the run will use, so two
+      // accounts never queue behind each other. No account resolved means
+      // nothing to run as; fail closed.
+      const fingerprint = await codexAuthFingerprint();
       if (!fingerprint) {
         throw new ProviderCallError(
           "not_configured",
           "No account with a Codex sign-in could be resolved for this task, so the run was refused.",
         );
       }
-      codexClerkUserId = codexUser;
       const key = codexLeaseKey(fingerprint);
       const lease = await acquireProviderLease(key, task.id, codexLeaseTtlMs());
       if (!lease.acquired) {
@@ -1220,8 +1357,6 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     try {
       for (let round = 1; round <= MAX_ACTION_ROUNDS; round += 1) {
         const result = await runtime.execute({
-          workspaceId,
-          clerkUserId: codexClerkUserId,
           provider,
           model: task.model ?? "",
           system,
@@ -1320,16 +1455,31 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
           };
           if (spentCents === null) {
             // Cost can no longer be measured; fail closed on extra rounds.
-            if (await stop("more connected-app actions were requested, but their cost could not be measured against the task's budget.")) break;
+            if (
+              await stop(
+                "more connected-app actions were requested, but their cost could not be measured against the task's budget.",
+              )
+            )
+              break;
           } else if (spentCents >= budgetCeilingCents) {
-            if (await stop("more connected-app actions were requested, but the task's budget was already spent.")) break;
+            if (
+              await stop(
+                "more connected-app actions were requested, but the task's budget was already spent.",
+              )
+            )
+              break;
           } else {
             const pricing = await getModelPricing(provider, task.model ?? "");
             if (
               pricing.promptCentsPerMTok === null ||
               pricing.completionCentsPerMTok === null
             ) {
-              if (await stop("more connected-app actions were requested, but pricing for this model is unknown.")) break;
+              if (
+                await stop(
+                  "more connected-app actions were requested, but pricing for this model is unknown.",
+                )
+              )
+                break;
             } else {
               const nextPromptTokens = estimatePromptTokens(
                 system.length + promptFor().length,
@@ -1346,7 +1496,12 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
                     )
                   : maxOutputTokens;
               if (remainingCents <= 0 || affordable < 1) {
-                if (await stop("more connected-app actions were requested, but the task's remaining budget cannot fund another round.")) break;
+                if (
+                  await stop(
+                    "more connected-app actions were requested, but the task's remaining budget cannot fund another round.",
+                  )
+                )
+                  break;
               }
               if (affordable < maxOutputTokens) maxOutputTokens = affordable;
             }
@@ -1606,7 +1761,10 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
           );
         }
       } catch (error) {
-        logger.warn({ taskId: task.id, error }, "Could not save task outcome memory");
+        logger.warn(
+          { taskId: task.id, error },
+          "Could not save task outcome memory",
+        );
       }
     } else {
       // Cancelled (or stopped) while the call was in flight; keep that
@@ -1617,7 +1775,10 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         .update(tasksTable)
         .set(usage)
         .where(
-          and(eq(tasksTable.id, task.id), eq(tasksTable.attempts, task.attempts)),
+          and(
+            eq(tasksTable.id, task.id),
+            eq(tasksTable.attempts, task.attempts),
+          ),
         );
       await setTaskPhase(task.id, task.attempts, "cancelled", workspaceId);
       await addTaskLog(
@@ -1652,7 +1813,11 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
 
     if (callError.kind === "cancelled") {
       await setTaskPhase(task.id, task.attempts, "cancelled", workspaceId);
-      await addTaskLog(task.id, "warn", "Provider call aborted by cancellation.");
+      await addTaskLog(
+        task.id,
+        "warn",
+        "Provider call aborted by cancellation.",
+      );
       return;
     }
     if (callError.kind === "rate_limit") {
@@ -1697,7 +1862,11 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
       errorKind: callError.kind,
       errorMessage: callError.message,
     });
-    await addTaskLog(task.id, "error", `Failed (${callError.kind}): ${callError.message}`);
+    await addTaskLog(
+      task.id,
+      "error",
+      `Failed (${callError.kind}): ${callError.message}`,
+    );
     if (finished) {
       await recordAudit(
         workspaceId,
@@ -1733,13 +1902,7 @@ async function offerFallback(
   const healthy: ProviderId[] = [];
   for (const candidate of availableProviderIds()) {
     if (candidate === fromProvider) continue;
-    // A fallback TO Codex would bill the task's snapshotted owner, so
-    // candidate health is judged against that same account.
-    const readiness = await providerReadiness(
-      task.workspaceId ?? "",
-      candidate,
-      candidate === "codex_chatgpt" ? (task.ownerClerkUserId ?? null) : undefined,
-    );
+    const readiness = await providerReadiness(candidate);
     if (readiness.ready) healthy.push(candidate);
   }
   const decision = await evaluateFallback({
@@ -1819,7 +1982,10 @@ const WORKER_LOCK_KEY = 0x484f4d41; // "HOMA"
 
 // Structurally typed to avoid a direct `pg` dep in api-server's package.json.
 type LeaseClient = {
-  query<T extends Record<string, unknown>>(sql: string, values?: unknown[]): Promise<{ rows: T[] }>;
+  query<T extends Record<string, unknown>>(
+    sql: string,
+    values?: unknown[],
+  ): Promise<{ rows: T[] }>;
   release(err?: boolean | Error): void;
   on(event: "error", listener: (err: Error) => void): unknown;
 };
@@ -1852,7 +2018,10 @@ async function ensureWorkerLease(): Promise<boolean> {
     // attempts fence in finishIfStillRunning covers the remaining window.
     const aborted = abortAllInFlight("lease_lost");
     if (aborted > 0) {
-      logger.warn({ aborted }, "Worker lease lost; aborted in-flight provider calls");
+      logger.warn(
+        { aborted },
+        "Worker lease lost; aborted in-flight provider calls",
+      );
     }
     leaseClient = null;
     leaseRecovered = false;

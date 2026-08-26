@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 
 /**
  * Live update subscription. The server streams topic hints over SSE
- * whenever tasks, approvals, notifications, agents, schedules, or the
+ * whenever tasks, approvals, notifications, agents, schedules, Talk, or the
  * office overview change; we invalidate the matching queries so React
  * Query refetches through the normal REST endpoints. The stream carries
  * no payloads — REST stays the single source of truth, and a dropped
@@ -16,7 +16,12 @@ const TOPIC_PREFIXES: Record<string, string[]> = {
   notifications: ["/api/notifications"],
   agents: ["/api/agents"],
   schedules: ["/api/schedules"],
-  overview: ["/api/office/overview", "/api/runtime/health", "/api/reports/usage"],
+  talk: ["/api/agents/"],
+  overview: [
+    "/api/office/overview",
+    "/api/runtime/health",
+    "/api/reports/usage",
+  ],
 };
 
 export function useLiveUpdates(): void {

@@ -1,19 +1,15 @@
 /**
  * Voice + text conversations with agents.
  *
- * Speech services (transcription and spoken replies) are paid for by the
- * workspace's own OpenAI API key, stored encrypted per workspace — there
- * is no shared or server-environment key, so one workspace's talking can
- * never draw on anyone else's account. Agent replies themselves come from
+ * Speech services (transcription and spoken replies) run through the
+ * Replit-managed OpenAI AI integration; agent replies themselves come from
  * the agent's own configured provider, exactly like task execution.
  *
- * The audio module is imported lazily so a missing speech dependency
- * degrades to a clear "voice unavailable" status instead of crashing the
- * whole server.
+ * The audio module is imported lazily so a missing integration degrades to a
+ * clear "voice unavailable" status instead of crashing the whole server.
  */
 import {
   ConverseWithAgentBody,
-  SetVoiceCredentialBody,
   TranscribeAudioBody,
   UpdateVoiceSettingsBody,
   VoiceConverseWithAgentBody,
@@ -34,12 +30,6 @@ import { callProvider, ProviderCallError } from "../execution";
 import { resolveRouting } from "../providers";
 import { CodexTalkError, runCodexTalkTurn } from "../talk-codex";
 import {
-  deleteProviderCredential,
-  getProviderCredential,
-  ProviderCredentialError,
-  saveProviderCredential,
-} from "../provider-credentials";
-import {
   getWorkspaceSetting,
   getWorkspaceSettingVia,
   setWorkspaceSetting,
@@ -47,6 +37,7 @@ import {
 const router: IRouter = Router();
 
 const TRANSCRIPTS_KEY = "voice_transcripts_enabled";
+const TALK_AUTO_APPROVE_KEY = "talk_auto_approve_tasks";
 /** ~20MB of base64 ≈ 15MB of audio ≈ several minutes of speech. */
 const MAX_AUDIO_BASE64_CHARS = 20 * 1024 * 1024;
 const REPLY_MAX_TOKENS = 500;
@@ -62,53 +53,45 @@ const CONVERSE_RETRY_DELAY_MS = 500;
 type AgentRow = typeof agentsTable.$inferSelect;
 
 /** Map HomardClaw voice styles to OpenAI voices; "none" means text only. */
-const VOICE_MAP: Record<string, "alloy" | "nova" | "onyx" | "shimmer" | null> = {
-  none: null,
-  warm: "nova",
-  crisp: "alloy",
-  deep: "onyx",
-  bubbly: "shimmer",
-};
+const VOICE_MAP: Record<string, "alloy" | "nova" | "onyx" | "shimmer" | null> =
+  {
+    none: null,
+    warm: "nova",
+    crisp: "alloy",
+    deep: "onyx",
+    bubbly: "shimmer",
+  };
 
-function agentVoice(agent: AgentRow): "alloy" | "nova" | "onyx" | "shimmer" | null {
+function agentVoice(
+  agent: AgentRow,
+): "alloy" | "nova" | "onyx" | "shimmer" | null {
   const style = (agent.voiceStyle ?? "").toLowerCase();
   if (style in VOICE_MAP) return VOICE_MAP[style];
   return "alloy";
 }
 
-/**
- * Speech is available only when THIS workspace has stored its own OpenAI
- * API key. Returns the decrypted key alongside the flag so routes that
- * checked availability can hand the same key to the audio helpers without
- * a second decrypt.
- */
-async function speechAvailability(workspaceId: string): Promise<{
-  available: boolean;
-  reason: string | null;
-  credentials: { apiKey: string } | null;
-}> {
-  let apiKey: string | null;
-  try {
-    apiKey = await getProviderCredential(workspaceId, "openai_voice");
-  } catch (error) {
-    if (error instanceof ProviderCredentialError) {
-      return { available: false, reason: error.message, credentials: null };
-    }
-    throw error;
-  }
-  if (!apiKey) {
+function speechAvailability(): { available: boolean; reason: string | null } {
+  if (
+    !process.env.AI_INTEGRATIONS_OPENAI_BASE_URL ||
+    !process.env.AI_INTEGRATIONS_OPENAI_API_KEY
+  ) {
     return {
       available: false,
       reason:
-        "Voice is not set up for this workspace. Add your OpenAI API key in Talk settings to enable spoken conversations; text chat still works.",
-      credentials: null,
+        "The managed speech service is not provisioned. Text chat still works; ask your administrator to enable the OpenAI AI integration for voice.",
     };
   }
-  return { available: true, reason: null, credentials: { apiKey } };
+  return { available: true, reason: null };
 }
 
 async function transcriptsEnabled(workspaceId: string): Promise<boolean> {
   return (await getWorkspaceSetting(workspaceId, TRANSCRIPTS_KEY)) === "true";
+}
+
+async function autoApproveTalkTasks(workspaceId: string): Promise<boolean> {
+  return (
+    (await getWorkspaceSetting(workspaceId, TALK_AUTO_APPROVE_KEY)) === "true"
+  );
 }
 
 /**
@@ -120,9 +103,13 @@ async function transcriptsEnabled(workspaceId: string): Promise<boolean> {
  * epoch, so the persist is skipped instead of silently repopulating history
  * the owner just wiped.
  */
-const clearedMarkerKey = (agentId: string) => `voice_history_cleared:${agentId}`;
+const clearedMarkerKey = (agentId: string) =>
+  `voice_history_cleared:${agentId}`;
 
-async function readClearEpoch(workspaceId: string, agentId: string): Promise<number> {
+async function readClearEpoch(
+  workspaceId: string,
+  agentId: string,
+): Promise<number> {
   const raw = await getWorkspaceSetting(workspaceId, clearedMarkerKey(agentId));
   const parsed = Number(raw);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -139,7 +126,11 @@ async function readClearEpochVia(
   workspaceId: string,
   agentId: string,
 ): Promise<number> {
-  const raw = await getWorkspaceSettingVia(executor, workspaceId, clearedMarkerKey(agentId));
+  const raw = await getWorkspaceSettingVia(
+    executor,
+    workspaceId,
+    clearedMarkerKey(agentId),
+  );
   const parsed = Number(raw);
   return Number.isFinite(parsed) ? parsed : 0;
 }
@@ -161,17 +152,21 @@ function lockTalkHistory(
   );
 }
 
-
 async function emergencyStopEngaged(workspaceId: string): Promise<boolean> {
   return (await getWorkspaceSetting(workspaceId, "emergency_stop")) === "true";
 }
 
 async function voiceStatusPayload(workspaceId: string) {
-  const { available, reason } = await speechAvailability(workspaceId);
+  const { available, reason } = speechAvailability();
+  const [saveTranscripts, autoApprove] = await Promise.all([
+    transcriptsEnabled(workspaceId),
+    autoApproveTalkTasks(workspaceId),
+  ]);
   return {
     available,
     reason,
-    transcriptsEnabled: await transcriptsEnabled(workspaceId),
+    transcriptsEnabled: saveTranscripts,
+    autoApproveTalkTasks: autoApprove,
   };
 }
 
@@ -181,63 +176,46 @@ router.get("/voice/status", async (req: Request, res: Response) => {
 
 router.put("/voice/settings", async (req: Request, res: Response) => {
   const parsed = UpdateVoiceSettingsBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: "transcriptsEnabled must be a boolean." });
+  if (
+    !parsed.success ||
+    (parsed.data.transcriptsEnabled === undefined &&
+      parsed.data.autoApproveTalkTasks === undefined)
+  ) {
+    res.status(400).json({
+      error: "Provide transcriptsEnabled or autoApproveTalkTasks as a boolean.",
+    });
     return;
   }
-  const value = parsed.data.transcriptsEnabled ? "true" : "false";
-  await setWorkspaceSetting(req.workspaceId!, TRANSCRIPTS_KEY, value);
+  const auditSummaries: string[] = [];
+  if (parsed.data.transcriptsEnabled !== undefined) {
+    await setWorkspaceSetting(
+      req.workspaceId!,
+      TRANSCRIPTS_KEY,
+      parsed.data.transcriptsEnabled ? "true" : "false",
+    );
+    auditSummaries.push(
+      parsed.data.transcriptsEnabled
+        ? "Voice transcript storage was turned on."
+        : "Voice transcript storage was turned off.",
+    );
+  }
+  if (parsed.data.autoApproveTalkTasks !== undefined) {
+    await setWorkspaceSetting(
+      req.workspaceId!,
+      TALK_AUTO_APPROVE_KEY,
+      parsed.data.autoApproveTalkTasks ? "true" : "false",
+    );
+    auditSummaries.push(
+      parsed.data.autoApproveTalkTasks
+        ? "Initial approvals for Talk-created tasks were automated."
+        : "Initial approvals for Talk-created tasks require manual review.",
+    );
+  }
   await recordAudit(
     req.workspaceId!,
     "voice.settings",
-    parsed.data.transcriptsEnabled
-      ? "Voice transcript storage was turned on."
-      : "Voice transcript storage was turned off.",
+    auditSummaries.join(" "),
   );
-  res.json(await voiceStatusPayload(req.workspaceId!));
-});
-
-/**
- * Store this workspace's own OpenAI API key for speech services. The key
- * is encrypted at rest and never echoed back; the response is the same
- * status payload the settings screen already renders.
- */
-router.put("/voice/credential", async (req: Request, res: Response) => {
-  const parsed = SetVoiceCredentialBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: "An API key of at least 8 characters is required." });
-    return;
-  }
-  try {
-    await saveProviderCredential(
-      req.workspaceId!,
-      "openai_voice",
-      parsed.data.credential,
-    );
-  } catch (error) {
-    if (error instanceof ProviderCredentialError) {
-      res.status(503).json({ error: error.message });
-      return;
-    }
-    throw error;
-  }
-  await recordAudit(
-    req.workspaceId!,
-    "voice.credential",
-    "A voice speech API key was stored for this workspace.",
-  );
-  res.json(await voiceStatusPayload(req.workspaceId!));
-});
-
-router.delete("/voice/credential", async (req: Request, res: Response) => {
-  const removed = await deleteProviderCredential(req.workspaceId!, "openai_voice");
-  if (removed) {
-    await recordAudit(
-      req.workspaceId!,
-      "voice.credential",
-      "The workspace's voice speech API key was removed.",
-    );
-  }
   res.json(await voiceStatusPayload(req.workspaceId!));
 });
 
@@ -247,8 +225,8 @@ router.delete("/voice/credential", async (req: Request, res: Response) => {
  * which stays authoritative for confirmations and history.
  */
 router.post("/voice/transcribe", async (req: Request, res: Response) => {
-  const availability = await speechAvailability(req.workspaceId!);
-  if (!availability.available || !availability.credentials) {
+  const availability = speechAvailability();
+  if (!availability.available) {
     res.status(503).json({ error: availability.reason });
     return;
   }
@@ -262,7 +240,9 @@ router.post("/voice/transcribe", async (req: Request, res: Response) => {
     audioBuffer = Buffer.from(parsed.data.audio, "base64");
     if (audioBuffer.length === 0) throw new Error("empty");
   } catch {
-    res.status(400).json({ error: "The audio recording could not be decoded." });
+    res
+      .status(400)
+      .json({ error: "The audio recording could not be decoded." });
     return;
   }
 
@@ -270,14 +250,14 @@ router.post("/voice/transcribe", async (req: Request, res: Response) => {
   const timeout = setTimeout(() => controller.abort(), 30_000);
   req.on("close", () => controller.abort());
   try {
-    const audio = await import("@workspace/integrations-openai-ai-server/audio");
+    const audio =
+      await import("@workspace/integrations-openai-ai-server/audio");
     const compatible = await audio.ensureCompatibleFormat(audioBuffer);
     const text = (
       await audio.speechToText(
         compatible.buffer,
         compatible.format,
         controller.signal,
-        availability.credentials,
       )
     ).trim();
     res.json({ text });
@@ -300,7 +280,10 @@ async function loadConversableAgent(
     .select()
     .from(agentsTable)
     .where(
-      and(eq(agentsTable.id, agentId), eq(agentsTable.workspaceId, workspaceId)),
+      and(
+        eq(agentsTable.id, agentId),
+        eq(agentsTable.workspaceId, workspaceId),
+      ),
     )
     .limit(1);
   if (!agent || agent.archived) {
@@ -315,7 +298,8 @@ async function loadConversableAgent(
   }
   if (await emergencyStopEngaged(workspaceId)) {
     res.status(409).json({
-      error: "The emergency stop is engaged; agents cannot converse until it is released.",
+      error:
+        "The emergency stop is engaged; agents cannot converse until it is released.",
     });
     return null;
   }
@@ -342,7 +326,11 @@ function buildSystemPrompt(agent: AgentRow): string {
   ].join("\n");
 }
 
-function buildPrompt(history: ConverseTurn[], userText: string, agentName: string): string {
+function buildPrompt(
+  history: ConverseTurn[],
+  userText: string,
+  agentName: string,
+): string {
   const lines = history
     .slice(-10)
     .map((t) => `${t.role === "user" ? "Owner" : agentName}: ${t.text}`);
@@ -352,12 +340,19 @@ function buildPrompt(history: ConverseTurn[], userText: string, agentName: strin
 }
 
 /** Parse the model's JSON reply, tolerating code fences and stray prose. */
-function parseModelReply(raw: string): { reply: string; taskObjective: string | null } {
-  const stripped = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+function parseModelReply(raw: string): {
+  reply: string;
+  taskObjective: string | null;
+} {
+  const stripped = raw
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/```\s*$/, "");
   const candidates = [stripped];
   const first = stripped.indexOf("{");
   const last = stripped.lastIndexOf("}");
-  if (first !== -1 && last > first) candidates.push(stripped.slice(first, last + 1));
+  if (first !== -1 && last > first)
+    candidates.push(stripped.slice(first, last + 1));
   for (const candidate of candidates) {
     try {
       const parsed: unknown = JSON.parse(candidate);
@@ -368,7 +363,8 @@ function parseModelReply(raw: string): { reply: string; taskObjective: string | 
         typeof (parsed as { reply: unknown }).reply === "string" &&
         (parsed as { reply: string }).reply.trim()
       ) {
-        const objectiveRaw = (parsed as { taskObjective?: unknown }).taskObjective;
+        const objectiveRaw = (parsed as { taskObjective?: unknown })
+          .taskObjective;
         const objective =
           typeof objectiveRaw === "string" ? objectiveRaw.trim() : "";
         return {
@@ -407,7 +403,12 @@ async function generateReply(
   userText: string,
   history: ConverseTurn[],
   signal: AbortSignal,
-  attachments: Array<{ name: string; mimeType: string; encoding: "text" | "base64"; content: string }> = [],
+  attachments: Array<{
+    name: string;
+    mimeType: string;
+    encoding: "text" | "base64";
+    content: string;
+  }> = [],
 ): Promise<{ reply: string; taskObjective: string | null }> {
   const routing = await resolveRouting(workspaceId, agent);
 
@@ -439,7 +440,6 @@ async function generateReply(
 
   const call = () =>
     callProvider({
-      workspaceId,
       provider: routing.provider,
       model: routing.model,
       system: buildSystemPrompt(agent),
@@ -457,7 +457,11 @@ async function generateReply(
     // to repeat: the provider never produced a reply. Auth, not_configured,
     // policy, cancellation, and timeout failures stay terminal — repeating
     // them just makes the owner wait longer for the same message.
-    if (!(err instanceof ProviderCallError) || !err.retryable || signal.aborted) {
+    if (
+      !(err instanceof ProviderCallError) ||
+      !err.retryable ||
+      signal.aborted
+    ) {
       throw err;
     }
     await abortableDelay(CONVERSE_RETRY_DELAY_MS, signal);
@@ -491,9 +495,14 @@ async function persistTranscript(
   // a clear therefore either commits before the delete (and its rows are
   // deleted with the rest) or observes the changed epoch and skips
   // persisting — it can never repopulate history the owner just wiped.
-  const run = async (executor: Pick<typeof db, "insert" | "execute" | "select">) => {
+  const run = async (
+    executor: Pick<typeof db, "insert" | "execute" | "select">,
+  ) => {
     await lockTalkHistory(executor, agent.id);
-    if ((await readClearEpochVia(executor, workspaceId, agent.id)) !== clearEpoch) return;
+    if (
+      (await readClearEpochVia(executor, workspaceId, agent.id)) !== clearEpoch
+    )
+      return;
     await executor.insert(agentMessagesTable).values([
       { fromAgentId: null, toAgentId: agent.id, kind: "voice", body: userText },
       { fromAgentId: agent.id, toAgentId: null, kind: "voice", body: reply },
@@ -512,7 +521,11 @@ async function persistTranscript(
  * failure is undiagnosable — the owner sees the category and the logs hold
  * the (already sanitized) underlying detail.
  */
-function logTalkFailure(agentId: string, surface: "text" | "voice", err: unknown): void {
+function logTalkFailure(
+  agentId: string,
+  surface: "text" | "voice",
+  err: unknown,
+): void {
   const kind =
     err instanceof CodexTalkError
       ? `codex:${err.kind}`
@@ -535,7 +548,10 @@ function logTalkFailure(agentId: string, surface: "text" | "voice", err: unknown
 }
 
 /** Fixed, sanitized messages only — never echo upstream provider detail. */
-function providerErrorMessage(err: unknown): { status: number; message: string } {
+function providerErrorMessage(err: unknown): {
+  status: number;
+  message: string;
+} {
   if (err instanceof CodexTalkError) {
     // Codex failures get their own accurate messages: a workspace or
     // sign-in problem is not a missing API key, and saying so sends the
@@ -574,7 +590,8 @@ function providerErrorMessage(err: unknown): { status: number; message: string }
       case "rate_limit":
         return {
           status: 503,
-          message: "Codex rate-limit error: ChatGPT asked us to slow down. Wait a moment, then resend this message.",
+          message:
+            "Codex rate-limit error: ChatGPT asked us to slow down. Wait a moment, then resend this message.",
         };
       case "timeout":
         return {
@@ -605,22 +622,31 @@ function providerErrorMessage(err: unknown): { status: number; message: string }
       case "auth":
         return {
           status: 503,
-          message: "The response provider rejected its credentials. Check the Providers page.",
+          message:
+            "The response provider rejected its credentials. Check the Providers page.",
         };
       case "rate_limit":
         return {
           status: 503,
-          message: "The response provider is rate limiting; try again in a moment.",
+          message:
+            "The response provider is rate limiting; try again in a moment.",
         };
       case "transient":
         return {
           status: 503,
-          message: "The response provider is temporarily unavailable. Try again.",
+          message:
+            "The response provider is temporarily unavailable. Try again.",
         };
       case "timeout":
-        return { status: 503, message: "The response provider timed out. Try again." };
+        return {
+          status: 503,
+          message: "The response provider timed out. Try again.",
+        };
       default:
-        return { status: 503, message: "The response provider failed. Try again." };
+        return {
+          status: 503,
+          message: "The response provider failed. Try again.",
+        };
     }
   }
   return { status: 500, message: "The agent could not answer just now." };
@@ -632,93 +658,27 @@ function providerErrorMessage(err: unknown): { status: number; message: string }
  * the emergency stop is engaged — the owner can always re-read what was said.
  */
 const TALK_HISTORY_LIMIT = 200;
-router.get("/agents/:agentId/talk-history", async (req: Request, res: Response) => {
-  const agentId = String(req.params.agentId);
-  const [agent] = await db
-    .select({ id: agentsTable.id, archived: agentsTable.archived })
-    .from(agentsTable)
-    .where(
-      and(eq(agentsTable.id, agentId), eq(agentsTable.workspaceId, req.workspaceId!)),
-    )
-    .limit(1);
-  if (!agent || agent.archived) {
-    res.status(404).json({ error: "Agent not found." });
-    return;
-  }
-  const rows = await db
-    .select()
-    .from(agentMessagesTable)
-    .where(
-      and(
-        eq(agentMessagesTable.kind, "voice"),
-        or(
-          eq(agentMessagesTable.fromAgentId, agentId),
-          eq(agentMessagesTable.toAgentId, agentId),
+router.get(
+  "/agents/:agentId/talk-history",
+  async (req: Request, res: Response) => {
+    const agentId = String(req.params.agentId);
+    const [agent] = await db
+      .select({ id: agentsTable.id, archived: agentsTable.archived })
+      .from(agentsTable)
+      .where(
+        and(
+          eq(agentsTable.id, agentId),
+          eq(agentsTable.workspaceId, req.workspaceId!),
         ),
-      ),
-    )
-    .orderBy(desc(agentMessagesTable.createdAt), desc(agentMessagesTable.id))
-    .limit(TALK_HISTORY_LIMIT);
-  // Same-timestamp pairs (one insert stores both sides of an exchange) sort
-  // user-before-agent so the transcript reads in speaking order.
-  const turns = rows
-    .reverse()
-    .sort(
-      (a, b) =>
-        a.createdAt.getTime() - b.createdAt.getTime() ||
-        Number(a.fromAgentId !== null) - Number(b.fromAgentId !== null),
-    )
-    .map((row) => ({
-      id: row.id,
-      role: row.fromAgentId === null ? ("user" as const) : ("agent" as const),
-      text: row.body,
-      createdAt: row.createdAt.toISOString(),
-    }));
-  res.json({ turns });
-});
-
-/**
- * Clear the stored Talk history with one agent. Workspace-scoped: the agent
- * must belong to the caller's workspace, and only that agent's kind='voice'
- * rows are removed. Like reading history, clearing works even for retired
- * agents or during an emergency stop — it never starts a conversation.
- */
-router.delete("/agents/:agentId/talk-history", async (req: Request, res: Response) => {
-  const agentId = String(req.params.agentId);
-  const [agent] = await db
-    .select({ id: agentsTable.id, name: agentsTable.name, archived: agentsTable.archived })
-    .from(agentsTable)
-    .where(
-      and(eq(agentsTable.id, agentId), eq(agentsTable.workspaceId, req.workspaceId!)),
-    )
-    .limit(1);
-  if (!agent || agent.archived) {
-    res.status(404).json({ error: "Agent not found." });
-    return;
-  }
-  // One transaction under the per-agent advisory lock: bump the clear epoch
-  // and delete the rows atomically. persistTranscript takes the same lock
-  // around its epoch check + insert, so an in-flight turn either commits
-  // before this delete (and its rows go with the rest) or sees the changed
-  // epoch afterwards and skips persisting. The increment is DB-ordered —
-  // no host clock is ever compared.
-  const deleted = await db.transaction(async (tx) => {
-    await lockTalkHistory(tx, agentId);
-    await tx
-      .insert(workspaceSettingsTable)
-      .values({
-        workspaceId: req.workspaceId!,
-        key: clearedMarkerKey(agentId),
-        value: "1",
-      })
-      .onConflictDoUpdate({
-        target: [workspaceSettingsTable.workspaceId, workspaceSettingsTable.key],
-        set: {
-          value: sql`(${workspaceSettingsTable.value}::bigint + 1)::text`,
-        },
-      });
-    return tx
-      .delete(agentMessagesTable)
+      )
+      .limit(1);
+    if (!agent || agent.archived) {
+      res.status(404).json({ error: "Agent not found." });
+      return;
+    }
+    const rows = await db
+      .select()
+      .from(agentMessagesTable)
       .where(
         and(
           eq(agentMessagesTable.kind, "voice"),
@@ -728,15 +688,101 @@ router.delete("/agents/:agentId/talk-history", async (req: Request, res: Respons
           ),
         ),
       )
-      .returning({ id: agentMessagesTable.id });
-  });
-  await recordAudit(
-    req.workspaceId!,
-    "voice.history_cleared",
-    `The Talk history with ${agent.name} was cleared (${deleted.length} stored turns).`,
-  );
-  res.json({ deleted: deleted.length });
-});
+      .orderBy(desc(agentMessagesTable.createdAt), desc(agentMessagesTable.id))
+      .limit(TALK_HISTORY_LIMIT);
+    // Same-timestamp pairs (one insert stores both sides of an exchange) sort
+    // user-before-agent so the transcript reads in speaking order.
+    const turns = rows
+      .reverse()
+      .sort(
+        (a, b) =>
+          a.createdAt.getTime() - b.createdAt.getTime() ||
+          Number(a.fromAgentId !== null) - Number(b.fromAgentId !== null),
+      )
+      .map((row) => ({
+        id: row.id,
+        role: row.fromAgentId === null ? ("user" as const) : ("agent" as const),
+        text: row.body,
+        taskId: row.taskId,
+        createdAt: row.createdAt.toISOString(),
+      }));
+    res.json({ turns });
+  },
+);
+
+/**
+ * Clear the stored Talk history with one agent. Workspace-scoped: the agent
+ * must belong to the caller's workspace, and only that agent's kind='voice'
+ * rows are removed. Like reading history, clearing works even for retired
+ * agents or during an emergency stop — it never starts a conversation.
+ */
+router.delete(
+  "/agents/:agentId/talk-history",
+  async (req: Request, res: Response) => {
+    const agentId = String(req.params.agentId);
+    const [agent] = await db
+      .select({
+        id: agentsTable.id,
+        name: agentsTable.name,
+        archived: agentsTable.archived,
+      })
+      .from(agentsTable)
+      .where(
+        and(
+          eq(agentsTable.id, agentId),
+          eq(agentsTable.workspaceId, req.workspaceId!),
+        ),
+      )
+      .limit(1);
+    if (!agent || agent.archived) {
+      res.status(404).json({ error: "Agent not found." });
+      return;
+    }
+    // One transaction under the per-agent advisory lock: bump the clear epoch
+    // and delete the rows atomically. persistTranscript takes the same lock
+    // around its epoch check + insert, so an in-flight turn either commits
+    // before this delete (and its rows go with the rest) or sees the changed
+    // epoch afterwards and skips persisting. The increment is DB-ordered —
+    // no host clock is ever compared.
+    const deleted = await db.transaction(async (tx) => {
+      await lockTalkHistory(tx, agentId);
+      await tx
+        .insert(workspaceSettingsTable)
+        .values({
+          workspaceId: req.workspaceId!,
+          key: clearedMarkerKey(agentId),
+          value: "1",
+        })
+        .onConflictDoUpdate({
+          target: [
+            workspaceSettingsTable.workspaceId,
+            workspaceSettingsTable.key,
+          ],
+          set: {
+            value: sql`(${workspaceSettingsTable.value}::bigint + 1)::text`,
+          },
+        });
+      return tx
+        .delete(agentMessagesTable)
+        .where(
+          and(
+            eq(agentMessagesTable.kind, "voice"),
+            or(
+              eq(agentMessagesTable.fromAgentId, agentId),
+              eq(agentMessagesTable.toAgentId, agentId),
+            ),
+          ),
+        )
+        .returning({ id: agentMessagesTable.id });
+    });
+    await recordAudit(
+      req.workspaceId!,
+      "voice.history_cleared",
+      `The Talk history with ${agent.name} was cleared (${deleted.length} stored turns).`,
+    );
+    res.json({ deleted: deleted.length });
+  },
+);
 
 /**
  * Resend idempotency: a reply can be generated and persisted while the
@@ -809,143 +855,168 @@ async function claimExchange(
 }
 
 /** Text fallback: plain JSON request/response, no speech services involved. */
-router.post("/agents/:agentId/converse", async (req: Request, res: Response) => {
-  const parsed = ConverseWithAgentBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: "A text message is required." });
-    return;
-  }
-  // Captured before any other await: a clear that lands anywhere after this
-  // point changes the epoch and vetoes this request's transcript persist.
-  const clearEpoch = await readClearEpoch(
-    req.workspaceId!,
-    String(req.params.agentId),
-  );
-  const agent = await loadConversableAgent(
-    req.workspaceId!,
-    String(req.params.agentId),
-    res,
-  );
-  if (!agent) return;
-
-  const clientMessageId = parsed.data.clientMessageId;
-  let claimId: string | null = null;
-  if (clientMessageId) {
-    const claim = await claimExchange(req.workspaceId!, agent.id, clientMessageId);
-    if (claim.kind === "done") {
-      res.json(claim.payload);
+router.post(
+  "/agents/:agentId/converse",
+  async (req: Request, res: Response) => {
+    const parsed = ConverseWithAgentBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "A text message is required." });
       return;
     }
-    if (claim.kind === "in_flight") {
-      res.status(409).json({
-        error: "This message is already being delivered. Give it a moment.",
-      });
-      return;
-    }
-    claimId = claim.claimId;
-  }
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), CONVERSE_TIMEOUT_MS * 2);
-  req.on("close", () => controller.abort());
-  try {
-    const history = (parsed.data.history ?? []) as ConverseTurn[];
-    const { reply, taskObjective } = await generateReply(
+    // Captured before any other await: a clear that lands anywhere after this
+    // point changes the epoch and vetoes this request's transcript persist.
+    const clearEpoch = await readClearEpoch(
       req.workspaceId!,
-      agent,
-      parsed.data.text,
-      history,
-      controller.signal,
-      parsed.data.attachments,
+      String(req.params.agentId),
     );
-    const payload = {
-      reply,
-      proposedTaskObjective: taskObjective,
-      voice: agentVoice(agent),
-    };
-    if (claimId) {
-      // Crash safety: history rows and the claim's "done" state commit
-      // atomically, so a crash before this point leaves nothing persisted
-      // (the released/expired claim lets a retry regenerate cleanly) and a
-      // crash after it replays the stored response. The status='pending'
-      // guard means a stolen/expired claim skips persisting instead of
-      // duplicating rows the reclaimer will write.
-      const ownedClaimId = claimId;
-      const finalized = await db.transaction(async (tx) => {
-        const updated = await tx
-          .update(talkExchangesTable)
-          .set({ status: "done", responseJson: JSON.stringify(payload) })
-          .where(
-            and(
-              eq(talkExchangesTable.id, ownedClaimId),
-              eq(talkExchangesTable.status, "pending"),
-            ),
-          )
-          .returning({ id: talkExchangesTable.id });
-        if (updated.length === 0) return false;
-        await persistTranscript(req.workspaceId!, agent, parsed.data.text, reply, clearEpoch, true, tx);
-        return true;
-      });
-      // Ownership is consumed either way: nothing past this point may
-      // release or delete the claim (a post-finalization failure such as a
-      // broken audit write must leave the done claim for replay).
-      claimId = null;
-      if (!finalized) {
-        // Lost ownership: our claim was reclaimed while we ran (stale-claim
-        // timeout). The reclaimer's outcome is authoritative — replay it
-        // rather than answering with our own uncommitted reply, which would
-        // double-deliver the message.
-        const [authoritative] = await db
-          .select()
-          .from(talkExchangesTable)
-          .where(
-            and(
-              eq(talkExchangesTable.workspaceId, req.workspaceId!),
-              eq(talkExchangesTable.agentId, agent.id),
-              eq(talkExchangesTable.clientMessageId, clientMessageId!),
-            ),
-          )
-          .limit(1);
-        if (authoritative?.status === "done" && authoritative.responseJson) {
-          res.json(JSON.parse(authoritative.responseJson));
-          return;
-        }
+    const agent = await loadConversableAgent(
+      req.workspaceId!,
+      String(req.params.agentId),
+      res,
+    );
+    if (!agent) return;
+
+    const clientMessageId = parsed.data.clientMessageId;
+    let claimId: string | null = null;
+    if (clientMessageId) {
+      const claim = await claimExchange(
+        req.workspaceId!,
+        agent.id,
+        clientMessageId,
+      );
+      if (claim.kind === "done") {
+        res.json(claim.payload);
+        return;
+      }
+      if (claim.kind === "in_flight") {
         res.status(409).json({
-          error: "This message is being retried elsewhere. Give it a moment.",
+          error: "This message is already being delivered. Give it a moment.",
         });
         return;
       }
-    } else {
-      await persistTranscript(req.workspaceId!, agent, parsed.data.text, reply, clearEpoch, true);
+      claimId = claim.claimId;
     }
-    await recordAudit(
-      req.workspaceId!,
-      "voice.converse",
-      `${agent.name} chatted with the owner (text mode).`,
+
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      CONVERSE_TIMEOUT_MS * 2,
     );
-    res.json(payload);
-  } catch (err) {
-    // Release only a claim we still own and that never finalized, so the
-    // owner's resend can try again. A finalized claim must survive for
-    // replay even when later steps fail.
-    if (claimId) {
-      await db
-        .delete(talkExchangesTable)
-        .where(
-          and(
-            eq(talkExchangesTable.id, claimId),
-            eq(talkExchangesTable.status, "pending"),
-          ),
-        )
-        .catch(() => {});
+    req.on("close", () => controller.abort());
+    try {
+      const history = (parsed.data.history ?? []) as ConverseTurn[];
+      const { reply, taskObjective } = await generateReply(
+        req.workspaceId!,
+        agent,
+        parsed.data.text,
+        history,
+        controller.signal,
+        parsed.data.attachments,
+      );
+      const payload = {
+        reply,
+        proposedTaskObjective: taskObjective,
+        voice: agentVoice(agent),
+      };
+      if (claimId) {
+        // Crash safety: history rows and the claim's "done" state commit
+        // atomically, so a crash before this point leaves nothing persisted
+        // (the released/expired claim lets a retry regenerate cleanly) and a
+        // crash after it replays the stored response. The status='pending'
+        // guard means a stolen/expired claim skips persisting instead of
+        // duplicating rows the reclaimer will write.
+        const ownedClaimId = claimId;
+        const finalized = await db.transaction(async (tx) => {
+          const updated = await tx
+            .update(talkExchangesTable)
+            .set({ status: "done", responseJson: JSON.stringify(payload) })
+            .where(
+              and(
+                eq(talkExchangesTable.id, ownedClaimId),
+                eq(talkExchangesTable.status, "pending"),
+              ),
+            )
+            .returning({ id: talkExchangesTable.id });
+          if (updated.length === 0) return false;
+          await persistTranscript(
+            req.workspaceId!,
+            agent,
+            parsed.data.text,
+            reply,
+            clearEpoch,
+            true,
+            tx,
+          );
+          return true;
+        });
+        // Ownership is consumed either way: nothing past this point may
+        // release or delete the claim (a post-finalization failure such as a
+        // broken audit write must leave the done claim for replay).
+        claimId = null;
+        if (!finalized) {
+          // Lost ownership: our claim was reclaimed while we ran (stale-claim
+          // timeout). The reclaimer's outcome is authoritative — replay it
+          // rather than answering with our own uncommitted reply, which would
+          // double-deliver the message.
+          const [authoritative] = await db
+            .select()
+            .from(talkExchangesTable)
+            .where(
+              and(
+                eq(talkExchangesTable.workspaceId, req.workspaceId!),
+                eq(talkExchangesTable.agentId, agent.id),
+                eq(talkExchangesTable.clientMessageId, clientMessageId!),
+              ),
+            )
+            .limit(1);
+          if (authoritative?.status === "done" && authoritative.responseJson) {
+            res.json(JSON.parse(authoritative.responseJson));
+            return;
+          }
+          res.status(409).json({
+            error: "This message is being retried elsewhere. Give it a moment.",
+          });
+          return;
+        }
+      } else {
+        await persistTranscript(
+          req.workspaceId!,
+          agent,
+          parsed.data.text,
+          reply,
+          clearEpoch,
+          true,
+        );
+      }
+      await recordAudit(
+        req.workspaceId!,
+        "voice.converse",
+        `${agent.name} chatted with the owner (text mode).`,
+      );
+      res.json(payload);
+    } catch (err) {
+      // Release only a claim we still own and that never finalized, so the
+      // owner's resend can try again. A finalized claim must survive for
+      // replay even when later steps fail.
+      if (claimId) {
+        await db
+          .delete(talkExchangesTable)
+          .where(
+            and(
+              eq(talkExchangesTable.id, claimId),
+              eq(talkExchangesTable.status, "pending"),
+            ),
+          )
+          .catch(() => {});
+      }
+      logTalkFailure(agent.id, "text", err);
+      const { status, message } = providerErrorMessage(err);
+      if (!res.headersSent) res.status(status).json({ error: message });
+    } finally {
+      clearTimeout(timeout);
     }
-    logTalkFailure(agent.id, "text", err);
-    const { status, message } = providerErrorMessage(err);
-    if (!res.headersSent) res.status(status).json({ error: message });
-  } finally {
-    clearTimeout(timeout);
-  }
-});
+  },
+);
 
 function sseWrite(res: Response, payload: Record<string, unknown>) {
   res.write(`data: ${JSON.stringify(payload)}\n\n`);
@@ -955,145 +1026,160 @@ function sseWrite(res: Response, payload: Record<string, unknown>) {
  * Voice round-trip as one SSE stream:
  *   user_transcript -> reply (+ proposed task) -> audio chunks -> done.
  */
-router.post("/agents/:agentId/voice-converse", async (req: Request, res: Response) => {
-  const availability = await speechAvailability(req.workspaceId!);
-  if (!availability.available || !availability.credentials) {
-    res.status(503).json({ error: availability.reason });
-    return;
-  }
-  const parsed = VoiceConverseWithAgentBody.safeParse(req.body);
-  if (!parsed.success || parsed.data.audio.length > MAX_AUDIO_BASE64_CHARS) {
-    res.status(400).json({ error: "A base64 audio recording is required." });
-    return;
-  }
-  // Captured before any other await: a clear that lands anywhere after this
-  // point changes the epoch and vetoes this request's transcript persist.
-  const clearEpoch = await readClearEpoch(
-    req.workspaceId!,
-    String(req.params.agentId),
-  );
-  const agent = await loadConversableAgent(
-    req.workspaceId!,
-    String(req.params.agentId),
-    res,
-  );
-  if (!agent) return;
+router.post(
+  "/agents/:agentId/voice-converse",
+  async (req: Request, res: Response) => {
+    const availability = speechAvailability();
+    if (!availability.available) {
+      res.status(503).json({ error: availability.reason });
+      return;
+    }
+    const parsed = VoiceConverseWithAgentBody.safeParse(req.body);
+    if (!parsed.success || parsed.data.audio.length > MAX_AUDIO_BASE64_CHARS) {
+      res.status(400).json({ error: "A base64 audio recording is required." });
+      return;
+    }
+    // Captured before any other await: a clear that lands anywhere after this
+    // point changes the epoch and vetoes this request's transcript persist.
+    const clearEpoch = await readClearEpoch(
+      req.workspaceId!,
+      String(req.params.agentId),
+    );
+    const agent = await loadConversableAgent(
+      req.workspaceId!,
+      String(req.params.agentId),
+      res,
+    );
+    if (!agent) return;
 
-  let audioBuffer: Buffer;
-  try {
-    audioBuffer = Buffer.from(parsed.data.audio, "base64");
-    if (audioBuffer.length === 0) throw new Error("empty");
-  } catch {
-    res.status(400).json({ error: "The audio recording could not be decoded." });
-    return;
-  }
-
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache, no-transform");
-  res.setHeader("Connection", "keep-alive");
-  res.flushHeaders?.();
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), CONVERSE_TIMEOUT_MS * 2);
-  req.on("close", () => controller.abort());
-
-  try {
-    // Lazy import: a missing integration must not crash the server at boot.
-    const audio = await import("@workspace/integrations-openai-ai-server/audio");
-
-    let userText: string;
+    let audioBuffer: Buffer;
     try {
-      const compatible = await audio.ensureCompatibleFormat(audioBuffer);
-      userText = (
-        await audio.speechToText(
-          compatible.buffer,
-          compatible.format,
-          controller.signal,
-          availability.credentials,
-        )
-      ).trim();
+      audioBuffer = Buffer.from(parsed.data.audio, "base64");
+      if (audioBuffer.length === 0) throw new Error("empty");
     } catch {
-      if (controller.signal.aborted) return;
-      sseWrite(res, {
-        type: "error",
-        fatal: true,
-        message:
-          "Your recording could not be transcribed. Check your microphone or type your message instead.",
-      });
+      res
+        .status(400)
+        .json({ error: "The audio recording could not be decoded." });
       return;
     }
-    if (!userText) {
-      sseWrite(res, {
-        type: "error",
-        fatal: true,
-        message: "No speech was detected in the recording. Try again a little closer to the microphone.",
-      });
-      return;
-    }
-    sseWrite(res, { type: "user_transcript", text: userText });
 
-    let reply: string;
-    let taskObjective: string | null;
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders?.();
+
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      CONVERSE_TIMEOUT_MS * 2,
+    );
+    req.on("close", () => controller.abort());
+
     try {
-      const history = (parsed.data.history ?? []) as ConverseTurn[];
-      ({ reply, taskObjective } = await generateReply(
+      // Lazy import: a missing integration must not crash the server at boot.
+      const audio =
+        await import("@workspace/integrations-openai-ai-server/audio");
+
+      let userText: string;
+      try {
+        const compatible = await audio.ensureCompatibleFormat(audioBuffer);
+        userText = (
+          await audio.speechToText(
+            compatible.buffer,
+            compatible.format,
+            controller.signal,
+          )
+        ).trim();
+      } catch {
+        if (controller.signal.aborted) return;
+        sseWrite(res, {
+          type: "error",
+          fatal: true,
+          message:
+            "Your recording could not be transcribed. Check your microphone or type your message instead.",
+        });
+        return;
+      }
+      if (!userText) {
+        sseWrite(res, {
+          type: "error",
+          fatal: true,
+          message:
+            "No speech was detected in the recording. Try again a little closer to the microphone.",
+        });
+        return;
+      }
+      sseWrite(res, { type: "user_transcript", text: userText });
+
+      let reply: string;
+      let taskObjective: string | null;
+      try {
+        const history = (parsed.data.history ?? []) as ConverseTurn[];
+        ({ reply, taskObjective } = await generateReply(
+          req.workspaceId!,
+          agent,
+          userText,
+          history,
+          controller.signal,
+        ));
+      } catch (err) {
+        logTalkFailure(agent.id, "voice", err);
+        sseWrite(res, {
+          type: "error",
+          fatal: true,
+          message: providerErrorMessage(err).message,
+        });
+        return;
+      }
+
+      const voice = agentVoice(agent);
+      sseWrite(res, {
+        type: "reply",
+        text: reply,
+        proposedTaskObjective: taskObjective,
+        voice,
+      });
+
+      await persistTranscript(
         req.workspaceId!,
         agent,
         userText,
-        history,
-        controller.signal,
-      ));
-    } catch (err) {
-      logTalkFailure(agent.id, "voice", err);
-      sseWrite(res, {
-        type: "error",
-        fatal: true,
-        message: providerErrorMessage(err).message,
-      });
-      return;
-    }
+        reply,
+        clearEpoch,
+      );
+      await recordAudit(
+        req.workspaceId!,
+        "voice.converse",
+        `${agent.name} spoke with the owner (voice mode).`,
+      );
 
-    const voice = agentVoice(agent);
-    sseWrite(res, {
-      type: "reply",
-      text: reply,
-      proposedTaskObjective: taskObjective,
-      voice,
-    });
-
-    await persistTranscript(req.workspaceId!, agent, userText, reply, clearEpoch);
-    await recordAudit(
-      req.workspaceId!,
-      "voice.converse",
-      `${agent.name} spoke with the owner (voice mode).`,
-    );
-
-    if (voice && !controller.signal.aborted) {
-      try {
-        let seq = 0;
-        for await (const chunk of await audio.textToSpeechStream(
-          reply,
-          voice,
-          controller.signal,
-          availability.credentials,
-        )) {
-          if (controller.signal.aborted) break;
-          sseWrite(res, { type: "audio", seq: seq++, data: chunk });
-        }
-      } catch {
-        if (!controller.signal.aborted) {
-          sseWrite(res, {
-            type: "error",
-            message: "Spoken playback failed; the reply above is still valid.",
-          });
+      if (voice && !controller.signal.aborted) {
+        try {
+          let seq = 0;
+          for await (const chunk of await audio.textToSpeechStream(
+            reply,
+            voice,
+            controller.signal,
+          )) {
+            if (controller.signal.aborted) break;
+            sseWrite(res, { type: "audio", seq: seq++, data: chunk });
+          }
+        } catch {
+          if (!controller.signal.aborted) {
+            sseWrite(res, {
+              type: "error",
+              message:
+                "Spoken playback failed; the reply above is still valid.",
+            });
+          }
         }
       }
+      sseWrite(res, { type: "done" });
+    } finally {
+      clearTimeout(timeout);
+      res.end();
     }
-    sseWrite(res, { type: "done" });
-  } finally {
-    clearTimeout(timeout);
-    res.end();
-  }
-});
+  },
+);
 
 export default router;

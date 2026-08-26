@@ -29,6 +29,8 @@ export interface TaskInput {
   reasoningOverride?: TaskInputReasoningOverride;
   /** Continue the agent's most recent provider thread instead of starting a new one. */
   continueConversation?: boolean;
+  /** Marks a task confirmed from Talk so its approval preference and result reporting stay scoped to Talk. */
+  talkMode?: boolean;
   /** @maxItems 4 */
   attachments?: InputAttachment[];
 }

@@ -1143,6 +1143,7 @@ export const CreateTaskBody = zod.object({
   "modelOverride": zod.string().max(createTaskBodyModelOverrideMax).optional(),
   "reasoningOverride": zod.enum(['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']).optional(),
   "continueConversation": zod.boolean().optional().describe('Continue the agent\'s most recent provider thread instead of starting a new one.'),
+  "talkMode": zod.boolean().optional().describe('Marks a task confirmed from Talk so its approval preference and result reporting stay scoped to Talk.'),
   "attachments": zod.array(zod.object({
   "name": zod.string().min(1).max(createTaskBodyAttachmentsItemNameMax),
   "mimeType": zod.string().min(1).max(createTaskBodyAttachmentsItemMimeTypeMax),
@@ -1635,7 +1636,8 @@ export const ListAgentMessagesResponse = zod.array(ListAgentMessagesResponseItem
 export const GetVoiceStatusResponse = zod.object({
   "available": zod.boolean(),
   "reason": zod.string().nullable(),
-  "transcriptsEnabled": zod.boolean()
+  "transcriptsEnabled": zod.boolean(),
+  "autoApproveTalkTasks": zod.boolean()
 })
 
 
@@ -1643,42 +1645,15 @@ export const GetVoiceStatusResponse = zod.object({
  * @summary Update voice settings such as transcript storage
  */
 export const UpdateVoiceSettingsBody = zod.object({
-  "transcriptsEnabled": zod.boolean()
+  "transcriptsEnabled": zod.boolean().optional(),
+  "autoApproveTalkTasks": zod.boolean().optional()
 })
 
 export const UpdateVoiceSettingsResponse = zod.object({
   "available": zod.boolean(),
   "reason": zod.string().nullable(),
-  "transcriptsEnabled": zod.boolean()
-})
-
-
-/**
- * @summary Store this workspace's OpenAI API key that pays for voice speech services
- */
-export const setVoiceCredentialBodyCredentialMin = 8;
-export const setVoiceCredentialBodyCredentialMax = 4000;
-
-
-
-export const SetVoiceCredentialBody = zod.object({
-  "credential": zod.string().min(setVoiceCredentialBodyCredentialMin).max(setVoiceCredentialBodyCredentialMax)
-}).describe('A provider API key or OAuth token belonging to this workspace\'s own account. It is encrypted before storage, never returned by any endpoint, and never exposed to an agent\'s tools or prompts.')
-
-export const SetVoiceCredentialResponse = zod.object({
-  "available": zod.boolean(),
-  "reason": zod.string().nullable(),
-  "transcriptsEnabled": zod.boolean()
-})
-
-
-/**
- * @summary Remove this workspace's stored voice OpenAI API key
- */
-export const DeleteVoiceCredentialResponse = zod.object({
-  "available": zod.boolean(),
-  "reason": zod.string().nullable(),
-  "transcriptsEnabled": zod.boolean()
+  "transcriptsEnabled": zod.boolean(),
+  "autoApproveTalkTasks": zod.boolean()
 })
 
 
@@ -1777,6 +1752,7 @@ export const GetTalkHistoryResponse = zod.object({
   "id": zod.string(),
   "role": zod.enum(['user', 'agent']),
   "text": zod.string(),
+  "taskId": zod.string().nullable(),
   "createdAt": zod.coerce.date()
 }))
 })
@@ -1931,59 +1907,6 @@ export const ListProviderModelsResponse = zod.object({
   "promptCentsPerMTok": zod.number().nullish(),
   "completionCentsPerMTok": zod.number().nullish()
 }))
-})
-
-
-/**
- * @summary Store this workspace's own credential for a provider
- */
-export const SetProviderCredentialParams = zod.object({
-  "provider": zod.enum(['claude_max', 'openrouter'])
-})
-
-export const setProviderCredentialBodyCredentialMin = 8;
-export const setProviderCredentialBodyCredentialMax = 4000;
-
-
-
-export const SetProviderCredentialBody = zod.object({
-  "credential": zod.string().min(setProviderCredentialBodyCredentialMin).max(setProviderCredentialBodyCredentialMax)
-}).describe('A provider API key or OAuth token belonging to this workspace\'s own account. It is encrypted before storage, never returned by any endpoint, and never exposed to an agent\'s tools or prompts.')
-
-export const SetProviderCredentialResponse = zod.object({
-  "provider": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter']),
-  "label": zod.string(),
-  "billing": zod.enum(['subscription', 'metered']),
-  "enabled": zod.boolean().describe('False when a server-side feature flag hides this provider.'),
-  "configured": zod.boolean(),
-  "healthy": zod.boolean(),
-  "message": zod.string().optional(),
-  "authMode": zod.union([zod.literal('chatgpt'),zod.literal('api_key'),zod.literal('unknown'),zod.literal(null)]).nullable().describe('Codex only. Only \"chatgpt\" draws on the ChatGPT Codex allowance; \"api_key\" means the stored credential bills OpenAI\'s API instead.'),
-  "usesSubscriptionAllowance": zod.boolean().describe('Confirmed from stored credentials, never assumed from the provider id.'),
-  "allowanceBalanceKnown": zod.boolean().describe('Whether the remaining plan allowance can be reported at all.'),
-  "reasoningLevels": zod.array(zod.string()).describe('Reasoning effort levels this provider accepts, from server configuration. Empty when it has no such control.')
-})
-
-
-/**
- * @summary Remove this workspace's stored credential for a provider
- */
-export const DeleteProviderCredentialParams = zod.object({
-  "provider": zod.enum(['claude_max', 'openrouter'])
-})
-
-export const DeleteProviderCredentialResponse = zod.object({
-  "provider": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter']),
-  "label": zod.string(),
-  "billing": zod.enum(['subscription', 'metered']),
-  "enabled": zod.boolean().describe('False when a server-side feature flag hides this provider.'),
-  "configured": zod.boolean(),
-  "healthy": zod.boolean(),
-  "message": zod.string().optional(),
-  "authMode": zod.union([zod.literal('chatgpt'),zod.literal('api_key'),zod.literal('unknown'),zod.literal(null)]).nullable().describe('Codex only. Only \"chatgpt\" draws on the ChatGPT Codex allowance; \"api_key\" means the stored credential bills OpenAI\'s API instead.'),
-  "usesSubscriptionAllowance": zod.boolean().describe('Confirmed from stored credentials, never assumed from the provider id.'),
-  "allowanceBalanceKnown": zod.boolean().describe('Whether the remaining plan allowance can be reported at all.'),
-  "reasoningLevels": zod.array(zod.string()).describe('Reasoning effort levels this provider accepts, from server configuration. Empty when it has no such control.')
 })
 
 

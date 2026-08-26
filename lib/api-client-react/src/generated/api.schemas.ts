@@ -1051,10 +1051,12 @@ export interface VoiceStatus {
   /** @nullable */
   reason: string | null;
   transcriptsEnabled: boolean;
+  autoApproveTalkTasks: boolean;
 }
 
 export interface VoiceSettingsInput {
-  transcriptsEnabled: boolean;
+  transcriptsEnabled?: boolean;
+  autoApproveTalkTasks?: boolean;
 }
 
 export type ConverseTurnRole = typeof ConverseTurnRole[keyof typeof ConverseTurnRole];
@@ -1083,6 +1085,8 @@ export interface TalkHistoryTurn {
   id: string;
   role: TalkHistoryTurnRole;
   text: string;
+  /** @nullable */
+  taskId: string | null;
   createdAt: string;
 }
 
@@ -1279,6 +1283,8 @@ export interface TaskInput {
   reasoningOverride?: TaskInputReasoningOverride;
   /** Continue the agent's most recent provider thread instead of starting a new one. */
   continueConversation?: boolean;
+  /** Marks a task confirmed from Talk so its approval preference and result reporting stay scoped to Talk. */
+  talkMode?: boolean;
   /** @maxItems 4 */
   attachments?: InputAttachment[];
 }
@@ -1491,17 +1497,6 @@ export interface CodexCredentialInput {
      * @maxLength 20000
      */
   authJson: string;
-}
-
-/**
- * A provider API key or OAuth token belonging to this workspace's own account. It is encrypted before storage, never returned by any endpoint, and never exposed to an agent's tools or prompts.
- */
-export interface ProviderCredentialInput {
-  /**
-     * @minLength 8
-     * @maxLength 4000
-     */
-  credential: string;
 }
 
 export type ProviderSettingsDefaultProvider = typeof ProviderSettingsDefaultProvider[keyof typeof ProviderSettingsDefaultProvider];

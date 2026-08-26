@@ -1,7 +1,16 @@
 import express from "express";
 import request from "supertest";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+import {
+  agentMessagesTable,
   agentsTable,
   approvalsTable,
   auditEventsTable,
@@ -29,7 +38,6 @@ import { claimNextTask, expireStaleApprovals, runTask } from "../worker";
 import { recordAudit, verifyAuditChain } from "../audit";
 import { effectivePermissions, evaluateTaskPolicy } from "../policy";
 import { clearProviderCaches } from "../providers";
-import { saveProviderCredential } from "../provider-credentials";
 
 const app = express();
 app.use(express.json());
@@ -57,12 +65,18 @@ async function createAgent(name: string, extra: Record<string, unknown> = {}) {
       provider: "openrouter",
       model: "test-vendor/test-model",
       securityPreset: "assistant",
-      avatar: { shellColor: "#C34428", deskStyle: "standard", accessory: "none" },
+      avatar: {
+        shellColor: "#C34428",
+        deskStyle: "standard",
+        accessory: "none",
+      },
       ...extra,
     });
   expect(res.status).toBe(201);
   createdAgentIds.push(res.body.id);
-  await request(app).post(`/api/agents/${res.body.id}/pause`).send({ paused: true });
+  await request(app)
+    .post(`/api/agents/${res.body.id}/pause`)
+    .send({ paused: true });
   return res.body as {
     id: string;
     name: string;
@@ -157,20 +171,21 @@ beforeAll(async () => {
   const [ws] = await db
     .insert(workspacesTable)
     .values({ clerkUserId: `hc-policy-${Date.now()}` })
-    .returning({ id: workspacesTable.id, clerkUserId: workspacesTable.clerkUserId });
+    .returning({
+      id: workspacesTable.id,
+      clerkUserId: workspacesTable.clerkUserId,
+    });
   wsId = ws.id;
   authState.userId = ws.clerkUserId;
 });
 
-beforeEach(async () => {
+beforeEach(() => {
   fetchMock.mockReset();
   fetchMock.mockImplementation(async () => {
     throw new Error("network disabled in tests");
   });
-  // Workspace-scoped credentials; the suite's own workspace cascade-deletes
-  // these rows in afterAll.
-  await saveProviderCredential(wsId, "openrouter", "test-openrouter-key");
-  await saveProviderCredential(wsId, "claude_max", "test-claude-token");
+  vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
+  vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", "test-claude-token");
   clearProviderCaches();
 });
 
@@ -183,7 +198,9 @@ afterAll(async () => {
     await db
       .delete(tasksTable)
       .where(inArray(tasksTable.agentId, createdAgentIds));
-    await db.delete(agentsTable).where(inArray(agentsTable.id, createdAgentIds));
+    await db
+      .delete(agentsTable)
+      .where(inArray(agentsTable.id, createdAgentIds));
   }
   // This suite owns the entire workspace, so cascading its deletion removes
   // the isolated audit chain without touching any real user's append-only log.
@@ -223,7 +240,11 @@ describe("policy denials", () => {
       autonomy: "autonomous",
       permissionOverrides: { maxTaskBudgetCents: 10 },
     });
-    await insertTask(agent.id, { estimatedCostCents: 25 });
+    await insertTask(agent.id, {
+      estimatedCostCents: 25,
+      talkMode: true,
+      talkAutoApprove: true,
+    });
     const claimed = await claimNextTask(scopeFor(agent.id));
     expect(claimed).not.toBeNull();
     await runTask(claimed!);
@@ -232,6 +253,7 @@ describe("policy denials", () => {
     expect(row.status).toBe("blocked");
     expect(row.errorKind).toBe("policy");
     expect(row.errorMessage).toContain("per-task cap");
+    expect(await getApprovalForTask(row.id)).toBeUndefined();
     // Policy blocked it before any provider call.
     expect(fetchMock.mock.calls.length).toBe(0);
   });
@@ -239,7 +261,10 @@ describe("policy denials", () => {
   it("denies via provider allow-list and daily task limit", async () => {
     const agent = await createAgent(`${RUN_TAG} Limits`, {
       autonomy: "autonomous",
-      permissionOverrides: { allowedProviders: ["claude_max"], maxTasksPerDay: 1 },
+      permissionOverrides: {
+        allowedProviders: ["claude_max"],
+        maxTasksPerDay: 1,
+      },
     });
     const agentRow = await loadAgent(agent.id);
     const task = await insertTask(agent.id, { estimatedCostCents: 1 });
@@ -356,9 +381,7 @@ describe("approval lifecycle", () => {
     // The approvals API exposes the real task context.
     const list = await request(app).get("/api/approvals");
     expect(list.status).toBe(200);
-    const listed = list.body.find(
-      (a: { id: string }) => a.id === approval!.id,
-    );
+    const listed = list.body.find((a: { id: string }) => a.id === approval!.id);
     expect(listed.taskId).toBe(row.id);
     expect(listed.taskObjective).toContain(RUN_TAG);
 
@@ -379,6 +402,42 @@ describe("approval lifecycle", () => {
     row = await getTaskRow(row.id);
     expect(row.status).toBe("completed");
     expect(row.output).toContain("finished work");
+  });
+
+  it("auto-approves only the initial gate for a Talk task and reports the result back", async () => {
+    const agent = await createAgent(`${RUN_TAG} Talk Auto`, {
+      autonomy: "supervised",
+    });
+    await insertTask(agent.id, {
+      estimatedCostCents: 1,
+      talkMode: true,
+      talkAutoApprove: true,
+    });
+    mockOpenRouterSuccess();
+    const claimed = await claimNextTask(scopeFor(agent.id));
+    expect(claimed).not.toBeNull();
+    await runTask(claimed!);
+
+    const row = await getTaskRow(claimed!.task.id);
+    expect(row.status).toBe("completed");
+    const approval = await getApprovalForTask(row.id);
+    expect(approval?.status).toBe("approved");
+    expect(approval?.details).toContain("confirmed in Talk");
+
+    const recaps = await db
+      .select()
+      .from(agentMessagesTable)
+      .where(
+        and(
+          eq(agentMessagesTable.taskId, row.id),
+          eq(agentMessagesTable.kind, "voice"),
+        ),
+      );
+    expect(recaps).toHaveLength(1);
+    expect(recaps[0]?.fromAgentId).toBe(agent.id);
+    expect(recaps[0]?.body).toContain("What I did and the main result");
+    expect(recaps[0]?.body).toContain("Here is the finished work.");
+    expect(recaps[0]?.body).toContain("No issues were reported.");
   });
 
   it("rejecting an approval cancels the task", async () => {
@@ -403,7 +462,10 @@ describe("approval lifecycle", () => {
   it("limited autonomy parks only above the approval threshold", async () => {
     const agent = await createAgent(`${RUN_TAG} Limited`, {
       autonomy: "limited",
-      permissionOverrides: { approvalThresholdCents: 10, maxTaskBudgetCents: 100 },
+      permissionOverrides: {
+        approvalThresholdCents: 10,
+        maxTaskBudgetCents: 100,
+      },
     });
     const agentRow = await loadAgent(agent.id);
     const cheap = await insertTask(agent.id, { estimatedCostCents: 5 });
@@ -571,9 +633,7 @@ describe("tamper-evident audit history", () => {
     expect(before.checked).toBeGreaterThanOrEqual(2);
 
     // Search finds the events through the owner API.
-    const search = await request(app)
-      .get("/api/audit")
-      .query({ q: marker });
+    const search = await request(app).get("/api/audit").query({ q: marker });
     expect(search.status).toBe(200);
     expect(search.body.total).toBe(2);
     expect(search.body.events[0].chained).toBe(true);

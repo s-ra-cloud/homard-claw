@@ -53,11 +53,6 @@ import {
   SetAgentArchivedResponse,
   SetEmergencyStopBody,
   SetEmergencyStopResponse,
-  SetProviderCredentialBody,
-  SetProviderCredentialParams,
-  SetProviderCredentialResponse,
-  DeleteProviderCredentialParams,
-  DeleteProviderCredentialResponse,
   TestCodexConnectionResponse,
   UpdateAgentBody,
   UpdateAgentParams,
@@ -101,11 +96,6 @@ import {
   updateProviderSettings,
   type ProviderId,
 } from "../providers";
-import {
-  deleteProviderCredential,
-  ProviderCredentialError,
-  saveProviderCredential,
-} from "../provider-credentials";
 import { testCodexConnection } from "../codex/execute";
 import {
   bootstrapCodexHome,
@@ -119,11 +109,7 @@ import { recordAudit, verifyAuditChain } from "../audit";
 import { agentPromptContext, dispatchTask } from "../dispatch";
 import { publish } from "../events";
 import { effectivePermissions } from "../policy";
-import {
-  DEFAULT_RUNTIME,
-  listRuntimeHealth,
-  queueHealth,
-} from "../runtime";
+import { DEFAULT_RUNTIME, listRuntimeHealth, queueHealth } from "../runtime";
 import { abortRunningTask, getWorkerStatus } from "../worker";
 import {
   listRecentAgentActions,
@@ -162,7 +148,7 @@ router.use(capabilitiesRouter);
 
 router.get("/runtime/health", async (req: Request, res: Response) => {
   const [runtimes, queue, stop] = await Promise.all([
-    listRuntimeHealth(req.workspaceId!),
+    listRuntimeHealth(),
     queueHealth(),
     getWorkspaceSetting(req.workspaceId!, "emergency_stop"),
   ]);
@@ -191,9 +177,7 @@ type AppGrantJson = { app: string; accessLevel: AppAccessLevel };
  * installed package); anything outside the registry is dropped — a grant
  * to an unknown package could never authorize anything anyway.
  */
-function dedupeGrants(
-  grants: readonly AppGrantJson[],
-): AppGrantJson[] {
+function dedupeGrants(grants: readonly AppGrantJson[]): AppGrantJson[] {
   const byApp = new Map<string, AppAccessLevel>();
   for (const grant of grants) {
     if (!findRegistryEntry(grant.app)) continue;
@@ -276,7 +260,10 @@ function toTaskJson(
     // base64 payloads back through every task-list refresh.
     files: task.files.map((file) => ({
       name: file.name,
-      content: file.encoding === "base64" ? `[${file.mimeType ?? "binary file"} attachment]` : file.content,
+      content:
+        file.encoding === "base64"
+          ? `[${file.mimeType ?? "binary file"} attachment]`
+          : file.content,
     })),
     agentName,
     teamName: lineage?.teamName ?? null,
@@ -292,7 +279,9 @@ function toTaskJson(
 
 /** Serialize a durable app_actions row for the API contract. */
 function toAppActionJson(
-  action: typeof appActionsTable.$inferSelect & { taskObjective?: string | null },
+  action: typeof appActionsTable.$inferSelect & {
+    taskObjective?: string | null;
+  },
 ) {
   return {
     id: action.id,
@@ -313,10 +302,14 @@ function toAppActionJson(
 }
 
 /** Statuses the owner may cancel from; everything else is already final. */
-const CANCELLABLE_STATUSES = ["queued", "running", "waiting_approval", "blocked"];
+const CANCELLABLE_STATUSES = [
+  "queued",
+  "running",
+  "waiting_approval",
+  "blocked",
+];
 /** Statuses eligible for a fresh retry attempt. */
 const RETRYABLE_STATUSES = ["failed", "cancelled", "blocked"];
-
 
 /** Case-insensitive name collision check across the workspace's agents, any lifecycle state. */
 async function findNameConflict(
@@ -342,7 +335,11 @@ function isUniqueViolation(error: unknown): boolean {
   // Drizzle wraps driver errors (DrizzleQueryError), so the Postgres error
   // code lives on the cause chain, not the thrown error itself.
   let current: unknown = error;
-  for (let depth = 0; depth < 5 && typeof current === "object" && current !== null; depth += 1) {
+  for (
+    let depth = 0;
+    depth < 5 && typeof current === "object" && current !== null;
+    depth += 1
+  ) {
     if ((current as { code?: string }).code === "23505") return true;
     current = (current as { cause?: unknown }).cause;
   }
@@ -576,7 +573,12 @@ router.patch("/agents/:agentId", async (req, res): Promise<void> => {
       if (existing.retired) return { status: 409 as const, retired: true };
       if (
         typeof updates.name === "string" &&
-        (await findNameConflict(tx, req.workspaceId!, updates.name, existing.id))
+        (await findNameConflict(
+          tx,
+          req.workspaceId!,
+          updates.name,
+          existing.id,
+        ))
       ) {
         return { status: 409 as const, retired: false, name: updates.name };
       }
@@ -607,10 +609,11 @@ router.patch("/agents/:agentId", async (req, res): Promise<void> => {
           );
         }
       } else {
-        grants = (await tx
-          .select()
-          .from(agentAppGrantsTable)
-          .where(eq(agentAppGrantsTable.agentId, existing.id))
+        grants = (
+          await tx
+            .select()
+            .from(agentAppGrantsTable)
+            .where(eq(agentAppGrantsTable.agentId, existing.id))
         ).map((row) => ({
           app: row.app,
           accessLevel: row.accessLevel as AppAccessLevel,
@@ -668,7 +671,11 @@ async function duplicateAgentOnce(workspaceId: string, agentId: string) {
     // name budget enforced by the API contract.
     const base = `${source.name.slice(0, 48).trimEnd()} Copy`;
     let candidate = base;
-    for (let n = 2; await findNameConflict(tx, workspaceId, candidate); n += 1) {
+    for (
+      let n = 2;
+      await findNameConflict(tx, workspaceId, candidate);
+      n += 1
+    ) {
       if (n > 50) return { status: 409 as const };
       candidate = `${base} ${n}`;
     }
@@ -759,7 +766,12 @@ router.post("/agents/:agentId/archive", async (req, res): Promise<void> => {
               paused: true,
               status: "paused",
             }
-          : { archived: false, archivedAt: null, paused: false, status: "idle" },
+          : {
+              archived: false,
+              archivedAt: null,
+              paused: false,
+              status: "idle",
+            },
       )
       .where(
         and(
@@ -863,9 +875,7 @@ router.delete("/agents/:agentId", async (req, res): Promise<void> => {
     // Retirement to the Island is permanent by design; retired agents are
     // never erased.
     if (agent.retired) return { status: 409 as const };
-    await tx
-      .delete(approvalsTable)
-      .where(eq(approvalsTable.agentId, agent.id));
+    await tx.delete(approvalsTable).where(eq(approvalsTable.agentId, agent.id));
     // Collect active tasks first so any in-flight provider calls can be
     // aborted after the delete commits; otherwise the worker would keep
     // spending against rows that no longer exist.
@@ -873,10 +883,7 @@ router.delete("/agents/:agentId", async (req, res): Promise<void> => {
       .select({ id: tasksTable.id })
       .from(tasksTable)
       .where(
-        and(
-          eq(tasksTable.agentId, agent.id),
-          eq(tasksTable.status, "running"),
-        ),
+        and(eq(tasksTable.agentId, agent.id), eq(tasksTable.status, "running")),
       );
     await tx.delete(tasksTable).where(eq(tasksTable.agentId, agent.id));
     await tx.delete(agentsTable).where(eq(agentsTable.id, agent.id));
@@ -897,7 +904,8 @@ router.delete("/agents/:agentId", async (req, res): Promise<void> => {
   }
   if (outcome.status === 409) {
     res.status(409).json({
-      error: "Retired agents rest on the Island permanently and cannot be deleted",
+      error:
+        "Retired agents rest on the Island permanently and cannot be deleted",
     });
     return;
   }
@@ -949,10 +957,10 @@ router.post("/agents/:agentId/pause", async (req, res): Promise<void> => {
     return;
   }
   await recordAudit(
-      req.workspaceId!,
-      body.data.paused ? "agent.paused" : "agent.resumed",
-      `${agent.name} was ${body.data.paused ? "paused" : "resumed"}.`,
-    );
+    req.workspaceId!,
+    body.data.paused ? "agent.paused" : "agent.resumed",
+    `${agent.name} was ${body.data.paused ? "paused" : "resumed"}.`,
+  );
   const pausedGrants = await grantsByAgent([agent.id]);
   res.json(
     PauseAgentResponse.parse(toAgent(agent, pausedGrants.get(agent.id) ?? [])),
@@ -1097,6 +1105,7 @@ router.post("/tasks", async (req, res): Promise<void> => {
     modelOverride: parsed.data.modelOverride,
     reasoningOverride: parsed.data.reasoningOverride,
     continueConversation: parsed.data.continueConversation,
+    talkMode: parsed.data.talkMode,
   });
   if (outcome.status === 404) {
     res.status(404).json({ error: "Agent not found" });
@@ -1120,7 +1129,9 @@ router.post("/tasks", async (req, res): Promise<void> => {
   }
   res
     .status(201)
-    .json(CreateTaskResponse.parse(toTaskJson(outcome.task, outcome.agentName)));
+    .json(
+      CreateTaskResponse.parse(toTaskJson(outcome.task, outcome.agentName)),
+    );
 });
 
 router.get("/tasks/:taskId", async (req, res): Promise<void> => {
@@ -1244,7 +1255,9 @@ router.post("/tasks/:taskId/cancel", async (req, res): Promise<void> => {
   // worker's conditional finish sees "cancelled" and discards the result.
   abortRunningTask(outcome.task.id);
   publish(req.workspaceId!, "tasks", "approvals", "overview");
-  res.json(CancelTaskResponse.parse(toTaskJson(outcome.task, outcome.agentName)));
+  res.json(
+    CancelTaskResponse.parse(toTaskJson(outcome.task, outcome.agentName)),
+  );
 });
 
 router.post("/tasks/:taskId/retry", async (req, res): Promise<void> => {
@@ -1308,7 +1321,9 @@ router.post("/tasks/:taskId/retry", async (req, res): Promise<void> => {
     return;
   }
   publish(req.workspaceId!, "tasks", "overview");
-  res.json(RetryTaskResponse.parse(toTaskJson(outcome.task, outcome.agentName)));
+  res.json(
+    RetryTaskResponse.parse(toTaskJson(outcome.task, outcome.agentName)),
+  );
 });
 
 /**
@@ -1513,12 +1528,12 @@ router.post("/emergency-stop", async (req, res): Promise<void> => {
     for (const task of interrupted) abortRunningTask(task.id);
   }
   await recordAudit(
-      wsId,
-      parsed.data.active ? "system.stopped" : "system.resumed",
-      parsed.data.active
+    wsId,
+    parsed.data.active ? "system.stopped" : "system.resumed",
+    parsed.data.active
       ? "This workspace's emergency stop was engaged."
       : "This workspace's emergency stop was released.",
-    );
+  );
   publish(wsId, "tasks", "agents", "overview");
   res.json(SetEmergencyStopResponse.parse(parsed.data));
 });
@@ -1660,7 +1675,11 @@ router.patch("/approvals/:approvalId", async (req, res): Promise<void> => {
       }`,
       tx,
     );
-    return { approval, agentName: agent?.name ?? "Unknown agent", taskObjective };
+    return {
+      approval,
+      agentName: agent?.name ?? "Unknown agent",
+      taskObjective,
+    };
   });
   if (!outcome) {
     res.status(404).json({ error: "Pending approval not found" });
@@ -1669,7 +1688,11 @@ router.patch("/approvals/:approvalId", async (req, res): Promise<void> => {
   publish(req.workspaceId!, "approvals", "tasks", "overview");
   res.json(
     DecideApprovalResponse.parse(
-      toApprovalJson(outcome.approval, outcome.agentName, outcome.taskObjective),
+      toApprovalJson(
+        outcome.approval,
+        outcome.agentName,
+        outcome.taskObjective,
+      ),
     ),
   );
 });
@@ -1727,78 +1750,14 @@ router.get("/audit/verify", async (req, res): Promise<void> => {
   res.json(VerifyAuditResponse.parse(await verifyAuditChain(req.workspaceId!)));
 });
 
-router.get("/providers", async (req, res): Promise<void> => {
+router.get("/providers", async (_req, res): Promise<void> => {
   // Every known provider is reported, including one whose flag is off:
   // hiding it entirely would leave an agent that still references it
   // looking mysteriously broken. `enabled: false` tells the UI to hide it.
-  // Health is scoped to the caller's workspace: it reflects only the
-  // credentials THIS workspace has stored, never anyone else's.
   const statuses = await Promise.all(
-    PROVIDER_IDS.map((provider) => getProviderHealth(req.workspaceId!, provider)),
+    PROVIDER_IDS.map((provider) => getProviderHealth(provider)),
   );
   res.json(GetProvidersResponse.parse(statuses));
-});
-
-/**
- * Store this workspace's own Claude Code token or OpenRouter API key.
- * The value is encrypted per workspace, never logged, never echoed back,
- * and never mentioned in audit entries — only the outcome is.
- */
-router.put("/providers/:provider/credential", async (req, res): Promise<void> => {
-  const params = SetProviderCredentialParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: "Unknown provider" });
-    return;
-  }
-  const provider = params.data.provider as "claude_max" | "openrouter";
-  const parsed = SetProviderCredentialBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: "A credential of at least 8 characters is required." });
-    return;
-  }
-  try {
-    await saveProviderCredential(req.workspaceId!, provider, parsed.data.credential);
-  } catch (error) {
-    if (error instanceof ProviderCredentialError) {
-      res.status(503).json({ error: error.message });
-      return;
-    }
-    throw error;
-  }
-  clearProviderCaches();
-  await recordAudit(
-    req.workspaceId!,
-    "providers.credential_set",
-    `A ${providerLabel(provider)} credential was stored for this workspace.`,
-  );
-  res.json(
-    SetProviderCredentialResponse.parse(
-      await getProviderHealth(req.workspaceId!, provider),
-    ),
-  );
-});
-
-router.delete("/providers/:provider/credential", async (req, res): Promise<void> => {
-  const params = DeleteProviderCredentialParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: "Unknown provider" });
-    return;
-  }
-  const provider = params.data.provider as "claude_max" | "openrouter";
-  const removed = await deleteProviderCredential(req.workspaceId!, provider);
-  clearProviderCaches();
-  await recordAudit(
-    req.workspaceId!,
-    "providers.credential_removed",
-    removed
-      ? `The workspace's ${providerLabel(provider)} credential was removed.`
-      : `A ${providerLabel(provider)} credential removal was requested, but none was stored.`,
-  );
-  res.json(
-    DeleteProviderCredentialResponse.parse(
-      await getProviderHealth(req.workspaceId!, provider),
-    ),
-  );
 });
 
 /**
@@ -1808,13 +1767,8 @@ router.delete("/providers/:provider/credential", async (req, res): Promise<void>
  * ChatGPT allowance or leave a stray session behind.
  */
 router.post("/providers/codex/test", async (req, res): Promise<void> => {
-  const testUserId = getAuth(req)?.userId;
-  if (!testUserId) {
-    res.status(401).json({ error: "Sign in to test a Codex connection." });
-    return;
-  }
   clearProviderCaches();
-  const result = await testCodexConnection(testUserId);
+  const result = await testCodexConnection(getAuth(req)?.userId);
   await recordAudit(
     req.workspaceId!,
     "providers.codex_tested",
@@ -1861,30 +1815,33 @@ router.post("/providers/codex/credential", async (req, res): Promise<void> => {
   res.json(ConnectCodexResponse.parse(outcome));
 });
 
-router.delete("/providers/codex/credential", async (req, res): Promise<void> => {
-  const userId = getAuth(req)?.userId;
-  if (!userId) {
-    res.status(401).json({ error: "Sign in to manage a Codex account." });
-    return;
-  }
-  const removed = await disconnectCodexCredential(userId);
-  clearProviderCaches();
-  await recordAudit(
-    req.workspaceId!,
-    "providers.codex_disconnected",
-    removed
-      ? "The stored ChatGPT Codex sign-in was removed for this account."
-      : "A Codex disconnect was requested, but this account had no sign-in stored.",
-  );
-  res.json(
-    DisconnectCodexResponse.parse({
-      action: removed ? "disconnected" : "skipped",
-      detail: removed
-        ? "Disconnected. The stored sign-in and its working copy were deleted; Codex runs stop until an account is connected again."
-        : "There was no Codex sign-in stored for this account.",
-    }),
-  );
-});
+router.delete(
+  "/providers/codex/credential",
+  async (req, res): Promise<void> => {
+    const userId = getAuth(req)?.userId;
+    if (!userId) {
+      res.status(401).json({ error: "Sign in to manage a Codex account." });
+      return;
+    }
+    const removed = await disconnectCodexCredential(userId);
+    clearProviderCaches();
+    await recordAudit(
+      req.workspaceId!,
+      "providers.codex_disconnected",
+      removed
+        ? "The stored ChatGPT Codex sign-in was removed for this account."
+        : "A Codex disconnect was requested, but this account had no sign-in stored.",
+    );
+    res.json(
+      DisconnectCodexResponse.parse({
+        action: removed ? "disconnected" : "skipped",
+        detail: removed
+          ? "Disconnected. The stored sign-in and its working copy were deleted; Codex runs stop until an account is connected again."
+          : "There was no Codex sign-in stored for this account.",
+      }),
+    );
+  },
+);
 
 /**
  * Seed this account's sign-in from CODEX_AUTH_JSON, for operators who
@@ -1892,12 +1849,7 @@ router.delete("/providers/codex/credential", async (req, res): Promise<void> => 
  * sign-in so a session Codex has since refreshed is never rolled back.
  */
 router.post("/providers/codex/bootstrap", async (req, res): Promise<void> => {
-  const bootstrapUserId = getAuth(req)?.userId;
-  if (!bootstrapUserId) {
-    res.status(401).json({ error: "Sign in to bootstrap a Codex sign-in." });
-    return;
-  }
-  const outcome = await bootstrapCodexHome(bootstrapUserId);
+  const outcome = await bootstrapCodexHome(getAuth(req)?.userId);
   clearProviderCaches();
   await recordAudit(
     req.workspaceId!,
@@ -1942,10 +1894,10 @@ router.put("/providers/settings", async (req, res): Promise<void> => {
     throw error;
   }
   await recordAudit(
-      req.workspaceId!,
-      "providers.settings_updated",
-      `Provider routing defaults were updated (default: ${providerLabel(settings.defaultProvider)}).`,
-    );
+    req.workspaceId!,
+    "providers.settings_updated",
+    `Provider routing defaults were updated (default: ${providerLabel(settings.defaultProvider)}).`,
+  );
   res.json(UpdateProviderSettingsResponse.parse(settings));
 });
 
@@ -1955,10 +1907,7 @@ router.get("/providers/:provider/models", async (req, res): Promise<void> => {
     res.status(400).json({ error: "Unknown provider" });
     return;
   }
-  const catalog = await getModelCatalog(
-    req.workspaceId!,
-    params.data.provider as ProviderId,
-  );
+  const catalog = await getModelCatalog(params.data.provider as ProviderId);
   res.json(ListProviderModelsResponse.parse(catalog));
 });
 

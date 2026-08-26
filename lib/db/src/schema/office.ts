@@ -86,8 +86,9 @@ export const agentsTable = pgTable(
     // runs anything within its hard budget limits.
     autonomy: text("autonomy").notNull().default("limited"),
     // Custom budgets/limits overriding the securityPreset profile.
-    permissionOverrides: jsonb("permission_overrides")
-      .$type<AgentPermissionOverrides>(),
+    permissionOverrides: jsonb(
+      "permission_overrides",
+    ).$type<AgentPermissionOverrides>(),
     avatar: jsonb("avatar").$type<AvatarConfig>().notNull(),
     // Sensitive-data sandbox: a server-enforced isolation mode for agents
     // that read confidential email/files. When true the agent keeps its
@@ -190,15 +191,6 @@ export const tasksTable = pgTable("tasks", {
   workspaceId: uuid("workspace_id").references(() => workspacesTable.id, {
     onDelete: "cascade",
   }),
-  /**
-   * The Clerk account that owned the workspace when this task was queued.
-   * Account-scoped providers (Codex) bill exactly this identity for every
-   * attempt, retry, and crash recovery of the task — a later workspace
-   * hand-over must never rebind queued work to a different account's
-   * credential. Legacy rows without a snapshot fail closed for such
-   * providers rather than guessing.
-   */
-  ownerClerkUserId: text("owner_clerk_user_id"),
   agentId: uuid("agent_id")
     .notNull()
     .references(() => agentsTable.id),
@@ -221,6 +213,10 @@ export const tasksTable = pgTable("tasks", {
   // Set when this task was launched by a durable schedule; notification
   // preferences for the task's lifecycle events come from that schedule.
   scheduleId: uuid("schedule_id"),
+  /** True only when the owner confirmed this task from an agent's Talk view. */
+  talkMode: boolean("talk_mode").notNull().default(false),
+  /** Snapshot of the Talk auto-approval preference when the task was queued. */
+  talkAutoApprove: boolean("talk_auto_approve").notNull().default(false),
   objective: text("objective").notNull(),
   status: text("status").notNull().default("queued"),
   priority: text("priority").notNull().default("normal"),
@@ -367,7 +363,9 @@ export const notificationsTable = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (table) => [index("notifications_read_created_idx").on(table.readAt, table.createdAt)],
+  (table) => [
+    index("notifications_read_created_idx").on(table.readAt, table.createdAt),
+  ],
 );
 
 /**
@@ -863,10 +861,12 @@ export const insertApprovalSchema = createInsertSchema(approvalsTable).omit({
   id: true,
   createdAt: true,
 });
-export const insertAuditEventSchema = createInsertSchema(auditEventsTable).omit({
-  id: true,
-  createdAt: true,
-});
+export const insertAuditEventSchema = createInsertSchema(auditEventsTable).omit(
+  {
+    id: true,
+    createdAt: true,
+  },
+);
 
 export const insertTeamSchema = createInsertSchema(teamsTable).omit({
   id: true,
@@ -912,7 +912,9 @@ export const workspacesTable = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (table) => [uniqueIndex("workspaces_clerk_user_unique").on(table.clerkUserId)],
+  (table) => [
+    uniqueIndex("workspaces_clerk_user_unique").on(table.clerkUserId),
+  ],
 );
 
 export type GoogleAccountRecord = typeof googleAccountsTable.$inferSelect;
@@ -953,8 +955,7 @@ export const googleAccountsTable = pgTable("google_accounts", {
     .defaultNow(),
 });
 
-export type GoogleOauthStateRecord =
-  typeof googleOauthStatesTable.$inferSelect;
+export type GoogleOauthStateRecord = typeof googleOauthStatesTable.$inferSelect;
 
 export type GithubAccountRecord = typeof githubAccountsTable.$inferSelect;
 
@@ -985,8 +986,7 @@ export const githubAccountsTable = pgTable("github_accounts", {
     .defaultNow(),
 });
 
-export type GithubOauthStateRecord =
-  typeof githubOauthStatesTable.$inferSelect;
+export type GithubOauthStateRecord = typeof githubOauthStatesTable.$inferSelect;
 
 /**
  * Single-use GitHub OAuth authorization states, mirroring the Google state
@@ -1026,40 +1026,6 @@ export const workspaceSettingsTable = pgTable(
 );
 
 export type WorkspaceSettingRecord = typeof workspaceSettingsTable.$inferSelect;
-
-export type ProviderCredentialRecord =
-  typeof providerCredentialsTable.$inferSelect;
-
-/**
- * Per-workspace AI provider credentials, entered in the app by each
- * workspace's own user. Only the AES-256-GCM ciphertext is stored; the
- * plaintext is decrypted per call and never logged or returned. One row
- * per (workspace, provider): "claude_max", "openrouter", or
- * "openai_voice" (the OpenAI key that pays for speech services).
- *
- * There is deliberately no server-environment fallback: a workspace
- * without a row here has no access to that provider, so one workspace can
- * never spend another workspace's — or the operator's — allowance.
- */
-export const providerCredentialsTable = pgTable(
-  "provider_credentials",
-  {
-    workspaceId: uuid("workspace_id")
-      .notNull()
-      .references(() => workspacesTable.id, { onDelete: "cascade" }),
-    /** "claude_max" | "openrouter" | "openai_voice". */
-    provider: text("provider").notNull(),
-    /** AES-256-GCM ciphertext of the API key/token. Never logged. */
-    credentialEnc: text("credential_enc").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (table) => [primaryKey({ columns: [table.workspaceId, table.provider] })],
-);
 
 /**
  * Single-use OAuth authorization states. A row proves HomardClaw started

@@ -40,6 +40,7 @@ const BACKFILL_DONE_KEY = "workspace_backfill_done";
 const MIGRATED_SETTINGS_KEYS = [
   "emergency_stop",
   "voice_transcripts_enabled",
+  "talk_auto_approve_tasks",
   "provider.default",
   "provider.claude_max.default_model",
   "provider.openrouter.default_model",
@@ -115,23 +116,6 @@ export async function workspaceForUser(clerkUserId: string): Promise<string> {
     .limit(1);
   if (!created) throw new Error("Workspace creation failed");
   return created.id;
-}
-
-/**
- * The Clerk account that owns a workspace, resolved server-side from the
- * workspace row itself. Task execution uses this to run provider calls as
- * the person whose workspace queued the work — never as whoever happens to
- * be signed in, and never as a global fallback owner.
- */
-export async function clerkUserIdForWorkspace(
-  workspaceId: string,
-): Promise<string | null> {
-  const [row] = await db
-    .select({ clerkUserId: workspacesTable.clerkUserId })
-    .from(workspacesTable)
-    .where(eq(workspacesTable.id, workspaceId))
-    .limit(1);
-  return row?.clerkUserId ?? null;
 }
 
 /** The workspace holding pre-multi-tenant data, if any. */
@@ -366,13 +350,11 @@ export function isSameWorkspace(
 }
 
 /** Predicate for scoping a table by its workspace column. */
-export function inWorkspace<
-  T extends { workspaceId: unknown },
->(table: T, workspaceId: string) {
-  return eq(
-    table.workspaceId as Parameters<typeof eq>[0],
-    workspaceId,
-  );
+export function inWorkspace<T extends { workspaceId: unknown }>(
+  table: T,
+  workspaceId: string,
+) {
+  return eq(table.workspaceId as Parameters<typeof eq>[0], workspaceId);
 }
 
 /** True when rows with a null workspace can never be seen (post-backfill). */

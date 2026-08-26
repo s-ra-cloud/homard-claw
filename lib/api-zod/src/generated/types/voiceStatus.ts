@@ -11,4 +11,5 @@ export interface VoiceStatus {
   /** @nullable */
   reason: string | null;
   transcriptsEnabled: boolean;
+  autoApproveTalkTasks: boolean;
 }

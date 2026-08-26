@@ -11,5 +11,7 @@ export interface TalkHistoryTurn {
   id: string;
   role: TalkHistoryTurnRole;
   text: string;
+  /** @nullable */
+  taskId: string | null;
   createdAt: Date;
 }

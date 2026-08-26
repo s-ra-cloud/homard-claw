@@ -10,10 +10,8 @@
 import { useEffect, useState } from "react";
 import { useLocation, useRoute } from "wouter";
 import {
-  useDeleteVoiceCredential,
   useGetVoiceStatus,
   useListAgents,
-  useSetVoiceCredential,
   useUpdateVoiceSettings,
 } from "@workspace/api-client-react";
 import {
@@ -74,40 +72,7 @@ export default function TalkPage() {
         void queryClient.invalidateQueries({ queryKey: ["/api/voice/status"] }),
       onError: (err) =>
         toast({
-          title: "Could not update transcript storage",
-          description: errorText(err, "Try again."),
-          variant: "destructive",
-        }),
-    },
-  });
-
-  const refreshVoiceStatus = () =>
-    void queryClient.invalidateQueries({ queryKey: ["/api/voice/status"] });
-
-  const saveVoiceKey = useSetVoiceCredential({
-    mutation: {
-      onSuccess: () => {
-        refreshVoiceStatus();
-        toast({ title: "Voice key saved", description: "Voice calls are ready." });
-      },
-      onError: (err) =>
-        toast({
-          title: "Could not save the voice key",
-          description: errorText(err, "Check the key and try again."),
-          variant: "destructive",
-        }),
-    },
-  });
-
-  const removeVoiceKey = useDeleteVoiceCredential({
-    mutation: {
-      onSuccess: () => {
-        refreshVoiceStatus();
-        toast({ title: "Voice key removed" });
-      },
-      onError: (err) =>
-        toast({
-          title: "Could not remove the voice key",
+          title: "Could not update Talk settings",
           description: errorText(err, "Try again."),
           variant: "destructive",
         }),
@@ -126,10 +91,11 @@ export default function TalkPage() {
       onTranscriptsChange={(on) =>
         updateSettings.mutate({ data: { transcriptsEnabled: on } })
       }
-      voiceKeyConfigured={speechAvailable}
-      voiceKeyPending={saveVoiceKey.isPending || removeVoiceKey.isPending}
-      onSaveVoiceKey={(key) => saveVoiceKey.mutate({ data: { credential: key } })}
-      onRemoveVoiceKey={() => removeVoiceKey.mutate()}
+      autoApproveTalkTasks={voiceStatus?.autoApproveTalkTasks ?? false}
+      autoApprovePending={!voiceStatus || updateSettings.isPending}
+      onAutoApproveTalkTasksChange={(on) =>
+        updateSettings.mutate({ data: { autoApproveTalkTasks: on } })
+      }
     />
   );
 
@@ -158,7 +124,10 @@ export default function TalkPage() {
                     className="w-4 h-4 mt-0.5 shrink-0 text-accent"
                     aria-hidden="true"
                   />
-                  <p>{voiceStatus.reason ?? "Voice is unavailable; text chat still works."}</p>
+                  <p>
+                    {voiceStatus.reason ??
+                      "Voice is unavailable; text chat still works."}
+                  </p>
                 </div>
               ) : null
             }
@@ -179,13 +148,16 @@ export default function TalkPage() {
               voiceOn={voiceOn}
               speechAvailable={speechAvailable}
               recorderSupported={recorderSupported}
+              autoApproveTalkTasks={voiceStatus?.autoApproveTalkTasks ?? false}
               onHangUp={isDesktop ? undefined : () => setLocation("/talk")}
               headerAction={settingsFor("call")}
             />
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
               <Phone className="w-8 h-8 text-primary" aria-hidden="true" />
-              <p className="font-display text-xs uppercase text-primary">No call in progress</p>
+              <p className="font-display text-xs uppercase text-primary">
+                No call in progress
+              </p>
               <p className="text-xs font-mono uppercase text-muted-foreground">
                 Pick a contact to start talking
               </p>

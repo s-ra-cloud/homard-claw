@@ -7,5 +7,6 @@
  */
 
 export interface VoiceSettingsInput {
-  transcriptsEnabled: boolean;
+  transcriptsEnabled?: boolean;
+  autoApproveTalkTasks?: boolean;
 }

@@ -555,35 +555,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/VoiceStatus"
-  /voice/credential:
-    put:
-      operationId: setVoiceCredential
-      tags: [office]
-      summary: Store this workspace's OpenAI API key that pays for voice speech services
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ProviderCredentialInput"
-      responses:
-        "200":
-          description: Updated voice status
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/VoiceStatus"
-    delete:
-      operationId: deleteVoiceCredential
-      tags: [office]
-      summary: Remove this workspace's stored voice OpenAI API key
-      responses:
-        "200":
-          description: Updated voice status
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/VoiceStatus"
   /voice/transcribe:
     post:
       operationId: transcribeAudio
@@ -799,7 +770,8 @@ paths:
         - name: provider
           in: path
           required: true
-          schema: { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
+          schema:
+            { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
       responses:
         "200":
           description: Provider model catalog
@@ -807,45 +779,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProviderModels"
-  /providers/{provider}/credential:
-    put:
-      operationId: setProviderCredential
-      tags: [office]
-      summary: Store this workspace's own credential for a provider
-      parameters:
-        - name: provider
-          in: path
-          required: true
-          schema: { type: string, enum: [claude_max, openrouter] }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ProviderCredentialInput"
-      responses:
-        "200":
-          description: Refreshed provider status for this workspace
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProviderStatus"
-    delete:
-      operationId: deleteProviderCredential
-      tags: [office]
-      summary: Remove this workspace's stored credential for a provider
-      parameters:
-        - name: provider
-          in: path
-          required: true
-          schema: { type: string, enum: [claude_max, openrouter] }
-      responses:
-        "200":
-          description: Refreshed provider status for this workspace
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProviderStatus"
   /tasks/{taskId}:
     get:
       operationId: getTask
@@ -1497,7 +1430,23 @@ components:
         - status
     Agent:
       type: object
-      required: [id, name, title, mission, provider, status, securityPreset, autonomy, permissions, appGrants, sensitiveDataSandbox, avatar, archived, createdAt]
+      required:
+        [
+          id,
+          name,
+          title,
+          mission,
+          provider,
+          status,
+          securityPreset,
+          autonomy,
+          permissions,
+          appGrants,
+          sensitiveDataSandbox,
+          avatar,
+          archived,
+          createdAt,
+        ]
       properties:
         id: { type: string }
         name: { type: string }
@@ -1507,7 +1456,11 @@ components:
         personality: { type: ["string", "null"] }
         goals: { type: ["string", "null"] }
         instructions: { type: ["string", "null"] }
-        provider: { type: ["string", "null"], enum: [claude_max, codex_chatgpt, openrouter, null] }
+        provider:
+          {
+            type: ["string", "null"],
+            enum: [claude_max, codex_chatgpt, openrouter, null],
+          }
         model: { type: ["string", "null"] }
         codexModel:
           type: ["string", "null"]
@@ -1516,7 +1469,21 @@ components:
           type: ["string", "null"]
           enum: [minimal, low, medium, high, xhigh, max, ultra, null]
         voiceStyle: { type: ["string", "null"] }
-        status: { type: string, enum: [idle, working, researching, waiting, paused, error, queued, complete] }
+        status:
+          {
+            type: string,
+            enum:
+              [
+                idle,
+                working,
+                researching,
+                waiting,
+                paused,
+                error,
+                queued,
+                complete,
+              ],
+          }
         securityPreset: { type: string, enum: [observer, assistant, operator] }
         autonomy: { type: string, enum: [supervised, limited, autonomous] }
         permissions: { $ref: "#/components/schemas/AgentPermissions" }
@@ -1563,7 +1530,8 @@ components:
         allowedProviders:
           oneOf:
             - type: array
-              items: { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
+              items:
+                { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
             - type: "null"
         maxRunSeconds: { type: [number, "null"], minimum: 0 }
         maxOutputTokens: { type: [number, "null"], minimum: 0 }
@@ -1581,7 +1549,8 @@ components:
         allowedProviders:
           oneOf:
             - type: array
-              items: { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
+              items:
+                { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
             - type: "null"
         maxRunSeconds: { type: [number, "null"], minimum: 0 }
         maxOutputTokens: { type: [number, "null"], minimum: 0 }
@@ -1603,13 +1572,28 @@ components:
             $ref: "#/components/schemas/AppAction"
     RetiredAgent:
       type: object
-      required: [id, name, title, mission, provider, securityPreset, avatar, createdAt, retiredAt]
+      required:
+        [
+          id,
+          name,
+          title,
+          mission,
+          provider,
+          securityPreset,
+          avatar,
+          createdAt,
+          retiredAt,
+        ]
       properties:
         id: { type: string }
         name: { type: string }
         title: { type: string }
         mission: { type: string }
-        provider: { type: ["string", "null"], enum: [claude_max, codex_chatgpt, openrouter, null] }
+        provider:
+          {
+            type: ["string", "null"],
+            enum: [claude_max, codex_chatgpt, openrouter, null],
+          }
         model: { type: ["string", "null"] }
         securityPreset: { type: string, enum: [observer, assistant, operator] }
         avatar: { $ref: "#/components/schemas/AvatarConfig" }
@@ -1634,7 +1618,11 @@ components:
         personality: { type: string, maxLength: 2000 }
         goals: { type: string, maxLength: 4000 }
         instructions: { type: string, maxLength: 4000 }
-        provider: { type: ["string", "null"], enum: [claude_max, codex_chatgpt, openrouter, null] }
+        provider:
+          {
+            type: ["string", "null"],
+            enum: [claude_max, codex_chatgpt, openrouter, null],
+          }
         model: { type: string, maxLength: 180 }
         codexModel: { type: ["string", "null"], maxLength: 200 }
         codexReasoning:
@@ -1662,7 +1650,11 @@ components:
         personality: { type: ["string", "null"], maxLength: 2000 }
         goals: { type: ["string", "null"], maxLength: 4000 }
         instructions: { type: ["string", "null"], maxLength: 4000 }
-        provider: { type: ["string", "null"], enum: [claude_max, codex_chatgpt, openrouter, null] }
+        provider:
+          {
+            type: ["string", "null"],
+            enum: [claude_max, codex_chatgpt, openrouter, null],
+          }
         model: { type: ["string", "null"], maxLength: 180 }
         codexModel: { type: ["string", "null"], maxLength: 200 }
         codexReasoning:
@@ -1731,7 +1723,16 @@ components:
         disconnected: { type: boolean }
     ConnectedApp:
       type: object
-      required: [app, displayName, enabled, status, statusDetail, accountLabel, grantedAgents]
+      required:
+        [
+          app,
+          displayName,
+          enabled,
+          status,
+          statusDetail,
+          accountLabel,
+          grantedAgents,
+        ]
       properties:
         app: { type: string, enum: [gmail, google_drive, github] }
         displayName: { type: string }
@@ -1791,10 +1792,27 @@ components:
     CapabilityPackage:
       type: object
       required:
-        [packageId, displayName, description, publisher, builtin, connection,
-         installed, installedVersion, registryVersion, status, enabled,
-         quarantineReason, pendingVersion, pendingDiff, health, healthDetail,
-         grantedAgents, tools, skills]
+        [
+          packageId,
+          displayName,
+          description,
+          publisher,
+          builtin,
+          connection,
+          installed,
+          installedVersion,
+          registryVersion,
+          status,
+          enabled,
+          quarantineReason,
+          pendingVersion,
+          pendingDiff,
+          health,
+          healthDetail,
+          grantedAgents,
+          tools,
+          skills,
+        ]
       properties:
         packageId: { type: string }
         displayName: { type: string }
@@ -1874,16 +1892,41 @@ components:
         paused: { type: boolean }
     Task:
       type: object
-      required: [id, agentId, agentName, objective, status, priority, attempts, files, createdAt]
+      required:
+        [
+          id,
+          agentId,
+          agentName,
+          objective,
+          status,
+          priority,
+          attempts,
+          files,
+          createdAt,
+        ]
       properties:
         id: { type: string }
         agentId: { type: string }
         agentName: { type: string }
         objective: { type: string }
-        status: { type: string, enum: [queued, running, waiting_approval, blocked, completed, failed, cancelled] }
+        status:
+          {
+            type: string,
+            enum:
+              [
+                queued,
+                running,
+                waiting_approval,
+                blocked,
+                completed,
+                failed,
+                cancelled,
+              ],
+          }
         priority: { type: string, enum: [low, normal, high] }
         budgetCents: { type: [number, "null"] }
-        provider: { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
+        provider:
+          { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
         model: { type: [string, "null"] }
         reasoningEffort:
           type: ["string", "null"]
@@ -2011,7 +2054,20 @@ components:
         agentId: { type: string }
         agentName: { type: string }
         objective: { type: string }
-        status: { type: string, enum: [queued, running, waiting_approval, blocked, completed, failed, cancelled] }
+        status:
+          {
+            type: string,
+            enum:
+              [
+                queued,
+                running,
+                waiting_approval,
+                blocked,
+                completed,
+                failed,
+                cancelled,
+              ],
+          }
         depth: { type: number }
         delegatedByAgentName: { type: [string, "null"] }
         actualCostCents: { type: [number, "null"] }
@@ -2040,16 +2096,18 @@ components:
         createdAt: { type: string, format: date-time }
     VoiceStatus:
       type: object
-      required: [available, reason, transcriptsEnabled]
+      required: [available, reason, transcriptsEnabled, autoApproveTalkTasks]
       properties:
         available: { type: boolean }
         reason: { type: [string, "null"] }
         transcriptsEnabled: { type: boolean }
+        autoApproveTalkTasks: { type: boolean }
     VoiceSettingsInput:
       type: object
-      required: [transcriptsEnabled]
+      minProperties: 1
       properties:
         transcriptsEnabled: { type: boolean }
+        autoApproveTalkTasks: { type: boolean }
     ConverseTurn:
       type: object
       required: [role, text]
@@ -2058,11 +2116,12 @@ components:
         text: { type: string, maxLength: 8000 }
     TalkHistoryTurn:
       type: object
-      required: [id, role, text, createdAt]
+      required: [id, role, text, taskId, createdAt]
       properties:
         id: { type: string }
         role: { type: string, enum: [user, agent] }
         text: { type: string }
+        taskId: { type: [string, "null"] }
         createdAt: { type: string, format: date-time }
     TalkHistory:
       type: object
@@ -2152,7 +2211,8 @@ components:
             $ref: "#/components/schemas/RuntimeInfo"
         queue:
           type: object
-          required: [queued, running, waitingApproval, blocked, oldestQueuedSeconds]
+          required:
+            [queued, running, waitingApproval, blocked, oldestQueuedSeconds]
           properties:
             queued: { type: number }
             running: { type: number }
@@ -2192,7 +2252,8 @@ components:
         createdAt: { type: string, format: date-time }
     AppAction:
       type: object
-      required: [id, taskId, agentId, app, operation, targetSummary, status, createdAt]
+      required:
+        [id, taskId, agentId, app, operation, targetSummary, status, createdAt]
       properties:
         id: { type: string }
         taskId: { type: string }
@@ -2242,7 +2303,8 @@ components:
         objective: { type: string, minLength: 3, maxLength: 5000 }
         priority: { type: string, enum: [low, normal, high] }
         budgetCents: { type: number, minimum: 0.01, maximum: 1000000 }
-        providerOverride: { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
+        providerOverride:
+          { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
         modelOverride: { type: string, maxLength: 200 }
         reasoningOverride:
           type: string
@@ -2250,6 +2312,9 @@ components:
         continueConversation:
           type: boolean
           description: Continue the agent's most recent provider thread instead of starting a new one.
+        talkMode:
+          type: boolean
+          description: Marks a task confirmed from Talk so its approval preference and result reporting stay scoped to Talk.
         attachments:
           type: array
           maxItems: 4
@@ -2269,7 +2334,8 @@ components:
       properties:
         agentId: { type: string }
         objective: { type: string, minLength: 3, maxLength: 5000 }
-        providerOverride: { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
+        providerOverride:
+          { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
         modelOverride: { type: string, maxLength: 200 }
     TaskEstimate:
       type: object
@@ -2285,7 +2351,8 @@ components:
           costKnown,
         ]
       properties:
-        provider: { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
+        provider:
+          { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
         model: { type: string }
         billing: { type: string, enum: [subscription, metered] }
         estimatedInputTokens: { type: number }
@@ -2324,7 +2391,11 @@ components:
         taskObjective: { type: [string, "null"] }
         action: { type: string }
         details: { type: string }
-        status: { type: string, enum: [pending, approved, rejected, expired, cancelled] }
+        status:
+          {
+            type: string,
+            enum: [pending, approved, rejected, expired, cancelled],
+          }
         decidedAt: { type: [string, "null"] }
         createdAt: { type: string, format: date-time }
         expiresAt: { type: string, format: date-time }
@@ -2349,7 +2420,8 @@ components:
           reasoningLevels,
         ]
       properties:
-        provider: { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
+        provider:
+          { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
         label: { type: string }
         billing: { type: string, enum: [subscription, metered] }
         enabled:
@@ -2410,15 +2482,6 @@ components:
       required: [authJson]
       properties:
         authJson: { type: string, minLength: 2, maxLength: 20000 }
-    ProviderCredentialInput:
-      type: object
-      description: >-
-        A provider API key or OAuth token belonging to this workspace's own
-        account. It is encrypted before storage, never returned by any
-        endpoint, and never exposed to an agent's tools or prompts.
-      required: [credential]
-      properties:
-        credential: { type: string, minLength: 8, maxLength: 4000 }
     ProviderSettings:
       type: object
       required:
@@ -2433,7 +2496,8 @@ components:
           paidFallbackLimitCents,
         ]
       properties:
-        defaultProvider: { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
+        defaultProvider:
+          { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
         claudeModel: { type: [string, "null"] }
         openrouterModel: { type: [string, "null"] }
         codexModel: { type: [string, "null"] }
@@ -2451,7 +2515,8 @@ components:
     ProviderSettingsInput:
       type: object
       properties:
-        defaultProvider: { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
+        defaultProvider:
+          { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
         claudeModel: { type: [string, "null"], maxLength: 200 }
         openrouterModel: { type: [string, "null"], maxLength: 200 }
         codexModel: { type: [string, "null"], maxLength: 200 }
@@ -2476,7 +2541,8 @@ components:
       type: object
       required: [provider, available, models]
       properties:
-        provider: { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
+        provider:
+          { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
         available: { type: boolean }
         message: { type: [string, "null"] }
         models:
@@ -2495,7 +2561,15 @@ components:
         active: { type: boolean }
     OfficeOverview:
       type: object
-      required: [agents, activeTasks, pendingApprovals, emergencyStop, monthlyCostCents, recentEvents]
+      required:
+        [
+          agents,
+          activeTasks,
+          pendingApprovals,
+          emergencyStop,
+          monthlyCostCents,
+          recentEvents,
+        ]
       properties:
         agents: { type: number }
         activeTasks: { type: number }
@@ -2533,12 +2607,28 @@ components:
         firstInvalidId: { type: [string, "null"] }
     Memory:
       type: object
-      required: [id, agentId, agentName, kind, content, pinned, disabled, sourceTaskId, createdAt, updatedAt]
+      required:
+        [
+          id,
+          agentId,
+          agentName,
+          kind,
+          content,
+          pinned,
+          disabled,
+          sourceTaskId,
+          createdAt,
+          updatedAt,
+        ]
       properties:
         id: { type: string }
         agentId: { type: [string, "null"] }
         agentName: { type: [string, "null"] }
-        kind: { type: string, enum: [fact, decision, context, task_outcome, relationship] }
+        kind:
+          {
+            type: string,
+            enum: [fact, decision, context, task_outcome, relationship],
+          }
         content: { type: string }
         pinned: { type: boolean }
         disabled: { type: boolean }
@@ -2550,14 +2640,22 @@ components:
       required: [content]
       properties:
         agentId: { type: [string, "null"] }
-        kind: { type: string, enum: [fact, decision, context, task_outcome, relationship] }
+        kind:
+          {
+            type: string,
+            enum: [fact, decision, context, task_outcome, relationship],
+          }
         content: { type: string, minLength: 3, maxLength: 4000 }
         pinned: { type: boolean }
     MemoryUpdate:
       type: object
       properties:
         agentId: { type: [string, "null"] }
-        kind: { type: string, enum: [fact, decision, context, task_outcome, relationship] }
+        kind:
+          {
+            type: string,
+            enum: [fact, decision, context, task_outcome, relationship],
+          }
         content: { type: string, minLength: 3, maxLength: 4000 }
         pinned: { type: boolean }
         disabled: { type: boolean }
@@ -2577,7 +2675,17 @@ components:
         deleted: { type: number }
     KnowledgeFile:
       type: object
-      required: [id, name, mimeType, description, sizeBytes, wordCount, agentIds, createdAt]
+      required:
+        [
+          id,
+          name,
+          mimeType,
+          description,
+          sizeBytes,
+          wordCount,
+          agentIds,
+          createdAt,
+        ]
       properties:
         id: { type: string }
         name: { type: string }
@@ -2620,7 +2728,8 @@ components:
         agentId: { type: string }
         objective: { type: string, minLength: 3, maxLength: 5000 }
         priority: { type: string, enum: [low, normal, high] }
-        providerOverride: { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
+        providerOverride:
+          { type: string, enum: [claude_max, codex_chatgpt, openrouter] }
         modelOverride: { type: string, maxLength: 200 }
         budgetCents: { type: number, minimum: 0.01, maximum: 1000000 }
         cadence: { type: string, enum: [once, daily, weekly, monthly] }
@@ -2655,7 +2764,20 @@ components:
         enabled: { type: boolean }
     Schedule:
       type: object
-      required: [id, name, agentId, agentName, objective, priority, cadence, timezone, notify, enabled, createdAt]
+      required:
+        [
+          id,
+          name,
+          agentId,
+          agentName,
+          objective,
+          priority,
+          cadence,
+          timezone,
+          notify,
+          enabled,
+          createdAt,
+        ]
       properties:
         id: { type: string }
         name: { type: string }
@@ -2716,7 +2838,14 @@ components:
       properties:
         totals:
           type: object
-          required: [todayCostCents, last7dCostCents, monthCostCents, monthInputTokens, monthOutputTokens]
+          required:
+            [
+              todayCostCents,
+              last7dCostCents,
+              monthCostCents,
+              monthInputTokens,
+              monthOutputTokens,
+            ]
           properties:
             todayCostCents: { type: number }
             last7dCostCents: { type: number }
@@ -2725,7 +2854,16 @@ components:
             monthOutputTokens: { type: number }
         outcomes:
           type: object
-          required: [completed, failed, blocked, cancelled, queued, running, waitingApproval]
+          required:
+            [
+              completed,
+              failed,
+              blocked,
+              cancelled,
+              queued,
+              running,
+              waitingApproval,
+            ]
           properties:
             completed: { type: number }
             failed: { type: number }
@@ -2738,7 +2876,17 @@ components:
           type: array
           items:
             type: object
-            required: [agentId, name, status, tasksCompleted, tasksFailed, inputTokens, outputTokens, costCents]
+            required:
+              [
+                agentId,
+                name,
+                status,
+                tasksCompleted,
+                tasksFailed,
+                inputTokens,
+                outputTokens,
+                costCents,
+              ]
             properties:
               agentId: { type: string }
               name: { type: string }

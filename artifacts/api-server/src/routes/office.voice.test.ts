@@ -8,7 +8,15 @@
  */
 import express from "express";
 import request from "supertest";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import {
   agentMessagesTable,
   agentsTable,
@@ -84,7 +92,11 @@ vi.mock("../workspace", async (importOriginal) => {
       workspaceId: string,
       key: string,
     ) => {
-      const value = await mod.getWorkspaceSettingVia(executor, workspaceId, key);
+      const value = await mod.getWorkspaceSettingVia(
+        executor,
+        workspaceId,
+        key,
+      );
       await maybePause(key);
       return value;
     },
@@ -93,11 +105,6 @@ vi.mock("../workspace", async (importOriginal) => {
 
 import officeRouter from "./office";
 import { clearProviderCaches } from "../providers";
-import {
-  deleteProviderCredential,
-  saveProviderCredential,
-} from "../provider-credentials";
-import { providerCredentialsTable } from "@workspace/db";
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));
@@ -111,8 +118,8 @@ const RUN_TAG = `HC Voice ${Date.now()}`;
 const createdAgentIds: string[] = [];
 let createdOwnerRow = false;
 let priorTranscriptsValue: string | null | undefined;
+let priorTalkAutoApproveValue: string | null | undefined;
 let wsId = "";
-let priorCredentialRows: (typeof providerCredentialsTable.$inferSelect)[] = [];
 
 /** Minimal RIFF/WAVE header so format detection skips ffmpeg conversion. */
 const FAKE_WAV_BASE64 = Buffer.concat([
@@ -121,6 +128,8 @@ const FAKE_WAV_BASE64 = Buffer.concat([
   Buffer.from("WAVEfmt "),
   Buffer.alloc(32),
 ]).toString("base64");
+
+const OPENAI_TEST_BASE = "https://openai.test/v1";
 
 async function createAgent(name: string, extra: Record<string, unknown> = {}) {
   const res = await request(app)
@@ -134,13 +143,19 @@ async function createAgent(name: string, extra: Record<string, unknown> = {}) {
       securityPreset: "assistant",
       autonomy: "autonomous",
       voiceStyle: "deep",
-      avatar: { shellColor: "#C34428", deskStyle: "standard", accessory: "none" },
+      avatar: {
+        shellColor: "#C34428",
+        deskStyle: "standard",
+        accessory: "none",
+      },
       ...extra,
     });
   expect(res.status).toBe(201);
   createdAgentIds.push(res.body.id);
   // Paused agents keep the live development worker away from test rows.
-  await request(app).post(`/api/agents/${res.body.id}/pause`).send({ paused: true });
+  await request(app)
+    .post(`/api/agents/${res.body.id}/pause`)
+    .send({ paused: true });
   return res.body as { id: string; name: string };
 }
 
@@ -152,7 +167,8 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 function sseResponse(frames: string[]): Response {
-  const body = frames.map((f) => `data: ${f}\n\n`).join("") + "data: [DONE]\n\n";
+  const body =
+    frames.map((f) => `data: ${f}\n\n`).join("") + "data: [DONE]\n\n";
   return new Response(body, {
     status: 200,
     headers: { "content-type": "text/event-stream" },
@@ -189,13 +205,16 @@ function mockProviders({
         ],
       });
     }
-    // Workspace voice keys go straight to api.openai.com (no managed base
-    // URL), so speech traffic is recognized by the OpenAI host or the
-    // transcription path.
-    if (target.includes("/audio/transcriptions")) {
+    if (
+      target.includes("openai.test") &&
+      target.includes("/audio/transcriptions")
+    ) {
       return jsonResponse({ text: transcript });
     }
-    if (target.includes("api.openai.com") && target.includes("/chat/completions")) {
+    if (
+      target.includes("openai.test") &&
+      target.includes("/chat/completions")
+    ) {
       // Streaming TTS: two PCM16 chunks.
       return sseResponse([
         '{"choices":[{"delta":{"audio":{"data":"QUFBQQ=="}}}]}',
@@ -206,7 +225,10 @@ function mockProviders({
       replyCalls += 1;
       const failure = failures.shift();
       if (failure !== undefined) {
-        return jsonResponse({ error: "upstream detail that must never leak" }, failure);
+        return jsonResponse(
+          { error: "upstream detail that must never leak" },
+          failure,
+        );
       }
       return jsonResponse({
         choices: [{ message: { content: replyJson } }],
@@ -248,35 +270,33 @@ beforeAll(async () => {
     )
     .limit(1);
   priorTranscriptsValue = transcripts?.value ?? null;
-  // Snapshot any real stored credentials so the suite can restore them.
-  priorCredentialRows = await db
+  const [talkAutoApprove] = await db
     .select()
-    .from(providerCredentialsTable)
-    .where(eq(providerCredentialsTable.workspaceId, wsId));
+    .from(workspaceSettingsTable)
+    .where(
+      and(
+        eq(workspaceSettingsTable.workspaceId, wsId),
+        eq(workspaceSettingsTable.key, "talk_auto_approve_tasks"),
+      ),
+    )
+    .limit(1);
+  priorTalkAutoApproveValue = talkAutoApprove?.value ?? null;
 });
 
-beforeEach(async () => {
+beforeEach(() => {
   fetchMock.mockReset();
   fetchMock.mockImplementation(async () => {
     throw new Error("network disabled in tests");
   });
-  // Voice and provider access are paid for by workspace-stored credentials
-  // now — there are no server-environment fallbacks to stub.
-  await saveProviderCredential(wsId, "openrouter", "test-openrouter-key");
-  await saveProviderCredential(wsId, "claude_max", "test-claude-token");
-  await saveProviderCredential(wsId, "openai_voice", "test-openai-key");
+  vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
+  vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", "test-claude-token");
+  vi.stubEnv("AI_INTEGRATIONS_OPENAI_BASE_URL", OPENAI_TEST_BASE);
+  vi.stubEnv("AI_INTEGRATIONS_OPENAI_API_KEY", "test-openai-key");
   clearProviderCaches();
 });
 
 afterAll(async () => {
   vi.unstubAllEnvs();
-  // Put the workspace's credential rows back exactly as we found them.
-  await db
-    .delete(providerCredentialsTable)
-    .where(eq(providerCredentialsTable.workspaceId, wsId));
-  if (priorCredentialRows.length > 0) {
-    await db.insert(providerCredentialsTable).values(priorCredentialRows);
-  }
   if (createdAgentIds.length > 0) {
     await db
       .delete(talkExchangesTable)
@@ -289,15 +309,15 @@ afterAll(async () => {
           inArray(agentMessagesTable.toAgentId, createdAgentIds),
         ),
       );
+    await db.delete(workspaceSettingsTable).where(
+      inArray(
+        workspaceSettingsTable.key,
+        createdAgentIds.map((id) => `voice_history_cleared:${id}`),
+      ),
+    );
     await db
-      .delete(workspaceSettingsTable)
-      .where(
-        inArray(
-          workspaceSettingsTable.key,
-          createdAgentIds.map((id) => `voice_history_cleared:${id}`),
-        ),
-      );
-    await db.delete(agentsTable).where(inArray(agentsTable.id, createdAgentIds));
+      .delete(agentsTable)
+      .where(inArray(agentsTable.id, createdAgentIds));
   }
   // Restore the transcript toggle exactly as we found it.
   if (priorTranscriptsValue === null) {
@@ -317,6 +337,26 @@ afterAll(async () => {
         and(
           eq(workspaceSettingsTable.workspaceId, wsId),
           eq(workspaceSettingsTable.key, "voice_transcripts_enabled"),
+        ),
+      );
+  }
+  if (priorTalkAutoApproveValue === null) {
+    await db
+      .delete(workspaceSettingsTable)
+      .where(
+        and(
+          eq(workspaceSettingsTable.workspaceId, wsId),
+          eq(workspaceSettingsTable.key, "talk_auto_approve_tasks"),
+        ),
+      );
+  } else if (priorTalkAutoApproveValue !== undefined) {
+    await db
+      .update(workspaceSettingsTable)
+      .set({ value: priorTalkAutoApproveValue })
+      .where(
+        and(
+          eq(workspaceSettingsTable.workspaceId, wsId),
+          eq(workspaceSettingsTable.key, "talk_auto_approve_tasks"),
         ),
       );
   }
@@ -344,37 +384,18 @@ async function setTranscripts(enabled: boolean) {
 }
 
 describe("voice status and settings", () => {
-  it("reports availability from the workspace's stored voice key", async () => {
+  it("reports availability from the managed speech env vars", async () => {
     const res = await request(app).get("/api/voice/status");
     expect(res.status).toBe(200);
     expect(res.body.available).toBe(true);
     expect(res.body.reason).toBeNull();
   });
 
-  it("reports a clear reason when the workspace has no voice key", async () => {
-    await deleteProviderCredential(wsId, "openai_voice");
+  it("reports a clear reason when the speech service is not provisioned", async () => {
+    vi.stubEnv("AI_INTEGRATIONS_OPENAI_BASE_URL", "");
     const res = await request(app).get("/api/voice/status");
     expect(res.body.available).toBe(false);
-    expect(res.body.reason).toMatch(/add your openai api key/i);
-  });
-
-  it("stores and removes the voice key through the credential routes", async () => {
-    const removed = await request(app).delete("/api/voice/credential");
-    expect(removed.status).toBe(200);
-    expect(removed.body.available).toBe(false);
-
-    const rejected = await request(app)
-      .put("/api/voice/credential")
-      .send({ credential: "short" });
-    expect(rejected.status).toBe(400);
-
-    const stored = await request(app)
-      .put("/api/voice/credential")
-      .send({ credential: "sk-test-voice-key-123" });
-    expect(stored.status).toBe(200);
-    expect(stored.body.available).toBe(true);
-    // The key itself must never be echoed back.
-    expect(JSON.stringify(stored.body)).not.toContain("sk-test-voice-key-123");
+    expect(res.body.reason).toMatch(/not provisioned/i);
   });
 
   it("toggles transcript storage", async () => {
@@ -384,8 +405,32 @@ describe("voice status and settings", () => {
     expect(off.transcriptsEnabled).toBe(false);
   });
 
+  it("toggles automatic initial approval for Talk-created tasks independently", async () => {
+    const on = await request(app)
+      .put("/api/voice/settings")
+      .send({ autoApproveTalkTasks: true });
+    expect(on.status).toBe(200);
+    expect(on.body.autoApproveTalkTasks).toBe(true);
+
+    const status = await request(app).get("/api/voice/status");
+    expect(status.body.autoApproveTalkTasks).toBe(true);
+
+    const off = await request(app)
+      .put("/api/voice/settings")
+      .send({ autoApproveTalkTasks: false });
+    expect(off.status).toBe(200);
+    expect(off.body.autoApproveTalkTasks).toBe(false);
+  });
+
   it("rejects a malformed settings body", async () => {
-    const res = await request(app).put("/api/voice/settings").send({ transcriptsEnabled: "yes" });
+    const res = await request(app)
+      .put("/api/voice/settings")
+      .send({ transcriptsEnabled: "yes" });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects an empty settings body", async () => {
+    const res = await request(app).put("/api/voice/settings").send({});
     expect(res.status).toBe(400);
   });
 });
@@ -401,7 +446,9 @@ describe("live-caption transcription", () => {
   });
 
   it("rejects an empty payload", async () => {
-    const res = await request(app).post("/api/voice/transcribe").send({ audio: "" });
+    const res = await request(app)
+      .post("/api/voice/transcribe")
+      .send({ audio: "" });
     expect(res.status).toBe(400);
   });
 
@@ -420,8 +467,8 @@ describe("live-caption transcription", () => {
     expect(res.body.error).toMatch(/transcription failed/i);
   });
 
-  it("503s when the workspace has no voice key", async () => {
-    await deleteProviderCredential(wsId, "openai_voice");
+  it("503s when speech services are unavailable", async () => {
+    vi.stubEnv("AI_INTEGRATIONS_OPENAI_API_KEY", "");
     const res = await request(app)
       .post("/api/voice/transcribe")
       .send({ audio: FAKE_WAV_BASE64 });
@@ -453,8 +500,16 @@ describe("text conversations", () => {
       .select()
       .from(agentMessagesTable)
       .where(eq(agentMessagesTable.fromAgentId, agent.id));
-    expect(toAgent.some((r) => r.kind === "voice" && r.body === "How are you today?")).toBe(true);
-    expect(fromAgent.some((r) => r.kind === "voice" && r.body === "Sure thing, boss.")).toBe(true);
+    expect(
+      toAgent.some(
+        (r) => r.kind === "voice" && r.body === "How are you today?",
+      ),
+    ).toBe(true);
+    expect(
+      fromAgent.some(
+        (r) => r.kind === "voice" && r.body === "Sure thing, boss.",
+      ),
+    ).toBe(true);
   });
 
   it("stores both sides of the exchange when transcripts are enabled", async () => {
@@ -475,8 +530,16 @@ describe("text conversations", () => {
       .select()
       .from(agentMessagesTable)
       .where(eq(agentMessagesTable.fromAgentId, agent.id));
-    expect(toAgent.some((r) => r.kind === "voice" && r.body === "Remember this chat.")).toBe(true);
-    expect(fromAgent.some((r) => r.kind === "voice" && r.body === "Sure thing, boss.")).toBe(true);
+    expect(
+      toAgent.some(
+        (r) => r.kind === "voice" && r.body === "Remember this chat.",
+      ),
+    ).toBe(true);
+    expect(
+      fromAgent.some(
+        (r) => r.kind === "voice" && r.body === "Sure thing, boss.",
+      ),
+    ).toBe(true);
 
     await setTranscripts(false);
   });
@@ -490,7 +553,9 @@ describe("text conversations", () => {
       .post(`/api/agents/${agent.id}/converse`)
       .send({ text: "First message" });
     expect(first.status).toBe(200);
-    mockProviders({ replyJson: '{"reply":"Second answer.","taskObjective":null}' });
+    mockProviders({
+      replyJson: '{"reply":"Second answer.","taskObjective":null}',
+    });
     const second = await request(app)
       .post(`/api/agents/${agent.id}/converse`)
       .send({ text: "Second message" });
@@ -498,7 +563,11 @@ describe("text conversations", () => {
 
     const res = await request(app).get(`/api/agents/${agent.id}/talk-history`);
     expect(res.status).toBe(200);
-    const turns = res.body.turns as { role: string; text: string; id: string }[];
+    const turns = res.body.turns as {
+      role: string;
+      text: string;
+      id: string;
+    }[];
     expect(turns.map((t) => [t.role, t.text])).toEqual([
       ["user", "First message"],
       ["agent", "Sure thing, boss."],
@@ -516,20 +585,28 @@ describe("text conversations", () => {
 
     const agent = await createAgent(`${RUN_TAG} Retired Reader`);
     mockProviders();
-    await request(app).post(`/api/agents/${agent.id}/converse`).send({ text: "Before retiring" });
+    await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Before retiring" });
     await db
       .update(agentsTable)
       .set({ retired: true, retiredAt: new Date() })
       .where(eq(agentsTable.id, agent.id));
     const res = await request(app).get(`/api/agents/${agent.id}/talk-history`);
     expect(res.status).toBe(200);
-    expect(res.body.turns.some((t: { text: string }) => t.text === "Before retiring")).toBe(true);
+    expect(
+      res.body.turns.some(
+        (t: { text: string }) => t.text === "Before retiring",
+      ),
+    ).toBe(true);
   });
 
   it("keeps another workspace's agent history invisible", async () => {
     const agent = await createAgent(`${RUN_TAG} Private`);
     mockProviders();
-    await request(app).post(`/api/agents/${agent.id}/converse`).send({ text: "Private note" });
+    await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Private note" });
 
     // A different signed-in user gets their own workspace; the first
     // workspace's agent must look nonexistent from there.
@@ -539,11 +616,15 @@ describe("text conversations", () => {
     try {
       const boot = await request(app).get("/api/agents");
       expect(boot.status).toBe(200);
-      const res = await request(app).get(`/api/agents/${agent.id}/talk-history`);
+      const res = await request(app).get(
+        `/api/agents/${agent.id}/talk-history`,
+      );
       expect(res.status).toBe(404);
     } finally {
       authState.userId = originalUser;
-      await db.delete(workspacesTable).where(eq(workspacesTable.clerkUserId, outsider));
+      await db
+        .delete(workspacesTable)
+        .where(eq(workspacesTable.clerkUserId, outsider));
     }
   });
 
@@ -551,27 +632,40 @@ describe("text conversations", () => {
     const agent = await createAgent(`${RUN_TAG} Cleared`);
     const bystander = await createAgent(`${RUN_TAG} Bystander`);
     mockProviders();
-    await request(app).post(`/api/agents/${agent.id}/converse`).send({ text: "Wipe me" });
+    await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Wipe me" });
     await request(app)
       .post(`/api/agents/${bystander.id}/converse`)
       .send({ text: "Keep me" });
     // A non-voice message to the same agent must survive the clear.
     const [nonVoice] = await db
       .insert(agentMessagesTable)
-      .values({ fromAgentId: null, toAgentId: agent.id, kind: "note", body: `${RUN_TAG} task note` })
+      .values({
+        fromAgentId: null,
+        toAgentId: agent.id,
+        kind: "note",
+        body: `${RUN_TAG} task note`,
+      })
       .returning({ id: agentMessagesTable.id });
 
-    const res = await request(app).delete(`/api/agents/${agent.id}/talk-history`);
+    const res = await request(app).delete(
+      `/api/agents/${agent.id}/talk-history`,
+    );
     expect(res.status).toBe(200);
     expect(res.body.deleted).toBe(2);
 
-    const history = await request(app).get(`/api/agents/${agent.id}/talk-history`);
+    const history = await request(app).get(
+      `/api/agents/${agent.id}/talk-history`,
+    );
     expect(history.body.turns).toEqual([]);
     const bystanderHistory = await request(app).get(
       `/api/agents/${bystander.id}/talk-history`,
     );
     expect(
-      bystanderHistory.body.turns.some((t: { text: string }) => t.text === "Keep me"),
+      bystanderHistory.body.turns.some(
+        (t: { text: string }) => t.text === "Keep me",
+      ),
     ).toBe(true);
     const survivors = await db
       .select()
@@ -605,7 +699,11 @@ describe("text conversations", () => {
         await gate;
         return jsonResponse({
           choices: [
-            { message: { content: '{"reply":"Too late.","taskObjective":null}' } },
+            {
+              message: {
+                content: '{"reply":"Too late.","taskObjective":null}',
+              },
+            },
           ],
           usage: { prompt_tokens: 50, completion_tokens: 20 },
         });
@@ -620,7 +718,9 @@ describe("text conversations", () => {
     // Give the converse handler time to reach the (gated) provider call.
     await new Promise((resolve) => setTimeout(resolve, 300));
 
-    const cleared = await request(app).delete(`/api/agents/${agent.id}/talk-history`);
+    const cleared = await request(app).delete(
+      `/api/agents/${agent.id}/talk-history`,
+    );
     expect(cleared.status).toBe(200);
 
     releaseReply();
@@ -629,7 +729,9 @@ describe("text conversations", () => {
     expect(res.body.reply).toBe("Too late.");
 
     // The reply was delivered but never persisted: history stays cleared.
-    const history = await request(app).get(`/api/agents/${agent.id}/talk-history`);
+    const history = await request(app).get(
+      `/api/agents/${agent.id}/talk-history`,
+    );
     expect(history.body.turns).toEqual([]);
     const rows = await db
       .select()
@@ -676,7 +778,9 @@ describe("text conversations", () => {
     expect(cleared.status).toBe(200);
     // The racing exchange's two rows were committed first, then deleted.
     expect(cleared.body.deleted).toBe(2);
-    const history = await request(app).get(`/api/agents/${agent.id}/talk-history`);
+    const history = await request(app).get(
+      `/api/agents/${agent.id}/talk-history`,
+    );
     expect(history.body.turns).toEqual([]);
   });
 
@@ -702,7 +806,9 @@ describe("text conversations", () => {
     await vi.waitFor(() => {
       if (!markerGate.release) throw new Error("capture not paused yet");
     });
-    const cleared = await request(app).delete(`/api/agents/${agent.id}/talk-history`);
+    const cleared = await request(app).delete(
+      `/api/agents/${agent.id}/talk-history`,
+    );
     expect(cleared.status).toBe(200);
     expect(cleared.body.deleted).toBe(2);
 
@@ -712,7 +818,9 @@ describe("text conversations", () => {
     expect(reply.status).toBe(200);
 
     // The straggler's reply was delivered but never persisted.
-    const history = await request(app).get(`/api/agents/${agent.id}/talk-history`);
+    const history = await request(app).get(
+      `/api/agents/${agent.id}/talk-history`,
+    );
     expect(history.body.turns).toEqual([]);
   });
 
@@ -727,18 +835,25 @@ describe("text conversations", () => {
       Array.from({ length: width }, (_, i) =>
         request(app)
           .post(`/api/agents/${agent.id}/converse`)
-          .send({ text: `Flood ${i}`, clientMessageId: `flood-${Date.now()}-${i}` }),
+          .send({
+            text: `Flood ${i}`,
+            clientMessageId: `flood-${Date.now()}-${i}`,
+          }),
       ),
     );
     for (const res of results) expect(res.status).toBe(200);
-    const history = await request(app).get(`/api/agents/${agent.id}/talk-history`);
+    const history = await request(app).get(
+      `/api/agents/${agent.id}/talk-history`,
+    );
     expect(history.body.turns).toHaveLength(width * 2);
   }, 30_000);
 
   it("refuses to clear another workspace's agent history", async () => {
     const agent = await createAgent(`${RUN_TAG} Guarded`);
     mockProviders();
-    await request(app).post(`/api/agents/${agent.id}/converse`).send({ text: "Protected" });
+    await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Protected" });
 
     const originalUser = authState.userId;
     const outsider = `hc-voice-test-clear-outsider-${Date.now()}`;
@@ -746,13 +861,19 @@ describe("text conversations", () => {
     try {
       const boot = await request(app).get("/api/agents");
       expect(boot.status).toBe(200);
-      const res = await request(app).delete(`/api/agents/${agent.id}/talk-history`);
+      const res = await request(app).delete(
+        `/api/agents/${agent.id}/talk-history`,
+      );
       expect(res.status).toBe(404);
     } finally {
       authState.userId = originalUser;
-      await db.delete(workspacesTable).where(eq(workspacesTable.clerkUserId, outsider));
+      await db
+        .delete(workspacesTable)
+        .where(eq(workspacesTable.clerkUserId, outsider));
     }
-    const history = await request(app).get(`/api/agents/${agent.id}/talk-history`);
+    const history = await request(app).get(
+      `/api/agents/${agent.id}/talk-history`,
+    );
     expect(
       history.body.turns.some((t: { text: string }) => t.text === "Protected"),
     ).toBe(true);
@@ -816,7 +937,11 @@ describe("text conversations", () => {
     const agent = await createAgent(`${RUN_TAG} Replayer`);
     const providers = mockProviders();
     const clientMessageId = `replay-${Date.now()}`;
-    const storedPayload = { reply: "Stored answer.", proposedTaskObjective: null, voice: "onyx" };
+    const storedPayload = {
+      reply: "Stored answer.",
+      proposedTaskObjective: null,
+      voice: "onyx",
+    };
     await db.insert(talkExchangesTable).values({
       workspaceId: wsId,
       agentId: agent.id,
@@ -881,7 +1006,9 @@ describe("text conversations", () => {
       .select()
       .from(agentMessagesTable)
       .where(eq(agentMessagesTable.toAgentId, agent.id));
-    expect(rows.filter((r) => r.body === "Persist despite audit")).toHaveLength(1);
+    expect(rows.filter((r) => r.body === "Persist despite audit")).toHaveLength(
+      1,
+    );
   });
 
   it("a stale original that loses its claim replays the reclaimer's reply instead of its own", async () => {
@@ -891,7 +1018,9 @@ describe("text conversations", () => {
     // The provider call blocks until we let it finish, giving us time to
     // steal the claim mid-flight (as a stale-claim reclaimer would).
     let releaseProvider!: () => void;
-    const providerGate = new Promise<void>((resolve) => (releaseProvider = resolve));
+    const providerGate = new Promise<void>(
+      (resolve) => (releaseProvider = resolve),
+    );
     fetchMock.mockImplementation(async (url: unknown) => {
       const target = String(url);
       if (target.includes("/models")) {
@@ -909,7 +1038,13 @@ describe("text conversations", () => {
       if (target.includes("/chat/completions")) {
         await providerGate;
         return jsonResponse({
-          choices: [{ message: { content: '{"reply":"Late reply.","taskObjective":null}' } }],
+          choices: [
+            {
+              message: {
+                content: '{"reply":"Late reply.","taskObjective":null}',
+              },
+            },
+          ],
           usage: { prompt_tokens: 50, completion_tokens: 20 },
         });
       }
@@ -936,8 +1071,14 @@ describe("text conversations", () => {
       if (!claimId) await new Promise((r) => setTimeout(r, 50));
     }
     expect(claimId).toBeDefined();
-    const authoritative = { reply: "Reclaimer's answer.", proposedTaskObjective: null, voice: "onyx" };
-    await db.delete(talkExchangesTable).where(eq(talkExchangesTable.id, claimId!));
+    const authoritative = {
+      reply: "Reclaimer's answer.",
+      proposedTaskObjective: null,
+      voice: "onyx",
+    };
+    await db
+      .delete(talkExchangesTable)
+      .where(eq(talkExchangesTable.id, claimId!));
     await db.insert(talkExchangesTable).values({
       workspaceId: wsId,
       agentId: agent.id,
@@ -1039,7 +1180,10 @@ describe("text conversations", () => {
       .insert(workspaceSettingsTable)
       .values({ workspaceId: wsId, key: "emergency_stop", value: "true" })
       .onConflictDoUpdate({
-        target: [workspaceSettingsTable.workspaceId, workspaceSettingsTable.key],
+        target: [
+          workspaceSettingsTable.workspaceId,
+          workspaceSettingsTable.key,
+        ],
         set: { value: "true" },
       });
     try {
@@ -1114,7 +1258,7 @@ describe("text conversations", () => {
 
   it("maps a missing provider key to a clear 503", async () => {
     const agent = await createAgent(`${RUN_TAG} Unprovisioned`);
-    await deleteProviderCredential(wsId, "openrouter");
+    vi.stubEnv("OPENROUTER_API_KEY", "");
     clearProviderCaches();
     mockProviders();
 
@@ -1127,14 +1271,14 @@ describe("text conversations", () => {
 });
 
 describe("voice conversations", () => {
-  it("503s with a clear reason when the workspace has no voice key", async () => {
+  it("503s with a clear reason when speech services are unavailable", async () => {
     const agent = await createAgent(`${RUN_TAG} NoSpeech`);
-    await deleteProviderCredential(wsId, "openai_voice");
+    vi.stubEnv("AI_INTEGRATIONS_OPENAI_API_KEY", "");
     const res = await request(app)
       .post(`/api/agents/${agent.id}/voice-converse`)
       .send({ audio: FAKE_WAV_BASE64 });
     expect(res.status).toBe(503);
-    expect(res.body.error).toMatch(/add your openai api key/i);
+    expect(res.body.error).toMatch(/not provisioned/i);
   });
 
   it("rejects garbage audio payloads", async () => {
@@ -1164,7 +1308,9 @@ describe("voice conversations", () => {
     const events = String(res.body)
       .split("\n\n")
       .filter((f) => f.startsWith("data: "))
-      .map((f) => JSON.parse(f.slice(6)) as { type: string; [k: string]: unknown });
+      .map(
+        (f) => JSON.parse(f.slice(6)) as { type: string; [k: string]: unknown },
+      );
 
     const types = events.map((e) => e.type);
     expect(types).toContain("user_transcript");
@@ -1199,7 +1345,10 @@ describe("voice conversations", () => {
     const events = String(res.body)
       .split("\n\n")
       .filter((f) => f.startsWith("data: "))
-      .map((f) => JSON.parse(f.slice(6)) as { type: string; voice?: string | null });
+      .map(
+        (f) =>
+          JSON.parse(f.slice(6)) as { type: string; voice?: string | null },
+      );
     expect(events.find((e) => e.type === "reply")?.voice).toBeNull();
     expect(events.some((e) => e.type === "audio")).toBe(false);
   });
@@ -1229,7 +1378,11 @@ describe("voice conversations", () => {
       .filter((f) => f.startsWith("data: "))
       .map(
         (f) =>
-          JSON.parse(f.slice(6)) as { type: string; message?: string; fatal?: boolean },
+          JSON.parse(f.slice(6)) as {
+            type: string;
+            message?: string;
+            fatal?: boolean;
+          },
       );
     const error = events.find((e) => e.type === "error");
     expect(error?.message).toMatch(/transcribed/i);

@@ -4,10 +4,9 @@ import {
   taskLogsTable,
   tasksTable,
   workspaceSettingsTable,
-  workspacesTable,
 } from "@workspace/db";
 import type { TaskFile } from "@workspace/db";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { recordAudit } from "./audit";
 import { publish } from "./events";
 import { notifyTaskEvent } from "./notifications";
@@ -60,6 +59,8 @@ export type DispatchInput = {
   continueConversation?: boolean;
   /** Set when a durable schedule launched this task. */
   scheduleId?: string | null;
+  /** Set only by the Talk task-confirmation flow. */
+  talkMode?: boolean;
 };
 
 export type DispatchOutcome =
@@ -78,7 +79,9 @@ export type DispatchOutcome =
  * Used by both the dispatch route and the schedule runner so scheduled
  * tasks get identical policy, estimation, and blocking behavior.
  */
-export async function dispatchTask(input: DispatchInput): Promise<DispatchOutcome> {
+export async function dispatchTask(
+  input: DispatchInput,
+): Promise<DispatchOutcome> {
   let outcome: DispatchOutcome = { status: 425 };
   for (let attempt = 0; attempt < 2 && outcome.status === 425; attempt += 1) {
     const [preview] = await db
@@ -141,41 +144,39 @@ export async function dispatchTask(input: DispatchInput): Promise<DispatchOutcom
         // Routing config changed between preview and lock; retry.
         return { status: 425 };
       }
-      // Queue-time billing snapshot, read under a row lock in the same
-      // transaction that inserts the task: a concurrent workspace
-      // hand-over either commits first (this read sees the new owner) or
-      // waits for this enqueue to commit — the snapshot can never be
-      // stale relative to the insert.
-      const [wsOwner] = agent.workspaceId
-        ? await tx
-            .select({ clerkUserId: workspacesTable.clerkUserId })
-            .from(workspacesTable)
-            .where(eq(workspacesTable.id, agent.workspaceId))
-            .limit(1)
-            .for("update")
-        : [undefined];
-      const [stop] = agent.workspaceId
+      const settings = agent.workspaceId
         ? await tx
             .select()
             .from(workspaceSettingsTable)
             .where(
               and(
                 eq(workspaceSettingsTable.workspaceId, agent.workspaceId),
-                eq(workspaceSettingsTable.key, "emergency_stop"),
+                inArray(workspaceSettingsTable.key, [
+                  "emergency_stop",
+                  "talk_auto_approve_tasks",
+                ]),
               ),
             )
-            .limit(1)
-        : [undefined];
-      const configured = await isConfigured(
-        agent.workspaceId ?? "",
-        routing.provider,
-      );
+        : [];
+      const stop = settings.find((row) => row.key === "emergency_stop");
+      // Snapshot this preference onto the task. Changing the switch later
+      // never widens or narrows permissions for work already confirmed.
+      const talkAutoApprove =
+        input.talkMode === true &&
+        settings.some(
+          (row) =>
+            row.key === "talk_auto_approve_tasks" && row.value === "true",
+        );
+      const configured = isConfigured(routing.provider);
       // Unconfigured providers and the emergency stop block explicitly, with
       // a reason the owner can act on; a paused agent's tasks simply wait in
       // the queue until the agent resumes.
       const blockReason =
         stop?.value === "true"
-          ? { errorKind: "emergency_stop", errorMessage: "The emergency stop is engaged." }
+          ? {
+              errorKind: "emergency_stop",
+              errorMessage: "The emergency stop is engaged.",
+            }
           : !configured
             ? {
                 errorKind: "not_configured",
@@ -188,11 +189,6 @@ export async function dispatchTask(input: DispatchInput): Promise<DispatchOutcom
           // The task's durable owner: always the agent's workspace, never
           // anything the client could supply.
           workspaceId: agent.workspaceId,
-          // Billing identity snapshot: the account that owns the workspace
-          // at enqueue commit, frozen onto the task so account-scoped
-          // providers (Codex) still bill the queuer even if the workspace
-          // is handed over before the queue drains.
-          ownerClerkUserId: wsOwner?.clerkUserId ?? null,
           agentId: agent.id,
           objective: input.objective,
           files: input.attachments ?? [],
@@ -207,6 +203,8 @@ export async function dispatchTask(input: DispatchInput): Promise<DispatchOutcom
             ? estimate.estimatedCostCents
             : null,
           scheduleId: input.scheduleId ?? null,
+          talkMode: input.talkMode === true,
+          talkAutoApprove,
           status: blockReason ? "blocked" : "queued",
           ...(blockReason ?? {}),
         })
@@ -237,7 +235,11 @@ export async function dispatchTask(input: DispatchInput): Promise<DispatchOutcom
     // A task blocked at creation never reaches the worker's transition
     // hooks, so its notification must be emitted here.
     if (outcome.task.status === "blocked") {
-      await notifyTaskEvent("task_blocked", outcome.task, outcome.task.errorMessage);
+      await notifyTaskEvent(
+        "task_blocked",
+        outcome.task,
+        outcome.task.errorMessage,
+      );
     }
   }
   return outcome;
