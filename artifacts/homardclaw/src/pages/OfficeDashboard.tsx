@@ -33,13 +33,19 @@ const officeArt = `${import.meta.env.BASE_URL}images/submarine-office.png`;
 // splits the two pose families, so no pose sits more than ~4px off its screen.
 //
 // `top` is what makes the agent read as *at* the desk rather than parked in the
-// room: the chair back has to overlap the desk shelf, whose front edge is at
-// 39.4%. 43.4% left a whole strip of floor between shelf and chair.
+// room: the chair back has to overlap the desk shelf. The room is isometric,
+// so the four shelves are not one horizontal line — their tops step down a
+// uniform 8px (0.81% of the 992px scene) per desk, measured at 364 / 372 /
+// 380 / 388px left to right. Each seat carries its own shelf's depth: the
+// third desk keeps the proven 39.8 (tuned against its shelf front edge at
+// 39.4%; 43.4% left a whole strip of floor between shelf and chair) and the
+// others shift by whole 0.81% shelf steps, so every chair has the identical
+// back-overlaps-shelf relationship and the four seats read as one diagonal.
 const DESK_SEATS = [
-  { left: 42.5, top: 39.8, label: "first submarine computer" },
-  { left: 48.3, top: 39.8, label: "second submarine computer" },
+  { left: 42.5, top: 38.19, label: "first submarine computer" },
+  { left: 48.3, top: 38.99, label: "second submarine computer" },
   { left: 54.0, top: 39.8, label: "third submarine computer" },
-  { left: 60.0, top: 39.8, label: "fourth submarine computer" },
+  { left: 60.0, top: 40.61, label: "fourth submarine computer" },
 ];
 
 // Six cushion spots on open floor: four staggered across the middle room, one
@@ -857,18 +863,21 @@ const SCENE_HOTSPOTS: SceneHotspot[] = [
     extraClass: "scene-hotspot--approval",
   },
   // The two wall computers that double as navigation sit directly behind the
-  // first two desk agents, whose sprite box reaches up to ~34.6%. These hit
-  // areas are therefore trimmed to the monitor screens themselves (measured at
-  // 32.2-36.3% and 33.0-37.0%) and lifted above the agents, so a seated lobster
-  // cannot swallow the click and the shortcut still stops short of its chair.
+  // first two desk agents. These hit areas are trimmed to the monitor screens
+  // themselves (measured at 32.2-36.3% and 33.0-37.0%) and lifted above the
+  // agents, so a seated lobster cannot swallow the click. The desk seats
+  // follow the shelves' diagonal, so each chair top sits at a different
+  // height (sprite boxes reach up to ~33.0% and ~33.8%): each hotspot's
+  // bottom edge is pulled up by its seat's shelf step, keeping the same
+  // stops-short-of-the-chair clearance the flat layout had.
   {
     href: "/agents",
     label: "Agents",
     ariaLabel: "First wall computer — open Agents",
     left: "42.4%",
-    top: "34.6%",
+    top: "33.8%",
     width: "5.4%",
-    height: "5.2%",
+    height: "3.6%",
     extraClass: "scene-hotspot--monitor",
   },
   {
@@ -876,9 +885,9 @@ const SCENE_HOTSPOTS: SceneHotspot[] = [
     label: "Teams",
     ariaLabel: "Second wall computer — open Teams",
     left: "48.4%",
-    top: "34.6%",
+    top: "34.2%",
     width: "5.4%",
-    height: "5.2%",
+    height: "4.4%",
     extraClass: "scene-hotspot--monitor",
   },
   {
