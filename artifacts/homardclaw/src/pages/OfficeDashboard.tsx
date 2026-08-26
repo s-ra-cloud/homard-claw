@@ -430,6 +430,10 @@ export default function OfficeDashboard() {
     href: string,
     title: string,
   ) => {
+    // Retirement Island is a second point-and-click location, not an app
+    // inside the office parchment. Let its Link perform a real route change.
+    if (href === "/island") return;
+
     if (
       !gameMode ||
       event.button !== 0 ||
