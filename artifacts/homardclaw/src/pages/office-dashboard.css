@@ -178,6 +178,138 @@
   inset: 0;
 }
 
+/* ── Working computer screens ──
+   These overlays sit inside the black glass already painted into the room.
+   They never capture a click and use hard, stepped movement so the activity
+   reads as part of the 16-bit scene instead of a modern video layer. */
+.workstation-screen {
+  --screen-bright: #75f4d2;
+  --screen-mid: #3db7ad;
+  --screen-dark: #123b52;
+  position: absolute;
+  z-index: 5;
+  overflow: hidden;
+  pointer-events: none;
+  transform: translate(-50%, -50%) rotate(2deg);
+  transform-origin: center;
+  clip-path: polygon(3% 2%, 98% 7%, 96% 96%, 1% 89%);
+  background: #071923;
+  box-shadow:
+    inset 0 0 0 1px rgb(147 255 224 / 32%),
+    0 0 5px rgb(78 235 209 / 38%);
+  image-rendering: pixelated;
+}
+
+.workstation-screen.is-researching {
+  --screen-bright: #c3a6ff;
+  --screen-mid: #6cd9df;
+  --screen-dark: #26345f;
+  box-shadow:
+    inset 0 0 0 1px rgb(205 185 255 / 34%),
+    0 0 5px rgb(139 115 232 / 42%);
+}
+
+.workstation-screen__wash {
+  position: absolute;
+  inset: 0;
+  opacity: 0.46;
+  background:
+    linear-gradient(
+      90deg,
+      transparent 0 72%,
+      var(--screen-mid) 73% 77%,
+      transparent 78%
+    ),
+    repeating-linear-gradient(0deg, var(--screen-dark) 0 8%, #071923 9% 21%);
+  animation: workstation-data-shift calc(1.35s * var(--screen-tempo, 1))
+    steps(4) infinite;
+  animation-delay: var(--screen-phase, 0s);
+}
+
+.workstation-screen__line {
+  position: absolute;
+  left: 11%;
+  height: 7%;
+  transform-origin: left center;
+  background: var(--screen-bright);
+  box-shadow: 0 0 2px var(--screen-mid);
+  animation: workstation-line-pulse calc(1.1s * var(--screen-tempo, 1)) steps(3)
+    infinite;
+  animation-delay: var(--screen-phase, 0s);
+}
+.workstation-screen__line--one {
+  top: 23%;
+  width: 62%;
+}
+.workstation-screen__line--two {
+  top: 46%;
+  width: 43%;
+  animation-delay: calc(var(--screen-phase, 0s) - 0.31s);
+}
+.workstation-screen__line--three {
+  top: 69%;
+  width: 71%;
+  animation-delay: calc(var(--screen-phase, 0s) - 0.67s);
+}
+
+.workstation-screen__cursor {
+  position: absolute;
+  right: 12%;
+  bottom: 16%;
+  width: 8%;
+  height: 12%;
+  background: var(--screen-bright);
+  animation: workstation-cursor calc(0.7s * var(--screen-tempo, 1)) steps(1)
+    infinite;
+  animation-delay: var(--screen-phase, 0s);
+}
+
+/* A narrow beam makes the screen feel powered without repainting its bezel. */
+.workstation-screen::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -18%;
+  height: 18%;
+  background: rgb(164 255 230 / 24%);
+  animation: workstation-scan calc(1.9s * var(--screen-tempo, 1)) steps(6)
+    infinite;
+  animation-delay: var(--screen-phase, 0s);
+}
+
+@keyframes workstation-data-shift {
+  50% {
+    background-position:
+      7px 0,
+      0 4px;
+  }
+}
+
+@keyframes workstation-line-pulse {
+  0%,
+  100% {
+    transform: scaleX(0.48);
+    opacity: 0.72;
+  }
+  50% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+}
+
+@keyframes workstation-cursor {
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes workstation-scan {
+  to {
+    transform: translateY(650%);
+  }
+}
+
 /* ── Agent sprites ── */
 /* Desk, floor and exterior agents are sized as a share of the scene (width and
    z-index are set per seat in OfficeDashboard), so their footprint — and
@@ -397,6 +529,14 @@
 }
 .is-ambient-paused .ocean-ambient *,
 .room-wrap.is-paused .ocean-ambient * {
+  animation-play-state: paused !important;
+}
+.is-ambient-paused .workstation-screen,
+.is-ambient-paused .workstation-screen *,
+.is-ambient-paused .workstation-screen::after,
+.room-wrap.is-paused .workstation-screen,
+.room-wrap.is-paused .workstation-screen *,
+.room-wrap.is-paused .workstation-screen::after {
   animation-play-state: paused !important;
 }
 
@@ -739,6 +879,20 @@
 @media (prefers-reduced-motion: reduce) {
   .ocean-ambient * {
     animation: none !important;
+  }
+  .workstation-screen,
+  .workstation-screen *,
+  .workstation-screen::after {
+    animation: none !important;
+  }
+  .workstation-screen__line--one {
+    transform: scaleX(0.82);
+  }
+  .workstation-screen__line--two {
+    transform: scaleX(0.58);
+  }
+  .workstation-screen__line--three {
+    transform: scaleX(0.94);
   }
   .office-game-window__parchment {
     animation: none;
