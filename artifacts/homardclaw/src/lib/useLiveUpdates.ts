@@ -17,6 +17,7 @@ const TOPIC_PREFIXES: Record<string, string[]> = {
   agents: ["/api/agents"],
   schedules: ["/api/schedules"],
   talk: ["/api/agents/"],
+  messages: ["/api/messages"],
   overview: [
     "/api/office/overview",
     "/api/runtime/health",

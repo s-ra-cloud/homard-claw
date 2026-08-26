@@ -792,6 +792,81 @@ export const DuplicateAgentResponse = zod.object({
 
 
 /**
+ * @summary Queue a confirmed task from one agent to an authorized teammate
+ */
+export const DelegateFromTalkParams = zod.object({
+  "agentId": zod.coerce.string()
+})
+
+export const delegateFromTalkBodyObjectiveMin = 3;
+export const delegateFromTalkBodyObjectiveMax = 5000;
+
+export const delegateFromTalkBodyNoteMax = 2000;
+
+
+
+export const DelegateFromTalkBody = zod.object({
+  "targetAgentId": zod.string(),
+  "objective": zod.string().min(delegateFromTalkBodyObjectiveMin).max(delegateFromTalkBodyObjectiveMax),
+  "note": zod.string().max(delegateFromTalkBodyNoteMax).optional()
+})
+
+export const DelegateFromTalkResponse = zod.object({
+  "id": zod.string(),
+  "agentId": zod.string(),
+  "agentName": zod.string(),
+  "objective": zod.string(),
+  "status": zod.enum(['queued', 'running', 'waiting_approval', 'blocked', 'completed', 'failed', 'cancelled']),
+  "priority": zod.enum(['low', 'normal', 'high']),
+  "budgetCents": zod.number().nullish(),
+  "provider": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter']).optional(),
+  "model": zod.string().nullish(),
+  "reasoningEffort": zod.union([zod.literal('minimal'),zod.literal('low'),zod.literal('medium'),zod.literal('high'),zod.literal('xhigh'),zod.literal('max'),zod.literal('ultra'),zod.literal(null)]).nullish(),
+  "providerPhase": zod.union([zod.literal('queued'),zod.literal('starting'),zod.literal('running'),zod.literal('waiting_approval'),zod.literal('completed'),zod.literal('rate_limited'),zod.literal('auth_required'),zod.literal('failed'),zod.literal('cancelled'),zod.literal(null)]).nullish().describe('Coarse execution phase shown while a task runs; `status` stays authoritative.'),
+  "providerThreadId": zod.string().nullish(),
+  "conversationId": zod.string().nullish(),
+  "estimatedTokens": zod.number().nullish(),
+  "estimatedCostCents": zod.number().nullish(),
+  "actualInputTokens": zod.number().nullish(),
+  "actualOutputTokens": zod.number().nullish(),
+  "actualCostCents": zod.number().nullish().describe('Null when the provider publishes no per-token price — for subscription allowances this is \"not applicable\", never a $0.00 charge.'),
+  "cachedInputTokens": zod.number().nullish(),
+  "cacheWriteInputTokens": zod.number().nullish(),
+  "reasoningOutputTokens": zod.number().nullish(),
+  "queuedMs": zod.number().nullish(),
+  "runMs": zod.number().nullish(),
+  "fallbackFromProvider": zod.union([zod.literal('claude_max'),zod.literal('codex_chatgpt'),zod.literal('openrouter'),zod.literal(null)]).nullish(),
+  "fallbackReason": zod.string().nullish(),
+  "paidFallbackApprovedAt": zod.coerce.date().nullish(),
+  "output": zod.string().nullish(),
+  "files": zod.array(zod.object({
+  "name": zod.string(),
+  "content": zod.string()
+})),
+  "errorKind": zod.string().nullish(),
+  "errorMessage": zod.string().nullish(),
+  "attempts": zod.number(),
+  "parentTaskId": zod.string().nullish(),
+  "rootTaskId": zod.string().nullish(),
+  "depth": zod.number().optional(),
+  "teamId": zod.string().nullish(),
+  "teamName": zod.string().nullish(),
+  "delegatedByAgentId": zod.string().nullish(),
+  "delegatedByAgentName": zod.string().nullish(),
+  "runtime": zod.string().optional(),
+  "contextSources": zod.array(zod.object({
+  "type": zod.enum(['memory', 'file']),
+  "id": zod.string(),
+  "label": zod.string(),
+  "title": zod.string()
+})).nullish(),
+  "startedAt": zod.coerce.date().nullish(),
+  "finishedAt": zod.coerce.date().nullish(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
  * @summary Archive or restore an agent
  */
 export const SetAgentArchivedParams = zod.object({
@@ -1712,6 +1787,12 @@ export const ConverseWithAgentBody = zod.object({
 export const ConverseWithAgentResponse = zod.object({
   "reply": zod.string(),
   "proposedTaskObjective": zod.string().nullable(),
+  "proposedDelegation": zod.union([zod.object({
+  "targetAgentId": zod.string(),
+  "targetAgentName": zod.string(),
+  "objective": zod.string(),
+  "note": zod.string()
+}),zod.null()]),
   "voice": zod.string().nullable().describe('OpenAI voice id the agent speaks with; null = text only')
 })
 

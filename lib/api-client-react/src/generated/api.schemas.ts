@@ -985,6 +985,24 @@ export interface DelegationInput {
   note?: string;
 }
 
+export interface TalkDelegationInput {
+  targetAgentId: string;
+  /**
+     * @minLength 3
+     * @maxLength 5000
+     */
+  objective: string;
+  /** @maxLength 2000 */
+  note?: string;
+}
+
+export interface AgentDelegationProposal {
+  targetAgentId: string;
+  targetAgentName: string;
+  objective: string;
+  note: string;
+}
+
 export type TaskTreeNodeStatus = typeof TaskTreeNodeStatus[keyof typeof TaskTreeNodeStatus];
 
 
@@ -1146,6 +1164,7 @@ export interface ConverseResponse {
   reply: string;
   /** @nullable */
   proposedTaskObjective: string | null;
+  proposedDelegation: AgentDelegationProposal | null;
   /**
      * OpenAI voice id the agent speaks with; null = text only
      * @nullable

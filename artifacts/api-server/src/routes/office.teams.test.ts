@@ -1,6 +1,14 @@
 import express from "express";
 import request from "supertest";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import {
   agentMessagesTable,
   agentsTable,
@@ -26,8 +34,6 @@ vi.stubGlobal("fetch", fetchMock);
 import officeRouter from "./office";
 import { claimNextTask, runTask } from "../worker";
 import { clearProviderCaches } from "../providers";
-import { saveProviderCredential } from "../provider-credentials";
-import { providerCredentialsTable } from "@workspace/db";
 import { getRuntime, listRuntimeHealth, queueHealth } from "../runtime";
 
 const app = express();
@@ -43,7 +49,6 @@ const createdAgentIds: string[] = [];
 const createdTeamIds: string[] = [];
 let createdOwnerRow = false;
 let wsId: string;
-let priorCredentialRows: (typeof providerCredentialsTable.$inferSelect)[] = [];
 
 /** Paused agents keep the live development worker away from test tasks. */
 async function createAgent(name: string, extra: Record<string, unknown> = {}) {
@@ -57,17 +62,29 @@ async function createAgent(name: string, extra: Record<string, unknown> = {}) {
       model: "test-vendor/test-model",
       securityPreset: "assistant",
       autonomy: "autonomous",
-      avatar: { shellColor: "#C34428", deskStyle: "standard", accessory: "none" },
+      avatar: {
+        shellColor: "#C34428",
+        deskStyle: "standard",
+        accessory: "none",
+      },
       ...extra,
     });
   expect(res.status).toBe(201);
   createdAgentIds.push(res.body.id);
-  await request(app).post(`/api/agents/${res.body.id}/pause`).send({ paused: true });
-  return res.body as { id: string; name: string; permissions: Record<string, number> };
+  await request(app)
+    .post(`/api/agents/${res.body.id}/pause`)
+    .send({ paused: true });
+  return res.body as {
+    id: string;
+    name: string;
+    permissions: Record<string, number>;
+  };
 }
 
 async function createTeam(name: string, body: Record<string, unknown> = {}) {
-  const res = await request(app).post("/api/teams").send({ name, ...body });
+  const res = await request(app)
+    .post("/api/teams")
+    .send({ name, ...body });
   expect(res.status).toBe(201);
   createdTeamIds.push(res.body.id);
   return res.body;
@@ -161,33 +178,21 @@ beforeAll(async () => {
     .where(eq(workspacesTable.clerkUserId, authState.userId))
     .limit(1);
   wsId = ws.id;
-  priorCredentialRows = await db
-    .select()
-    .from(providerCredentialsTable)
-    .where(eq(providerCredentialsTable.workspaceId, wsId));
 });
 
-beforeEach(async () => {
+beforeEach(() => {
   fetchMock.mockReset();
   fetchMock.mockImplementation(async () => {
     throw new Error("network disabled in tests");
   });
   lastCompletionBody = {};
-  // Provider credentials are workspace rows now, not env vars.
-  await saveProviderCredential(wsId, "openrouter", "test-openrouter-key");
-  await saveProviderCredential(wsId, "claude_max", "test-claude-token");
+  vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
+  vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", "test-claude-token");
   clearProviderCaches();
 });
 
 afterAll(async () => {
   vi.unstubAllEnvs();
-  // Restore the workspace's credential rows exactly as we found them.
-  await db
-    .delete(providerCredentialsTable)
-    .where(eq(providerCredentialsTable.workspaceId, wsId));
-  if (priorCredentialRows.length > 0) {
-    await db.insert(providerCredentialsTable).values(priorCredentialRows);
-  }
   if (createdAgentIds.length > 0) {
     await db
       .delete(agentMessagesTable)
@@ -200,7 +205,9 @@ afterAll(async () => {
     await db.delete(teamsTable).where(inArray(teamsTable.id, createdTeamIds));
   }
   if (createdAgentIds.length > 0) {
-    await db.delete(agentsTable).where(inArray(agentsTable.id, createdAgentIds));
+    await db
+      .delete(agentsTable)
+      .where(inArray(agentsTable.id, createdAgentIds));
   }
   if (createdOwnerRow) {
     await db
@@ -232,7 +239,9 @@ describe("teams", () => {
 
     const list = await request(app).get("/api/teams");
     expect(list.status).toBe(200);
-    expect(list.body.some((row: { id: string }) => row.id === team.id)).toBe(true);
+    expect(list.body.some((row: { id: string }) => row.id === team.id)).toBe(
+      true,
+    );
   });
 
   it("rejects a duplicate team name regardless of case", async () => {
@@ -270,7 +279,10 @@ describe("teams", () => {
 });
 
 describe("delegation authorization", () => {
-  async function buildTeam(tag: string, leadExtra: Record<string, unknown> = {}) {
+  async function buildTeam(
+    tag: string,
+    leadExtra: Record<string, unknown> = {},
+  ) {
     const lead = await createAgent(`${RUN_TAG} ${tag} Lead`, leadExtra);
     const worker = await createAgent(`${RUN_TAG} ${tag} Worker`);
     const team = await createTeam(`${RUN_TAG} ${tag}`, {
@@ -279,6 +291,98 @@ describe("delegation authorization", () => {
     });
     return { lead, worker, team };
   }
+
+  it("queues an owner-confirmed Talk hand-off and records it in Inbox", async () => {
+    const { lead, worker, team } = await buildTeam("TalkRelay");
+    const priorSetting = await request(app).get("/api/voice/status");
+    expect(priorSetting.status).toBe(200);
+    const setting = await request(app)
+      .put("/api/voice/settings")
+      .send({ autoApproveTalkTasks: true });
+    expect(setting.status).toBe(200);
+    try {
+      const res = await request(app)
+        .post(`/api/agents/${lead.id}/delegate-from-talk`)
+        .send({
+          targetAgentId: worker.id,
+          objective: `${RUN_TAG} investigate the alert`,
+          note: "Please check the latest logs and report back.",
+        });
+      expect(res.status).toBe(201);
+      expect(res.body).toMatchObject({
+        agentId: worker.id,
+        depth: 1,
+        teamId: team.id,
+        delegatedByAgentId: lead.id,
+        status: "queued",
+      });
+
+      const task = await getTaskRow(res.body.id);
+      expect(task).toMatchObject({
+        talkMode: true,
+        talkAutoApprove: true,
+        teamId: team.id,
+        delegatedByAgentId: lead.id,
+      });
+      const messages = await request(app)
+        .get("/api/messages")
+        .query({ taskId: res.body.id });
+      expect(messages.status).toBe(200);
+      expect(messages.body[0]).toMatchObject({
+        kind: "delegation",
+        fromAgentId: lead.id,
+        toAgentId: worker.id,
+        body: "Please check the latest logs and report back.",
+      });
+    } finally {
+      await request(app).put("/api/voice/settings").send({
+        autoApproveTalkTasks: priorSetting.body.autoApproveTalkTasks,
+      });
+    }
+  });
+
+  it("refuses a Talk hand-off from a sandboxed source", async () => {
+    const { lead, worker } = await buildTeam("TalkSandboxSource", {
+      sensitiveDataSandbox: true,
+    });
+    const res = await request(app)
+      .post(`/api/agents/${lead.id}/delegate-from-talk`)
+      .send({
+        targetAgentId: worker.id,
+        objective: `${RUN_TAG} forbidden outbound work`,
+      });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/sensitive data sandbox/i);
+  });
+
+  it("refuses a Talk hand-off to a sandboxed target", async () => {
+    const { lead, worker } = await buildTeam("TalkSandboxTarget");
+    const patched = await request(app)
+      .patch(`/api/agents/${worker.id}`)
+      .send({ sensitiveDataSandbox: true });
+    expect(patched.status).toBe(200);
+
+    const res = await request(app)
+      .post(`/api/agents/${lead.id}/delegate-from-talk`)
+      .send({
+        targetAgentId: worker.id,
+        objective: `${RUN_TAG} forbidden inbound work`,
+      });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/sensitive data sandbox/i);
+  });
+
+  it("refuses a Talk hand-off when the source does not lead the target", async () => {
+    const { lead, worker } = await buildTeam("TalkLeadership");
+    const res = await request(app)
+      .post(`/api/agents/${worker.id}/delegate-from-talk`)
+      .send({
+        targetAgentId: lead.id,
+        objective: `${RUN_TAG} unauthorized hand-off`,
+      });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/team it leads/i);
+  });
 
   it("creates a sub-task with lineage and a delegation message", async () => {
     const { lead, worker, team } = await buildTeam("Echo");
@@ -469,7 +573,9 @@ describe("delegation authorization", () => {
     // Retiring also parks the lead's open work, so either guard may answer
     // first; what matters is that no new work is queued behind a departure.
     expect(res.status).toBe(403);
-    expect(res.body.error).toMatch(/no longer works here|cannot hand out new work/i);
+    expect(res.body.error).toMatch(
+      /no longer works here|cannot hand out new work/i,
+    );
     const children = await db
       .select({ id: tasksTable.id })
       .from(tasksTable)
@@ -573,9 +679,11 @@ describe("runtime limits and health", () => {
     // Never silently downgraded to the built-in runtime.
     expect(row.status).toBe("blocked");
     expect(row.errorKind).toBe("runtime_unavailable");
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("chat/completions"))).toBe(
-      false,
-    );
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        String(url).includes("chat/completions"),
+      ),
+    ).toBe(false);
   });
 
   it("blocks before any provider call when the attempt limit is zero", async () => {
@@ -591,15 +699,16 @@ describe("runtime limits and health", () => {
     const row = await getTaskRow(task.id);
     expect(row.status).toBe("blocked");
     expect(row.errorMessage).toMatch(/attempt limit is 0/i);
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("chat/completions"))).toBe(
-      false,
-    );
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        String(url).includes("chat/completions"),
+      ),
+    ).toBe(false);
   });
 
   it("refuses to execute on the uninstalled runtime even if dispatched directly", async () => {
     await expect(
       getRuntime("openclaw").execute({
-        workspaceId: wsId,
         provider: "openrouter",
         model: "test-vendor/test-model",
         system: "s",
@@ -611,11 +720,14 @@ describe("runtime limits and health", () => {
   });
 
   it("reports every runtime honestly, with only the built-in one accepting work", async () => {
-    const runtimes = await listRuntimeHealth(wsId);
+    const runtimes = await listRuntimeHealth();
     const native = runtimes.find((runtime) => runtime.id === "native");
     const openclaw = runtimes.find((runtime) => runtime.id === "openclaw");
     expect(native?.acceptsWork).toBe(true);
-    expect(openclaw).toMatchObject({ status: "not_installed", acceptsWork: false });
+    expect(openclaw).toMatchObject({
+      status: "not_installed",
+      acceptsWork: false,
+    });
   });
 
   it("exposes queue depth and worker state over HTTP", async () => {

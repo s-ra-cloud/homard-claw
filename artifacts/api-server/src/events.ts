@@ -21,6 +21,7 @@ export type LiveTopic =
   | "agents"
   | "schedules"
   | "talk"
+  | "messages"
   | "overview";
 
 const bus = new EventEmitter();

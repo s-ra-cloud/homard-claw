@@ -15,8 +15,13 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { Agent, InputAttachment } from "@workspace/api-client-react";
+import type {
+  Agent,
+  AgentDelegationProposal,
+  InputAttachment,
+} from "@workspace/api-client-react";
 import {
+  useDelegateFromTalk,
   getGetTalkHistoryQueryKey,
   transcribeAudio,
   useClearTalkHistory,
@@ -50,6 +55,7 @@ import {
   Loader2,
   Mic,
   MicOff,
+  Network,
   Paperclip,
   FileText,
   RotateCcw,
@@ -201,6 +207,8 @@ export function CallView({
   const [textDraft, setTextDraft] = useState("");
   const [attachments, setAttachments] = useState<InputAttachment[]>([]);
   const [proposedTask, setProposedTask] = useState<string | null>(null);
+  const [proposedDelegation, setProposedDelegation] =
+    useState<AgentDelegationProposal | null>(null);
   const [liveTranscript, setLiveTranscript] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
@@ -210,6 +218,8 @@ export function CallView({
   turnsRef.current = turns;
   const proposedRef = useRef<string | null>(null);
   proposedRef.current = proposedTask;
+  const proposedDelegationRef = useRef<AgentDelegationProposal | null>(null);
+  proposedDelegationRef.current = proposedDelegation;
   // Bumped on unmount (i.e. contact switch / hang up) so late replies from a
   // previous conversation can never leak into the current one.
   const epochRef = useRef(0);
@@ -239,7 +249,7 @@ export function CallView({
     transcriptRef.current?.scrollTo({
       top: transcriptRef.current.scrollHeight,
     });
-  }, [turns, proposedTask, liveTranscript, phase]);
+  }, [turns, proposedTask, proposedDelegation, liveTranscript, phase]);
 
   // Keys for optimistic turns; hydrated turns use server ids. User turns'
   // keys double as the converse idempotency id, so they must be unique
@@ -419,6 +429,45 @@ export function CallView({
     [agentId, createTask],
   );
 
+  const delegateTask = useDelegateFromTalk({
+    mutation: {
+      onSuccess: () => {
+        const proposal = proposedDelegationRef.current;
+        setProposedDelegation(null);
+        void queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+        void queryClient.invalidateQueries({ queryKey: ["/api/messages"] });
+        appendTurn({
+          role: "agent",
+          text: `I sent the task to ${proposal?.targetAgentName ?? "my teammate"}. You'll see our hand-off and their result in Inbox.`,
+        });
+        toast({
+          title: "Task handed off",
+          description: `${proposal?.targetAgentName ?? "The teammate"} received it.`,
+        });
+      },
+      onError: (err) =>
+        toast({
+          title: "Could not hand off the task",
+          description: errorText(err, "The office refused that delegation."),
+          variant: "destructive",
+        }),
+    },
+  });
+
+  const queueProposedDelegation = useCallback(
+    (proposal: AgentDelegationProposal) => {
+      delegateTask.mutate({
+        agentId,
+        data: {
+          targetAgentId: proposal.targetAgentId,
+          objective: proposal.objective,
+          note: proposal.note,
+        },
+      });
+    },
+    [agentId, delegateTask],
+  );
+
   /**
    * A pending proposal is resolved by the owner's next words — spoken or
    * typed. Returns true when the utterance was consumed as a confirmation.
@@ -426,20 +475,23 @@ export function CallView({
   const resolveProposal = useCallback(
     (utterance: string): boolean => {
       const objective = proposedRef.current;
-      if (!objective) return false;
+      const delegation = proposedDelegationRef.current;
+      if (!objective && !delegation) return false;
       const intent = confirmationIntent(utterance);
       if (intent === "confirm") {
-        queueProposedTask(objective);
+        if (delegation) queueProposedDelegation(delegation);
+        else if (objective) queueProposedTask(objective);
         return true;
       }
       if (intent === "cancel") {
         setProposedTask(null);
+        setProposedDelegation(null);
         appendTurn({ role: "agent", text: "Okay, I won't queue that task." });
         return true;
       }
       return false;
     },
-    [appendTurn, queueProposedTask],
+    [appendTurn, queueProposedDelegation, queueProposedTask],
   );
 
   const textConverse = useConverseWithAgent();
@@ -460,6 +512,7 @@ export function CallView({
         // remount hydrates empty.
         setTurns([]);
         setProposedTask(null);
+        setProposedDelegation(null);
         setFlowError(null);
         queryClient.invalidateQueries({
           queryKey: getGetTalkHistoryQueryKey(agentId),
@@ -509,6 +562,7 @@ export function CallView({
           if (epochRef.current !== epoch) return; // the call was ended
           appendTurn({ role: "agent", text: data.reply });
           setProposedTask(data.proposedTaskObjective ?? null);
+          setProposedDelegation(data.proposedDelegation ?? null);
           setPhase("idle");
         })
         .catch((err) => {
@@ -679,6 +733,12 @@ export function CallView({
               setProposedTask(
                 typeof event.proposedTaskObjective === "string"
                   ? event.proposedTaskObjective
+                  : null,
+              );
+              setProposedDelegation(
+                event.proposedDelegation &&
+                  typeof event.proposedDelegation === "object"
+                  ? (event.proposedDelegation as AgentDelegationProposal)
                   : null,
               );
               expectAudio = event.voice != null;
@@ -954,6 +1014,37 @@ export function CallView({
               size="sm"
               variant="outline"
               onClick={() => setProposedTask(null)}
+            >
+              <X className="w-3 h-3 mr-1" aria-hidden="true" /> Dismiss
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {proposedDelegation && (
+        <div className="shrink-0 border-t-4 border-border p-4 bg-accent/10 space-y-2">
+          <p className="text-xs font-mono uppercase text-accent flex items-center gap-2">
+            <Network className="w-4 h-4" aria-hidden="true" /> Proposed hand-off
+            to {proposedDelegation.targetAgentName}
+          </p>
+          <p className="text-sm">{proposedDelegation.objective}</p>
+          <p className="text-[10px] text-muted-foreground">
+            Say “confirm” (or tap Send task) to queue it. Team permissions,
+            sandbox isolation, and approval policy are checked again by the
+            server.
+          </p>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              disabled={delegateTask.isPending}
+              onClick={() => queueProposedDelegation(proposedDelegation)}
+            >
+              Send task
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setProposedDelegation(null)}
             >
               <X className="w-3 h-3 mr-1" aria-hidden="true" /> Dismiss
             </Button>

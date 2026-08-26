@@ -1743,6 +1743,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
             kind: "result",
             body: `Finished "${task.objective.slice(0, 160)}": ${finalOutput.slice(0, 400)}`,
           });
+          publish(workspaceId, "messages");
         }
       }
       // Retain the outcome as agent memory so future tasks can draw on it.

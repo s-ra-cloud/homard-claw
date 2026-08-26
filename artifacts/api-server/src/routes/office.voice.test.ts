@@ -24,6 +24,8 @@ import {
   pool,
   systemStateTable,
   talkExchangesTable,
+  teamMembersTable,
+  teamsTable,
   workspaceSettingsTable,
   workspacesTable,
 } from "@workspace/db";
@@ -116,6 +118,7 @@ app.use("/api", officeRouter);
 
 const RUN_TAG = `HC Voice ${Date.now()}`;
 const createdAgentIds: string[] = [];
+const createdTeamIds: string[] = [];
 let createdOwnerRow = false;
 let priorTranscriptsValue: string | null | undefined;
 let priorTalkAutoApproveValue: string | null | undefined;
@@ -240,6 +243,35 @@ function mockProviders({
   return { calls: () => replyCalls };
 }
 
+function mockTalkOutputs(outputs: string[]) {
+  const pending = [...outputs];
+  let calls = 0;
+  fetchMock.mockImplementation(async (url: unknown) => {
+    const target = String(url);
+    if (target.includes("/models")) {
+      return jsonResponse({
+        data: [
+          {
+            id: "test-vendor/test-model",
+            name: "Test Model",
+            context_length: 8192,
+            pricing: { prompt: "0.000001", completion: "0.00001" },
+          },
+        ],
+      });
+    }
+    if (target.includes("/chat/completions")) {
+      calls += 1;
+      return jsonResponse({
+        choices: [{ message: { content: pending.shift() ?? "No answer." } }],
+        usage: { prompt_tokens: 50, completion_tokens: 20 },
+      });
+    }
+    throw new Error(`unexpected fetch in test: ${target}`);
+  });
+  return { calls: () => calls };
+}
+
 beforeAll(async () => {
   const [owner] = await db
     .select()
@@ -315,6 +347,9 @@ afterAll(async () => {
         createdAgentIds.map((id) => `voice_history_cleared:${id}`),
       ),
     );
+    if (createdTeamIds.length > 0) {
+      await db.delete(teamsTable).where(inArray(teamsTable.id, createdTeamIds));
+    }
     await db
       .delete(agentsTable)
       .where(inArray(agentsTable.id, createdAgentIds));
@@ -477,6 +512,163 @@ describe("live-caption transcription", () => {
 });
 
 describe("text conversations", () => {
+  it("lets one non-sandboxed agent ask another and reports the answer to the owner", async () => {
+    const source = await createAgent(`${RUN_TAG} Relay Source`);
+    const target = await createAgent(`${RUN_TAG} Relay Target`, {
+      personality: "Precise and cheerful",
+    });
+    const mocked = mockTalkOutputs([
+      JSON.stringify({
+        reply: `I'll ask ${target.name}.`,
+        taskObjective: null,
+        agentRequest: {
+          targetAgentId: target.id,
+          kind: "question",
+          content: "What is the launch status?",
+        },
+      }),
+      "The launch checks are complete and everything is green.",
+      "I checked with the team: all launch checks are complete and green.",
+    ]);
+
+    const response = await request(app)
+      .post(`/api/agents/${source.id}/converse`)
+      .send({ text: `Ask ${target.name} for the launch status.` });
+    expect(response.status).toBe(200);
+    expect(response.body.reply).toContain("complete and green");
+    expect(response.body.proposedDelegation).toBeNull();
+    expect(mocked.calls()).toBe(3);
+
+    const inbox = await request(app)
+      .get("/api/messages")
+      .query({ agentId: source.id });
+    const relay = inbox.body
+      .filter((message: { kind: string }) => message.kind === "note")
+      .slice(0, 2)
+      .reverse();
+    expect(relay).toHaveLength(2);
+    expect(relay[0]).toMatchObject({
+      fromAgentId: source.id,
+      toAgentId: target.id,
+      body: "What is the launch status?",
+    });
+    expect(relay[1]).toMatchObject({
+      fromAgentId: target.id,
+      toAgentId: source.id,
+      body: "The launch checks are complete and everything is green.",
+    });
+  });
+
+  it("proposes a teammate task for owner confirmation instead of starting it", async () => {
+    const source = await createAgent(`${RUN_TAG} Task Relay Source`);
+    const target = await createAgent(`${RUN_TAG} Task Relay Target`);
+    const [team] = await db
+      .insert(teamsTable)
+      .values({
+        workspaceId: wsId,
+        name: `${RUN_TAG} Talk Delegation Team`,
+        leadAgentId: source.id,
+      })
+      .returning();
+    createdTeamIds.push(team.id);
+    await db.insert(teamMembersTable).values([
+      { teamId: team.id, agentId: source.id },
+      { teamId: team.id, agentId: target.id },
+    ]);
+    const mocked = mockTalkOutputs([
+      JSON.stringify({
+        reply: `I can hand that to ${target.name} once you confirm.`,
+        taskObjective: null,
+        agentRequest: {
+          targetAgentId: target.id,
+          kind: "task",
+          content: "Prepare a concise launch-readiness report.",
+        },
+      }),
+    ]);
+
+    const response = await request(app)
+      .post(`/api/agents/${source.id}/converse`)
+      .send({ text: `Ask ${target.name} to prepare the report.` });
+    expect(response.status).toBe(200);
+    expect(response.body.proposedDelegation).toMatchObject({
+      targetAgentId: target.id,
+      targetAgentName: target.name,
+      objective: "Prepare a concise launch-readiness report.",
+    });
+    expect(response.body.proposedTaskObjective).toBeNull();
+    expect(mocked.calls()).toBe(1);
+
+    const inbox = await request(app)
+      .get("/api/messages")
+      .query({ agentId: source.id });
+    expect(
+      inbox.body.filter((message: { kind: string }) =>
+        ["delegation", "result", "note"].includes(message.kind),
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("blocks outbound communication from a sandboxed agent", async () => {
+    const source = await createAgent(`${RUN_TAG} Sandboxed Source`, {
+      sensitiveDataSandbox: true,
+    });
+    const target = await createAgent(`${RUN_TAG} Sandbox Out Target`);
+    const mocked = mockTalkOutputs([
+      JSON.stringify({
+        reply: "I'll ask.",
+        taskObjective: null,
+        agentRequest: {
+          targetAgentId: target.id,
+          kind: "question",
+          content: "Share the private finding.",
+        },
+      }),
+    ]);
+    const response = await request(app)
+      .post(`/api/agents/${source.id}/converse`)
+      .send({ text: `Tell ${target.name} the finding.` });
+    expect(response.status).toBe(200);
+    expect(response.body.reply).toMatch(/sensitive data sandbox/i);
+    expect(mocked.calls()).toBe(1);
+    const inbox = await request(app)
+      .get("/api/messages")
+      .query({ agentId: source.id });
+    expect(
+      inbox.body.filter((message: { kind: string }) => message.kind === "note"),
+    ).toHaveLength(0);
+  });
+
+  it("blocks inbound communication to a sandboxed agent", async () => {
+    const source = await createAgent(`${RUN_TAG} Sandbox In Source`);
+    const target = await createAgent(`${RUN_TAG} Sandboxed Target`, {
+      sensitiveDataSandbox: true,
+    });
+    const mocked = mockTalkOutputs([
+      JSON.stringify({
+        reply: "I'll ask.",
+        taskObjective: null,
+        agentRequest: {
+          targetAgentId: target.id,
+          kind: "question",
+          content: "Can you share your notes?",
+        },
+      }),
+    ]);
+    const response = await request(app)
+      .post(`/api/agents/${source.id}/converse`)
+      .send({ text: `Ask ${target.name} for their notes.` });
+    expect(response.status).toBe(200);
+    expect(response.body.reply).toMatch(/unavailable|isolated/i);
+    expect(mocked.calls()).toBe(1);
+    const inbox = await request(app)
+      .get("/api/messages")
+      .query({ agentId: target.id });
+    expect(
+      inbox.body.filter((message: { kind: string }) => message.kind === "note"),
+    ).toHaveLength(0);
+  });
+
   it("returns the agent reply and always keeps typed Talk history, even with transcripts off", async () => {
     const agent = await createAgent(`${RUN_TAG} Texter`);
     await setTranscripts(false);

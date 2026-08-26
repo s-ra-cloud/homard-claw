@@ -15,6 +15,9 @@ import {
   ListTeamsResponse,
   RemoveTeamMemberParams,
   RemoveTeamMemberResponse,
+  DelegateFromTalkBody,
+  DelegateFromTalkParams,
+  DelegateFromTalkResponse,
   UpdateTeamBody,
   UpdateTeamParams,
   UpdateTeamResponse,
@@ -26,13 +29,14 @@ import {
   tasksTable,
   teamMembersTable,
   teamsTable,
-  workspacesTable,
 } from "@workspace/db";
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { recordAudit } from "../audit";
-import { evaluateDelegation } from "../policy";
+import { evaluateDelegation, evaluateTalkDelegation } from "../policy";
 import { resolveRouting } from "../providers";
+import { publish } from "../events";
+import { getWorkspaceSetting } from "../workspace";
 
 const router: IRouter = Router();
 
@@ -42,6 +46,148 @@ type AgentRow = typeof agentsTable.$inferSelect;
 /** Only live work may spawn more work. */
 const DELEGATABLE_STATUSES = ["queued", "running", "waiting_approval"];
 
+/**
+ * A Talk conversation may propose work for another agent, but the owner must
+ * confirm it in the call UI before this endpoint runs. The server then
+ * re-checks team leadership and both sandbox flags; model output is never an
+ * authorization token.
+ */
+router.post(
+  "/agents/:agentId/delegate-from-talk",
+  async (req: Request, res: Response) => {
+    const params = DelegateFromTalkParams.safeParse(req.params);
+    const body = DelegateFromTalkBody.safeParse(req.body);
+    if (!params.success || !body.success) {
+      res.status(400).json({ error: "Invalid Talk delegation request." });
+      return;
+    }
+    if (
+      (await getWorkspaceSetting(req.workspaceId!, "emergency_stop")) === "true"
+    ) {
+      res.status(409).json({
+        error:
+          "The emergency stop is engaged; agents cannot hand off new work.",
+      });
+      return;
+    }
+
+    const [targetPreview] = await db
+      .select()
+      .from(agentsTable)
+      .where(
+        and(
+          eq(agentsTable.id, body.data.targetAgentId),
+          eq(agentsTable.workspaceId, req.workspaceId!),
+        ),
+      )
+      .limit(1);
+    if (!targetPreview) {
+      res.status(404).json({ error: "Target agent not found." });
+      return;
+    }
+    const routing = await resolveRouting(req.workspaceId!, targetPreview);
+    const talkAutoApprove =
+      (await getWorkspaceSetting(
+        req.workspaceId!,
+        "talk_auto_approve_tasks",
+      )) === "true";
+
+    const outcome = await db.transaction(async (tx) => {
+      const [source] = await tx
+        .select()
+        .from(agentsTable)
+        .where(
+          and(
+            eq(agentsTable.id, params.data.agentId),
+            eq(agentsTable.workspaceId, req.workspaceId!),
+          ),
+        )
+        .limit(1)
+        .for("update");
+      if (!source) return { status: 404 as const, error: "Agent not found." };
+      const decision = await evaluateTalkDelegation({
+        lead: source,
+        targetAgentId: body.data.targetAgentId,
+        tx,
+      });
+      if (decision.kind === "deny") {
+        return { status: 403 as const, error: decision.reason, source };
+      }
+      const [target] = await tx
+        .select()
+        .from(agentsTable)
+        .where(
+          and(
+            eq(agentsTable.id, body.data.targetAgentId),
+            eq(agentsTable.workspaceId, req.workspaceId!),
+          ),
+        )
+        .limit(1);
+      if (!target) {
+        return { status: 404 as const, error: "Target agent not found." };
+      }
+      const [task] = await tx
+        .insert(tasksTable)
+        .values({
+          workspaceId: req.workspaceId!,
+          agentId: target.id,
+          objective: body.data.objective,
+          priority: "normal",
+          provider: routing.provider,
+          model: routing.model,
+          reasoningEffort: routing.reasoningEffort,
+          depth: decision.depth,
+          teamId: decision.teamId,
+          delegatedByAgentId: source.id,
+          talkMode: true,
+          talkAutoApprove,
+          status: "queued",
+        })
+        .returning();
+      await tx.insert(agentMessagesTable).values({
+        fromAgentId: source.id,
+        toAgentId: target.id,
+        taskId: task.id,
+        kind: "delegation",
+        body:
+          body.data.note?.trim() ||
+          `Please handle this for me: ${body.data.objective.slice(0, 300)}`,
+      });
+      await recordAudit(
+        req.workspaceId!,
+        "task.delegated_from_talk",
+        `${source.name} asked ${target.name} to handle a task from Talk.`,
+        tx,
+      );
+      return { status: 201 as const, task, targetName: target.name, source };
+    });
+
+    if (outcome.status !== 201) {
+      if (outcome.status === 403) {
+        await recordAudit(
+          req.workspaceId!,
+          "delegation.denied",
+          `A Talk delegation${outcome.source ? ` from ${outcome.source.name}` : ""} was refused: ${outcome.error}`,
+        );
+      }
+      res.status(outcome.status).json({ error: outcome.error });
+      return;
+    }
+    publish(req.workspaceId!, "tasks", "messages", "overview");
+    res.status(201).json(
+      DelegateFromTalkResponse.parse({
+        ...outcome.task,
+        agentName: outcome.targetName,
+        teamName: null,
+        delegatedByAgentName: outcome.source.name,
+        startedAt: null,
+        finishedAt: null,
+        createdAt: outcome.task.createdAt.toISOString(),
+      }),
+    );
+  },
+);
+
 /** Load teams with their members in two queries, newest first. */
 async function loadTeams(workspaceId: string, teamId?: string) {
   const teams = await db
@@ -49,7 +195,10 @@ async function loadTeams(workspaceId: string, teamId?: string) {
     .from(teamsTable)
     .where(
       teamId
-        ? and(eq(teamsTable.workspaceId, workspaceId), eq(teamsTable.id, teamId))
+        ? and(
+            eq(teamsTable.workspaceId, workspaceId),
+            eq(teamsTable.id, teamId),
+          )
         : eq(teamsTable.workspaceId, workspaceId),
     )
     .orderBy(desc(teamsTable.createdAt));
@@ -101,7 +250,11 @@ async function loadTeams(workspaceId: string, teamId?: string) {
         avatar: member.avatar,
       }))
       .sort((a, b) =>
-        a.isLead === b.isLead ? a.name.localeCompare(b.name) : a.isLead ? -1 : 1,
+        a.isLead === b.isLead
+          ? a.name.localeCompare(b.name)
+          : a.isLead
+            ? -1
+            : 1,
       ),
     createdAt: team.createdAt.toISOString(),
   }));
@@ -137,7 +290,10 @@ router.post("/teams", async (req: Request, res: Response) => {
   }
 
   const memberIds = Array.from(
-    new Set([...(body.memberAgentIds ?? []), ...(body.leadAgentId ? [body.leadAgentId] : [])]),
+    new Set([
+      ...(body.memberAgentIds ?? []),
+      ...(body.leadAgentId ? [body.leadAgentId] : []),
+    ]),
   );
   if (memberIds.length > 0) {
     const found = await db
@@ -170,7 +326,12 @@ router.post("/teams", async (req: Request, res: Response) => {
         .insert(teamMembersTable)
         .values(memberIds.map((agentId) => ({ teamId: team.id, agentId })));
     }
-    await recordAudit(wsId, "team.created", `Team "${team.name}" was created.`, tx);
+    await recordAudit(
+      wsId,
+      "team.created",
+      `Team "${team.name}" was created.`,
+      tx,
+    );
     return team.id;
   });
 
@@ -215,7 +376,9 @@ router.patch("/teams/:teamId", async (req: Request, res: Response) => {
     if (!member) {
       res
         .status(409)
-        .json({ error: "Add that agent to the team before making it the lead" });
+        .json({
+          error: "Add that agent to the team before making it the lead",
+        });
       return;
     }
   }
@@ -225,7 +388,9 @@ router.patch("/teams/:teamId", async (req: Request, res: Response) => {
     .set({
       ...(body.name !== undefined ? { name: body.name } : {}),
       ...(body.mission !== undefined ? { mission: body.mission } : {}),
-      ...(body.leadAgentId !== undefined ? { leadAgentId: body.leadAgentId } : {}),
+      ...(body.leadAgentId !== undefined
+        ? { leadAgentId: body.leadAgentId }
+        : {}),
     })
     .where(eq(teamsTable.id, teamId));
 
@@ -270,7 +435,10 @@ router.post("/teams/:teamId/members", async (req: Request, res: Response) => {
       .select()
       .from(agentsTable)
       .where(
-        and(eq(agentsTable.id, body.agentId), eq(agentsTable.workspaceId, wsId)),
+        and(
+          eq(agentsTable.id, body.agentId),
+          eq(agentsTable.workspaceId, wsId),
+        ),
       )
       .limit(1),
   ]);
@@ -326,7 +494,9 @@ router.delete(
     await db
       .update(teamsTable)
       .set({ leadAgentId: null })
-      .where(and(eq(teamsTable.id, teamId), eq(teamsTable.leadAgentId, agentId)));
+      .where(
+        and(eq(teamsTable.id, teamId), eq(teamsTable.leadAgentId, agentId)),
+      );
     await recordAudit(
       req.workspaceId!,
       "team.member_removed",
@@ -386,7 +556,11 @@ router.post("/tasks/:taskId/delegate", async (req: Request, res: Response) => {
       tx,
     });
     if (decision.kind === "deny") {
-      return { status: 403 as const, error: decision.reason, lead: parent.agent };
+      return {
+        status: 403 as const,
+        error: decision.reason,
+        lead: parent.agent,
+      };
     }
 
     const [target] = await tx
@@ -402,22 +576,11 @@ router.post("/tasks/:taskId/delegate", async (req: Request, res: Response) => {
     if (!target) return { status: 404 as const, error: "Agent not found" };
     const routing = await resolveRouting(req.workspaceId!, target as AgentRow);
 
-    // Billing identity snapshot, same rule as direct dispatch: read under
-    // a row lock in the insert transaction so a concurrent hand-over
-    // serializes with this enqueue, and the delegated child bills the
-    // account that owned the workspace at enqueue commit.
-    const [wsOwner] = await tx
-      .select({ clerkUserId: workspacesTable.clerkUserId })
-      .from(workspacesTable)
-      .where(eq(workspacesTable.id, req.workspaceId!))
-      .limit(1)
-      .for("update");
     const [child] = await tx
       .insert(tasksTable)
       .values({
         agentId: body.agentId,
         workspaceId: req.workspaceId!,
-        ownerClerkUserId: wsOwner?.clerkUserId ?? null,
         objective: body.objective,
         priority: body.priority ?? parent.task.priority,
         budgetCents: body.budgetCents ?? null,
@@ -521,7 +684,10 @@ router.get("/tasks/:taskId/tree", async (req: Request, res: Response) => {
     .where(
       and(
         eq(tasksTable.workspaceId, req.workspaceId!),
-        or(eq(tasksTable.rootTaskId, rootTaskId), eq(tasksTable.id, rootTaskId)),
+        or(
+          eq(tasksTable.rootTaskId, rootTaskId),
+          eq(tasksTable.id, rootTaskId),
+        ),
       ),
     )
     .orderBy(tasksTable.depth, tasksTable.createdAt);

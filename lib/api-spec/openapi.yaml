@@ -139,6 +139,30 @@ paths:
           description: Agent not found
         "409":
           description: Agent retired
+  /agents/{agentId}/delegate-from-talk:
+    post:
+      operationId: delegateFromTalk
+      tags: [office]
+      summary: Queue a confirmed task from one agent to an authorized teammate
+      parameters:
+        - $ref: "#/components/parameters/AgentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TalkDelegationInput"
+      responses:
+        "201":
+          description: Delegated task queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "403":
+          description: Delegation or agent communication is not permitted
+        "404":
+          description: Source or target agent not found
   /agents/{agentId}/archive:
     post:
       operationId: setAgentArchived
@@ -2045,6 +2069,21 @@ components:
         priority: { type: string, enum: [low, normal, high] }
         budgetCents: { type: number, minimum: 0.01, maximum: 1000000 }
         note: { type: string, maxLength: 2000 }
+    TalkDelegationInput:
+      type: object
+      required: [targetAgentId, objective]
+      properties:
+        targetAgentId: { type: string }
+        objective: { type: string, minLength: 3, maxLength: 5000 }
+        note: { type: string, maxLength: 2000 }
+    AgentDelegationProposal:
+      type: object
+      required: [targetAgentId, targetAgentName, objective, note]
+      properties:
+        targetAgentId: { type: string }
+        targetAgentName: { type: string }
+        objective: { type: string }
+        note: { type: string }
     TaskTreeNode:
       type: object
       required: [id, agentId, agentName, objective, status, depth, createdAt]
@@ -2160,10 +2199,14 @@ components:
             $ref: "#/components/schemas/InputAttachment"
     ConverseResponse:
       type: object
-      required: [reply, proposedTaskObjective, voice]
+      required: [reply, proposedTaskObjective, proposedDelegation, voice]
       properties:
         reply: { type: string }
         proposedTaskObjective: { type: [string, "null"] }
+        proposedDelegation:
+          oneOf:
+            - $ref: "#/components/schemas/AgentDelegationProposal"
+            - type: "null"
         voice:
           type: [string, "null"]
           description: OpenAI voice id the agent speaks with; null = text only

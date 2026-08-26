@@ -141,7 +141,10 @@ export async function meteredSpendTodayCents(agentId: string): Promise<number> {
     .select({ spent: sum(tasksTable.actualCostCents) })
     .from(tasksTable)
     .where(
-      and(eq(tasksTable.agentId, agentId), gte(tasksTable.finishedAt, dayStart)),
+      and(
+        eq(tasksTable.agentId, agentId),
+        gte(tasksTable.finishedAt, dayStart),
+      ),
     );
   return Number(row?.spent ?? 0);
 }
@@ -285,6 +288,81 @@ export type DelegationDecision =
   | { kind: "deny"; reason: string };
 
 /**
+ * Authorize a new root task proposed by an agent during Talk. Unlike a
+ * running task's child delegation there is no parent row to count against,
+ * but the same leadership, depth, retirement, and sandbox boundaries apply.
+ */
+export async function evaluateTalkDelegation({
+  lead,
+  targetAgentId,
+  tx,
+}: {
+  lead: AgentRow;
+  targetAgentId: string;
+  tx: Tx;
+}): Promise<DelegationDecision> {
+  const perms = effectivePermissions(lead);
+  if (perms.maxDelegationDepth === null || perms.maxDelegationDepth < 1) {
+    return {
+      kind: "deny",
+      reason: `${lead.name} is not allowed to delegate work.`,
+    };
+  }
+  if (targetAgentId === lead.id) {
+    return { kind: "deny", reason: `${lead.name} cannot delegate to itself.` };
+  }
+  if (lead.retired || lead.archived) {
+    return {
+      kind: "deny",
+      reason: `${lead.name} is no longer working in the office.`,
+    };
+  }
+  if (lead.sensitiveDataSandbox) {
+    return {
+      kind: "deny",
+      reason: `${lead.name} is in the sensitive data sandbox and cannot contact other agents.`,
+    };
+  }
+
+  const [team] = await tx
+    .select({ id: teamsTable.id })
+    .from(teamsTable)
+    .innerJoin(teamMembersTable, eq(teamMembersTable.teamId, teamsTable.id))
+    .where(
+      and(
+        eq(teamsTable.leadAgentId, lead.id),
+        eq(teamMembersTable.agentId, targetAgentId),
+      ),
+    )
+    .limit(1);
+  if (!team) {
+    return {
+      kind: "deny",
+      reason: `${lead.name} may only delegate tasks to members of a team it leads.`,
+    };
+  }
+
+  const [target] = await tx
+    .select()
+    .from(agentsTable)
+    .where(eq(agentsTable.id, targetAgentId))
+    .limit(1);
+  if (!target || target.retired || target.archived) {
+    return { kind: "deny", reason: "That teammate is no longer available." };
+  }
+  if (target.workspaceId !== lead.workspaceId) {
+    return { kind: "deny", reason: "That teammate is not in this office." };
+  }
+  if (target.sensitiveDataSandbox) {
+    return {
+      kind: "deny",
+      reason: `${target.name} is in the sensitive data sandbox and cannot receive messages or tasks from other agents.`,
+    };
+  }
+  return { kind: "allow", teamId: team.id, depth: 1 };
+}
+
+/**
  * Decide whether one agent may hand work to another.
  *
  * Delegation is authorized by team structure, never by the request: the
@@ -363,7 +441,8 @@ export async function evaluateDelegation({
     .from(agentsTable)
     .where(eq(agentsTable.id, targetAgentId))
     .limit(1);
-  if (!target) return { kind: "deny", reason: "That teammate no longer exists." };
+  if (!target)
+    return { kind: "deny", reason: "That teammate no longer exists." };
   if (target.retired || target.archived) {
     return {
       kind: "deny",
@@ -432,7 +511,8 @@ export async function evaluateFallback(input: {
   const settings = await getProviderSettings(input.workspaceId);
   const candidates = settings.fallbackOrder.filter(
     (provider) =>
-      provider !== input.fromProvider && input.healthyProviders.includes(provider),
+      provider !== input.fromProvider &&
+      input.healthyProviders.includes(provider),
   );
   if (candidates.length === 0) {
     return {

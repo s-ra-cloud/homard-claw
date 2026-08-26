@@ -19,6 +19,8 @@ import {
   agentsTable,
   db,
   talkExchangesTable,
+  teamMembersTable,
+  teamsTable,
   workspaceSettingsTable,
 } from "@workspace/db";
 import { and, desc, eq, or, sql } from "drizzle-orm";
@@ -29,6 +31,7 @@ import { sanitizeErrorMessage } from "../lib/sanitize";
 import { callProvider, ProviderCallError } from "../execution";
 import { resolveRouting } from "../providers";
 import { CodexTalkError, runCodexTalkTurn } from "../talk-codex";
+import { publish } from "../events";
 import {
   getWorkspaceSetting,
   getWorkspaceSettingVia,
@@ -308,7 +311,77 @@ async function loadConversableAgent(
 
 type ConverseTurn = { role: "user" | "agent"; text: string };
 
-function buildSystemPrompt(agent: AgentRow): string {
+type Coworker = {
+  id: string;
+  name: string;
+  title: string;
+  canReceiveTask: boolean;
+};
+
+type AgentRequest = {
+  targetAgentId: string;
+  kind: "question" | "message" | "task";
+  content: string;
+};
+
+type AgentExchange = {
+  target: AgentRow;
+  sent: string;
+  received: string;
+};
+
+type DelegationProposal = {
+  targetAgentId: string;
+  targetAgentName: string;
+  objective: string;
+  note: string;
+};
+
+type GeneratedReply = {
+  reply: string;
+  taskObjective: string | null;
+  proposedDelegation: DelegationProposal | null;
+  exchange: AgentExchange | null;
+};
+
+async function availableCoworkers(
+  workspaceId: string,
+  source: AgentRow,
+): Promise<Coworker[]> {
+  if (source.sensitiveDataSandbox) return [];
+  const rows = await db
+    .select({
+      id: agentsTable.id,
+      name: agentsTable.name,
+      title: agentsTable.title,
+      sensitiveDataSandbox: agentsTable.sensitiveDataSandbox,
+    })
+    .from(agentsTable)
+    .where(
+      and(
+        eq(agentsTable.workspaceId, workspaceId),
+        eq(agentsTable.retired, false),
+        eq(agentsTable.archived, false),
+        sql`${agentsTable.id} <> ${source.id}`,
+      ),
+    );
+  const eligible = rows.filter((row) => !row.sensitiveDataSandbox);
+  if (eligible.length === 0) return [];
+  const taskRecipients = await db
+    .select({ agentId: teamMembersTable.agentId })
+    .from(teamsTable)
+    .innerJoin(teamMembersTable, eq(teamMembersTable.teamId, teamsTable.id))
+    .where(eq(teamsTable.leadAgentId, source.id));
+  const taskRecipientIds = new Set(taskRecipients.map((row) => row.agentId));
+  return eligible.map((row) => ({
+    id: row.id,
+    name: row.name,
+    title: row.title,
+    canReceiveTask: taskRecipientIds.has(row.id),
+  }));
+}
+
+function buildSystemPrompt(agent: AgentRow, coworkers: Coworker[]): string {
   const traits = [
     agent.title ? `Your job title is "${agent.title}".` : "",
     agent.personality ? `Personality: ${agent.personality}.` : "",
@@ -322,7 +395,19 @@ function buildSystemPrompt(agent: AgentRow): string {
     "You are having a short live conversation with your owner (the Director).",
     "Reply in character, warmly and concisely: one to three short sentences, plain spoken language, no markdown, no lists, no emojis.",
     "You CANNOT start work from a conversation. If the owner asks you to actually do something, describe a single clear task objective in the taskObjective field. The task is only queued after the owner explicitly confirms it, and it still goes through the office's normal approval policy — never claim work has started.",
-    'Respond with STRICT JSON exactly like {"reply": "...", "taskObjective": null} or {"reply": "...", "taskObjective": "..."} and nothing else.',
+    agent.sensitiveDataSandbox
+      ? "You are in the sensitive data sandbox. You cannot send messages or tasks to another agent and cannot receive them. Always leave agentRequest null."
+      : coworkers.length > 0
+        ? `You may contact these coworkers when the owner asks. Use the exact id. A task is allowed only when marked task=yes:\n${coworkers
+            .map(
+              (coworker) =>
+                `- ${coworker.name} (${coworker.title}), id=${coworker.id}, task=${coworker.canReceiveTask ? "yes" : "no"}`,
+            )
+            .join("\n")}`
+        : "No coworker is currently available. Always leave agentRequest null.",
+    "For a question or message to a coworker, set agentRequest to {targetAgentId, kind:'question' or 'message', content}. The office will deliver it and show you the answer before you reply to the owner.",
+    "For work that a task-eligible coworker should perform, use kind:'task'. It will only be queued after the owner confirms it. Never claim it was already sent or started.",
+    'Respond with STRICT JSON exactly like {"reply":"...","taskObjective":null,"agentRequest":null} or include one agentRequest object. Use either taskObjective or agentRequest, never both.',
   ].join("\n");
 }
 
@@ -343,6 +428,7 @@ function buildPrompt(
 function parseModelReply(raw: string): {
   reply: string;
   taskObjective: string | null;
+  agentRequest: AgentRequest | null;
 } {
   const stripped = raw
     .trim()
@@ -367,9 +453,31 @@ function parseModelReply(raw: string): {
           .taskObjective;
         const objective =
           typeof objectiveRaw === "string" ? objectiveRaw.trim() : "";
+        const requestRaw = (parsed as { agentRequest?: unknown }).agentRequest;
+        let agentRequest: AgentRequest | null = null;
+        if (requestRaw && typeof requestRaw === "object") {
+          const request = requestRaw as Record<string, unknown>;
+          const kind = request.kind;
+          const targetAgentId = request.targetAgentId;
+          const content = request.content;
+          if (
+            (kind === "question" || kind === "message" || kind === "task") &&
+            typeof targetAgentId === "string" &&
+            targetAgentId.trim() &&
+            typeof content === "string" &&
+            content.trim()
+          ) {
+            agentRequest = {
+              targetAgentId: targetAgentId.trim(),
+              kind,
+              content: content.trim().slice(0, 5000),
+            };
+          }
+        }
         return {
           reply: (parsed as { reply: string }).reply.trim(),
-          taskObjective: objective || null,
+          taskObjective: agentRequest ? null : objective || null,
+          agentRequest,
         };
       }
     } catch {
@@ -377,7 +485,11 @@ function parseModelReply(raw: string): {
     }
   }
   // The model ignored the JSON contract; treat the whole output as speech.
-  return { reply: stripped || "…", taskObjective: null };
+  return {
+    reply: stripped || "…",
+    taskObjective: null,
+    agentRequest: null,
+  };
 }
 
 /**
@@ -397,11 +509,11 @@ function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-async function generateReply(
+async function callTalkAgent(
   workspaceId: string,
   agent: AgentRow,
-  userText: string,
-  history: ConverseTurn[],
+  system: string,
+  prompt: string,
   signal: AbortSignal,
   attachments: Array<{
     name: string;
@@ -409,7 +521,7 @@ async function generateReply(
     encoding: "text" | "base64";
     content: string;
   }> = [],
-): Promise<{ reply: string; taskObjective: string | null }> {
+): Promise<string> {
   const routing = await resolveRouting(workspaceId, agent);
 
   if (routing.provider === "codex_chatgpt") {
@@ -429,21 +541,21 @@ async function generateReply(
       },
       model: routing.model,
       reasoningEffort: routing.reasoningEffort,
-      system: buildSystemPrompt(agent),
-      prompt: buildPrompt(history, userText, agent.name),
+      system,
+      prompt,
       attachments,
       maxOutputTokens: REPLY_MAX_TOKENS,
       signal,
     });
-    return parseModelReply(result.output);
+    return result.output;
   }
 
   const call = () =>
     callProvider({
       provider: routing.provider,
       model: routing.model,
-      system: buildSystemPrompt(agent),
-      prompt: buildPrompt(history, userText, agent.name),
+      system,
+      prompt,
       attachments,
       maxOutputTokens: REPLY_MAX_TOKENS,
       signal,
@@ -468,7 +580,150 @@ async function generateReply(
     if (signal.aborted) throw err;
     result = await call();
   }
-  return parseModelReply(result.output);
+  return result.output;
+}
+
+async function generateReply(
+  workspaceId: string,
+  agent: AgentRow,
+  userText: string,
+  history: ConverseTurn[],
+  signal: AbortSignal,
+  attachments: Array<{
+    name: string;
+    mimeType: string;
+    encoding: "text" | "base64";
+    content: string;
+  }> = [],
+): Promise<GeneratedReply> {
+  const coworkers = await availableCoworkers(workspaceId, agent);
+  const first = parseModelReply(
+    await callTalkAgent(
+      workspaceId,
+      agent,
+      buildSystemPrompt(agent, coworkers),
+      buildPrompt(history, userText, agent.name),
+      signal,
+      attachments,
+    ),
+  );
+  if (!first.agentRequest) {
+    return {
+      reply: first.reply,
+      taskObjective: first.taskObjective,
+      proposedDelegation: null,
+      exchange: null,
+    };
+  }
+  if (agent.sensitiveDataSandbox) {
+    return {
+      reply:
+        "I can't contact another agent while I'm in the sensitive data sandbox.",
+      taskObjective: null,
+      proposedDelegation: null,
+      exchange: null,
+    };
+  }
+  const coworker = coworkers.find(
+    (candidate) => candidate.id === first.agentRequest!.targetAgentId,
+  );
+  if (!coworker) {
+    return {
+      reply:
+        "I couldn't contact that agent. They may be unavailable or isolated in the sensitive data sandbox.",
+      taskObjective: null,
+      proposedDelegation: null,
+      exchange: null,
+    };
+  }
+  const [target] = await db
+    .select()
+    .from(agentsTable)
+    .where(
+      and(
+        eq(agentsTable.id, coworker.id),
+        eq(agentsTable.workspaceId, workspaceId),
+        eq(agentsTable.retired, false),
+        eq(agentsTable.archived, false),
+        eq(agentsTable.sensitiveDataSandbox, false),
+      ),
+    )
+    .limit(1);
+  if (!target) {
+    return {
+      reply: `${coworker.name} is not available for agent messages right now.`,
+      taskObjective: null,
+      proposedDelegation: null,
+      exchange: null,
+    };
+  }
+  if (first.agentRequest.kind === "task") {
+    return {
+      reply: coworker.canReceiveTask
+        ? first.reply
+        : `I can message ${target.name}, but I can't assign them a task because they are not in a team I lead.`,
+      taskObjective: null,
+      proposedDelegation: coworker.canReceiveTask
+        ? {
+            targetAgentId: target.id,
+            targetAgentName: target.name,
+            objective: first.agentRequest.content,
+            note: `Requested by ${agent.name} during a Talk conversation.`,
+          }
+        : null,
+      exchange: null,
+    };
+  }
+
+  const targetReply = (
+    await callTalkAgent(
+      workspaceId,
+      target,
+      [
+        `You are ${target.name}, ${target.title}, in the HomardClaw office.`,
+        target.personality ? `Personality: ${target.personality}.` : "",
+        `Your coworker ${agent.name} has sent you a ${first.agentRequest.kind}.`,
+        "Reply directly to your coworker in one to three concise plain-text sentences. Do not contact anyone else and do not start a task.",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      `${agent.name}: ${first.agentRequest.content}\n${target.name}:`,
+      signal,
+    )
+  ).trim();
+  let reply: string;
+  try {
+    reply = (
+      await callTalkAgent(
+        workspaceId,
+        agent,
+        `You are ${agent.name}. Reply to your owner in one to three concise plain-text sentences, using the coworker's answer you just received. No markdown or JSON.`,
+        [
+          `Owner asked: ${userText}`,
+          `You sent ${target.name}: ${first.agentRequest.content}`,
+          `${target.name} answered: ${targetReply}`,
+          "Now explain the answer to the owner:",
+        ].join("\n"),
+        signal,
+      )
+    ).trim();
+  } catch (error) {
+    logger.warn(
+      { agentId: agent.id, targetAgentId: target.id, error },
+      "Could not generate the source agent's relay follow-up",
+    );
+    reply = `I asked ${target.name}. They answered: ${targetReply}`;
+  }
+  return {
+    reply: reply || `I asked ${target.name}. They answered: ${targetReply}`,
+    taskObjective: null,
+    proposedDelegation: null,
+    exchange: {
+      target,
+      sent: first.agentRequest.content,
+      received: targetReply || "I don't have an answer yet.",
+    },
+  };
 }
 
 /**
@@ -513,6 +768,47 @@ async function persistTranscript(
   } else {
     await db.transaction(run);
   }
+}
+
+async function persistAgentExchange(
+  executor: Pick<typeof db, "insert" | "select">,
+  source: AgentRow,
+  exchange: AgentExchange | null,
+): Promise<void> {
+  if (!exchange) return;
+  // Re-check both sandbox flags in the INSERT transaction. A switch flipped
+  // while providers were answering must sever the exchange before any
+  // cross-agent content becomes durable.
+  const participants = await executor
+    .select({ id: agentsTable.id, sandboxed: agentsTable.sensitiveDataSandbox })
+    .from(agentsTable)
+    .where(
+      or(eq(agentsTable.id, source.id), eq(agentsTable.id, exchange.target.id)),
+    );
+  if (
+    participants.length !== 2 ||
+    participants.some((participant) => participant.sandboxed)
+  ) {
+    return;
+  }
+  const sentAt = new Date();
+  const receivedAt = new Date(sentAt.getTime() + 1);
+  await executor.insert(agentMessagesTable).values([
+    {
+      fromAgentId: source.id,
+      toAgentId: exchange.target.id,
+      kind: "note",
+      body: exchange.sent,
+      createdAt: sentAt,
+    },
+    {
+      fromAgentId: exchange.target.id,
+      toAgentId: source.id,
+      kind: "note",
+      body: exchange.received,
+      createdAt: receivedAt,
+    },
+  ]);
 }
 
 /**
@@ -905,7 +1201,7 @@ router.post(
     req.on("close", () => controller.abort());
     try {
       const history = (parsed.data.history ?? []) as ConverseTurn[];
-      const { reply, taskObjective } = await generateReply(
+      const generated = await generateReply(
         req.workspaceId!,
         agent,
         parsed.data.text,
@@ -913,9 +1209,11 @@ router.post(
         controller.signal,
         parsed.data.attachments,
       );
+      const { reply, taskObjective, proposedDelegation, exchange } = generated;
       const payload = {
         reply,
         proposedTaskObjective: taskObjective,
+        proposedDelegation,
         voice: agentVoice(agent),
       };
       if (claimId) {
@@ -947,6 +1245,7 @@ router.post(
             true,
             tx,
           );
+          await persistAgentExchange(tx, agent, exchange);
           return true;
         });
         // Ownership is consumed either way: nothing past this point may
@@ -979,20 +1278,25 @@ router.post(
           return;
         }
       } else {
-        await persistTranscript(
-          req.workspaceId!,
-          agent,
-          parsed.data.text,
-          reply,
-          clearEpoch,
-          true,
-        );
+        await db.transaction(async (tx) => {
+          await persistTranscript(
+            req.workspaceId!,
+            agent,
+            parsed.data.text,
+            reply,
+            clearEpoch,
+            true,
+            tx,
+          );
+          await persistAgentExchange(tx, agent, exchange);
+        });
       }
       await recordAudit(
         req.workspaceId!,
         "voice.converse",
         `${agent.name} chatted with the owner (text mode).`,
       );
+      if (exchange) publish(req.workspaceId!, "messages");
       res.json(payload);
     } catch (err) {
       // Release only a claim we still own and that never finalized, so the
@@ -1113,15 +1417,18 @@ router.post(
 
       let reply: string;
       let taskObjective: string | null;
+      let proposedDelegation: DelegationProposal | null;
+      let exchange: AgentExchange | null;
       try {
         const history = (parsed.data.history ?? []) as ConverseTurn[];
-        ({ reply, taskObjective } = await generateReply(
-          req.workspaceId!,
-          agent,
-          userText,
-          history,
-          controller.signal,
-        ));
+        ({ reply, taskObjective, proposedDelegation, exchange } =
+          await generateReply(
+            req.workspaceId!,
+            agent,
+            userText,
+            history,
+            controller.signal,
+          ));
       } catch (err) {
         logTalkFailure(agent.id, "voice", err);
         sseWrite(res, {
@@ -1137,21 +1444,28 @@ router.post(
         type: "reply",
         text: reply,
         proposedTaskObjective: taskObjective,
+        proposedDelegation,
         voice,
       });
 
-      await persistTranscript(
-        req.workspaceId!,
-        agent,
-        userText,
-        reply,
-        clearEpoch,
-      );
+      await db.transaction(async (tx) => {
+        await persistTranscript(
+          req.workspaceId!,
+          agent,
+          userText,
+          reply,
+          clearEpoch,
+          false,
+          tx,
+        );
+        await persistAgentExchange(tx, agent, exchange);
+      });
       await recordAudit(
         req.workspaceId!,
         "voice.converse",
         `${agent.name} spoke with the owner (voice mode).`,
       );
+      if (exchange) publish(req.workspaceId!, "messages");
 
       if (voice && !controller.signal.aborted) {
         try {
