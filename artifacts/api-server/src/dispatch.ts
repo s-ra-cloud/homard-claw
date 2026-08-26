@@ -4,6 +4,7 @@ import {
   taskLogsTable,
   tasksTable,
   workspaceSettingsTable,
+  workspacesTable,
 } from "@workspace/db";
 import type { TaskFile } from "@workspace/db";
 import { and, eq, inArray } from "drizzle-orm";
@@ -144,6 +145,19 @@ export async function dispatchTask(
         // Routing config changed between preview and lock; retry.
         return { status: 425 };
       }
+      // Queue-time billing snapshot, read under a row lock in the same
+      // transaction that inserts the task: a concurrent workspace
+      // hand-over either commits first (this read sees the new owner) or
+      // waits for this enqueue to commit — the snapshot can never be
+      // stale relative to the insert.
+      const [wsOwner] = agent.workspaceId
+        ? await tx
+            .select({ clerkUserId: workspacesTable.clerkUserId })
+            .from(workspacesTable)
+            .where(eq(workspacesTable.id, agent.workspaceId))
+            .limit(1)
+            .for("update")
+        : [undefined];
       const settings = agent.workspaceId
         ? await tx
             .select()
@@ -167,7 +181,10 @@ export async function dispatchTask(
           (row) =>
             row.key === "talk_auto_approve_tasks" && row.value === "true",
         );
-      const configured = isConfigured(routing.provider);
+      const configured = await isConfigured(
+        agent.workspaceId ?? "",
+        routing.provider,
+      );
       // Unconfigured providers and the emergency stop block explicitly, with
       // a reason the owner can act on; a paused agent's tasks simply wait in
       // the queue until the agent resumes.
@@ -189,6 +206,11 @@ export async function dispatchTask(
           // The task's durable owner: always the agent's workspace, never
           // anything the client could supply.
           workspaceId: agent.workspaceId,
+          // Billing identity snapshot: the account that owns the workspace
+          // at enqueue commit, frozen onto the task so account-scoped
+          // providers (Codex) still bill the queuer even if the workspace
+          // is handed over before the queue drains.
+          ownerClerkUserId: wsOwner?.clerkUserId ?? null,
           agentId: agent.id,
           objective: input.objective,
           files: input.attachments ?? [],

@@ -10,8 +10,10 @@
 import { useEffect, useState } from "react";
 import { useLocation, useRoute } from "wouter";
 import {
+  useDeleteVoiceCredential,
   useGetVoiceStatus,
   useListAgents,
+  useSetVoiceCredential,
   useUpdateVoiceSettings,
 } from "@workspace/api-client-react";
 import {
@@ -79,6 +81,42 @@ export default function TalkPage() {
     },
   });
 
+  const refreshVoiceStatus = () =>
+    void queryClient.invalidateQueries({ queryKey: ["/api/voice/status"] });
+
+  const saveVoiceKey = useSetVoiceCredential({
+    mutation: {
+      onSuccess: () => {
+        refreshVoiceStatus();
+        toast({
+          title: "Voice key saved",
+          description: "Voice calls are ready.",
+        });
+      },
+      onError: (err) =>
+        toast({
+          title: "Could not save the voice key",
+          description: errorText(err, "Check the key and try again."),
+          variant: "destructive",
+        }),
+    },
+  });
+
+  const removeVoiceKey = useDeleteVoiceCredential({
+    mutation: {
+      onSuccess: () => {
+        refreshVoiceStatus();
+        toast({ title: "Voice key removed" });
+      },
+      onError: (err) =>
+        toast({
+          title: "Could not remove the voice key",
+          description: errorText(err, "Try again."),
+          variant: "destructive",
+        }),
+    },
+  });
+
   const settingsFor = (idPrefix: string) => (
     <TalkSettings
       idPrefix={idPrefix}
@@ -96,6 +134,12 @@ export default function TalkPage() {
       onAutoApproveTalkTasksChange={(on) =>
         updateSettings.mutate({ data: { autoApproveTalkTasks: on } })
       }
+      voiceKeyConfigured={speechAvailable}
+      voiceKeyPending={saveVoiceKey.isPending || removeVoiceKey.isPending}
+      onSaveVoiceKey={(key) =>
+        saveVoiceKey.mutate({ data: { credential: key } })
+      }
+      onRemoveVoiceKey={() => removeVoiceKey.mutate()}
     />
   );
 

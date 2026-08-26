@@ -114,6 +114,7 @@ export * from './notificationList';
 export * from './notifyPrefs';
 export * from './officeOverview';
 export * from './pauseInput';
+export * from './providerCredentialInput';
 export * from './providerModel';
 export * from './providerModels';
 export * from './providerModelsProvider';

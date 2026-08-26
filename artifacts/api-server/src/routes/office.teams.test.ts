@@ -819,6 +819,7 @@ describe("runtime limits and health", () => {
   it("refuses to execute on the uninstalled runtime even if dispatched directly", async () => {
     await expect(
       getRuntime("openclaw").execute({
+        workspaceId: wsId,
         provider: "openrouter",
         model: "test-vendor/test-model",
         system: "s",
@@ -830,7 +831,7 @@ describe("runtime limits and health", () => {
   });
 
   it("reports every runtime honestly, with only the built-in one accepting work", async () => {
-    const runtimes = await listRuntimeHealth();
+    const runtimes = await listRuntimeHealth(wsId);
     const native = runtimes.find((runtime) => runtime.id === "native");
     const openclaw = runtimes.find((runtime) => runtime.id === "openclaw");
     expect(native?.acceptsWork).toBe(true);

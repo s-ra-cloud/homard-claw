@@ -194,6 +194,15 @@ export const tasksTable = pgTable("tasks", {
   workspaceId: uuid("workspace_id").references(() => workspacesTable.id, {
     onDelete: "cascade",
   }),
+  /**
+   * The Clerk account that owned the workspace when this task was queued.
+   * Account-scoped providers (Codex) bill exactly this identity for every
+   * attempt, retry, and crash recovery of the task — a later workspace
+   * hand-over must never rebind queued work to a different account's
+   * credential. Legacy rows without a snapshot fail closed for such
+   * providers rather than guessing.
+   */
+  ownerClerkUserId: text("owner_clerk_user_id"),
   agentId: uuid("agent_id")
     .notNull()
     .references(() => agentsTable.id),
@@ -1064,6 +1073,40 @@ export const workspaceSettingsTable = pgTable(
 );
 
 export type WorkspaceSettingRecord = typeof workspaceSettingsTable.$inferSelect;
+
+export type ProviderCredentialRecord =
+  typeof providerCredentialsTable.$inferSelect;
+
+/**
+ * Per-workspace AI provider credentials, entered in the app by each
+ * workspace's own user. Only the AES-256-GCM ciphertext is stored; the
+ * plaintext is decrypted per call and never logged or returned. One row
+ * per (workspace, provider): "claude_max", "openrouter", or
+ * "openai_voice" (the OpenAI key that pays for speech services).
+ *
+ * There is deliberately no server-environment fallback: a workspace
+ * without a row here has no access to that provider, so one workspace can
+ * never spend another workspace's — or the operator's — allowance.
+ */
+export const providerCredentialsTable = pgTable(
+  "provider_credentials",
+  {
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspacesTable.id, { onDelete: "cascade" }),
+    /** "claude_max" | "openrouter" | "openai_voice". */
+    provider: text("provider").notNull(),
+    /** AES-256-GCM ciphertext of the API key/token. Never logged. */
+    credentialEnc: text("credential_enc").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.workspaceId, table.provider] })],
+);
 
 /**
  * Single-use OAuth authorization states. A row proves HomardClaw started

@@ -1783,6 +1783,37 @@ export const UpdateVoiceSettingsResponse = zod.object({
 
 
 /**
+ * @summary Store this workspace's OpenAI API key that pays for voice speech services
+ */
+export const setVoiceCredentialBodyCredentialMin = 8;
+export const setVoiceCredentialBodyCredentialMax = 4000;
+
+
+
+export const SetVoiceCredentialBody = zod.object({
+  "credential": zod.string().min(setVoiceCredentialBodyCredentialMin).max(setVoiceCredentialBodyCredentialMax)
+}).describe('A provider API key or OAuth token belonging to this workspace\'s own account. It is encrypted before storage, never returned by any endpoint, and never exposed to an agent\'s tools or prompts.')
+
+export const SetVoiceCredentialResponse = zod.object({
+  "available": zod.boolean(),
+  "reason": zod.string().nullable(),
+  "transcriptsEnabled": zod.boolean(),
+  "autoApproveTalkTasks": zod.boolean()
+})
+
+
+/**
+ * @summary Remove this workspace's stored voice OpenAI API key
+ */
+export const DeleteVoiceCredentialResponse = zod.object({
+  "available": zod.boolean(),
+  "reason": zod.string().nullable(),
+  "transcriptsEnabled": zod.boolean(),
+  "autoApproveTalkTasks": zod.boolean()
+})
+
+
+/**
  * @summary Transcribe a (possibly in-progress) recording for live captions
  */
 export const TranscribeAudioBody = zod.object({
@@ -2061,6 +2092,59 @@ export const TestCodexConnectionResponse = zod.object({
 export const BootstrapCodexResponse = zod.object({
   "action": zod.enum(['connected', 'preserved', 'skipped', 'disconnected', 'unavailable']),
   "detail": zod.string()
+})
+
+
+/**
+ * @summary Store this workspace's own credential for a provider
+ */
+export const SetProviderCredentialParams = zod.object({
+  "provider": zod.enum(['claude_max', 'openrouter'])
+})
+
+export const setProviderCredentialBodyCredentialMin = 8;
+export const setProviderCredentialBodyCredentialMax = 4000;
+
+
+
+export const SetProviderCredentialBody = zod.object({
+  "credential": zod.string().min(setProviderCredentialBodyCredentialMin).max(setProviderCredentialBodyCredentialMax)
+}).describe('A provider API key or OAuth token belonging to this workspace\'s own account. It is encrypted before storage, never returned by any endpoint, and never exposed to an agent\'s tools or prompts.')
+
+export const SetProviderCredentialResponse = zod.object({
+  "provider": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter']),
+  "label": zod.string(),
+  "billing": zod.enum(['subscription', 'metered']),
+  "enabled": zod.boolean().describe('False when a server-side feature flag hides this provider.'),
+  "configured": zod.boolean(),
+  "healthy": zod.boolean(),
+  "message": zod.string().optional(),
+  "authMode": zod.union([zod.literal('chatgpt'),zod.literal('api_key'),zod.literal('unknown'),zod.literal(null)]).nullable().describe('Codex only. Only \"chatgpt\" draws on the ChatGPT Codex allowance; \"api_key\" means the stored credential bills OpenAI\'s API instead.'),
+  "usesSubscriptionAllowance": zod.boolean().describe('Confirmed from stored credentials, never assumed from the provider id.'),
+  "allowanceBalanceKnown": zod.boolean().describe('Whether the remaining plan allowance can be reported at all.'),
+  "reasoningLevels": zod.array(zod.string()).describe('Reasoning effort levels this provider accepts, from server configuration. Empty when it has no such control.')
+})
+
+
+/**
+ * @summary Remove this workspace's stored credential for a provider
+ */
+export const DeleteProviderCredentialParams = zod.object({
+  "provider": zod.enum(['claude_max', 'openrouter'])
+})
+
+export const DeleteProviderCredentialResponse = zod.object({
+  "provider": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter']),
+  "label": zod.string(),
+  "billing": zod.enum(['subscription', 'metered']),
+  "enabled": zod.boolean().describe('False when a server-side feature flag hides this provider.'),
+  "configured": zod.boolean(),
+  "healthy": zod.boolean(),
+  "message": zod.string().optional(),
+  "authMode": zod.union([zod.literal('chatgpt'),zod.literal('api_key'),zod.literal('unknown'),zod.literal(null)]).nullable().describe('Codex only. Only \"chatgpt\" draws on the ChatGPT Codex allowance; \"api_key\" means the stored credential bills OpenAI\'s API instead.'),
+  "usesSubscriptionAllowance": zod.boolean().describe('Confirmed from stored credentials, never assumed from the provider id.'),
+  "allowanceBalanceKnown": zod.boolean().describe('Whether the remaining plan allowance can be reported at all.'),
+  "reasoningLevels": zod.array(zod.string()).describe('Reasoning effort levels this provider accepts, from server configuration. Empty when it has no such control.')
 })
 
 

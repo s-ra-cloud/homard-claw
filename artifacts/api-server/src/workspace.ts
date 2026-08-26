@@ -118,6 +118,23 @@ export async function workspaceForUser(clerkUserId: string): Promise<string> {
   return created.id;
 }
 
+/**
+ * The Clerk account that owns a workspace, resolved server-side from the
+ * workspace row itself. Task execution uses this to run provider calls as
+ * the person whose workspace queued the work — never as whoever happens to
+ * be signed in, and never as a global fallback owner.
+ */
+export async function clerkUserIdForWorkspace(
+  workspaceId: string,
+): Promise<string | null> {
+  const [row] = await db
+    .select({ clerkUserId: workspacesTable.clerkUserId })
+    .from(workspacesTable)
+    .where(eq(workspacesTable.id, workspaceId))
+    .limit(1);
+  return row?.clerkUserId ?? null;
+}
+
 /** The workspace holding pre-multi-tenant data, if any. */
 export async function legacyWorkspaceId(): Promise<string | null> {
   return (await readSystemValue(LEGACY_WORKSPACE_KEY)) ?? null;

@@ -1613,6 +1613,17 @@ export interface CodexCredentialInput {
   authJson: string;
 }
 
+/**
+ * A provider API key or OAuth token belonging to this workspace's own account. It is encrypted before storage, never returned by any endpoint, and never exposed to an agent's tools or prompts.
+ */
+export interface ProviderCredentialInput {
+  /**
+     * @minLength 8
+     * @maxLength 4000
+     */
+  credential: string;
+}
+
 export type ProviderSettingsDefaultProvider = typeof ProviderSettingsDefaultProvider[keyof typeof ProviderSettingsDefaultProvider];
 
 

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Settings2 } from "lucide-react";
 import {
   Popover,
@@ -5,6 +6,8 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 /**
  * Talk preferences, tucked behind one gear so the phone call view stays a
@@ -22,6 +25,11 @@ export interface TalkSettingsProps {
   autoApproveTalkTasks: boolean;
   autoApprovePending: boolean;
   onAutoApproveTalkTasksChange: (on: boolean) => void;
+  /** Whether this workspace has stored its own OpenAI voice key. */
+  voiceKeyConfigured: boolean;
+  voiceKeyPending: boolean;
+  onSaveVoiceKey: (key: string) => void;
+  onRemoveVoiceKey: () => void;
   /** Distinguishes the two mounted copies for the switch ids. */
   idPrefix: string;
 }
@@ -37,8 +45,13 @@ export function TalkSettings({
   autoApproveTalkTasks,
   autoApprovePending,
   onAutoApproveTalkTasksChange,
+  voiceKeyConfigured,
+  voiceKeyPending,
+  onSaveVoiceKey,
+  onRemoveVoiceKey,
   idPrefix,
 }: TalkSettingsProps) {
+  const [keyDraft, setKeyDraft] = useState("");
   return (
     <Popover>
       <PopoverTrigger
@@ -109,6 +122,57 @@ export function TalkSettings({
               disabled={autoApprovePending}
               onCheckedChange={onAutoApproveTalkTasksChange}
             />
+          </div>
+          <div className="space-y-2 border-t-2 border-border pt-3">
+            <label
+              htmlFor={`${idPrefix}-voice-key`}
+              className="text-[10px] font-mono uppercase text-muted-foreground"
+            >
+              OpenAI voice key
+              <span className="block normal-case text-muted-foreground/80">
+                {voiceKeyConfigured
+                  ? "A key is stored (encrypted, never shown). Paste to replace it."
+                  : "Voice calls use your own OpenAI API key."}
+              </span>
+            </label>
+            <Input
+              id={`${idPrefix}-voice-key`}
+              type="password"
+              value={keyDraft}
+              onChange={(event) => setKeyDraft(event.target.value)}
+              placeholder="sk-..."
+              spellCheck={false}
+              autoComplete="off"
+              className="font-mono text-[11px] h-8 bg-background border-2 border-border rounded-none focus-visible:ring-0 focus-visible:border-primary"
+              data-testid={`input-${idPrefix}-voice-key`}
+            />
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                disabled={voiceKeyPending || keyDraft.trim().length < 8}
+                onClick={() => {
+                  const pasted = keyDraft.trim();
+                  // Cleared as it leaves the browser — a key has no business
+                  // sitting in a text box.
+                  setKeyDraft("");
+                  onSaveVoiceKey(pasted);
+                }}
+                data-testid={`button-${idPrefix}-save-voice-key`}
+              >
+                Save key
+              </Button>
+              {voiceKeyConfigured && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={voiceKeyPending}
+                  onClick={onRemoveVoiceKey}
+                  data-testid={`button-${idPrefix}-remove-voice-key`}
+                >
+                  Remove
+                </Button>
+              )}
+            </div>
           </div>
           {!recorderSupported && (
             <p className="text-[10px] text-muted-foreground border-t-2 border-border pt-3">

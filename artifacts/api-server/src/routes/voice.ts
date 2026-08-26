@@ -10,6 +10,7 @@
  */
 import {
   ConverseWithAgentBody,
+  SetVoiceCredentialBody,
   TranscribeAudioBody,
   UpdateVoiceSettingsBody,
   VoiceConverseWithAgentBody,
@@ -31,6 +32,12 @@ import { sanitizeErrorMessage } from "../lib/sanitize";
 import { callProvider, ProviderCallError } from "../execution";
 import { resolveRouting } from "../providers";
 import { CodexTalkError, runCodexTalkTurn } from "../talk-codex";
+import {
+  deleteProviderCredential,
+  getProviderCredential,
+  ProviderCredentialError,
+  saveProviderCredential,
+} from "../provider-credentials";
 import { publish } from "../events";
 import {
   getWorkspaceSetting,
@@ -73,18 +80,34 @@ function agentVoice(
   return "alloy";
 }
 
-function speechAvailability(): { available: boolean; reason: string | null } {
-  if (
-    !process.env.AI_INTEGRATIONS_OPENAI_BASE_URL ||
-    !process.env.AI_INTEGRATIONS_OPENAI_API_KEY
-  ) {
+/**
+ * Speech runs on this workspace's own OpenAI key — never a shared or
+ * server-environment account — so one workspace can never bill another's
+ * (or the operator's) speech allowance.
+ */
+async function speechAvailability(workspaceId: string): Promise<{
+  available: boolean;
+  reason: string | null;
+  credentials: { apiKey: string } | null;
+}> {
+  let apiKey: string | null;
+  try {
+    apiKey = await getProviderCredential(workspaceId, "openai_voice");
+  } catch (error) {
+    if (error instanceof ProviderCredentialError) {
+      return { available: false, reason: error.message, credentials: null };
+    }
+    throw error;
+  }
+  if (!apiKey) {
     return {
       available: false,
       reason:
-        "The managed speech service is not provisioned. Text chat still works; ask your administrator to enable the OpenAI AI integration for voice.",
+        "Voice is not set up for this workspace. Add your OpenAI API key in Talk settings to enable spoken conversations; text chat still works.",
+      credentials: null,
     };
   }
-  return { available: true, reason: null };
+  return { available: true, reason: null, credentials: { apiKey } };
 }
 
 async function transcriptsEnabled(workspaceId: string): Promise<boolean> {
@@ -160,7 +183,7 @@ async function emergencyStopEngaged(workspaceId: string): Promise<boolean> {
 }
 
 async function voiceStatusPayload(workspaceId: string) {
-  const { available, reason } = speechAvailability();
+  const { available, reason } = await speechAvailability(workspaceId);
   const [saveTranscripts, autoApprove] = await Promise.all([
     transcriptsEnabled(workspaceId),
     autoApproveTalkTasks(workspaceId),
@@ -174,6 +197,55 @@ async function voiceStatusPayload(workspaceId: string) {
 }
 
 router.get("/voice/status", async (req: Request, res: Response) => {
+  res.json(await voiceStatusPayload(req.workspaceId!));
+});
+
+/**
+ * Store this workspace's own OpenAI API key for speech services. The key
+ * is encrypted at rest and never echoed back; the response is the same
+ * status payload the settings screen already renders.
+ */
+router.put("/voice/credential", async (req: Request, res: Response) => {
+  const parsed = SetVoiceCredentialBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({
+      error: "An API key of at least 8 characters is required.",
+    });
+    return;
+  }
+  try {
+    await saveProviderCredential(
+      req.workspaceId!,
+      "openai_voice",
+      parsed.data.credential,
+    );
+  } catch (error) {
+    if (error instanceof ProviderCredentialError) {
+      res.status(503).json({ error: error.message });
+      return;
+    }
+    throw error;
+  }
+  await recordAudit(
+    req.workspaceId!,
+    "voice.credential",
+    "A voice speech API key was stored for this workspace.",
+  );
+  res.json(await voiceStatusPayload(req.workspaceId!));
+});
+
+router.delete("/voice/credential", async (req: Request, res: Response) => {
+  const removed = await deleteProviderCredential(
+    req.workspaceId!,
+    "openai_voice",
+  );
+  if (removed) {
+    await recordAudit(
+      req.workspaceId!,
+      "voice.credential",
+      "The workspace's voice speech API key was removed.",
+    );
+  }
   res.json(await voiceStatusPayload(req.workspaceId!));
 });
 
@@ -228,8 +300,8 @@ router.put("/voice/settings", async (req: Request, res: Response) => {
  * which stays authoritative for confirmations and history.
  */
 router.post("/voice/transcribe", async (req: Request, res: Response) => {
-  const availability = speechAvailability();
-  if (!availability.available) {
+  const availability = await speechAvailability(req.workspaceId!);
+  if (!availability.available || !availability.credentials) {
     res.status(503).json({ error: availability.reason });
     return;
   }
@@ -261,6 +333,7 @@ router.post("/voice/transcribe", async (req: Request, res: Response) => {
         compatible.buffer,
         compatible.format,
         controller.signal,
+        availability.credentials,
       )
     ).trim();
     res.json({ text });
@@ -655,6 +728,7 @@ async function callTalkAgent(
 
   const call = () =>
     callProvider({
+      workspaceId,
       provider: routing.provider,
       model: routing.model,
       system,
@@ -1721,8 +1795,8 @@ function sseWrite(res: Response, payload: Record<string, unknown>) {
 router.post(
   "/agents/:agentId/voice-converse",
   async (req: Request, res: Response) => {
-    const availability = speechAvailability();
-    if (!availability.available) {
+    const availability = await speechAvailability(req.workspaceId!);
+    if (!availability.available || !availability.credentials) {
       res.status(503).json({ error: availability.reason });
       return;
     }
@@ -1780,6 +1854,7 @@ router.post(
             compatible.buffer,
             compatible.format,
             controller.signal,
+            availability.credentials,
           )
         ).trim();
       } catch {
@@ -1870,6 +1945,7 @@ router.post(
             reply,
             voice,
             controller.signal,
+            availability.credentials,
           )) {
             if (controller.signal.aborted) break;
             sseWrite(res, { type: "audio", seq: seq++, data: chunk });

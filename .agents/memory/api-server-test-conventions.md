@@ -31,3 +31,17 @@ The dev API server runs a live queue worker (advisory-lock singleton) against th
 A test that hand-writes a row to simulate a state the real code would have reached must reproduce *everything* that transition clears, not just the fields it sets. Outcome paths tend to write only what they own, so any stale field the real path would have reset survives into the final row and quietly fools assertions.
 
 **How to apply:** keep test agents paused (the worker skips paused agents), use the worker's test-only claim scope (`agentIds` + `includePausedAgents`) for ordering assertions, insert `running` rows directly to exercise execution paths, and cancel/block every row a test leaves behind. All provider traffic goes through a stubbed global fetch — never the network.
+
+## Concurrent suite runs are not safe
+
+The API vitest suite runs files serially (`fileParallelism: false`) but all
+files share the owner's workspace rows in the dev Postgres. Two vitest
+invocations running at once (manual run + validation run + a reviewer's run)
+race on provider-credential rows — one suite deletes `openai_voice`/`openrouter`
+while another expects them seeded — producing phantom 503 failures.
+The live dev API server also shares the DB: its worker/scheduler can fire
+test schedules and create/read notifications, flaking the schedules,
+lifecycle, and memory suites (~1 test per full run). A failure in those areas
+that passes in isolation is interference, not a regression.
+**How to apply:** run one suite at a time; verify suspected flakes by running
+the file alone before debugging.

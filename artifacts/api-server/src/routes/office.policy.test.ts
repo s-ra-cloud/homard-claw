@@ -38,6 +38,7 @@ import { claimNextTask, expireStaleApprovals, runTask } from "../worker";
 import { recordAudit, verifyAuditChain } from "../audit";
 import { effectivePermissions, evaluateTaskPolicy } from "../policy";
 import { clearProviderCaches } from "../providers";
+import { saveProviderCredential } from "../provider-credentials";
 
 const app = express();
 app.use(express.json());
@@ -179,13 +180,15 @@ beforeAll(async () => {
   authState.userId = ws.clerkUserId;
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   fetchMock.mockReset();
   fetchMock.mockImplementation(async () => {
     throw new Error("network disabled in tests");
   });
-  vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
-  vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", "test-claude-token");
+  // Workspace-scoped credentials; the suite's own workspace cascade-deletes
+  // these rows in afterAll.
+  await saveProviderCredential(wsId, "openrouter", "test-openrouter-key");
+  await saveProviderCredential(wsId, "claude_max", "test-claude-token");
   clearProviderCaches();
 });
 
