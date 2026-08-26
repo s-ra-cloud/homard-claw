@@ -42,10 +42,30 @@ const officeArt = `${import.meta.env.BASE_URL}images/submarine-office.png`;
 // others shift by whole 0.81% shelf steps, so every chair has the identical
 // back-overlaps-shelf relationship and the four seats read as one diagonal.
 const DESK_SEATS = [
-  { left: 42.5, top: 38.19, label: "first submarine computer" },
-  { left: 48.3, top: 38.99, label: "second submarine computer" },
-  { left: 54.0, top: 39.8, label: "third submarine computer" },
-  { left: 60.0, top: 40.61, label: "fourth submarine computer" },
+  {
+    left: 42.5,
+    top: 38.19,
+    label: "first submarine computer",
+    screen: { left: 42.25, top: 33.75, width: 2.7, height: 2.9 },
+  },
+  {
+    left: 48.3,
+    top: 38.99,
+    label: "second submarine computer",
+    screen: { left: 47.95, top: 34.55, width: 2.7, height: 2.9 },
+  },
+  {
+    left: 54.0,
+    top: 39.8,
+    label: "third submarine computer",
+    screen: { left: 53.85, top: 35.25, width: 2.7, height: 2.9 },
+  },
+  {
+    left: 60.0,
+    top: 40.61,
+    label: "fourth submarine computer",
+    screen: { left: 59.95, top: 36.0, width: 2.7, height: 2.9 },
+  },
 ];
 
 // Six cushion spots on open floor: four staggered across the middle room, one
@@ -180,6 +200,47 @@ function OceanAmbient() {
         </div>
       ))}
     </div>
+  );
+}
+
+/**
+ * A CSS-only activity layer fitted inside one of the four monitor bezels.
+ * The illustrated computer remains the source artwork; this adds only the
+ * live pixels, stays pointer-transparent, and mounts only while its occupant
+ * is actually doing work.
+ */
+function WorkstationScreen({
+  station,
+  status,
+  index,
+}: {
+  station: (typeof DESK_SEATS)[number];
+  status: string;
+  index: number;
+}) {
+  const researching = status === "researching";
+
+  return (
+    <span
+      className={`workstation-screen is-active${researching ? " is-researching" : ""}`}
+      aria-hidden="true"
+      style={
+        {
+          left: `${station.screen.left}%`,
+          top: `${station.screen.top}%`,
+          width: `${station.screen.width}%`,
+          height: `${station.screen.height}%`,
+          "--screen-phase": `${-(index * 0.41 + 0.17)}s`,
+          "--screen-tempo": (1 + index * 0.06).toFixed(2),
+        } as React.CSSProperties
+      }
+    >
+      <i className="workstation-screen__wash" />
+      <i className="workstation-screen__line workstation-screen__line--one" />
+      <i className="workstation-screen__line workstation-screen__line--two" />
+      <i className="workstation-screen__line workstation-screen__line--three" />
+      <i className="workstation-screen__cursor" />
+    </span>
   );
 }
 
@@ -552,6 +613,18 @@ export default function OfficeDashboard() {
                 />
                 <OceanAmbient />
                 <div className="room-scene">
+                  {/* A monitor wakes only when the agent seated below it works. */}
+                  {deskAgents.map((agent, index) =>
+                    !stopped && AT_DESK_STATUSES.has(agent.status) ? (
+                      <WorkstationScreen
+                        key={`${agent.id}-screen`}
+                        station={DESK_SEATS[index]}
+                        status={agent.status}
+                        index={index}
+                      />
+                    ) : null,
+                  )}
+
                   {/* ── Static scene navigation hotspots ── */}
                   {SCENE_HOTSPOTS.map((spot) => (
                     <Link
