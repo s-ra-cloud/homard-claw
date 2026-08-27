@@ -11,31 +11,31 @@ _Replace the heading above with the project's name, and this line with one sente
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - `pnpm --filter @workspace/api-server run test` — API integration tests (uses the dev Postgres)
 - Required env: `DATABASE_URL` — Postgres connection string
+- Optional Web Research env: `WEB_SEARCH_API_KEY` — a Brave Search API key.
+  When unset, the package remains visible but reports **not configured**; it
+  never falls back to plain HTTP or an unconfigured remote server.
 
 ### Codex via ChatGPT Plus (optional third provider)
 
-Codex is off unless every variable below is set. Sign-ins are **per
-account**: each signed-in user connects their own ChatGPT session (encrypted
-in Postgres, keyed by their Clerk id), and every run — queued tasks, retries,
-recovery, Talk — executes as the account that owns the task's workspace,
-resolved server-side. There is no fallback identity: work whose owner cannot
-be resolved is refused rather than billed to someone else.
+Codex is off unless every variable below is set. It is a **single-owner**
+feature: it runs work against one person's ChatGPT Codex allowance, so it must
+never be enabled on a shared or multi-tenant deployment.
 
-| Variable | Required | Purpose |
-| --- | --- | --- |
-| `CODEX_ENABLED` | yes | Server-side feature flag. Unset ⇒ Codex is hidden in the UI and refuses to run. |
-| `CODEX_HOME` | yes | Absolute path to a **private** root; each account gets its own hashed subdirectory holding a temporary working copy of `auth.json` during runs (created 0700, file 0600). The credential itself lives encrypted in Postgres. Refused outright under `/tmp`, `/var/tmp`, `/dev/shm`, `/run`, or the OS temp dir. |
-| `CODEX_HOME_IS_PERSISTENT` | yes | Your attestation that `CODEX_HOME` is on a volume that survives a redeploy. Nothing inside the container can tell a Reserved VM disk from an instance disk, so Codex refuses to guess and stays off until this is set. |
-| `CODEX_WORKSPACE_ROOT` | yes | Absolute path under which each agent/conversation gets its own isolated working directory. |
-| `CODEX_AUTH_JSON` | optional | Contents of an existing `auth.json`, used **once** to seed the **office owner's** account when it has no sign-in stored. It is never applied to any other account and never overwrites a stored sign-in. |
-| `CODEX_MODELS` | no | `id:name:context,…` override of the model catalog. |
-| `CODEX_DEFAULT_MODEL` | no | Defaults to `gpt-5.6-terra`. |
-| `CODEX_REASONING_LEVELS` | no | Subset of `low,medium,high`. |
-| `CODEX_DEFAULT_REASONING` | no | Defaults to `medium`. |
-| `CODEX_AUTH_MAX_AGE_DAYS` | no | Age past which a session is treated as expired. |
-| `CODEX_HEALTH_CHECK_MINUTES` | no | Throttle for the local credential health check. |
-| `CODEX_LEASE_TTL_SECONDS` | no | How long one Codex run may hold the credential lease. |
-| `CODEX_ALLOW_NETWORK` | no | Allows network/web search **only** for `operator` + `autonomous` agents. |
+| Variable                     | Required        | Purpose                                                                                                                                                                                                                |
+| ---------------------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CODEX_ENABLED`              | yes             | Server-side feature flag. Unset ⇒ Codex is hidden in the UI and refuses to run.                                                                                                                                        |
+| `CODEX_HOME`                 | yes             | Absolute path to a **private, durable** directory holding `auth.json`. Created 0700; the file is kept 0600. Refused outright under `/tmp`, `/var/tmp`, `/dev/shm`, `/run`, or the OS temp dir.                         |
+| `CODEX_HOME_IS_PERSISTENT`   | yes             | Your attestation that `CODEX_HOME` is on a volume that survives a redeploy. Nothing inside the container can tell a Reserved VM disk from an instance disk, so Codex refuses to guess and stays off until this is set. |
+| `CODEX_WORKSPACE_ROOT`       | yes             | Absolute path under which each agent/conversation gets its own isolated working directory.                                                                                                                             |
+| `CODEX_AUTH_JSON`            | first boot only | Contents of an existing `auth.json`, used **once** to seed an empty `CODEX_HOME`. Never overwrites an existing file.                                                                                                   |
+| `CODEX_MODELS`               | no              | `id:name:context,…` override of the model catalog.                                                                                                                                                                     |
+| `CODEX_DEFAULT_MODEL`        | no              | Defaults to `gpt-5.6-terra`.                                                                                                                                                                                           |
+| `CODEX_REASONING_LEVELS`     | no              | Subset of `low,medium,high`.                                                                                                                                                                                           |
+| `CODEX_DEFAULT_REASONING`    | no              | Defaults to `medium`.                                                                                                                                                                                                  |
+| `CODEX_AUTH_MAX_AGE_DAYS`    | no              | Age past which a session is treated as expired.                                                                                                                                                                        |
+| `CODEX_HEALTH_CHECK_MINUTES` | no              | Throttle for the local credential health check.                                                                                                                                                                        |
+| `CODEX_LEASE_TTL_SECONDS`    | no              | How long one Codex run may hold the credential lease.                                                                                                                                                                  |
+| `CODEX_ALLOW_NETWORK`        | no              | Allows network/web search **only** for `operator` + `autonomous` agents.                                                                                                                                               |
 
 **Deployment target must be a Reserved VM.** `.replit` currently declares
 `deploymentTarget = "autoscale"`, whose filesystem is not durable. Codex
@@ -43,7 +43,7 @@ rewrites `auth.json` on every token refresh, so on Autoscale the refreshed
 credential is lost on the next deploy and the session dies. Switch the
 deployment to a Reserved VM with persistent storage, point `CODEX_HOME` at it,
 and set `CODEX_HOME_IS_PERSISTENT=1` before enabling the flag. Setting that
-flag on a deployment whose disk is *not* persistent will lose the session at
+flag on a deployment whose disk is _not_ persistent will lose the session at
 the next deploy — it is an attestation, not a fix. Without durable writable
 storage the provider fails closed and says so.
 
@@ -52,13 +52,11 @@ programmatic ChatGPT sign-in, and HomardClaw deliberately implements none.
 
 1. On a machine with a browser: `npx @openai/codex login` (or `codex login`).
 2. Copy the resulting `~/.codex/auth.json`.
-3. Paste its contents into Providers → Codex → **Connect** while signed in
-   as the account that should own it (it is stored encrypted against that
-   account). The office owner may instead set `CODEX_AUTH_JSON` and press
-   **Bootstrap** — the seed only ever lands on the owner's own account.
+3. Either place it at `$CODEX_HOME/auth.json` on the Reserved VM, or set
+   `CODEX_AUTH_JSON` to its contents and let the first boot seed it.
 4. Confirm with Providers → Codex → **Test connection**. That check is
-   entirely local — it reads the stored sign-in's metadata and resolves the
-   SDK/CLI, and never calls OpenAI, so it cannot spend allowance.
+   entirely local — it reads the file and resolves the SDK/CLI, and never
+   calls OpenAI, so it cannot spend allowance.
 
 Re-run steps 1–3 whenever the status reports authentication expired. Only
 Codex's own SDK refresh path may rewrite `auth.json`; HomardClaw never does.
@@ -82,7 +80,7 @@ _Populate as you build — short repo map plus pointers to the source-of-truth f
 - **`claude_max` is the persisted id for Claude Code.** Renaming it would break existing agents and tasks; the friendly name lives in `PROVIDER_LABELS` only.
 - **Providers are classified `subscription` vs `metered`.** Budget ceilings, pricing lookups, and paid-fallback consent all key off that, not off the provider id.
 - **A subscription run records no cost.** Neither Claude Code nor Codex publishes a per-token price, and no plan exposes a remaining balance, so cost is `null` and the UI says "covered by plan". A `$0.00` would be an invented figure.
-- **Codex is serialized with a durable `provider_leases` row, not an advisory lock.** The worker singleton already holds advisory lock `0x484f4d41` for its whole life; a second lock in the same connection would deadlock. The lease is keyed by a hash of the auth *file path*, so one credential can never run two Codex jobs even across processes, and it survives a restart.
+- **Codex is serialized with a durable `provider_leases` row, not an advisory lock.** The worker singleton already holds advisory lock `0x484f4d41` for its whole life; a second lock in the same connection would deadlock. The lease is keyed by a hash of the auth _file path_, so one credential can never run two Codex jobs even across processes, and it survives a restart.
 - **Fallbacks are never silent.** On a Codex auth/allowance failure the task stops and the owner picks wait / cancel / approve-paid-fallback. Approval only records consent; the spend policy is re-evaluated at execution time and the reason and destination are written to the audit chain.
 
 ## Product

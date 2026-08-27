@@ -1,7 +1,4 @@
-import {
-  APP_OPERATIONS,
-  type AppOperation,
-} from "../connected-apps/catalog";
+import { APP_OPERATIONS, type AppOperation } from "../connected-apps/catalog";
 import {
   signManifest,
   verifyManifestSignature,
@@ -15,7 +12,8 @@ import {
  * ever trusted: nothing is fetched from arbitrary URLs, nothing unsigned is
  * loaded, and installed workspaces pin the exact snapshot (version +
  * fingerprint) they reviewed. Shipping a new capability means adding a
- * manifest here — data, not a new executor or catalog surgery.
+ * manifest here. Native packages may reference only handler names compiled
+ * into the server allowlist; the manifest itself never carries executable code.
  */
 
 /** Recovery classification for the built-in operations. Writes carry
@@ -97,7 +95,14 @@ const GITHUB_PACKAGE = builtinPackage(
     {
       id: "github-issue-hygiene",
       title: "GitHub issue hygiene",
-      triggers: ["github", "repo", "repository", "issue", "pull request", "code"],
+      triggers: [
+        "github",
+        "repo",
+        "repository",
+        "issue",
+        "pull request",
+        "code",
+      ],
       instructions:
         "Read the relevant files or existing issues before opening or commenting on one. Keep issue titles specific and bodies short, with concrete reproduction or file references. Never paste large file contents into an issue.",
     },
@@ -105,24 +110,18 @@ const GITHUB_PACKAGE = builtinPackage(
 );
 
 /**
- * The read-only Web Research starter package: proves a new capability lands
- * as a manifest plus a remote MCP endpoint, with no bespoke operation or
- * executor added to the application. The endpoint comes from server env
- * (an approved HTTPS MCP server the operator provisions), never from the
- * manifest or a prompt.
+ * Read-only web research through compiled native handlers. The manifest is
+ * still data-only: handler names resolve through the server allowlist, and
+ * the Brave Search credential comes only from WEB_SEARCH_API_KEY.
  */
 const WEB_RESEARCH_PACKAGE: CapabilityManifest = {
   id: "web_research",
   displayName: "Web Research",
-  version: "1.0.0",
+  version: "2.0.0",
   description:
-    "Read-only web search and page fetching through an approved remote MCP server.",
+    "Read-only web search and public HTTPS page extraction through vetted native handlers.",
   publisher: "HomardClaw (vetted registry)",
-  connection: "mcp",
-  mcpServer: {
-    urlEnv: "WEB_RESEARCH_MCP_URL",
-    authTokenEnv: "WEB_RESEARCH_MCP_TOKEN",
-  },
+  connection: "none",
   skills: [
     {
       id: "web-research-method",
@@ -148,24 +147,28 @@ const WEB_RESEARCH_PACKAGE: CapabilityManifest = {
       description:
         "Search the web; params: query. Returns a list of result titles, URLs, and snippets.",
       level: "read",
-      params: [{ name: "query", required: true, kind: "string", maxLength: 500 }],
+      params: [
+        { name: "query", required: true, kind: "string", maxLength: 500 },
+      ],
       targetTemplate: 'Web search for "{query}"',
       recovery: "retry_safe",
       resultCharLimit: 4000,
       timeoutMs: 20_000,
-      executor: { kind: "mcp", remoteName: "search" },
+      executor: { kind: "native", handler: "web.search" },
     },
     {
       name: "web_research.fetch",
       description:
         "Fetch one web page as readable text; params: url (https only).",
       level: "read",
-      params: [{ name: "url", required: true, kind: "string", maxLength: 2000 }],
+      params: [
+        { name: "url", required: true, kind: "string", maxLength: 2000 },
+      ],
       targetTemplate: "Fetch web page {url}",
       recovery: "retry_safe",
       resultCharLimit: 6000,
       timeoutMs: 30_000,
-      executor: { kind: "mcp", remoteName: "fetch" },
+      executor: { kind: "native", handler: "web.fetch" },
     },
   ],
   builtin: false,

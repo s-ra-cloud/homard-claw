@@ -15,6 +15,7 @@ import {
   type WorkspaceCapabilities,
 } from "../capabilities/service";
 import { buildSkillsPromptSection } from "../capabilities/skills";
+import { isNetworkBackedExecutor } from "../capabilities/manifest";
 import { buildAppsPromptSection, levelAllows, validateParams } from "./catalog";
 
 /** Everything the worker needs to know about one agent's app access. */
@@ -129,7 +130,7 @@ export async function loadAgentAppAccess(
       packageId: tool.packageId,
       level: tool.level,
       description: tool.description,
-      external: tool.def.executor.kind !== "builtin",
+      external: isNetworkBackedExecutor(tool.def.executor),
     })),
   });
   const skillsSection = options?.objective
@@ -169,8 +170,8 @@ export type AppActionDecision =
  * what any prompt claimed. Pure over its inputs so the deny matrix is
  * directly testable: unknown operations, unassigned packages, and requests
  * broader than the grant all die here; externally visible writes survive
- * only as approval requests. Neither an MCP description nor a skill text
- * can widen anything: the decision reads only the pinned catalog, the
+ * only as approval requests. Neither an MCP/native description nor a skill
+ * text can widen anything: the decision reads only the pinned catalog, the
  * grants, and the sandbox flag.
  */
 export function authorizeAppAction(
@@ -202,8 +203,11 @@ export function authorizeAppAction(
   // when a request first arrives and when the worker re-authorizes an
   // approved action just before execution, so enabling the sandbox stops
   // pending drafts/writes too.
-  if (access.sensitiveDataSandbox && tool.def.executor.kind !== "builtin") {
-    // The sandbox's no-internet guarantee: MCP/network-backed tools are
+  if (
+    access.sensitiveDataSandbox &&
+    isNetworkBackedExecutor(tool.def.executor)
+  ) {
+    // The sandbox's no-internet guarantee: MCP/native network-backed tools are
     // denied outright, even at read level — a web-search query is an
     // exfiltration channel for whatever confidential content the agent
     // has already read.

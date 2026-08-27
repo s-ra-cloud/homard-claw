@@ -3,10 +3,14 @@ import { sanitizeErrorMessage } from "./sanitize";
 
 const hadEnv = "OPENROUTER_API_KEY" in process.env;
 const priorEnv = process.env.OPENROUTER_API_KEY;
+const hadWebEnv = "WEB_SEARCH_API_KEY" in process.env;
+const priorWebEnv = process.env.WEB_SEARCH_API_KEY;
 
 afterAll(() => {
   if (hadEnv) process.env.OPENROUTER_API_KEY = priorEnv;
   else delete process.env.OPENROUTER_API_KEY;
+  if (hadWebEnv) process.env.WEB_SEARCH_API_KEY = priorWebEnv;
+  else delete process.env.WEB_SEARCH_API_KEY;
 });
 
 describe("sanitizeErrorMessage", () => {
@@ -47,6 +51,15 @@ describe("sanitizeErrorMessage", () => {
       "provider said: bad credential test-literal-secret-value-42 supplied",
     );
     expect(out).not.toContain("test-literal-secret-value-42");
+    expect(out).toContain("[redacted]");
+  });
+
+  it("redacts the native web-search credential", () => {
+    process.env.WEB_SEARCH_API_KEY = "native-web-secret-value-42";
+    const out = sanitizeErrorMessage(
+      "search failed with native-web-secret-value-42",
+    );
+    expect(out).not.toContain("native-web-secret-value-42");
     expect(out).toContain("[redacted]");
   });
 

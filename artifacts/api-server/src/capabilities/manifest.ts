@@ -7,7 +7,8 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
  * operation name, and MCP tools reference a remote server the package
  * declares. Nothing in a manifest can widen what the surrounding pipeline
  * (grants, sandbox, approvals, audit, budgets) allows; it can only describe
- * tools that pipeline will police.
+ * tools that pipeline will police. Native executors still carry only a
+ * handler name; the implementation lives in an explicit server allowlist.
  */
 
 export const CAPABILITY_RECOVERY_CLASSES = [
@@ -49,6 +50,11 @@ export type CapabilityToolDef = {
         kind: "mcp";
         /** Tool name on the remote MCP server (pinned at review time). */
         remoteName: string;
+      }
+    | {
+        kind: "native";
+        /** Name resolved by vetted server code. A manifest never carries code. */
+        handler: string;
       };
 };
 
@@ -204,8 +210,9 @@ export type CapabilityPermissionDiff = {
   /**
    * Execution-routing changes: the package's MCP server binding (endpoint or
    * token env var), a tool's executor kind, or a tool's remote MCP operation
-   * name. Any of these silently repoints where a call actually goes, so they
-   * always require owner review.
+   * name. Moving from MCP to a vetted native handler (and dropping its MCP
+   * binding) is a contraction and is recorded here without counting as an
+   * expansion; all other routing changes require owner review.
    */
   routingChanges: string[];
   expandsPermissions: boolean;
@@ -217,6 +224,56 @@ const RECOVERY_RANK: Record<CapabilityRecoveryClass, number> = {
   provider_verifiable: 1,
   non_retryable: 2,
 };
+
+/**
+ * One reviewed routing contraction: Web Research 1.0's two MCP operations
+ * move to their exact compiled 2.0 handlers. Keeping this allowlist narrow
+ * prevents a future arbitrary MCP → native rebind from silently auto-applying.
+ */
+function isWebResearchNativeMigration(
+  from: CapabilityManifest,
+  to: CapabilityManifest,
+): boolean {
+  if (
+    from.id !== "web_research" ||
+    to.id !== "web_research" ||
+    from.version !== "1.0.0" ||
+    to.version !== "2.0.0" ||
+    from.connection !== "mcp" ||
+    to.connection !== "none" ||
+    to.mcpServer !== undefined
+  ) {
+    return false;
+  }
+  const expectedHandlers = new Map([
+    ["web_research.search", ["search", "web.search"]],
+    ["web_research.fetch", ["fetch", "web.fetch"]],
+  ]);
+  if (
+    from.tools.length !== expectedHandlers.size ||
+    to.tools.length !== expectedHandlers.size
+  ) {
+    return false;
+  }
+  return to.tools.every((tool) => {
+    const previous = from.tools.find(
+      (candidate) => candidate.name === tool.name,
+    );
+    const expected = expectedHandlers.get(tool.name);
+    return (
+      previous !== undefined &&
+      expected !== undefined &&
+      previous.executor.kind === "mcp" &&
+      previous.executor.remoteName === expected[0] &&
+      tool.executor.kind === "native" &&
+      tool.executor.handler === expected[1] &&
+      previous.level === tool.level &&
+      previous.recovery === tool.recovery &&
+      JSON.stringify(canonicalize(previous.params)) ===
+        JSON.stringify(canonicalize(tool.params))
+    );
+  });
+}
 
 export function computePermissionDiff(
   from: CapabilityManifest,
@@ -237,6 +294,10 @@ export function computePermissionDiff(
     routingChanges: [],
     expandsPermissions: false,
   };
+  const vettedNativeMigration = isWebResearchNativeMigration(from, to);
+  let routingExpands = false;
+  const connectionExpands =
+    diff.connectionChange !== null && !vettedNativeMigration;
   // The MCP server binding is part of the routing surface: pointing the same
   // tools at a different endpoint (or auth) env var is a review-gating change.
   if (
@@ -247,6 +308,9 @@ export function computePermissionDiff(
     diff.routingChanges.push(
       `${to.id}: MCP server binding changed (${from.mcpServer?.urlEnv ?? "none"} → ${to.mcpServer?.urlEnv ?? "none"})`,
     );
+    // Removing a remote MCP binding while moving to a server-vetted native
+    // handler narrows routing. Adding or changing a remote binding does not.
+    if (!vettedNativeMigration) routingExpands = true;
   }
   for (const [name, tool] of after) {
     const prev = before.get(name);
@@ -262,17 +326,27 @@ export function computePermissionDiff(
       diff.levelChanges.push({ name, from: prev.level, to: tool.level });
     }
     if (prev.recovery !== tool.recovery) {
-      diff.recoveryChanges.push({ name, from: prev.recovery, to: tool.recovery });
+      diff.recoveryChanges.push({
+        name,
+        from: prev.recovery,
+        to: tool.recovery,
+      });
     }
-    if (JSON.stringify(canonicalize(prev.params)) !== JSON.stringify(canonicalize(tool.params))) {
+    if (
+      JSON.stringify(canonicalize(prev.params)) !==
+      JSON.stringify(canonicalize(tool.params))
+    ) {
       diff.schemaChanges.push(name);
     }
-    // Executor routing: kind change or a different remote operation name
-    // silently redirects the call — always review-gating.
+    // Executor routing changes are review-gating except MCP → native: the
+    // latter replaces a remote endpoint with a compiled server allowlist.
     if (prev.executor.kind !== tool.executor.kind) {
       diff.routingChanges.push(
         `${name}: executor changed (${prev.executor.kind} → ${tool.executor.kind})`,
       );
+      if (!vettedNativeMigration) {
+        routingExpands = true;
+      }
     } else if (
       prev.executor.kind === "mcp" &&
       tool.executor.kind === "mcp" &&
@@ -281,6 +355,16 @@ export function computePermissionDiff(
       diff.routingChanges.push(
         `${name}: remote operation changed (${prev.executor.remoteName} → ${tool.executor.remoteName})`,
       );
+      routingExpands = true;
+    } else if (
+      prev.executor.kind === "native" &&
+      tool.executor.kind === "native" &&
+      prev.executor.handler !== tool.executor.handler
+    ) {
+      diff.routingChanges.push(
+        `${name}: native handler changed (${prev.executor.handler} → ${tool.executor.handler})`,
+      );
+      routingExpands = true;
     }
   }
   for (const name of before.keys()) {
@@ -289,8 +373,8 @@ export function computePermissionDiff(
   diff.expandsPermissions =
     diff.addedTools.length > 0 ||
     diff.schemaChanges.length > 0 ||
-    diff.connectionChange !== null ||
-    diff.routingChanges.length > 0 ||
+    connectionExpands ||
+    routingExpands ||
     diff.levelChanges.some(
       (c) => (LEVEL_RANK[c.to] ?? 99) > (LEVEL_RANK[c.from] ?? 0),
     ) ||
@@ -303,7 +387,9 @@ export function computePermissionDiff(
 }
 
 /** Structural validation of a manifest snapshot loaded back from the DB. */
-export function isCapabilityManifest(value: unknown): value is CapabilityManifest {
+export function isCapabilityManifest(
+  value: unknown,
+): value is CapabilityManifest {
   if (!value || typeof value !== "object") return false;
   const m = value as Record<string, unknown>;
   if (
@@ -332,6 +418,21 @@ export function isCapabilityManifest(value: unknown): value is CapabilityManifes
     ) {
       return false;
     }
+    const executor = t.executor as Record<string, unknown>;
+    if (!(
+      executor.kind === "builtin" ||
+      (executor.kind === "mcp" && typeof executor.remoteName === "string") ||
+      (executor.kind === "native" && typeof executor.handler === "string")
+    )) {
+      return false;
+    }
   }
   return true;
+}
+
+/** MCP and native handlers cross the agent's no-network sandbox boundary. */
+export function isNetworkBackedExecutor(
+  executor: CapabilityToolDef["executor"],
+): boolean {
+  return executor.kind === "mcp" || executor.kind === "native";
 }

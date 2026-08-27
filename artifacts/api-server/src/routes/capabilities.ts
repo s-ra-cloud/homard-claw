@@ -32,6 +32,7 @@ import {
   uninstallPackage,
 } from "../capabilities/service";
 import { mcpListTools, resolveMcpEndpoint } from "../capabilities/mcp";
+import { nativeWebConfigured } from "../capabilities/web";
 
 const router: IRouter = Router();
 
@@ -43,7 +44,8 @@ const router: IRouter = Router();
  */
 
 type PackageHealth = {
-  status: "connected" | "expired" | "not_connected" | "unavailable" | "none_required";
+  status:
+    "connected" | "expired" | "not_connected" | "unavailable" | "none_required";
   detail: string | null;
 };
 
@@ -51,6 +53,21 @@ async function packageHealth(
   manifest: CapabilityManifest,
   workspaceId: string,
 ): Promise<PackageHealth> {
+  if (
+    manifest.tools.some(
+      (tool) =>
+        tool.executor.kind === "native" &&
+        tool.executor.handler.startsWith("web."),
+    )
+  ) {
+    return nativeWebConfigured()
+      ? { status: "connected", detail: null }
+      : {
+          status: "not_connected",
+          detail:
+            "Web Research is not configured on this deployment (WEB_SEARCH_API_KEY is missing).",
+        };
+  }
   if (manifest.connection === "none") {
     return { status: "none_required", detail: null };
   }
@@ -61,7 +78,8 @@ async function packageHealth(
     } catch (error) {
       return {
         status: "unavailable",
-        detail: error instanceof Error ? error.message : "Misconfigured endpoint.",
+        detail:
+          error instanceof Error ? error.message : "Misconfigured endpoint.",
       };
     }
     if (!endpoint) {
@@ -77,7 +95,8 @@ async function packageHealth(
     const remoteNames = new Set(listed.tools.map((t) => t.name));
     const missing = manifest.tools
       .filter(
-        (t) => t.executor.kind === "mcp" && !remoteNames.has(t.executor.remoteName),
+        (t) =>
+          t.executor.kind === "mcp" && !remoteNames.has(t.executor.remoteName),
       )
       .map((t) => t.name);
     if (missing.length > 0) {
@@ -159,7 +178,9 @@ router.get("/capabilities", async (req, res): Promise<void> => {
         !registry.builtin && row && isCapabilityManifest(row.manifest)
           ? (row.manifest as unknown as CapabilityManifest)
           : registry;
-      const status = registry.builtin ? "active" : (row?.status ?? "not_installed");
+      const status = registry.builtin
+        ? "active"
+        : (row?.status ?? "not_installed");
       const usable = installed && status === "active";
       const health = usable
         ? await packageHealth(pinned, wsId)
@@ -180,7 +201,8 @@ router.get("/capabilities", async (req, res): Promise<void> => {
         enabled: !disabled.has(registry.id),
         quarantineReason: row?.quarantineReason ?? null,
         pendingVersion: row?.pendingVersion ?? null,
-        pendingDiff: (row?.pendingDiff as Record<string, unknown> | null) ?? null,
+        pendingDiff:
+          (row?.pendingDiff as Record<string, unknown> | null) ?? null,
         health: health.status,
         healthDetail: health.detail,
         grantedAgents: grants.get(registry.id) ?? 0,
@@ -192,49 +214,59 @@ router.get("/capabilities", async (req, res): Promise<void> => {
   res.json({ packages });
 });
 
-router.post("/capabilities/:packageId/install", async (req, res): Promise<void> => {
-  const wsId = req.workspaceId!;
-  const packageId = req.params.packageId;
-  const outcome = await installPackage(wsId, packageId);
-  if (!outcome.ok) {
-    const message =
-      outcome.error === "unknown_package"
-        ? "This package is not in the vetted registry."
-        : outcome.error === "builtin"
-          ? "Built-in packages are always installed."
-          : "This package is already installed.";
-    res
-      .status(outcome.error === "unknown_package" ? 404 : 409)
-      .json({ error: message });
-    return;
-  }
-  publish(wsId, "agents", "overview");
-  res.status(201).json({ installed: true });
-});
+router.post(
+  "/capabilities/:packageId/install",
+  async (req, res): Promise<void> => {
+    const wsId = req.workspaceId!;
+    const packageId = req.params.packageId;
+    const outcome = await installPackage(wsId, packageId);
+    if (!outcome.ok) {
+      const message =
+        outcome.error === "unknown_package"
+          ? "This package is not in the vetted registry."
+          : outcome.error === "builtin"
+            ? "Built-in packages are always installed."
+            : "This package is already installed.";
+      res
+        .status(outcome.error === "unknown_package" ? 404 : 409)
+        .json({ error: message });
+      return;
+    }
+    publish(wsId, "agents", "overview");
+    res.status(201).json({ installed: true });
+  },
+);
 
-router.post("/capabilities/:packageId/update", async (req, res): Promise<void> => {
-  const wsId = req.workspaceId!;
-  const outcome = await applyPendingUpdate(wsId, req.params.packageId);
-  if (!outcome.ok) {
-    const message =
-      outcome.error === "not_installed"
-        ? "This package is not installed."
-        : outcome.error === "no_pending_update"
-          ? "There is no update awaiting review."
-          : "The registry changed since this update was offered — review it again.";
-    res.status(outcome.error === "not_installed" ? 404 : 409).json({ error: message });
-    return;
-  }
-  publish(wsId, "agents", "overview");
-  res.json({ updated: true });
-});
+router.post(
+  "/capabilities/:packageId/update",
+  async (req, res): Promise<void> => {
+    const wsId = req.workspaceId!;
+    const outcome = await applyPendingUpdate(wsId, req.params.packageId);
+    if (!outcome.ok) {
+      const message =
+        outcome.error === "not_installed"
+          ? "This package is not installed."
+          : outcome.error === "no_pending_update"
+            ? "There is no update awaiting review."
+            : "The registry changed since this update was offered — review it again.";
+      res
+        .status(outcome.error === "not_installed" ? 404 : 409)
+        .json({ error: message });
+      return;
+    }
+    publish(wsId, "agents", "overview");
+    res.json({ updated: true });
+  },
+);
 
 router.post(
   "/capabilities/:packageId/uninstall",
   async (req, res): Promise<void> => {
     const wsId = req.workspaceId!;
     if (isBuiltinPackageId(req.params.packageId)) {
-      res.status(409).json({ error: "Built-in packages cannot be uninstalled." });
+      res
+        .status(409)
+        .json({ error: "Built-in packages cannot be uninstalled." });
       return;
     }
     const outcome = await uninstallPackage(wsId, req.params.packageId);
@@ -266,7 +298,10 @@ router.patch("/capabilities/:packageId", async (req, res): Promise<void> => {
     .insert(workspaceConnectedAppsTable)
     .values({ workspaceId: wsId, app: packageId, enabled })
     .onConflictDoUpdate({
-      target: [workspaceConnectedAppsTable.workspaceId, workspaceConnectedAppsTable.app],
+      target: [
+        workspaceConnectedAppsTable.workspaceId,
+        workspaceConnectedAppsTable.app,
+      ],
       set: { enabled, updatedAt: new Date() },
     });
   await recordAudit(

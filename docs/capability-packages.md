@@ -2,22 +2,23 @@
 
 Capability packages are HomardClaw's extensibility layer: signed, versioned,
 **data-only** manifests that combine reusable skill instructions with tool
-declarations. Shipping a new agent capability means adding a manifest to the
-vetted registry — not adding a bespoke operation, executor, or catalog edit
-to the application.
+declarations. Most new capabilities need only a manifest in the vetted
+registry. A package that uses an existing native handler still carries no
+code; adding a brand-new handler is a separate reviewed server-code change.
 
 ## Where things live
 
-| Piece | Location |
-| --- | --- |
-| Manifest contract & signing | `artifacts/api-server/src/capabilities/manifest.ts` |
-| Vetted registry (the only trust source) | `artifacts/api-server/src/capabilities/registry.ts` |
-| Workspace resolution / install lifecycle | `artifacts/api-server/src/capabilities/service.ts` |
-| MCP HTTPS client | `artifacts/api-server/src/capabilities/mcp.ts` |
-| Execution bridge | `artifacts/api-server/src/capabilities/execute.ts` |
-| Skill prompt assembly | `artifacts/api-server/src/capabilities/skills.ts` |
-| Install rows (per workspace) | `capability_packages` table (`lib/db/src/schema/office.ts`) |
-| Owner UI | Connected Apps page → Capabilities section |
+| Piece                                    | Location                                                    |
+| ---------------------------------------- | ----------------------------------------------------------- |
+| Manifest contract & signing              | `artifacts/api-server/src/capabilities/manifest.ts`         |
+| Vetted registry (the only trust source)  | `artifacts/api-server/src/capabilities/registry.ts`         |
+| Workspace resolution / install lifecycle | `artifacts/api-server/src/capabilities/service.ts`          |
+| Native web handlers                      | `artifacts/api-server/src/capabilities/web.ts`              |
+| MCP HTTPS client                         | `artifacts/api-server/src/capabilities/mcp.ts`              |
+| Execution bridge                         | `artifacts/api-server/src/capabilities/execute.ts`          |
+| Skill prompt assembly                    | `artifacts/api-server/src/capabilities/skills.ts`           |
+| Install rows (per workspace)             | `capability_packages` table (`lib/db/src/schema/office.ts`) |
+| Owner UI                                 | Connected Apps page → Capabilities section                  |
 
 ## The manifest contract
 
@@ -32,8 +33,10 @@ A `CapabilityManifest` declares, before anything can be enabled:
   **risk level** (`read` < `draft` < `write`; write always requires durable
   owner approval), param schema (`kind`, `required`, `maxLength`,
   `multiline`), human target template, **recovery class** (below),
-  `resultCharLimit`, `timeoutMs`, and executor (`builtin` or
-  `mcp` + `remoteName`).
+  `resultCharLimit`, `timeoutMs`, and executor (`builtin`, `mcp` +
+  `remoteName`, or `native` + a server-resolved `handler` name). Native
+  manifests remain data-only: handler names resolve through a compiled
+  allowlist and never carry code.
 - **Skills** (`CapabilitySkillDef`): trigger keywords plus instructions.
   Skills are guidance only — they are injected under a header stating they
   can never change permissions, approvals, or the sandbox, and only when a
@@ -65,6 +68,10 @@ Every external-effect tool must be classified:
   A database actor cannot forge it: a tampered, copied, or version-swapped
   row fails signature verification on resolve and is quarantined. The
   worker resolves tools ONLY from a verified pinned snapshot.
+- Native handlers are compiled server code selected by a manifest handler
+  name. Web Research uses `WEB_SEARCH_API_KEY` for Brave Search; fetched pages
+  are HTTPS-only, DNS-pinned, redirect-revalidated, timeout-bounded, and capped
+  at 2 MB before HTML is reduced to readable text.
 - MCP endpoints/tokens come from server env vars referenced **by name** in
   the manifest (e.g. `WEB_RESEARCH_MCP_URL`, `WEB_RESEARCH_MCP_TOKEN`).
   HTTPS is enforced. Credentials never appear in manifests, prompts, DB
@@ -78,7 +85,7 @@ On every catalog listing the install row is reconciled against the registry:
 - **Newer version, no permission expansion** (wording tweaks, tool
   removals, stricter recovery) → auto-applied and audited.
 - **Permission-expanding update** (new tools, level escalations, loosened
-  schemas, a recovery class claiming MORE retry safety, connection change)
+  schemas, a recovery class claiming MORE retry safety, or routing expansion)
   → parked in `update_review` with a stored diff. The pinned version keeps
   serving; the new tools stay invisible until the owner accepts the diff in
   the UI. Acceptance is rejected if the registry moved again since review.
@@ -95,12 +102,12 @@ and Codex — no provider function-calling). Every request passes:
 1. Pinned-schema param validation (`validateParams`).
 2. Grant check (per-agent, per-package, level ranked read/draft/write).
 3. Sensitive-data sandbox cap — sandboxed agents are read-only AND denied
-   every network-backed (MCP) tool outright, even at read level: a web-search
-   query is an exfiltration channel for confidential content the agent has
-   already read. Such tools are also hidden from the sandboxed prompt.
+   every network-backed (MCP or native) tool outright, even at read level: a
+   web-search query is an exfiltration channel for confidential content the
+   agent has already read. Such tools are also hidden from the sandboxed prompt.
 4. Workspace enablement + install status (`active`/pinned only).
 5. Write-level → durable owner approval, audit, at-most-once claiming.
-6. Execution through the vetted built-in executor or the bounded MCP client
+6. Execution through a vetted built-in/native handler or the bounded MCP client
    (timeout, char limit, control-char stripping, sanitized failures).
 7. Results are UNTRUSTED external data — bounded, framed as such in the
    model prompt (the server vouches only that the action ran, never for the
@@ -114,7 +121,9 @@ and Codex — no provider function-calling). Every request passes:
    `<packageId>.`.
 2. Classify every tool's level and recovery class honestly; when unsure use
    `write` + `non_retryable` (most conservative).
-3. For MCP packages: add `mcpServer.urlEnv` (+ `authTokenEnv`), then
+3. For a native package, choose an existing handler from the server allowlist;
+   adding a handler requires reviewed server code. For MCP packages: add
+   `mcpServer.urlEnv` (+ `authTokenEnv`), then
    provision the env vars on the deployment. Unconfigured endpoints fail
    with a clear message; they never fall back to HTTP.
 4. Add skills with tight trigger keywords — they are selected per objective.
@@ -125,11 +134,11 @@ and Codex — no provider function-calling). Every request passes:
 
 ## Troubleshooting
 
-| Symptom | Meaning | Recovery |
-| --- | --- | --- |
-| Package shows **Quarantined** | Pinned snapshot or registry drifted | Fix the registry (restore or bump version); the next listing re-assesses |
-| **Update Needs Review** | New version expands permissions | Owner reviews the diff and accepts (or leaves the pinned version serving) |
-| **Unavailable** health | MCP server unreachable or no longer advertises a pinned tool | Check the endpoint env var, server health, or ship a corrected package version |
-| **Not Connected** | Endpoint env var unset / OAuth account missing | Configure the env var or connect the account |
-| Tool denied at runtime | Grant, enablement, sandbox, or install state changed since the prompt | Working as intended — re-authorization is immediate-pre-execution |
-| Interrupted write shows "unknown" | Non-verifiable tool crashed mid-call | Intentional: verify manually with the provider; it is never replayed |
+| Symptom                           | Meaning                                                               | Recovery                                                                       |
+| --------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Package shows **Quarantined**     | Pinned snapshot or registry drifted                                   | Fix the registry (restore or bump version); the next listing re-assesses       |
+| **Update Needs Review**           | New version expands permissions                                       | Owner reviews the diff and accepts (or leaves the pinned version serving)      |
+| **Unavailable** health            | MCP server unreachable or no longer advertises a pinned tool          | Check the endpoint env var, server health, or ship a corrected package version |
+| **Not Connected**                 | Required native/MCP env var unset or OAuth account missing            | Configure the env var or connect the account                                   |
+| Tool denied at runtime            | Grant, enablement, sandbox, or install state changed since the prompt | Working as intended — re-authorization is immediate-pre-execution              |
+| Interrupted write shows "unknown" | Non-verifiable tool crashed mid-call                                  | Intentional: verify manually with the provider; it is never replayed           |
