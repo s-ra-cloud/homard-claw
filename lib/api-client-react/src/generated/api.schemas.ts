@@ -1003,6 +1003,11 @@ export interface AgentDelegationProposal {
   note: string;
 }
 
+export interface AgentDelegationTarget {
+  targetAgentId: string;
+  targetAgentName: string;
+}
+
 export type TaskTreeNodeStatus = typeof TaskTreeNodeStatus[keyof typeof TaskTreeNodeStatus];
 
 
@@ -1154,6 +1159,8 @@ export interface ConverseInput {
      * @maxLength 64
      */
   clientMessageId?: string;
+  /** Teammate selected by an earlier clarification turn. This carries conversational intent only; the server revalidates team and sandbox permissions before proposing or creating work. */
+  pendingDelegationTargetId?: string;
   /** @maxItems 20 */
   history?: ConverseTurn[];
   /** @maxItems 4 */
@@ -1165,6 +1172,7 @@ export interface ConverseResponse {
   /** @nullable */
   proposedTaskObjective: string | null;
   proposedDelegation: AgentDelegationProposal | null;
+  pendingDelegation: AgentDelegationTarget | null;
   /**
      * OpenAI voice id the agent speaks with; null = text only
      * @nullable
@@ -1177,6 +1185,8 @@ export interface VoiceConverseInput {
   audio: string;
   /** @maxItems 20 */
   history?: ConverseTurn[];
+  /** Teammate selected by an earlier clarification turn. Authority is revalidated by the server. */
+  pendingDelegationTargetId?: string;
 }
 
 export interface TranscribeAudioInput {

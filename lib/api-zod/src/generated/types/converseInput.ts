@@ -19,6 +19,8 @@ export interface ConverseInput {
      * @maxLength 64
      */
   clientMessageId?: string;
+  /** Teammate selected by an earlier clarification turn. This carries conversational intent only; the server revalidates team and sandbox permissions before proposing or creating work. */
+  pendingDelegationTargetId?: string;
   /** @maxItems 20 */
   history?: ConverseTurn[];
   /** @maxItems 4 */

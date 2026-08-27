@@ -2084,6 +2084,12 @@ components:
         targetAgentName: { type: string }
         objective: { type: string }
         note: { type: string }
+    AgentDelegationTarget:
+      type: object
+      required: [targetAgentId, targetAgentName]
+      properties:
+        targetAgentId: { type: string }
+        targetAgentName: { type: string }
     TaskTreeNode:
       type: object
       required: [id, agentId, agentName, objective, status, depth, createdAt]
@@ -2187,6 +2193,12 @@ components:
             Client-generated id for this message. Resending with the same id
             returns the already-generated reply instead of creating a
             duplicate exchange.
+        pendingDelegationTargetId:
+          type: string
+          description: >-
+            Teammate selected by an earlier clarification turn. This carries
+            conversational intent only; the server revalidates team and
+            sandbox permissions before proposing or creating work.
         history:
           type: array
           maxItems: 20
@@ -2199,13 +2211,24 @@ components:
             $ref: "#/components/schemas/InputAttachment"
     ConverseResponse:
       type: object
-      required: [reply, proposedTaskObjective, proposedDelegation, voice]
+      required:
+        [
+          reply,
+          proposedTaskObjective,
+          proposedDelegation,
+          pendingDelegation,
+          voice,
+        ]
       properties:
         reply: { type: string }
         proposedTaskObjective: { type: [string, "null"] }
         proposedDelegation:
           oneOf:
             - $ref: "#/components/schemas/AgentDelegationProposal"
+            - type: "null"
+        pendingDelegation:
+          oneOf:
+            - $ref: "#/components/schemas/AgentDelegationTarget"
             - type: "null"
         voice:
           type: [string, "null"]
@@ -2222,6 +2245,11 @@ components:
           maxItems: 20
           items:
             $ref: "#/components/schemas/ConverseTurn"
+        pendingDelegationTargetId:
+          type: string
+          description: >-
+            Teammate selected by an earlier clarification turn. Authority is
+            revalidated by the server.
     TranscribeAudioInput:
       type: object
       required: [audio]

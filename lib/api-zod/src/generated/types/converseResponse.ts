@@ -6,12 +6,14 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { AgentDelegationProposal } from './agentDelegationProposal';
+import type { AgentDelegationTarget } from './agentDelegationTarget';
 
 export interface ConverseResponse {
   reply: string;
   /** @nullable */
   proposedTaskObjective: string | null;
   proposedDelegation: AgentDelegationProposal | null;
+  pendingDelegation: AgentDelegationTarget | null;
   /**
      * OpenAI voice id the agent speaks with; null = text only
      * @nullable

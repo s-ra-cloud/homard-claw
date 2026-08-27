@@ -316,6 +316,7 @@ type Coworker = {
   name: string;
   title: string;
   canReceiveTask: boolean;
+  sandboxed: boolean;
 };
 
 type AgentRequest = {
@@ -337,18 +338,23 @@ type DelegationProposal = {
   note: string;
 };
 
+type PendingDelegation = {
+  targetAgentId: string;
+  targetAgentName: string;
+};
+
 type GeneratedReply = {
   reply: string;
   taskObjective: string | null;
   proposedDelegation: DelegationProposal | null;
+  pendingDelegation: PendingDelegation | null;
   exchange: AgentExchange | null;
 };
 
-async function availableCoworkers(
+async function coworkerDirectory(
   workspaceId: string,
   source: AgentRow,
 ): Promise<Coworker[]> {
-  if (source.sensitiveDataSandbox) return [];
   const rows = await db
     .select({
       id: agentsTable.id,
@@ -365,23 +371,101 @@ async function availableCoworkers(
         sql`${agentsTable.id} <> ${source.id}`,
       ),
     );
-  const eligible = rows.filter((row) => !row.sensitiveDataSandbox);
-  if (eligible.length === 0) return [];
+  if (rows.length === 0) return [];
   const taskRecipients = await db
     .select({ agentId: teamMembersTable.agentId })
     .from(teamsTable)
     .innerJoin(teamMembersTable, eq(teamMembersTable.teamId, teamsTable.id))
     .where(eq(teamsTable.leadAgentId, source.id));
   const taskRecipientIds = new Set(taskRecipients.map((row) => row.agentId));
-  return eligible.map((row) => ({
+  return rows.map((row) => ({
     id: row.id,
     name: row.name,
     title: row.title,
     canReceiveTask: taskRecipientIds.has(row.id),
+    sandboxed: row.sensitiveDataSandbox,
   }));
 }
 
-function buildSystemPrompt(agent: AgentRow, coworkers: Coworker[]): string {
+function normalizeTalkText(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function mentionedCoworker(
+  text: string,
+  coworkers: Coworker[],
+): Coworker | null {
+  const normalized = ` ${normalizeTalkText(text)} `;
+  return (
+    coworkers
+      .slice()
+      .sort(
+        (left, right) =>
+          normalizeTalkText(right.name).length -
+          normalizeTalkText(left.name).length,
+      )
+      .find((coworker) =>
+        normalized.includes(` ${normalizeTalkText(coworker.name)} `),
+      ) ?? null
+  );
+}
+
+/**
+ * Detect an explicit instruction to give work to a named coworker. This is
+ * intentionally narrow: ordinary questions such as "what is Jean working
+ * on?" must remain messages, while "ask Jean to check..." locks Jean as the
+ * assignee before a model can accidentally turn it into the speaker's task.
+ */
+function requestsTaskForCoworker(text: string, coworker: Coworker): boolean {
+  const normalized = normalizeTalkText(text);
+  const name = normalizeTalkText(coworker.name).replace(/ /g, "\\s+");
+  const action =
+    "do|handle|complete|perform|prepare|write|create|review|research|investigate|check|send|make|build|run|test";
+  return (
+    new RegExp(
+      `\\b(?:ask|tell|have|assign)\\s+${name}\\s+(?:to\\s+)?(?:${action})\\b`,
+    ).test(normalized) ||
+    new RegExp(`\\b(?:give|assign)\\s+${name}\\s+(?:a\\s+)?task\\b`).test(
+      normalized,
+    ) ||
+    new RegExp(`\\bdelegate\\b.+\\bto\\s+${name}\\b`).test(normalized) ||
+    new RegExp(
+      `\\b${name}\\s+(?:should|must|can|needs?\\s+to)\\s+(?:${action})\\b`,
+    ).test(normalized)
+  );
+}
+
+function vagueDelegationObjective(
+  objective: string,
+  target: Coworker,
+): boolean {
+  let normalized = normalizeTalkText(objective);
+  const targetName = normalizeTalkText(target.name);
+  normalized = normalized
+    .replace(targetName, " ")
+    .replace(/\b(?:please|ask|tell|have|assign|delegate|to)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return /^(?:a |the )?(?:task|test task|something|anything|do a task|do something)$/.test(
+    normalized,
+  );
+}
+
+function pendingDelegationFor(target: Coworker): PendingDelegation {
+  return { targetAgentId: target.id, targetAgentName: target.name };
+}
+
+function buildSystemPrompt(
+  agent: AgentRow,
+  coworkers: Coworker[],
+  pendingTarget: Coworker | null,
+): string {
   const traits = [
     agent.title ? `Your job title is "${agent.title}".` : "",
     agent.personality ? `Personality: ${agent.personality}.` : "",
@@ -394,7 +478,7 @@ function buildSystemPrompt(agent: AgentRow, coworkers: Coworker[]): string {
     `You are ${agent.name}, a lobster agent working in the HomardClaw office. ${traits}`,
     "You are having a short live conversation with your owner (the Director).",
     "Reply in character, warmly and concisely: one to three short sentences, plain spoken language, no markdown, no lists, no emojis.",
-    "You CANNOT start work from a conversation. If the owner asks you to actually do something, describe a single clear task objective in the taskObjective field. The task is only queued after the owner explicitly confirms it, and it still goes through the office's normal approval policy — never claim work has started.",
+    "You CANNOT start work from a conversation. Use taskObjective only when the owner wants YOU personally to do the work. Never put an assignment for a coworker in taskObjective. A task is only queued after the owner explicitly confirms it, and it still goes through the office's normal approval policy — never claim work has started.",
     agent.sensitiveDataSandbox
       ? "You are in the sensitive data sandbox. You cannot send messages or tasks to another agent and cannot receive them. Always leave agentRequest null."
       : coworkers.length > 0
@@ -407,8 +491,13 @@ function buildSystemPrompt(agent: AgentRow, coworkers: Coworker[]): string {
         : "No coworker is currently available. Always leave agentRequest null.",
     "For a question or message to a coworker, set agentRequest to {targetAgentId, kind:'question' or 'message', content}. The office will deliver it and show you the answer before you reply to the owner.",
     "For work that a task-eligible coworker should perform, use kind:'task'. It will only be queued after the owner confirms it. Never claim it was already sent or started.",
+    pendingTarget
+      ? `A task hand-off to ${pendingTarget.name} is already pending from the previous turn. Keep targetAgentId=${pendingTarget.id}. If the owner has now supplied a concrete objective, return agentRequest kind='task' for that exact target. If details are still missing, ask one concise clarifying question and leave both taskObjective and agentRequest null. Never turn this hand-off into your own task.`
+      : "",
     'Respond with STRICT JSON exactly like {"reply":"...","taskObjective":null,"agentRequest":null} or include one agentRequest object. Use either taskObjective or agentRequest, never both.',
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function buildPrompt(
@@ -589,6 +678,7 @@ async function generateReply(
   userText: string,
   history: ConverseTurn[],
   signal: AbortSignal,
+  pendingDelegationTargetId?: string,
   attachments: Array<{
     name: string;
     mimeType: string;
@@ -596,22 +686,173 @@ async function generateReply(
     content: string;
   }> = [],
 ): Promise<GeneratedReply> {
-  const coworkers = await availableCoworkers(workspaceId, agent);
+  const directory = await coworkerDirectory(workspaceId, agent);
+  const coworkers = agent.sensitiveDataSandbox
+    ? []
+    : directory.filter((coworker) => !coworker.sandboxed);
+  const carriedTarget = pendingDelegationTargetId
+    ? (directory.find(
+        (coworker) => coworker.id === pendingDelegationTargetId,
+      ) ?? null)
+    : null;
+  const namedTarget = mentionedCoworker(userText, directory);
+  const explicitTaskTarget =
+    namedTarget && requestsTaskForCoworker(userText, namedTarget)
+      ? namedTarget
+      : null;
+  const lockedTarget = carriedTarget ?? explicitTaskTarget;
+
+  // A carried target is intent state, not authority. Reject it before any
+  // provider call if permissions or sandbox boundaries no longer allow the
+  // hand-off; never fall back to creating work for the speaking agent.
+  if (pendingDelegationTargetId && !carriedTarget) {
+    return {
+      reply:
+        "I can't continue that hand-off because the intended agent is no longer available.",
+      taskObjective: null,
+      proposedDelegation: null,
+      pendingDelegation: null,
+      exchange: null,
+    };
+  }
+  if (lockedTarget && agent.sensitiveDataSandbox) {
+    return {
+      reply:
+        "I can't contact or assign another agent while I'm in the sensitive data sandbox.",
+      taskObjective: null,
+      proposedDelegation: null,
+      pendingDelegation: null,
+      exchange: null,
+    };
+  }
+  if (lockedTarget?.sandboxed) {
+    return {
+      reply: `${lockedTarget.name} is in the sensitive data sandbox and cannot receive messages or tasks from another agent.`,
+      taskObjective: null,
+      proposedDelegation: null,
+      pendingDelegation: null,
+      exchange: null,
+    };
+  }
+  if (lockedTarget && !lockedTarget.canReceiveTask) {
+    return {
+      reply: `I can message ${lockedTarget.name}, but I can't assign them a task because they are not in a team I lead. I won't run it as my own task instead.`,
+      taskObjective: null,
+      proposedDelegation: null,
+      pendingDelegation: null,
+      exchange: null,
+    };
+  }
+
   const first = parseModelReply(
     await callTalkAgent(
       workspaceId,
       agent,
-      buildSystemPrompt(agent, coworkers),
+      buildSystemPrompt(agent, coworkers, lockedTarget),
       buildPrompt(history, userText, agent.name),
       signal,
       attachments,
     ),
   );
+
+  const requestedTarget =
+    first.agentRequest?.kind === "task"
+      ? (directory.find(
+          (coworker) => coworker.id === first.agentRequest!.targetAgentId,
+        ) ?? null)
+      : null;
+  const namedObjectiveTarget = first.taskObjective
+    ? mentionedCoworker(first.taskObjective, directory)
+    : null;
+  const objectiveTarget =
+    first.taskObjective &&
+    namedObjectiveTarget &&
+    requestsTaskForCoworker(first.taskObjective, namedObjectiveTarget)
+      ? namedObjectiveTarget
+      : null;
+  // A target locked by an earlier clarification always wins. Model output
+  // may fill the objective, but it cannot silently switch the assignee.
+  const taskTarget = lockedTarget ?? requestedTarget ?? objectiveTarget;
+  const delegatedObjective =
+    first.agentRequest?.kind === "task"
+      ? first.agentRequest.content
+      : taskTarget
+        ? first.taskObjective
+        : null;
+
+  if (first.agentRequest?.kind === "task" && !requestedTarget) {
+    return {
+      reply:
+        "I couldn't identify that teammate, so I did not create a task for anyone.",
+      taskObjective: null,
+      proposedDelegation: null,
+      pendingDelegation: null,
+      exchange: null,
+    };
+  }
+  if (taskTarget) {
+    if (agent.sensitiveDataSandbox) {
+      return {
+        reply:
+          "I can't contact or assign another agent while I'm in the sensitive data sandbox.",
+        taskObjective: null,
+        proposedDelegation: null,
+        pendingDelegation: null,
+        exchange: null,
+      };
+    }
+    if (taskTarget.sandboxed) {
+      return {
+        reply: `${taskTarget.name} is in the sensitive data sandbox and cannot receive messages or tasks from another agent.`,
+        taskObjective: null,
+        proposedDelegation: null,
+        pendingDelegation: null,
+        exchange: null,
+      };
+    }
+    if (!taskTarget.canReceiveTask) {
+      return {
+        reply: `I can message ${taskTarget.name}, but I can't assign them a task because they are not in a team I lead. I won't run it as my own task instead.`,
+        taskObjective: null,
+        proposedDelegation: null,
+        pendingDelegation: null,
+        exchange: null,
+      };
+    }
+    if (
+      delegatedObjective &&
+      !vagueDelegationObjective(delegatedObjective, taskTarget)
+    ) {
+      return {
+        reply: first.reply,
+        taskObjective: null,
+        proposedDelegation: {
+          targetAgentId: taskTarget.id,
+          targetAgentName: taskTarget.name,
+          objective: delegatedObjective,
+          note: `Requested by ${agent.name} during a Talk conversation.`,
+        },
+        pendingDelegation: null,
+        exchange: null,
+      };
+    }
+    return {
+      reply: first.reply.endsWith("?")
+        ? first.reply
+        : `${first.reply} What task should ${taskTarget.name} handle?`,
+      taskObjective: null,
+      proposedDelegation: null,
+      pendingDelegation: pendingDelegationFor(taskTarget),
+      exchange: null,
+    };
+  }
+
   if (!first.agentRequest) {
     return {
       reply: first.reply,
       taskObjective: first.taskObjective,
       proposedDelegation: null,
+      pendingDelegation: null,
       exchange: null,
     };
   }
@@ -621,6 +862,7 @@ async function generateReply(
         "I can't contact another agent while I'm in the sensitive data sandbox.",
       taskObjective: null,
       proposedDelegation: null,
+      pendingDelegation: null,
       exchange: null,
     };
   }
@@ -633,6 +875,7 @@ async function generateReply(
         "I couldn't contact that agent. They may be unavailable or isolated in the sensitive data sandbox.",
       taskObjective: null,
       proposedDelegation: null,
+      pendingDelegation: null,
       exchange: null,
     };
   }
@@ -654,27 +897,10 @@ async function generateReply(
       reply: `${coworker.name} is not available for agent messages right now.`,
       taskObjective: null,
       proposedDelegation: null,
+      pendingDelegation: null,
       exchange: null,
     };
   }
-  if (first.agentRequest.kind === "task") {
-    return {
-      reply: coworker.canReceiveTask
-        ? first.reply
-        : `I can message ${target.name}, but I can't assign them a task because they are not in a team I lead.`,
-      taskObjective: null,
-      proposedDelegation: coworker.canReceiveTask
-        ? {
-            targetAgentId: target.id,
-            targetAgentName: target.name,
-            objective: first.agentRequest.content,
-            note: `Requested by ${agent.name} during a Talk conversation.`,
-          }
-        : null,
-      exchange: null,
-    };
-  }
-
   const targetReply = (
     await callTalkAgent(
       workspaceId,
@@ -718,6 +944,7 @@ async function generateReply(
     reply: reply || `I asked ${target.name}. They answered: ${targetReply}`,
     taskObjective: null,
     proposedDelegation: null,
+    pendingDelegation: null,
     exchange: {
       target,
       sent: first.agentRequest.content,
@@ -1207,13 +1434,21 @@ router.post(
         parsed.data.text,
         history,
         controller.signal,
+        parsed.data.pendingDelegationTargetId,
         parsed.data.attachments,
       );
-      const { reply, taskObjective, proposedDelegation, exchange } = generated;
+      const {
+        reply,
+        taskObjective,
+        proposedDelegation,
+        pendingDelegation,
+        exchange,
+      } = generated;
       const payload = {
         reply,
         proposedTaskObjective: taskObjective,
         proposedDelegation,
+        pendingDelegation,
         voice: agentVoice(agent),
       };
       if (claimId) {
@@ -1418,17 +1653,24 @@ router.post(
       let reply: string;
       let taskObjective: string | null;
       let proposedDelegation: DelegationProposal | null;
+      let pendingDelegation: PendingDelegation | null;
       let exchange: AgentExchange | null;
       try {
         const history = (parsed.data.history ?? []) as ConverseTurn[];
-        ({ reply, taskObjective, proposedDelegation, exchange } =
-          await generateReply(
-            req.workspaceId!,
-            agent,
-            userText,
-            history,
-            controller.signal,
-          ));
+        ({
+          reply,
+          taskObjective,
+          proposedDelegation,
+          pendingDelegation,
+          exchange,
+        } = await generateReply(
+          req.workspaceId!,
+          agent,
+          userText,
+          history,
+          controller.signal,
+          parsed.data.pendingDelegationTargetId,
+        ));
       } catch (err) {
         logTalkFailure(agent.id, "voice", err);
         sseWrite(res, {
@@ -1445,6 +1687,7 @@ router.post(
         text: reply,
         proposedTaskObjective: taskObjective,
         proposedDelegation,
+        pendingDelegation,
         voice,
       });
 

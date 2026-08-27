@@ -12,4 +12,6 @@ export interface VoiceConverseInput {
   audio: string;
   /** @maxItems 20 */
   history?: ConverseTurn[];
+  /** Teammate selected by an earlier clarification turn. Authority is revalidated by the server. */
+  pendingDelegationTargetId?: string;
 }

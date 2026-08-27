@@ -18,6 +18,7 @@ import {
 import type {
   Agent,
   AgentDelegationProposal,
+  AgentDelegationTarget,
   InputAttachment,
 } from "@workspace/api-client-react";
 import {
@@ -209,6 +210,8 @@ export function CallView({
   const [proposedTask, setProposedTask] = useState<string | null>(null);
   const [proposedDelegation, setProposedDelegation] =
     useState<AgentDelegationProposal | null>(null);
+  const [pendingDelegation, setPendingDelegation] =
+    useState<AgentDelegationTarget | null>(null);
   const [liveTranscript, setLiveTranscript] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
@@ -220,6 +223,8 @@ export function CallView({
   proposedRef.current = proposedTask;
   const proposedDelegationRef = useRef<AgentDelegationProposal | null>(null);
   proposedDelegationRef.current = proposedDelegation;
+  const pendingDelegationRef = useRef<AgentDelegationTarget | null>(null);
+  pendingDelegationRef.current = pendingDelegation;
   // Bumped on unmount (i.e. contact switch / hang up) so late replies from a
   // previous conversation can never leak into the current one.
   const epochRef = useRef(0);
@@ -249,7 +254,14 @@ export function CallView({
     transcriptRef.current?.scrollTo({
       top: transcriptRef.current.scrollHeight,
     });
-  }, [turns, proposedTask, proposedDelegation, liveTranscript, phase]);
+  }, [
+    turns,
+    proposedTask,
+    proposedDelegation,
+    pendingDelegation,
+    liveTranscript,
+    phase,
+  ]);
 
   // Keys for optimistic turns; hydrated turns use server ids. User turns'
   // keys double as the converse idempotency id, so they must be unique
@@ -434,6 +446,7 @@ export function CallView({
       onSuccess: () => {
         const proposal = proposedDelegationRef.current;
         setProposedDelegation(null);
+        setPendingDelegation(null);
         void queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
         void queryClient.invalidateQueries({ queryKey: ["/api/messages"] });
         appendTurn({
@@ -476,17 +489,30 @@ export function CallView({
     (utterance: string): boolean => {
       const objective = proposedRef.current;
       const delegation = proposedDelegationRef.current;
-      if (!objective && !delegation) return false;
+      const pending = pendingDelegationRef.current;
+      if (!objective && !delegation && !pending) return false;
       const intent = confirmationIntent(utterance);
       if (intent === "confirm") {
         if (delegation) queueProposedDelegation(delegation);
         else if (objective) queueProposedTask(objective);
+        else if (pending) {
+          appendTurn({
+            role: "agent",
+            text: `Tell me what task ${pending.targetAgentName} should handle first.`,
+          });
+        }
         return true;
       }
       if (intent === "cancel") {
         setProposedTask(null);
         setProposedDelegation(null);
-        appendTurn({ role: "agent", text: "Okay, I won't queue that task." });
+        setPendingDelegation(null);
+        appendTurn({
+          role: "agent",
+          text: pending
+            ? `Okay, I cancelled the hand-off to ${pending.targetAgentName}.`
+            : "Okay, I won't queue that task.",
+        });
         return true;
       }
       return false;
@@ -513,6 +539,7 @@ export function CallView({
         setTurns([]);
         setProposedTask(null);
         setProposedDelegation(null);
+        setPendingDelegation(null);
         setFlowError(null);
         queryClient.invalidateQueries({
           queryKey: getGetTalkHistoryQueryKey(agentId),
@@ -555,6 +582,12 @@ export function CallView({
             text,
             history: contextTurns(),
             clientMessageId: turnKey,
+            ...(pendingDelegationRef.current
+              ? {
+                  pendingDelegationTargetId:
+                    pendingDelegationRef.current.targetAgentId,
+                }
+              : {}),
             ...(turnAttachments.length ? { attachments: turnAttachments } : {}),
           },
         })
@@ -563,6 +596,7 @@ export function CallView({
           appendTurn({ role: "agent", text: data.reply });
           setProposedTask(data.proposedTaskObjective ?? null);
           setProposedDelegation(data.proposedDelegation ?? null);
+          setPendingDelegation(data.pendingDelegation ?? null);
           setPhase("idle");
         })
         .catch((err) => {
@@ -686,7 +720,16 @@ export function CallView({
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ audio, history: contextTurns() }),
+          body: JSON.stringify({
+            audio,
+            history: contextTurns(),
+            ...(pendingDelegationRef.current
+              ? {
+                  pendingDelegationTargetId:
+                    pendingDelegationRef.current.targetAgentId,
+                }
+              : {}),
+          }),
           signal: controller.signal,
         },
       );
@@ -739,6 +782,12 @@ export function CallView({
                 event.proposedDelegation &&
                   typeof event.proposedDelegation === "object"
                   ? (event.proposedDelegation as AgentDelegationProposal)
+                  : null,
+              );
+              setPendingDelegation(
+                event.pendingDelegation &&
+                  typeof event.pendingDelegation === "object"
+                  ? (event.pendingDelegation as AgentDelegationTarget)
                   : null,
               );
               expectAudio = event.voice != null;
@@ -991,6 +1040,31 @@ export function CallView({
         )}
       </div>
 
+      {pendingDelegation && !proposedDelegation && (
+        <div className="shrink-0 border-t-4 border-border p-3 bg-accent/10 flex items-center gap-3">
+          <Network
+            className="w-4 h-4 shrink-0 text-accent"
+            aria-hidden="true"
+          />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-mono uppercase text-accent">
+              Hand-off locked to {pendingDelegation.targetAgentName}
+            </p>
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Describe the task. It cannot be reassigned to {agent.name}; say
+              “cancel” to stop this hand-off.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setPendingDelegation(null)}
+          >
+            Cancel
+          </Button>
+        </div>
+      )}
+
       {proposedTask && (
         <div className="shrink-0 border-t-4 border-border p-4 bg-accent/10 space-y-2">
           <p className="text-xs font-mono uppercase text-accent flex items-center gap-2">
@@ -1044,7 +1118,10 @@ export function CallView({
             <Button
               size="sm"
               variant="outline"
-              onClick={() => setProposedDelegation(null)}
+              onClick={() => {
+                setProposedDelegation(null);
+                setPendingDelegation(null);
+              }}
             >
               <X className="w-3 h-3 mr-1" aria-hidden="true" /> Dismiss
             </Button>

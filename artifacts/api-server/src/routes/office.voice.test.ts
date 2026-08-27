@@ -609,6 +609,99 @@ describe("text conversations", () => {
     ).toHaveLength(0);
   });
 
+  it("keeps the intended teammate across a clarification turn and never falls back to a self-task", async () => {
+    const source = await createAgent(`${RUN_TAG} Clarifying Lead`);
+    const target = await createAgent(`${RUN_TAG} Jean-Pierre`);
+    const [team] = await db
+      .insert(teamsTable)
+      .values({
+        workspaceId: wsId,
+        name: `${RUN_TAG} Clarification Team`,
+        leadAgentId: source.id,
+      })
+      .returning();
+    createdTeamIds.push(team.id);
+    await db.insert(teamMembersTable).values([
+      { teamId: team.id, agentId: source.id },
+      { teamId: team.id, agentId: target.id },
+    ]);
+
+    const firstProvider = mockTalkOutputs([
+      JSON.stringify({
+        reply: `Certainly. What task would you like ${target.name} to handle?`,
+        taskObjective: null,
+        agentRequest: null,
+      }),
+    ]);
+    const openingText = `Ask ${target.name} to do a task.`;
+    const first = await request(app)
+      .post(`/api/agents/${source.id}/converse`)
+      .send({ text: openingText });
+    expect(first.status).toBe(200);
+    expect(first.body).toMatchObject({
+      proposedTaskObjective: null,
+      proposedDelegation: null,
+      pendingDelegation: {
+        targetAgentId: target.id,
+        targetAgentName: target.name,
+      },
+    });
+    expect(firstProvider.calls()).toBe(1);
+
+    // Reproduce the screenshot's failure: the model incorrectly emits the
+    // follow-up as a normal taskObjective. The server must convert it to the
+    // locked Jean-Pierre hand-off, never a task for the speaking lead.
+    const secondProvider = mockTalkOutputs([
+      JSON.stringify({
+        reply: `I can queue ${target.name} once you confirm.`,
+        taskObjective: `Have ${target.name} send the Director a brief confirmation that he is available.`,
+        agentRequest: null,
+      }),
+    ]);
+    const second = await request(app)
+      .post(`/api/agents/${source.id}/converse`)
+      .send({
+        text: "Any one, it is a test.",
+        pendingDelegationTargetId: target.id,
+        history: [
+          { role: "user", text: openingText },
+          { role: "agent", text: first.body.reply },
+        ],
+      });
+    expect(second.status).toBe(200);
+    expect(second.body.proposedTaskObjective).toBeNull();
+    expect(second.body.pendingDelegation).toBeNull();
+    expect(second.body.proposedDelegation).toMatchObject({
+      targetAgentId: target.id,
+      targetAgentName: target.name,
+      objective: `Have ${target.name} send the Director a brief confirmation that he is available.`,
+    });
+    expect(secondProvider.calls()).toBe(1);
+  });
+
+  it("refuses an unauthorized teammate assignment instead of running it itself", async () => {
+    const source = await createAgent(`${RUN_TAG} Nonlead Source`);
+    const target = await createAgent(`${RUN_TAG} Outside Target`);
+    const mocked = mockTalkOutputs([
+      JSON.stringify({
+        reply: "I will do it myself.",
+        taskObjective: `Ask ${target.name} to prepare the report.`,
+        agentRequest: null,
+      }),
+    ]);
+
+    const response = await request(app)
+      .post(`/api/agents/${source.id}/converse`)
+      .send({ text: `Ask ${target.name} to prepare the report.` });
+    expect(response.status).toBe(200);
+    expect(response.body.reply).toMatch(/not in a team i lead/i);
+    expect(response.body.proposedTaskObjective).toBeNull();
+    expect(response.body.proposedDelegation).toBeNull();
+    expect(response.body.pendingDelegation).toBeNull();
+    // The deterministic permission guard runs before spending a model call.
+    expect(mocked.calls()).toBe(0);
+  });
+
   it("blocks outbound communication from a sandboxed agent", async () => {
     const source = await createAgent(`${RUN_TAG} Sandboxed Source`, {
       sensitiveDataSandbox: true,

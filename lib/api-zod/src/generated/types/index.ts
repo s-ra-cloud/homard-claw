@@ -10,6 +10,7 @@ export * from './agent';
 export * from './agentAutonomy';
 export * from './agentCodexReasoning';
 export * from './agentDelegationProposal';
+export * from './agentDelegationTarget';
 export * from './agentDetail';
 export * from './agentInput';
 export * from './agentInputAutonomy';

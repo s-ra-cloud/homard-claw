@@ -1772,6 +1772,7 @@ export const converseWithAgentBodyAttachmentsMax = 4;
 export const ConverseWithAgentBody = zod.object({
   "text": zod.string().min(1).max(converseWithAgentBodyTextMax),
   "clientMessageId": zod.string().max(converseWithAgentBodyClientMessageIdMax).optional().describe('Client-generated id for this message. Resending with the same id returns the already-generated reply instead of creating a duplicate exchange.'),
+  "pendingDelegationTargetId": zod.string().optional().describe('Teammate selected by an earlier clarification turn. This carries conversational intent only; the server revalidates team and sandbox permissions before proposing or creating work.'),
   "history": zod.array(zod.object({
   "role": zod.enum(['user', 'agent']),
   "text": zod.string().max(converseWithAgentBodyHistoryItemTextMax)
@@ -1792,6 +1793,10 @@ export const ConverseWithAgentResponse = zod.object({
   "targetAgentName": zod.string(),
   "objective": zod.string(),
   "note": zod.string()
+}),zod.null()]),
+  "pendingDelegation": zod.union([zod.object({
+  "targetAgentId": zod.string(),
+  "targetAgentName": zod.string()
 }),zod.null()]),
   "voice": zod.string().nullable().describe('OpenAI voice id the agent speaks with; null = text only')
 })
@@ -1815,7 +1820,8 @@ export const VoiceConverseWithAgentBody = zod.object({
   "history": zod.array(zod.object({
   "role": zod.enum(['user', 'agent']),
   "text": zod.string().max(voiceConverseWithAgentBodyHistoryItemTextMax)
-})).max(voiceConverseWithAgentBodyHistoryMax).optional()
+})).max(voiceConverseWithAgentBodyHistoryMax).optional(),
+  "pendingDelegationTargetId": zod.string().optional().describe('Teammate selected by an earlier clarification turn. Authority is revalidated by the server.')
 })
 
 export const VoiceConverseWithAgentResponse = zod.unknown()
