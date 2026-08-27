@@ -13,6 +13,7 @@ import {
   agentMessagesTable,
   agentsTable,
   db,
+  memoriesTable,
   pool,
   systemStateTable,
   tasksTable,
@@ -20,7 +21,7 @@ import {
   teamsTable,
   workspacesTable,
 } from "@workspace/db";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, like } from "drizzle-orm";
 
 const authState = vi.hoisted(() => ({ userId: "hc-test-owner" }));
 
@@ -200,6 +201,9 @@ afterAll(async () => {
     await db
       .delete(tasksTable)
       .where(inArray(tasksTable.agentId, createdAgentIds));
+    await db
+      .delete(memoriesTable)
+      .where(like(memoriesTable.content, `%${RUN_TAG}%`));
   }
   if (createdTeamIds.length > 0) {
     await db.delete(teamsTable).where(inArray(teamsTable.id, createdTeamIds));
@@ -294,6 +298,37 @@ describe("delegation authorization", () => {
 
   it("queues an owner-confirmed Talk hand-off and records it in Inbox", async () => {
     const { lead, worker, team } = await buildTeam("TalkRelay");
+    const [handoffMemory] = await db
+      .insert(memoriesTable)
+      .values({
+        agentId: lead.id,
+        workspaceId: wsId,
+        kind: "context",
+        content: `${RUN_TAG} alert logs use correlation code BLUE-LANTERN-47.`,
+      })
+      .returning();
+    await db.insert(memoriesTable).values([
+      {
+        agentId: lead.id,
+        workspaceId: wsId,
+        kind: "context",
+        content: `${RUN_TAG} BLUE-LANTERN-47 disabled private secret.`,
+        disabled: true,
+      },
+      {
+        agentId: null,
+        workspaceId: wsId,
+        kind: "context",
+        content: `${RUN_TAG} BLUE-LANTERN-47 shared office context.`,
+      },
+      {
+        agentId: lead.id,
+        workspaceId: wsId,
+        kind: "context",
+        content: `${RUN_TAG} unrelated pinned breakfast preference.`,
+        pinned: true,
+      },
+    ]);
     const priorSetting = await request(app).get("/api/voice/status");
     expect(priorSetting.status).toBe(200);
     const setting = await request(app)
@@ -324,6 +359,23 @@ describe("delegation authorization", () => {
         teamId: team.id,
         delegatedByAgentId: lead.id,
       });
+      expect(task.handoffContext).toContain("BLUE-LANTERN-47");
+      expect(task.handoffContext).toContain(
+        "Please check the latest logs and report back.",
+      );
+      expect(task.handoffSources).toEqual([
+        expect.objectContaining({
+          id: handoffMemory!.id,
+          label: "H1",
+          sourceAgentId: lead.id,
+          sourceAgentName: lead.name,
+        }),
+      ]);
+      expect(task.handoffContext).not.toContain("disabled private secret");
+      expect(task.handoffContext).not.toContain("shared office context");
+      expect(task.handoffContext).not.toContain("breakfast preference");
+      expect(res.body.handoffContext).toBeUndefined();
+      expect(res.body.handoffSources).toEqual(task.handoffSources);
       const messages = await request(app)
         .get("/api/messages")
         .query({ taskId: res.body.id });
@@ -609,12 +661,18 @@ describe("delegation authorization", () => {
 
   it("reports the delegated result back to the lead when the sub-task finishes", async () => {
     const { lead, worker, team } = await buildTeam("Lima");
+    await db.insert(memoriesTable).values({
+      agentId: lead.id,
+      workspaceId: wsId,
+      kind: "decision",
+      content: `${RUN_TAG} PLATYPUS-92 summaries must lead with the launch metric.`,
+    });
     const parent = await insertTask(lead.id, { teamId: team.id });
     const child = await request(app)
       .post(`/api/tasks/${parent.id}/delegate`)
       .send({
         agentId: worker.id,
-        objective: `${RUN_TAG} summarize it`,
+        objective: `${RUN_TAG} summarize PLATYPUS-92`,
         budgetCents: 10,
       });
     expect(child.status).toBe(201);
@@ -636,6 +694,58 @@ describe("delegation authorization", () => {
       toAgentName: lead.name,
     });
     expect(result.body).toContain("The summary is ready.");
+
+    const providerMessages = lastCompletionBody.messages as Array<{
+      role: string;
+      content: string;
+    }>;
+    const system = providerMessages.find(
+      (message) => message.role === "system",
+    );
+    expect(system?.content).toContain("PLATYPUS-92 summaries");
+    expect(system?.content).toContain("[H1]");
+  });
+
+  it("withholds an existing handoff if the target enters the sandbox before execution", async () => {
+    const { lead, worker, team } = await buildTeam("HandoffSandbox");
+    await db.insert(memoriesTable).values({
+      agentId: lead.id,
+      workspaceId: wsId,
+      kind: "context",
+      content: `${RUN_TAG} NARWHAL-81 private launch code.`,
+    });
+    const parent = await insertTask(lead.id, { teamId: team.id });
+    const child = await request(app)
+      .post(`/api/tasks/${parent.id}/delegate`)
+      .send({
+        agentId: worker.id,
+        objective: `${RUN_TAG} inspect NARWHAL-81`,
+        budgetCents: 10,
+      });
+    expect(child.status).toBe(201);
+    expect((await getTaskRow(child.body.id)).handoffContext).toContain(
+      "NARWHAL-81 private launch code",
+    );
+
+    const patched = await request(app)
+      .patch(`/api/agents/${worker.id}`)
+      .send({ sensitiveDataSandbox: true });
+    expect(patched.status).toBe(200);
+
+    mockOpenRouterSuccess("Handled without cross-agent context.");
+    const claimed = await claimNextTask(scopeFor(worker.id));
+    expect(claimed?.task.id).toBe(child.body.id);
+    await runTask(claimed!);
+
+    const providerMessages = lastCompletionBody.messages as Array<{
+      role: string;
+      content: string;
+    }>;
+    const system = providerMessages.find(
+      (message) => message.role === "system",
+    );
+    expect(system?.content).not.toContain("NARWHAL-81 private launch code");
+    expect((await getTaskRow(child.body.id)).status).toBe("completed");
   });
 });
 

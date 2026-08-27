@@ -33,6 +33,7 @@ import {
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { recordAudit } from "../audit";
+import { buildDelegationHandoff } from "../memory-context";
 import { evaluateDelegation, evaluateTalkDelegation } from "../policy";
 import { resolveRouting } from "../providers";
 import { publish } from "../events";
@@ -126,6 +127,13 @@ router.post(
       if (!target) {
         return { status: 404 as const, error: "Target agent not found." };
       }
+      const handoff = await buildDelegationHandoff({
+        tx,
+        sourceAgent: source,
+        workspaceId: req.workspaceId!,
+        objective: body.data.objective,
+        note: body.data.note,
+      });
       const [task] = await tx
         .insert(tasksTable)
         .values({
@@ -141,6 +149,8 @@ router.post(
           delegatedByAgentId: source.id,
           talkMode: true,
           talkAutoApprove,
+          handoffContext: handoff.promptSection,
+          handoffSources: handoff.sources,
           status: "queued",
         })
         .returning();
@@ -374,11 +384,9 @@ router.patch("/teams/:teamId", async (req: Request, res: Response) => {
       )
       .limit(1);
     if (!member) {
-      res
-        .status(409)
-        .json({
-          error: "Add that agent to the team before making it the lead",
-        });
+      res.status(409).json({
+        error: "Add that agent to the team before making it the lead",
+      });
       return;
     }
   }
@@ -575,6 +583,13 @@ router.post("/tasks/:taskId/delegate", async (req: Request, res: Response) => {
       .limit(1);
     if (!target) return { status: 404 as const, error: "Agent not found" };
     const routing = await resolveRouting(req.workspaceId!, target as AgentRow);
+    const handoff = await buildDelegationHandoff({
+      tx,
+      sourceAgent: parent.agent,
+      workspaceId: req.workspaceId!,
+      objective: body.objective,
+      note: body.note,
+    });
 
     const [child] = await tx
       .insert(tasksTable)
@@ -592,6 +607,8 @@ router.post("/tasks/:taskId/delegate", async (req: Request, res: Response) => {
         teamId: decision.teamId,
         delegatedByAgentId: parent.agent.id,
         runtime: parent.task.runtime,
+        handoffContext: handoff.promptSection,
+        handoffSources: handoff.sources,
         status: "queued",
       })
       .returning();

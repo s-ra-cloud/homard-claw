@@ -2013,6 +2013,11 @@ components:
           type: ["array", "null"]
           items:
             $ref: "#/components/schemas/TaskSource"
+        handoffSources:
+          type: array
+          description: Provenance for private memories snapshotted from the delegating agent; raw handoff text remains server-side.
+          items:
+            $ref: "#/components/schemas/TaskSource"
         startedAt: { type: [string, "null"], format: date-time }
         finishedAt: { type: [string, "null"], format: date-time }
         createdAt: { type: string, format: date-time }
@@ -2307,6 +2312,8 @@ components:
         id: { type: string }
         label: { type: string }
         title: { type: string }
+        sourceAgentId: { type: string }
+        sourceAgentName: { type: string }
     TaskFile:
       type: object
       required: [name, content]

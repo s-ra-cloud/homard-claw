@@ -12,4 +12,6 @@ export interface TaskSource {
   id: string;
   label: string;
   title: string;
+  sourceAgentId?: string;
+  sourceAgentName?: string;
 }

@@ -254,8 +254,11 @@ function toTaskJson(
   /** Delegation attribution, when the caller resolved the related names. */
   lineage?: { teamName?: string | null; delegatedByAgentName?: string | null },
 ) {
+  // The handoff text may contain a delegator's private memories. Keep it
+  // server-side; the owner can audit the non-secret source provenance.
+  const { handoffContext: _handoffContext, ...publicTask } = task;
   return {
-    ...task,
+    ...publicTask,
     // Binary inputs stay server-side for the agent; never send multi-megabyte
     // base64 payloads back through every task-list refresh.
     files: task.files.map((file) => ({

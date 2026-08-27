@@ -828,6 +828,57 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     );
   }
 
+  // A handoff is a creation-time snapshot, but its agent-to-agent boundary
+  // remains live: if either side enters the sensitive-data sandbox before
+  // execution, the target never receives it. Missing/deleted source agents
+  // also fail closed rather than turning an orphaned snapshot into context.
+  const delegatorAllowsHandoff = async (): Promise<boolean> => {
+    if (!task.delegatedByAgentId || appAccess.sensitiveDataSandbox)
+      return false;
+    const [delegator] = await db
+      .select({ sensitiveDataSandbox: agentsTable.sensitiveDataSandbox })
+      .from(agentsTable)
+      .where(
+        and(
+          eq(agentsTable.id, task.delegatedByAgentId),
+          eq(agentsTable.workspaceId, workspaceId),
+        ),
+      )
+      .limit(1);
+    return delegator?.sensitiveDataSandbox === false;
+  };
+  let handoffPromptSection: string | null = null;
+  if (task.handoffContext) {
+    try {
+      if (await delegatorAllowsHandoff()) {
+        handoffPromptSection = task.handoffContext;
+        await addTaskLog(
+          task.id,
+          "info",
+          task.handoffSources.length > 0
+            ? `Using a delegation handoff with ${task.handoffSources.length} memory source(s): ${task.handoffSources.map((source) => source.label).join(", ")}.`
+            : "Using the delegating agent's explicit handoff note.",
+        );
+      } else {
+        await addTaskLog(
+          task.id,
+          "info",
+          "The delegation handoff was withheld because the sensitive-data boundary no longer permits agent-to-agent context.",
+        );
+      }
+    } catch (error) {
+      logger.warn(
+        { taskId: task.id, error },
+        "Could not verify handoff access",
+      );
+      await addTaskLog(
+        task.id,
+        "warn",
+        "The delegation handoff was withheld because its access boundary could not be verified.",
+      );
+    }
+  }
+
   // Run anything the owner already approved for this task before the model
   // is consulted again. claimApprovedAction is the exactly-once fence: only
   // one process ever moves a row approved → executing, so an approved email
@@ -986,7 +1037,12 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
   // Rebuilt whenever grants/sandbox state is refreshed mid-run, so every
   // provider round is prompted with the access it actually has.
   const buildSystem = () =>
-    [buildSystemPrompt(agent), context.promptSection, appAccess.promptSection]
+    [
+      buildSystemPrompt(agent),
+      appAccess.sensitiveDataSandbox ? null : handoffPromptSection,
+      context.promptSection,
+      appAccess.promptSection,
+    ]
       .filter(Boolean)
       .join("\n\n");
   let system = buildSystem();
@@ -1551,6 +1607,25 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
             "warn",
             "The sensitive data sandbox was enabled mid-run: drafts and external changes are refused and shared context was withdrawn from this task.",
           );
+        }
+        if (handoffPromptSection) {
+          try {
+            if (!(await delegatorAllowsHandoff())) {
+              handoffPromptSection = null;
+              await addTaskLog(
+                task.id,
+                "warn",
+                "The delegation handoff was withdrawn because a sensitive-data sandbox was enabled.",
+              );
+            }
+          } catch {
+            handoffPromptSection = null;
+            await addTaskLog(
+              task.id,
+              "warn",
+              "The delegation handoff was withdrawn because its access boundary could not be re-verified.",
+            );
+          }
         }
         system = buildSystem();
 

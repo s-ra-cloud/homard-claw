@@ -175,6 +175,9 @@ export type TaskSource = {
   id: string;
   label: string;
   title: string;
+  /** Present when this source was snapshotted from a delegating agent. */
+  sourceAgentId?: string;
+  sourceAgentName?: string;
 };
 
 // Task lifecycle: queued (pending) → running → completed | failed |
@@ -263,6 +266,14 @@ export const tasksTable = pgTable("tasks", {
   // Which memories/knowledge files were injected into the prompt, so the
   // UI can show where the result drew from ([M1]/[F1] citations).
   contextSources: jsonb("context_sources").$type<TaskSource[]>(),
+  // Immutable, bounded context selected from the delegating agent's private
+  // memories when the hand-off is created. The raw prompt stays server-side;
+  // source metadata is exposed separately for owner-visible provenance.
+  handoffContext: text("handoff_context"),
+  handoffSources: jsonb("handoff_sources")
+    .$type<TaskSource[]>()
+    .notNull()
+    .default([]),
   // Earliest time the worker may (re)claim this task; used for rate-limit
   // backoff between attempts.
   notBefore: timestamp("not_before", { withTimezone: true }),

@@ -467,8 +467,18 @@ export const GetAgentResponse = zod.object({
   "type": zod.enum(['memory', 'file']),
   "id": zod.string(),
   "label": zod.string(),
-  "title": zod.string()
+  "title": zod.string(),
+  "sourceAgentId": zod.string().optional(),
+  "sourceAgentName": zod.string().optional()
 })).nullish(),
+  "handoffSources": zod.array(zod.object({
+  "type": zod.enum(['memory', 'file']),
+  "id": zod.string(),
+  "label": zod.string(),
+  "title": zod.string(),
+  "sourceAgentId": zod.string().optional(),
+  "sourceAgentName": zod.string().optional()
+})).optional().describe('Provenance for private memories snapshotted from the delegating agent; raw handoff text remains server-side.'),
   "startedAt": zod.coerce.date().nullish(),
   "finishedAt": zod.coerce.date().nullish(),
   "createdAt": zod.coerce.date()
@@ -858,8 +868,18 @@ export const DelegateFromTalkResponse = zod.object({
   "type": zod.enum(['memory', 'file']),
   "id": zod.string(),
   "label": zod.string(),
-  "title": zod.string()
+  "title": zod.string(),
+  "sourceAgentId": zod.string().optional(),
+  "sourceAgentName": zod.string().optional()
 })).nullish(),
+  "handoffSources": zod.array(zod.object({
+  "type": zod.enum(['memory', 'file']),
+  "id": zod.string(),
+  "label": zod.string(),
+  "title": zod.string(),
+  "sourceAgentId": zod.string().optional(),
+  "sourceAgentName": zod.string().optional()
+})).optional().describe('Provenance for private memories snapshotted from the delegating agent; raw handoff text remains server-side.'),
   "startedAt": zod.coerce.date().nullish(),
   "finishedAt": zod.coerce.date().nullish(),
   "createdAt": zod.coerce.date()
@@ -1179,8 +1199,18 @@ export const ListTasksResponseItem = zod.object({
   "type": zod.enum(['memory', 'file']),
   "id": zod.string(),
   "label": zod.string(),
-  "title": zod.string()
+  "title": zod.string(),
+  "sourceAgentId": zod.string().optional(),
+  "sourceAgentName": zod.string().optional()
 })).nullish(),
+  "handoffSources": zod.array(zod.object({
+  "type": zod.enum(['memory', 'file']),
+  "id": zod.string(),
+  "label": zod.string(),
+  "title": zod.string(),
+  "sourceAgentId": zod.string().optional(),
+  "sourceAgentName": zod.string().optional()
+})).optional().describe('Provenance for private memories snapshotted from the delegating agent; raw handoff text remains server-side.'),
   "startedAt": zod.coerce.date().nullish(),
   "finishedAt": zod.coerce.date().nullish(),
   "createdAt": zod.coerce.date()
@@ -1274,8 +1304,18 @@ export const CreateTaskResponse = zod.object({
   "type": zod.enum(['memory', 'file']),
   "id": zod.string(),
   "label": zod.string(),
-  "title": zod.string()
+  "title": zod.string(),
+  "sourceAgentId": zod.string().optional(),
+  "sourceAgentName": zod.string().optional()
 })).nullish(),
+  "handoffSources": zod.array(zod.object({
+  "type": zod.enum(['memory', 'file']),
+  "id": zod.string(),
+  "label": zod.string(),
+  "title": zod.string(),
+  "sourceAgentId": zod.string().optional(),
+  "sourceAgentName": zod.string().optional()
+})).optional().describe('Provenance for private memories snapshotted from the delegating agent; raw handoff text remains server-side.'),
   "startedAt": zod.coerce.date().nullish(),
   "finishedAt": zod.coerce.date().nullish(),
   "createdAt": zod.coerce.date()
@@ -1650,8 +1690,18 @@ export const DelegateTaskResponse = zod.object({
   "type": zod.enum(['memory', 'file']),
   "id": zod.string(),
   "label": zod.string(),
-  "title": zod.string()
+  "title": zod.string(),
+  "sourceAgentId": zod.string().optional(),
+  "sourceAgentName": zod.string().optional()
 })).nullish(),
+  "handoffSources": zod.array(zod.object({
+  "type": zod.enum(['memory', 'file']),
+  "id": zod.string(),
+  "label": zod.string(),
+  "title": zod.string(),
+  "sourceAgentId": zod.string().optional(),
+  "sourceAgentName": zod.string().optional()
+})).optional().describe('Provenance for private memories snapshotted from the delegating agent; raw handoff text remains server-side.'),
   "startedAt": zod.coerce.date().nullish(),
   "finishedAt": zod.coerce.date().nullish(),
   "createdAt": zod.coerce.date()
@@ -2052,8 +2102,18 @@ export const GetTaskResponse = zod.object({
   "type": zod.enum(['memory', 'file']),
   "id": zod.string(),
   "label": zod.string(),
-  "title": zod.string()
+  "title": zod.string(),
+  "sourceAgentId": zod.string().optional(),
+  "sourceAgentName": zod.string().optional()
 })).nullish(),
+  "handoffSources": zod.array(zod.object({
+  "type": zod.enum(['memory', 'file']),
+  "id": zod.string(),
+  "label": zod.string(),
+  "title": zod.string(),
+  "sourceAgentId": zod.string().optional(),
+  "sourceAgentName": zod.string().optional()
+})).optional().describe('Provenance for private memories snapshotted from the delegating agent; raw handoff text remains server-side.'),
   "startedAt": zod.coerce.date().nullish(),
   "finishedAt": zod.coerce.date().nullish(),
   "createdAt": zod.coerce.date()
@@ -2137,8 +2197,18 @@ export const CancelTaskResponse = zod.object({
   "type": zod.enum(['memory', 'file']),
   "id": zod.string(),
   "label": zod.string(),
-  "title": zod.string()
+  "title": zod.string(),
+  "sourceAgentId": zod.string().optional(),
+  "sourceAgentName": zod.string().optional()
 })).nullish(),
+  "handoffSources": zod.array(zod.object({
+  "type": zod.enum(['memory', 'file']),
+  "id": zod.string(),
+  "label": zod.string(),
+  "title": zod.string(),
+  "sourceAgentId": zod.string().optional(),
+  "sourceAgentName": zod.string().optional()
+})).optional().describe('Provenance for private memories snapshotted from the delegating agent; raw handoff text remains server-side.'),
   "startedAt": zod.coerce.date().nullish(),
   "finishedAt": zod.coerce.date().nullish(),
   "createdAt": zod.coerce.date()
@@ -2199,8 +2269,18 @@ export const RetryTaskResponse = zod.object({
   "type": zod.enum(['memory', 'file']),
   "id": zod.string(),
   "label": zod.string(),
-  "title": zod.string()
+  "title": zod.string(),
+  "sourceAgentId": zod.string().optional(),
+  "sourceAgentName": zod.string().optional()
 })).nullish(),
+  "handoffSources": zod.array(zod.object({
+  "type": zod.enum(['memory', 'file']),
+  "id": zod.string(),
+  "label": zod.string(),
+  "title": zod.string(),
+  "sourceAgentId": zod.string().optional(),
+  "sourceAgentName": zod.string().optional()
+})).optional().describe('Provenance for private memories snapshotted from the delegating agent; raw handoff text remains server-side.'),
   "startedAt": zod.coerce.date().nullish(),
   "finishedAt": zod.coerce.date().nullish(),
   "createdAt": zod.coerce.date()
@@ -2265,8 +2345,18 @@ export const DecideTaskFallbackResponse = zod.object({
   "type": zod.enum(['memory', 'file']),
   "id": zod.string(),
   "label": zod.string(),
-  "title": zod.string()
+  "title": zod.string(),
+  "sourceAgentId": zod.string().optional(),
+  "sourceAgentName": zod.string().optional()
 })).nullish(),
+  "handoffSources": zod.array(zod.object({
+  "type": zod.enum(['memory', 'file']),
+  "id": zod.string(),
+  "label": zod.string(),
+  "title": zod.string(),
+  "sourceAgentId": zod.string().optional(),
+  "sourceAgentName": zod.string().optional()
+})).optional().describe('Provenance for private memories snapshotted from the delegating agent; raw handoff text remains server-side.'),
   "startedAt": zod.coerce.date().nullish(),
   "finishedAt": zod.coerce.date().nullish(),
   "createdAt": zod.coerce.date()
@@ -2586,8 +2676,18 @@ export const RecordTaskUsageResponse = zod.object({
   "type": zod.enum(['memory', 'file']),
   "id": zod.string(),
   "label": zod.string(),
-  "title": zod.string()
+  "title": zod.string(),
+  "sourceAgentId": zod.string().optional(),
+  "sourceAgentName": zod.string().optional()
 })).nullish(),
+  "handoffSources": zod.array(zod.object({
+  "type": zod.enum(['memory', 'file']),
+  "id": zod.string(),
+  "label": zod.string(),
+  "title": zod.string(),
+  "sourceAgentId": zod.string().optional(),
+  "sourceAgentName": zod.string().optional()
+})).optional().describe('Provenance for private memories snapshotted from the delegating agent; raw handoff text remains server-side.'),
   "startedAt": zod.coerce.date().nullish(),
   "finishedAt": zod.coerce.date().nullish(),
   "createdAt": zod.coerce.date()

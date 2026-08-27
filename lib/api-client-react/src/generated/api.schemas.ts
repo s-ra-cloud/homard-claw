@@ -335,6 +335,8 @@ export interface TaskSource {
   id: string;
   label: string;
   title: string;
+  sourceAgentId?: string;
+  sourceAgentName?: string;
 }
 
 export interface Task {
@@ -413,6 +415,8 @@ export interface Task {
   runtime?: string;
   /** @nullable */
   contextSources?: TaskSource[] | null;
+  /** Provenance for private memories snapshotted from the delegating agent; raw handoff text remains server-side. */
+  handoffSources?: TaskSource[];
   /** @nullable */
   startedAt?: string | null;
   /** @nullable */
