@@ -1,6 +1,14 @@
 import express from "express";
 import request from "supertest";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import {
   agentsTable,
   db,
@@ -22,6 +30,11 @@ vi.mock("@clerk/express", () => ({
 // No provider traffic may leave a test run.
 const fetchMock = vi.hoisted(() => vi.fn());
 vi.stubGlobal("fetch", fetchMock);
+const telegramPushMock = vi.hoisted(() => vi.fn(async () => undefined));
+vi.mock("../telegram/service", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../telegram/service")>()),
+  pushTelegramNotification: telegramPushMock,
+}));
 
 import officeRouter from "./office";
 import { runDueSchedules } from "../scheduler";
@@ -29,7 +42,10 @@ import { runDueSchedules } from "../scheduler";
 // Test-only scope: only touch our own schedules, and opt paused test
 // agents back in (they are paused so the live dev worker ignores them).
 function fireSchedules(...scheduleIds: string[]) {
-  return runDueSchedules(new Date(), { scheduleIds, includePausedAgents: true });
+  return runDueSchedules(new Date(), {
+    scheduleIds,
+    includePausedAgents: true,
+  });
 }
 import { notifyTaskEvent } from "../notifications";
 
@@ -62,7 +78,11 @@ async function createAgent(name: string) {
         dailyBudgetCents: null,
         maxTasksPerDay: null,
       },
-      avatar: { shellColor: "#C34428", deskStyle: "standard", accessory: "none" },
+      avatar: {
+        shellColor: "#C34428",
+        deskStyle: "standard",
+        accessory: "none",
+      },
     });
   expect(res.status).toBe(201);
   createdAgentIds.push(res.body.id);
@@ -110,13 +130,16 @@ beforeAll(async () => {
 
 beforeEach(() => {
   fetchMock.mockReset();
+  telegramPushMock.mockClear();
   fetchMock.mockImplementation(async () => {
     throw new Error("network disabled in tests");
   });
 });
 
 afterAll(async () => {
-  await db.delete(notificationsTable).where(like(notificationsTable.body, `%${RUN_TAG}%`));
+  await db
+    .delete(notificationsTable)
+    .where(like(notificationsTable.body, `%${RUN_TAG}%`));
   if (createdAgentIds.length > 0) {
     await db
       .update(tasksTable)
@@ -124,12 +147,23 @@ afterAll(async () => {
       .where(
         and(
           inArray(tasksTable.agentId, createdAgentIds),
-          inArray(tasksTable.status, ["queued", "running", "blocked", "waiting_approval"]),
+          inArray(tasksTable.status, [
+            "queued",
+            "running",
+            "blocked",
+            "waiting_approval",
+          ]),
         ),
       );
-    await db.delete(tasksTable).where(inArray(tasksTable.agentId, createdAgentIds));
-    await db.delete(schedulesTable).where(inArray(schedulesTable.agentId, createdAgentIds));
-    await db.delete(agentsTable).where(inArray(agentsTable.id, createdAgentIds));
+    await db
+      .delete(tasksTable)
+      .where(inArray(tasksTable.agentId, createdAgentIds));
+    await db
+      .delete(schedulesTable)
+      .where(inArray(schedulesTable.agentId, createdAgentIds));
+    await db
+      .delete(agentsTable)
+      .where(inArray(agentsTable.id, createdAgentIds));
   }
   if (createdOwnerRow) {
     await db
@@ -157,7 +191,9 @@ describe("schedule CRUD", () => {
 
     const list = await request(app).get("/api/schedules");
     expect(list.status).toBe(200);
-    expect(list.body.some((s: { id: string }) => s.id === created.body.id)).toBe(true);
+    expect(
+      list.body.some((s: { id: string }) => s.id === created.body.id),
+    ).toBe(true);
 
     const paused = await request(app)
       .patch(`/api/schedules/${created.body.id}`)
@@ -170,12 +206,18 @@ describe("schedule CRUD", () => {
       .send({ enabled: true });
     expect(resumed.status).toBe(200);
     expect(resumed.body.enabled).toBe(true);
-    expect(new Date(resumed.body.nextRunAt).getTime()).toBeGreaterThan(Date.now());
+    expect(new Date(resumed.body.nextRunAt).getTime()).toBeGreaterThan(
+      Date.now(),
+    );
 
-    const deleted = await request(app).delete(`/api/schedules/${created.body.id}`);
+    const deleted = await request(app).delete(
+      `/api/schedules/${created.body.id}`,
+    );
     expect(deleted.status).toBe(204);
     const listAfter = await request(app).get("/api/schedules");
-    expect(listAfter.body.some((s: { id: string }) => s.id === created.body.id)).toBe(false);
+    expect(
+      listAfter.body.some((s: { id: string }) => s.id === created.body.id),
+    ).toBe(false);
   });
 
   it("rejects malformed recurrence and unknown timezones", async () => {
@@ -201,7 +243,13 @@ describe("schedule firing", () => {
     const past = new Date(Date.now() - 60_000).toISOString();
     const created = await request(app)
       .post("/api/schedules")
-      .send(scheduleBody(agent.id, { cadence: "once", runAt: past, timeOfDay: undefined }));
+      .send(
+        scheduleBody(agent.id, {
+          cadence: "once",
+          runAt: past,
+          timeOfDay: undefined,
+        }),
+      );
     expect(created.status).toBe(201);
 
     const fired = await fireSchedules(created.body.id);
@@ -399,7 +447,12 @@ describe("notifications", () => {
       .post("/api/schedules")
       .send(
         scheduleBody(agent.id, {
-          notify: { onCompleted: false, onFailed: true, onBlocked: true, onApprovalNeeded: true },
+          notify: {
+            onCompleted: false,
+            onFailed: true,
+            onBlocked: true,
+            onApprovalNeeded: true,
+          },
         }),
       );
     const [mutedTask] = await db
@@ -415,6 +468,7 @@ describe("notifications", () => {
       })
       .returning();
     await notifyTaskEvent("task_completed", mutedTask);
+    expect(telegramPushMock).not.toHaveBeenCalled();
 
     // An ad-hoc task always notifies.
     const [adhocTask] = await db
@@ -422,19 +476,36 @@ describe("notifications", () => {
       .values({
         workspaceId: wsId,
         agentId: agent.id,
-        objective: `${RUN_TAG} adhoc failure`,
+        objective: `${RUN_TAG} adhoc completion`,
         provider: "openrouter",
         model: "test-vendor/test-model",
-        status: "failed",
+        status: "completed",
       })
       .returning();
-    await notifyTaskEvent("task_failed", adhocTask, "Provider exploded.");
+    await notifyTaskEvent("task_completed", adhocTask, "Finished cleanly.");
+    expect(telegramPushMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: wsId,
+        kind: "task_completed",
+        taskId: adhocTask.id,
+        title: "Task completed",
+      }),
+    );
 
     const list = await request(app).get("/api/notifications?limit=50");
     expect(list.status).toBe(200);
-    const bodies = (list.body.notifications as { body: string; id: string; read: boolean }[]) ?? [];
-    expect(bodies.some((n) => n.body.includes(`${RUN_TAG} adhoc failure`))).toBe(true);
-    expect(bodies.some((n) => n.body.includes(`${RUN_TAG} muted completion`))).toBe(false);
+    const bodies =
+      (list.body.notifications as {
+        body: string;
+        id: string;
+        read: boolean;
+      }[]) ?? [];
+    expect(
+      bodies.some((n) => n.body.includes(`${RUN_TAG} adhoc completion`)),
+    ).toBe(true);
+    expect(
+      bodies.some((n) => n.body.includes(`${RUN_TAG} muted completion`)),
+    ).toBe(false);
 
     const mine = bodies.filter((n) => n.body.includes(RUN_TAG));
     expect(mine.every((n) => !n.read)).toBe(true);
@@ -445,9 +516,9 @@ describe("notifications", () => {
     expect(marked.body.updated).toBe(mine.length);
 
     const after = await request(app).get("/api/notifications?limit=50");
-    const afterMine = (after.body.notifications as { body: string; read: boolean }[]).filter((n) =>
-      n.body.includes(RUN_TAG),
-    );
+    const afterMine = (
+      after.body.notifications as { body: string; read: boolean }[]
+    ).filter((n) => n.body.includes(RUN_TAG));
     expect(afterMine.every((n) => n.read)).toBe(true);
   });
 });

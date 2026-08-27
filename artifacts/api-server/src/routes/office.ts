@@ -114,8 +114,12 @@ import { abortRunningTask, getWorkerStatus } from "../worker";
 import {
   listRecentAgentActions,
   listTaskActions,
-  settleActionForApproval,
 } from "../connected-apps/actions";
+import {
+  ApprovalDecisionError,
+  decideApproval,
+  toApprovalJson,
+} from "../approvals";
 import { findRegistryEntry } from "../capabilities/registry";
 import connectedAppsRouter from "./connected-apps";
 import capabilitiesRouter from "./capabilities";
@@ -126,6 +130,7 @@ import reportsRouter from "./reports";
 import schedulesRouter from "./schedules";
 import skillsRouter from "./skills";
 import teamsRouter from "./teams";
+import telegramRouter from "./telegram";
 import voiceRouter from "./voice";
 
 const router: IRouter = Router();
@@ -140,6 +145,7 @@ router.use(requireWorkspace);
 router.use(memoryRouter);
 router.use(skillsRouter);
 router.use(teamsRouter);
+router.use(telegramRouter);
 router.use(voiceRouter);
 router.use(schedulesRouter);
 router.use(notificationsRouter);
@@ -1543,25 +1549,6 @@ router.post("/emergency-stop", async (req, res): Promise<void> => {
   res.json(SetEmergencyStopResponse.parse(parsed.data));
 });
 
-function toApprovalJson(
-  approval: typeof approvalsTable.$inferSelect,
-  agentName: string,
-  taskObjective: string | null,
-) {
-  return {
-    id: approval.id,
-    agentName,
-    taskId: approval.taskId,
-    taskObjective,
-    action: approval.action,
-    details: approval.details,
-    status: approval.status,
-    decidedAt: approval.decidedAt ? approval.decidedAt.toISOString() : null,
-    createdAt: approval.createdAt.toISOString(),
-    expiresAt: approval.expiresAt.toISOString(),
-  };
-}
-
 router.get("/approvals", async (req, res): Promise<void> => {
   const rows = await db
     .select({
@@ -1590,116 +1577,20 @@ router.patch("/approvals/:approvalId", async (req, res): Promise<void> => {
     res.status(400).json({ error: "Invalid approval decision" });
     return;
   }
-  // Decision and task transition commit atomically: an approved task
-  // requeues (the worker re-checks policy and honors the approval), a
-  // rejected task cancels. Expired approvals cannot be decided.
-  const outcome = await db.transaction(async (tx) => {
-    // Bind the decision to this workspace: the update only fires when the
-    // approval's agent belongs to the caller's workspace, so a guessed
-    // approval id from another tenant reads as "not found".
-    const [approval] = await tx
-      .update(approvalsTable)
-      .set({ status: body.data.decision, decidedAt: new Date() })
-      .where(
-        and(
-          eq(approvalsTable.id, params.data.approvalId),
-          eq(approvalsTable.status, "pending"),
-          sql`${approvalsTable.expiresAt} > now()`,
-          sql`exists (select 1 from ${agentsTable} where ${agentsTable.id} = ${approvalsTable.agentId} and ${agentsTable.workspaceId} = ${req.workspaceId!})`,
-        ),
-      )
-      .returning();
-    if (!approval) return null;
-    const [agent] = await tx
-      .select({ name: agentsTable.name })
-      .from(agentsTable)
-      .where(eq(agentsTable.id, approval.agentId))
-      .limit(1);
-    let taskObjective: string | null = null;
-    if (approval.taskId) {
-      if (body.data.decision === "approved") {
-        const [task] = await tx
-          .update(tasksTable)
-          .set({ status: "queued", notBefore: null })
-          .where(
-            and(
-              eq(tasksTable.id, approval.taskId),
-              eq(tasksTable.status, "waiting_approval"),
-            ),
-          )
-          .returning({ objective: tasksTable.objective });
-        taskObjective = task?.objective ?? null;
-        if (task) {
-          await tx.insert(taskLogsTable).values({
-            taskId: approval.taskId,
-            level: "info",
-            message: "Approved by the owner; requeued to run.",
-          });
-        }
-      } else {
-        const [task] = await tx
-          .update(tasksTable)
-          .set({
-            status: "cancelled",
-            finishedAt: new Date(),
-            errorKind: "approval_rejected",
-            errorMessage: "The owner rejected this task's approval request.",
-          })
-          .where(
-            and(
-              eq(tasksTable.id, approval.taskId),
-              eq(tasksTable.status, "waiting_approval"),
-            ),
-          )
-          .returning({ objective: tasksTable.objective });
-        taskObjective = task?.objective ?? null;
-        if (task) {
-          await tx.insert(taskLogsTable).values({
-            taskId: approval.taskId,
-            level: "warn",
-            message: "Rejected by the owner; task cancelled.",
-          });
-        }
-      }
+  try {
+    const outcome = await decideApproval({
+      workspaceId: req.workspaceId!,
+      approvalId: params.data.approvalId,
+      decision: body.data.decision,
+    });
+    res.json(DecideApprovalResponse.parse(outcome));
+  } catch (error) {
+    if (error instanceof ApprovalDecisionError) {
+      res.status(404).json({ error: error.message });
+      return;
     }
-    // A connected-app action tied to this approval follows the decision in
-    // the same transaction: approved actions become claimable exactly once
-    // by the worker, rejected ones are settled and can never run.
-    const settledAction = await settleActionForApproval(
-      tx,
-      approval.id,
-      body.data.decision === "approved" ? "approved" : "rejected",
-    );
-    await recordAudit(
-      req.workspaceId!,
-      `approval.${body.data.decision}`,
-      `${approval.action} was ${body.data.decision} by the owner.${
-        settledAction
-          ? ` Linked connected-app action (${settledAction.targetSummary}) is now ${settledAction.status}.`
-          : ""
-      }`,
-      tx,
-    );
-    return {
-      approval,
-      agentName: agent?.name ?? "Unknown agent",
-      taskObjective,
-    };
-  });
-  if (!outcome) {
-    res.status(404).json({ error: "Pending approval not found" });
-    return;
+    throw error;
   }
-  publish(req.workspaceId!, "approvals", "tasks", "overview");
-  res.json(
-    DecideApprovalResponse.parse(
-      toApprovalJson(
-        outcome.approval,
-        outcome.agentName,
-        outcome.taskObjective,
-      ),
-    ),
-  );
 });
 
 router.get("/audit", async (req, res): Promise<void> => {

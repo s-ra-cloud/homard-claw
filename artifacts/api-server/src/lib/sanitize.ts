@@ -12,6 +12,8 @@ const SECRET_ENV_KEYS = [
   "CLAUDE_CODE_OAUTH_TOKEN",
   "OPENROUTER_API_KEY",
   "WEB_SEARCH_API_KEY",
+  "TELEGRAM_BOT_TOKEN",
+  "TELEGRAM_WEBHOOK_SECRET",
   "AI_INTEGRATIONS_OPENAI_API_KEY",
   "CLERK_SECRET_KEY",
   "SESSION_SECRET",
@@ -32,6 +34,8 @@ const PLAIN_PATTERNS: RegExp[] = [
   /\b(?:sk|pk|rk|xox[a-z])[-_][a-z0-9._-]{10,}/gi,
   // Postgres/redis/amqp URLs with embedded credentials.
   /\b[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:[^/\s@]+@/gi,
+  // Telegram bot tokens: numeric bot id, colon, then the secret segment.
+  /\b\d{6,12}:[A-Za-z0-9_-]{20,}\b/g,
 ];
 
 // key=value / "key": "value" assignments for credential-ish names; the key

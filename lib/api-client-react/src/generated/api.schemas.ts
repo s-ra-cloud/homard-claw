@@ -736,6 +736,36 @@ export interface GithubOauthDisconnect {
   disconnected: boolean;
 }
 
+export interface TelegramStatus {
+  available: boolean;
+  /** @nullable */
+  reason: string | null;
+  linked: boolean;
+  /** @nullable */
+  agentId: string | null;
+  /** @nullable */
+  agentName: string | null;
+  /** @nullable */
+  verifiedAt: string | null;
+  /** @nullable */
+  botUsername: string | null;
+}
+
+export interface TelegramLinkInput {
+  agentId: string;
+}
+
+export interface TelegramLinkCode {
+  code: string;
+  expiresAt: string;
+  /** @nullable */
+  botUsername: string | null;
+}
+
+export interface TelegramUnlinkResult {
+  unlinked: boolean;
+}
+
 export type ConnectedAppApp = typeof ConnectedAppApp[keyof typeof ConnectedAppApp];
 
 

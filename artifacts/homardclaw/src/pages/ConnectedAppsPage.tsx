@@ -13,8 +13,14 @@ import {
   useUpdateCapability,
   useApplyCapabilityUpdate,
   getListCapabilitiesQueryKey,
+  useGetTelegramStatus,
+  useCreateTelegramLinkCode,
+  useRemoveTelegramLink,
+  getGetTelegramStatusQueryKey,
+  useListAgents,
   type ConnectedApp,
   type CapabilityPackage,
+  type TelegramLinkCode,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Shell } from "@/components/layout/Shell";
@@ -32,6 +38,7 @@ import {
   Package,
   Globe,
   AlertTriangle,
+  Send,
 } from "lucide-react";
 
 const APP_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -41,19 +48,28 @@ const APP_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
 };
 
 function StatusBadge({ app }: { app: ConnectedApp }) {
-  if (app.status === "connected") return <Badge variant="success">Connected</Badge>;
-  if (app.status === "expired") return <Badge variant="destructive">Reconnect Needed</Badge>;
-  if (app.status === "not_connected") return <Badge variant="warning">Not Connected</Badge>;
+  if (app.status === "connected")
+    return <Badge variant="success">Connected</Badge>;
+  if (app.status === "expired")
+    return <Badge variant="destructive">Reconnect Needed</Badge>;
+  if (app.status === "not_connected")
+    return <Badge variant="warning">Not Connected</Badge>;
   return <Badge variant="outline">Status Unknown</Badge>;
 }
 
 /** Human messages for the OAuth callback results the API redirects with. */
-function oauthCallbackMessage(appName: string, code: string): {
+function oauthCallbackMessage(
+  appName: string,
+  code: string,
+): {
   title: string;
   description: string;
   ok?: boolean;
 } {
-  const messages: Record<string, { title: string; description: string; ok?: boolean }> = {
+  const messages: Record<
+    string,
+    { title: string; description: string; ok?: boolean }
+  > = {
     connected: {
       ok: true,
       title: `${appName} connected`,
@@ -70,7 +86,8 @@ function oauthCallbackMessage(appName: string, code: string): {
     },
     "error:expired": {
       title: "The sign-in took too long",
-      description: "The connection attempt expired. Start again and finish within a few minutes.",
+      description:
+        "The connection attempt expired. Start again and finish within a few minutes.",
     },
     "error:not_configured": {
       title: `${appName} sign-in unavailable`,
@@ -140,7 +157,9 @@ function ConnectActions({ app }: { app: ConnectedApp }) {
       startGithub.mutate();
     } else {
       startGoogle.mutate({
-        data: { service: app.app === "google_drive" ? "google_drive" : "gmail" },
+        data: {
+          service: app.app === "google_drive" ? "google_drive" : "gmail",
+        },
       });
     }
   };
@@ -186,7 +205,9 @@ function AppCard({ app }: { app: ConnectedApp }) {
   const update = useUpdateConnectedApp({
     mutation: {
       onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: getListConnectedAppsQueryKey() });
+        queryClient.invalidateQueries({
+          queryKey: getListConnectedAppsQueryKey(),
+        });
       },
       onError: (error) => {
         toast({
@@ -208,9 +229,13 @@ function AppCard({ app }: { app: ConnectedApp }) {
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-display uppercase text-sm">{app.displayName}</span>
+              <span className="font-display uppercase text-sm">
+                {app.displayName}
+              </span>
               <StatusBadge app={app} />
-              {!app.enabled ? <Badge variant="destructive">Disabled</Badge> : null}
+              {!app.enabled ? (
+                <Badge variant="destructive">Disabled</Badge>
+              ) : null}
             </div>
             <p className="text-[10px] text-muted-foreground uppercase font-bold mt-1">
               {app.status === "connected"
@@ -253,7 +278,191 @@ function AppCard({ app }: { app: ConnectedApp }) {
   );
 }
 
-const PACKAGE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+/**
+ * Telegram is an infrastructure-backed channel rather than an agent tool.
+ * It is deliberately absent when the server has not configured both secrets.
+ */
+function TelegramCard() {
+  const [linkCode, setLinkCode] = React.useState<TelegramLinkCode | null>(null);
+  const [agentId, setAgentId] = React.useState("");
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const statusQuery = useGetTelegramStatus({
+    query: { refetchInterval: linkCode ? 5_000 : false },
+  });
+  const agentsQuery = useListAgents();
+  const agents = (agentsQuery.data ?? []).filter((agent) => !agent.archived);
+
+  React.useEffect(() => {
+    if (statusQuery.data?.linked) setLinkCode(null);
+    if (statusQuery.data?.agentId) {
+      setAgentId(statusQuery.data.agentId);
+    } else if (!agentId && agents[0]) {
+      setAgentId(agents[0].id);
+    }
+  }, [
+    agentId,
+    agentsQuery.data,
+    statusQuery.data?.agentId,
+    statusQuery.data?.linked,
+  ]);
+
+  const refresh = () =>
+    queryClient.invalidateQueries({ queryKey: getGetTelegramStatusQueryKey() });
+  const createCode = useCreateTelegramLinkCode({
+    mutation: {
+      onSuccess: (data) => {
+        setLinkCode(data);
+        toast({
+          title: "Telegram link code ready",
+          description: "Send the command below to your bot within ten minutes.",
+        });
+      },
+      onError: (error) =>
+        toast({
+          variant: "destructive",
+          title: "Could not create link code",
+          description: error.message,
+        }),
+    },
+  });
+  const removeLink = useRemoveTelegramLink({
+    mutation: {
+      onSuccess: () => {
+        setLinkCode(null);
+        void refresh();
+        toast({
+          title: "Telegram disconnected",
+          description: "That chat can no longer reach this workspace.",
+        });
+      },
+      onError: (error) =>
+        toast({
+          variant: "destructive",
+          title: "Could not disconnect Telegram",
+          description: error.message,
+        }),
+    },
+  });
+
+  const status = statusQuery.data;
+  if (!status?.available) return null;
+
+  const botUrl = status.botUsername
+    ? `https://t.me/${encodeURIComponent(status.botUsername)}`
+    : null;
+  return (
+    <PixelCard>
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+        <div className="flex items-start gap-3 min-w-0">
+          <div className="border-4 border-border bg-muted/30 p-2 shrink-0">
+            <Send className="w-6 h-6" />
+          </div>
+          <div className="min-w-0 space-y-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-display uppercase text-sm">Telegram</span>
+              <Badge variant={status.linked ? "success" : "warning"}>
+                {status.linked ? "Connected" : "Not Connected"}
+              </Badge>
+            </div>
+            <p className="text-[10px] text-muted-foreground uppercase font-bold">
+              Talk to one selected agent and receive task and approval alerts on
+              your phone.
+            </p>
+            {status.linked ? (
+              <p className="text-xs font-mono">
+                Default Talk agent:{" "}
+                <strong>{status.agentName ?? "Selected agent"}</strong>
+              </p>
+            ) : (
+              <div className="space-y-2">
+                <label className="block text-[10px] uppercase font-bold text-muted-foreground">
+                  Default Talk agent
+                </label>
+                <select
+                  value={agentId}
+                  onChange={(event) => setAgentId(event.target.value)}
+                  className="h-10 w-full max-w-sm border-4 border-border bg-background px-2 font-mono text-xs"
+                >
+                  {agents.map((agent) => (
+                    <option key={agent.id} value={agent.id}>
+                      {agent.name} — {agent.title}
+                    </option>
+                  ))}
+                </select>
+                {linkCode ? (
+                  <div className="border-2 border-accent bg-accent/10 p-3 space-y-2">
+                    <p className="text-xs">
+                      {botUrl ? (
+                        <a
+                          href={botUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-bold underline"
+                        >
+                          Open @{status.botUsername}
+                        </a>
+                      ) : (
+                        "Open your HomardClaw bot"
+                      )}{" "}
+                      and send this exact command before{" "}
+                      {new Date(linkCode.expiresAt).toLocaleTimeString()}:
+                    </p>
+                    <code className="block select-all break-all border-2 border-border bg-background p-2 text-sm">
+                      /start {linkCode.code}
+                    </code>
+                    <p className="text-[10px] text-muted-foreground uppercase">
+                      The code works once. This page checks automatically for
+                      the connection.
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="flex gap-2 shrink-0 flex-wrap">
+          {status.linked ? (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={removeLink.isPending}
+              onClick={() => {
+                if (
+                  window.confirm(
+                    "Disconnect this Telegram chat from HomardClaw?",
+                  )
+                ) {
+                  removeLink.mutate();
+                }
+              }}
+            >
+              {removeLink.isPending ? "..." : "DISCONNECT"}
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={!agentId || createCode.isPending}
+              onClick={() => createCode.mutate({ data: { agentId } })}
+            >
+              {createCode.isPending
+                ? "..."
+                : linkCode
+                  ? "NEW CODE"
+                  : "CREATE LINK CODE"}
+            </Button>
+          )}
+        </div>
+      </div>
+    </PixelCard>
+  );
+}
+
+const PACKAGE_ICONS: Record<
+  string,
+  React.ComponentType<{ className?: string }>
+> = {
   web_research: Globe,
 };
 
@@ -280,10 +489,20 @@ function CapabilityCard({ pkg }: { pkg: CapabilityPackage }) {
   const refresh = () =>
     queryClient.invalidateQueries({ queryKey: getListCapabilitiesQueryKey() });
   const onError = (error: Error) =>
-    toast({ variant: "destructive", title: "Change failed", description: error.message });
-  const install = useInstallCapability({ mutation: { onSuccess: refresh, onError } });
-  const uninstall = useUninstallCapability({ mutation: { onSuccess: refresh, onError } });
-  const update = useUpdateCapability({ mutation: { onSuccess: refresh, onError } });
+    toast({
+      variant: "destructive",
+      title: "Change failed",
+      description: error.message,
+    });
+  const install = useInstallCapability({
+    mutation: { onSuccess: refresh, onError },
+  });
+  const uninstall = useUninstallCapability({
+    mutation: { onSuccess: refresh, onError },
+  });
+  const update = useUpdateCapability({
+    mutation: { onSuccess: refresh, onError },
+  });
   const applyUpdate = useApplyCapabilityUpdate({
     mutation: { onSuccess: refresh, onError },
   });
@@ -307,7 +526,9 @@ function CapabilityCard({ pkg }: { pkg: CapabilityPackage }) {
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-display uppercase text-sm">{pkg.displayName}</span>
+              <span className="font-display uppercase text-sm">
+                {pkg.displayName}
+              </span>
               <PackageHealthBadge pkg={pkg} />
               {pkg.installed && !pkg.enabled ? (
                 <Badge variant="destructive">Disabled</Badge>
@@ -347,10 +568,13 @@ function CapabilityCard({ pkg }: { pkg: CapabilityPackage }) {
               <div className="mt-2 border-2 border-warning/60 bg-warning/10 p-2 text-[10px]">
                 <p className="font-bold uppercase flex items-center gap-1">
                   <AlertTriangle className="w-3 h-3" />
-                  Update to v{pkg.pendingVersion} expands permissions — review before it activates:
+                  Update to v{pkg.pendingVersion} expands permissions — review
+                  before it activates:
                 </p>
                 {(pendingDiff.addedTools ?? []).map((t) => (
-                  <p key={t.name} className="font-mono">+ {t.name} ({t.level})</p>
+                  <p key={t.name} className="font-mono">
+                    + {t.name} ({t.level})
+                  </p>
                 ))}
                 {(pendingDiff.levelChanges ?? []).map((c) => (
                   <p key={c.name} className="font-mono">
@@ -363,7 +587,9 @@ function CapabilityCard({ pkg }: { pkg: CapabilityPackage }) {
                   </p>
                 ))}
                 {(pendingDiff.schemaChanges ?? []).map((name) => (
-                  <p key={name} className="font-mono">{name}: input schema changed</p>
+                  <p key={name} className="font-mono">
+                    {name}: input schema changed
+                  </p>
                 ))}
                 {pendingDiff.connectionChange ? (
                   <p className="font-mono">
@@ -372,10 +598,14 @@ function CapabilityCard({ pkg }: { pkg: CapabilityPackage }) {
                   </p>
                 ) : null}
                 {(pendingDiff.routingChanges ?? []).map((line) => (
-                  <p key={line} className="font-mono">routing: {line}</p>
+                  <p key={line} className="font-mono">
+                    routing: {line}
+                  </p>
                 ))}
                 {(pendingDiff.removedTools ?? []).map((name) => (
-                  <p key={name} className="font-mono">- {name} (removed)</p>
+                  <p key={name} className="font-mono">
+                    - {name} (removed)
+                  </p>
                 ))}
               </div>
             ) : null}
@@ -398,7 +628,9 @@ function CapabilityCard({ pkg }: { pkg: CapabilityPackage }) {
                   variant="primary"
                   size="sm"
                   disabled={applyUpdate.isPending}
-                  onClick={() => applyUpdate.mutate({ packageId: pkg.packageId })}
+                  onClick={() =>
+                    applyUpdate.mutate({ packageId: pkg.packageId })
+                  }
                 >
                   {applyUpdate.isPending ? "..." : "ACCEPT UPDATE"}
                 </Button>
@@ -443,7 +675,8 @@ function CapabilityCard({ pkg }: { pkg: CapabilityPackage }) {
 }
 
 export default function ConnectedAppsPage() {
-  const { data, isLoading, error, refetch, isFetching } = useListConnectedApps();
+  const { data, isLoading, error, refetch, isFetching } =
+    useListConnectedApps();
   const capabilitiesQuery = useListCapabilities();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -474,7 +707,9 @@ export default function ConnectedAppsPage() {
     if (!found) return;
     window.history.replaceState(null, "", url.pathname + url.search);
     if (anyOk) {
-      queryClient.invalidateQueries({ queryKey: getListConnectedAppsQueryKey() });
+      queryClient.invalidateQueries({
+        queryKey: getListConnectedAppsQueryKey(),
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -488,8 +723,8 @@ export default function ConnectedAppsPage() {
               Connected Apps
             </h1>
             <p className="text-muted-foreground text-sm">
-              Your own external accounts, connected privately to your
-              workspace, that your agents can be granted access to.
+              Your own external accounts, connected privately to your workspace,
+              that your agents can be granted access to.
             </p>
           </div>
           <Button
@@ -498,7 +733,9 @@ export default function ConnectedAppsPage() {
             disabled={isFetching}
             onClick={() => refetch()}
           >
-            <RefreshCw className={`w-3 h-3 mr-1 ${isFetching ? "animate-spin" : ""}`} />
+            <RefreshCw
+              className={`w-3 h-3 mr-1 ${isFetching ? "animate-spin" : ""}`}
+            />
             {isFetching ? "CHECKING..." : "REFRESH STATUS"}
           </Button>
         </div>
@@ -510,23 +747,22 @@ export default function ConnectedAppsPage() {
               <p>
                 Connecting an account and granting an agent access are two
                 different things. You connect{" "}
-                <span className="font-bold">your own account</span> right here
-                — it belongs to your workspace alone, other users can never
-                see or use it, and agents never see credentials. Then, on each
-                agent's personnel file, you choose what that agent may do with
-                it: <span className="font-bold uppercase">read</span>{" "}
-                (search and read), <span className="font-bold uppercase">draft</span>{" "}
+                <span className="font-bold">your own account</span> right here —
+                it belongs to your workspace alone, other users can never see or
+                use it, and agents never see credentials. Then, on each agent's
+                personnel file, you choose what that agent may do with it:{" "}
+                <span className="font-bold uppercase">read</span> (search and
+                read), <span className="font-bold uppercase">draft</span>{" "}
                 (prepare drafts nobody outside sees), or{" "}
                 <span className="font-bold uppercase">write</span> — and every
                 write still waits for your approval before it happens.
               </p>
               <p>
                 Disabling an app here blocks it for every agent at once,
-                whatever their individual grants say. Disconnecting an
-                account removes the credential immediately — even
-                already-approved actions can no longer run against it. Gmail
-                and Google Drive share one Google account, so disconnecting
-                it ends both.
+                whatever their individual grants say. Disconnecting an account
+                removes the credential immediately — even already-approved
+                actions can no longer run against it. Gmail and Google Drive
+                share one Google account, so disconnecting it ends both.
               </p>
             </div>
           </div>
@@ -548,6 +784,7 @@ export default function ConnectedAppsPage() {
             {data.apps.map((app) => (
               <AppCard key={app.app} app={app} />
             ))}
+            <TelegramCard />
           </div>
         )}
 

@@ -3,6 +3,10 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { abortAllInFlight, startWorker, stopWorker } from "./worker";
 import { ensureWorkspaceBackfill } from "./workspace";
+import {
+  registerTelegramWebhook,
+  telegramFeatureStatus,
+} from "./telegram/client";
 
 const rawPort = process.env["PORT"];
 
@@ -25,6 +29,31 @@ const server = app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
+
+  // Telegram is infrastructure-configured. When either required secret is
+  // absent, do not contact Telegram at all; the UI reports it unavailable.
+  if (telegramFeatureStatus().available) {
+    registerTelegramWebhook()
+      .then((result) => {
+        if (result.registered) {
+          logger.info("Telegram webhook registered");
+        } else {
+          logger.warn(
+            { reason: result.reason },
+            "Telegram webhook not registered",
+          );
+        }
+      })
+      .catch((error) => {
+        logger.warn(
+          {
+            failureKind:
+              error instanceof Error ? error.constructor.name : "UnknownError",
+          },
+          "Telegram webhook registration failed",
+        );
+      });
+  }
 
   // Legacy single-owner data must belong to the owner's workspace before
   // any request or worker claim can rely on workspace scoping. Fail loudly

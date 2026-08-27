@@ -14,49 +14,66 @@ _Replace the heading above with the project's name, and this line with one sente
 - Optional Web Research env: `WEB_SEARCH_API_KEY` — a Brave Search API key.
   When unset, the package remains visible but reports **not configured**; it
   never falls back to plain HTTP or an unconfigured remote server.
+- Optional Telegram channel: set both `TELEGRAM_BOT_TOKEN` and
+  `TELEGRAM_WEBHOOK_SECRET` to enable phone Talk, task notifications, and
+  approval buttons. `TELEGRAM_BOT_USERNAME` adds a convenient bot link in the
+  UI. The server derives its webhook from the Replit domain; set
+  `TELEGRAM_WEBHOOK_URL=https://<your-domain>/api/telegram/webhook` when it
+  cannot.
+
+### Telegram webhook (optional)
+
+On startup, a configured server calls Telegram `setWebhook` when it can derive
+a public HTTPS URL. To register it manually instead, make this request with the
+same secret stored in `TELEGRAM_WEBHOOK_SECRET`:
+
+```sh
+curl -X POST "https://api.telegram.org/bot<bot-token>/setWebhook" \
+  -H "content-type: application/json" \
+  --data '{"url":"https://<your-domain>/api/telegram/webhook","secret_token":"<webhook-secret>","allowed_updates":["message","callback_query"]}'
+```
+
+Then open **Connected Apps**, choose the default Talk agent, create a one-time
+code, and send `/start <code>` to the bot. Codes expire after ten minutes and
+work once. The database schema must be pushed before using this feature.
 
 ### Codex via ChatGPT Plus (optional third provider)
 
-Codex is off unless every variable below is set. It is a **single-owner**
-feature: it runs work against one person's ChatGPT Codex allowance, so it must
-never be enabled on a shared or multi-tenant deployment.
+Codex is off unless its required variables are set. Sign-ins are **per
+account**: each signed-in user connects their own ChatGPT session (encrypted
+in Postgres, keyed by Clerk id), and every run must resolve that account
+explicitly. There is no fallback identity.
 
-| Variable                     | Required        | Purpose                                                                                                                                                                                                                |
-| ---------------------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CODEX_ENABLED`              | yes             | Server-side feature flag. Unset ⇒ Codex is hidden in the UI and refuses to run.                                                                                                                                        |
-| `CODEX_HOME`                 | yes             | Absolute path to a **private, durable** directory holding `auth.json`. Created 0700; the file is kept 0600. Refused outright under `/tmp`, `/var/tmp`, `/dev/shm`, `/run`, or the OS temp dir.                         |
-| `CODEX_HOME_IS_PERSISTENT`   | yes             | Your attestation that `CODEX_HOME` is on a volume that survives a redeploy. Nothing inside the container can tell a Reserved VM disk from an instance disk, so Codex refuses to guess and stays off until this is set. |
-| `CODEX_WORKSPACE_ROOT`       | yes             | Absolute path under which each agent/conversation gets its own isolated working directory.                                                                                                                             |
-| `CODEX_AUTH_JSON`            | first boot only | Contents of an existing `auth.json`, used **once** to seed an empty `CODEX_HOME`. Never overwrites an existing file.                                                                                                   |
-| `CODEX_MODELS`               | no              | `id:name:context,…` override of the model catalog.                                                                                                                                                                     |
-| `CODEX_DEFAULT_MODEL`        | no              | Defaults to `gpt-5.6-terra`.                                                                                                                                                                                           |
-| `CODEX_REASONING_LEVELS`     | no              | Subset of `low,medium,high`.                                                                                                                                                                                           |
-| `CODEX_DEFAULT_REASONING`    | no              | Defaults to `medium`.                                                                                                                                                                                                  |
-| `CODEX_AUTH_MAX_AGE_DAYS`    | no              | Age past which a session is treated as expired.                                                                                                                                                                        |
-| `CODEX_HEALTH_CHECK_MINUTES` | no              | Throttle for the local credential health check.                                                                                                                                                                        |
-| `CODEX_LEASE_TTL_SECONDS`    | no              | How long one Codex run may hold the credential lease.                                                                                                                                                                  |
-| `CODEX_ALLOW_NETWORK`        | no              | Allows network/web search **only** for `operator` + `autonomous` agents.                                                                                                                                               |
+| Variable                     | Required | Purpose                                                                                                                                                      |
+| ---------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `CODEX_ENABLED`              | yes      | Server-side feature flag. Unset ⇒ Codex is hidden and refuses to run.                                                                                        |
+| `CODEX_HOME`                 | yes      | Absolute private scratch root. Each account gets a hashed subdirectory and temporary 0600 `auth.json`; the durable credential remains encrypted in Postgres. |
+| `CODEX_WORKSPACE_ROOT`       | yes      | Absolute root for isolated agent/conversation working directories.                                                                                           |
+| `CODEX_AUTH_JSON`            | optional | One-time seed for the office owner's account only when no credential is stored. Never applies to another account.                                            |
+| `CODEX_MODELS`               | no       | `id:name:context,…` model catalog override.                                                                                                                  |
+| `CODEX_DEFAULT_MODEL`        | no       | Defaults to `gpt-5.6-terra`.                                                                                                                                 |
+| `CODEX_REASONING_LEVELS`     | no       | Supported reasoning levels.                                                                                                                                  |
+| `CODEX_DEFAULT_REASONING`    | no       | Defaults to `medium`.                                                                                                                                        |
+| `CODEX_AUTH_MAX_AGE_DAYS`    | no       | Session staleness threshold.                                                                                                                                 |
+| `CODEX_HEALTH_CHECK_MINUTES` | no       | Local credential health-check throttle.                                                                                                                      |
+| `CODEX_LEASE_TTL_SECONDS`    | no       | Maximum credential-lease duration.                                                                                                                           |
+| `CODEX_ALLOW_NETWORK`        | no       | Network/web search only for `operator` + `autonomous` agents.                                                                                                |
 
-**Deployment target must be a Reserved VM.** `.replit` currently declares
-`deploymentTarget = "autoscale"`, whose filesystem is not durable. Codex
-rewrites `auth.json` on every token refresh, so on Autoscale the refreshed
-credential is lost on the next deploy and the session dies. Switch the
-deployment to a Reserved VM with persistent storage, point `CODEX_HOME` at it,
-and set `CODEX_HOME_IS_PERSISTENT=1` before enabling the flag. Setting that
-flag on a deployment whose disk is _not_ persistent will lose the session at
-the next deploy — it is an attestation, not a fix. Without durable writable
-storage the provider fails closed and says so.
+Autoscale is supported because Postgres is the credential source of truth.
+The plaintext working copy is created just for a run, refreshed contents are
+folded back into the same account's encrypted row, and the file is removed.
 
 **Manual login (one time, not automatable).** There is no supported
 programmatic ChatGPT sign-in, and HomardClaw deliberately implements none.
 
 1. On a machine with a browser: `npx @openai/codex login` (or `codex login`).
 2. Copy the resulting `~/.codex/auth.json`.
-3. Either place it at `$CODEX_HOME/auth.json` on the Reserved VM, or set
-   `CODEX_AUTH_JSON` to its contents and let the first boot seed it.
+3. Paste it into Providers → Codex → **Connect** while signed in as the account
+   that should own it. The office owner may instead use `CODEX_AUTH_JSON` and
+   **Bootstrap**; the seed is refused for every other account.
 4. Confirm with Providers → Codex → **Test connection**. That check is
-   entirely local — it reads the file and resolves the SDK/CLI, and never
-   calls OpenAI, so it cannot spend allowance.
+   entirely local — it reads stored sign-in metadata and resolves the SDK/CLI,
+   and never calls OpenAI, so it cannot spend allowance.
 
 Re-run steps 1–3 whenever the status reports authentication expired. Only
 Codex's own SDK refresh path may rewrite `auth.json`; HomardClaw never does.

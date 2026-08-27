@@ -16,6 +16,12 @@ const app: Express = express();
 app.use(
   pinoHttp({
     logger,
+    // Webhook authentication failures are counted in-memory and otherwise
+    // silent. Suppress pino-http's automatic request/completion lines too,
+    // so neither an invalid secret attempt nor its source is logged.
+    autoLogging: {
+      ignore: (req) => req.url?.split("?")[0] === "/api/telegram/webhook",
+    },
     serializers: {
       req(req) {
         return {
@@ -94,10 +100,9 @@ app.use(
       next(err);
       return;
     }
-    (req as unknown as { log?: { error: (o: unknown, m: string) => void } }).log?.error(
-      { err },
-      "Unhandled route error",
-    );
+    (
+      req as unknown as { log?: { error: (o: unknown, m: string) => void } }
+    ).log?.error({ err }, "Unhandled route error");
     res.status(500).json({ error: "Internal server error" });
   },
 );

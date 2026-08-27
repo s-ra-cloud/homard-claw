@@ -5,12 +5,16 @@ const hadEnv = "OPENROUTER_API_KEY" in process.env;
 const priorEnv = process.env.OPENROUTER_API_KEY;
 const hadWebEnv = "WEB_SEARCH_API_KEY" in process.env;
 const priorWebEnv = process.env.WEB_SEARCH_API_KEY;
+const hadTelegramEnv = "TELEGRAM_BOT_TOKEN" in process.env;
+const priorTelegramEnv = process.env.TELEGRAM_BOT_TOKEN;
 
 afterAll(() => {
   if (hadEnv) process.env.OPENROUTER_API_KEY = priorEnv;
   else delete process.env.OPENROUTER_API_KEY;
   if (hadWebEnv) process.env.WEB_SEARCH_API_KEY = priorWebEnv;
   else delete process.env.WEB_SEARCH_API_KEY;
+  if (hadTelegramEnv) process.env.TELEGRAM_BOT_TOKEN = priorTelegramEnv;
+  else delete process.env.TELEGRAM_BOT_TOKEN;
 });
 
 describe("sanitizeErrorMessage", () => {
@@ -61,6 +65,19 @@ describe("sanitizeErrorMessage", () => {
     );
     expect(out).not.toContain("native-web-secret-value-42");
     expect(out).toContain("[redacted]");
+  });
+
+  it("redacts Telegram bot tokens by literal value and token shape", () => {
+    process.env.TELEGRAM_BOT_TOKEN =
+      "123456789:AAExampleLiteralTelegramSecret123";
+    const literal = sanitizeErrorMessage(
+      "Telegram rejected 123456789:AAExampleLiteralTelegramSecret123",
+    );
+    const shaped = sanitizeErrorMessage(
+      "Telegram rejected 987654321:AAAnotherBotTokenSecretValue456",
+    );
+    expect(literal).not.toContain("AAExampleLiteralTelegramSecret123");
+    expect(shaped).not.toContain("AAAnotherBotTokenSecretValue456");
   });
 
   it("redacts quoted JSON header values including the token after Bearer", () => {

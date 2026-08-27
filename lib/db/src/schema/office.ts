@@ -1096,5 +1096,62 @@ export const googleOauthStatesTable = pgTable("google_oauth_states", {
   usedAt: timestamp("used_at", { withTimezone: true }),
 });
 
+/**
+ * One Telegram chat bound to one workspace and its default Talk agent. The
+ * chat id is globally unique, while workspaceId as the primary key keeps a
+ * workspace from silently broadcasting to more than one chat.
+ */
+export const telegramLinksTable = pgTable(
+  "telegram_links",
+  {
+    workspaceId: uuid("workspace_id")
+      .primaryKey()
+      .references(() => workspacesTable.id, { onDelete: "cascade" }),
+    chatId: text("chat_id").notNull(),
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => agentsTable.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    verifiedAt: timestamp("verified_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("telegram_links_chat_idx").on(table.chatId),
+    index("telegram_links_agent_idx").on(table.agentId),
+  ],
+);
+
+/**
+ * Short-lived, single-use Telegram link proofs. Only SHA-256(code) is stored;
+ * the plaintext code is returned once to the authenticated owner.
+ */
+export const telegramLinkCodesTable = pgTable(
+  "telegram_link_codes",
+  {
+    codeHash: text("code_hash").primaryKey(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspacesTable.id, { onDelete: "cascade" }),
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => agentsTable.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("telegram_link_codes_workspace_idx").on(table.workspaceId),
+    index("telegram_link_codes_expiry_idx").on(table.expiresAt),
+  ],
+);
+
+export type TelegramLinkRecord = typeof telegramLinksTable.$inferSelect;
+export type TelegramLinkCodeRecord = typeof telegramLinkCodesTable.$inferSelect;
+
 export type WorkspaceConnectedAppRecord =
   typeof workspaceConnectedAppsTable.$inferSelect;

@@ -3111,6 +3111,42 @@ export const UpdateConnectedAppResponse = zod.object({
 
 
 /**
+ * @summary Report whether Telegram is configured and linked for this workspace
+ */
+export const GetTelegramStatusResponse = zod.object({
+  "available": zod.boolean(),
+  "reason": zod.string().nullable(),
+  "linked": zod.boolean(),
+  "agentId": zod.string().nullable(),
+  "agentName": zod.string().nullable(),
+  "verifiedAt": zod.coerce.date().nullable(),
+  "botUsername": zod.string().nullable()
+})
+
+
+/**
+ * @summary Create a short-lived one-time code for linking a Telegram chat
+ */
+export const CreateTelegramLinkCodeBody = zod.object({
+  "agentId": zod.string()
+})
+
+export const CreateTelegramLinkCodeResponse = zod.object({
+  "code": zod.string(),
+  "expiresAt": zod.coerce.date(),
+  "botUsername": zod.string().nullable()
+})
+
+
+/**
+ * @summary Unlink this workspace from Telegram and invalidate outstanding codes
+ */
+export const RemoveTelegramLinkResponse = zod.object({
+  "unlinked": zod.boolean()
+})
+
+
+/**
  * @summary Vetted capability-package catalog with install state, tools, health, and pending updates
  */
 export const ListCapabilitiesResponse = zod.object({

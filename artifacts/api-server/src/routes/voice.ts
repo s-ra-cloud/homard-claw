@@ -274,11 +274,13 @@ router.post("/voice/transcribe", async (req: Request, res: Response) => {
 });
 
 /** Shared guardrails: the agent must exist and be able to hold a chat. */
-async function loadConversableAgent(
+async function findConversableAgent(
   workspaceId: string,
   agentId: string,
-  res: Response,
-): Promise<AgentRow | null> {
+): Promise<
+  | { ok: true; agent: AgentRow }
+  | { ok: false; status: 404 | 409; message: string }
+> {
   const [agent] = await db
     .select()
     .from(agentsTable)
@@ -290,26 +292,38 @@ async function loadConversableAgent(
     )
     .limit(1);
   if (!agent || agent.archived) {
-    res.status(404).json({ error: "Agent not found." });
-    return null;
+    return { ok: false, status: 404, message: "Agent not found." };
   }
   if (agent.retired) {
-    res.status(409).json({
-      error: `${agent.name} has retired to the beach and no longer takes calls.`,
-    });
-    return null;
+    return {
+      ok: false,
+      status: 409,
+      message: `${agent.name} has retired to the beach and no longer takes calls.`,
+    };
   }
   if (await emergencyStopEngaged(workspaceId)) {
-    res.status(409).json({
-      error:
+    return {
+      ok: false,
+      status: 409,
+      message:
         "The emergency stop is engaged; agents cannot converse until it is released.",
-    });
-    return null;
+    };
   }
-  return agent;
+  return { ok: true, agent };
 }
 
-type ConverseTurn = { role: "user" | "agent"; text: string };
+async function loadConversableAgent(
+  workspaceId: string,
+  agentId: string,
+  res: Response,
+): Promise<AgentRow | null> {
+  const result = await findConversableAgent(workspaceId, agentId);
+  if (result.ok) return result.agent;
+  res.status(result.status).json({ error: result.message });
+  return null;
+}
+
+export type ConverseTurn = { role: "user" | "agent"; text: string };
 
 type Coworker = {
   id: string;
@@ -331,14 +345,14 @@ type AgentExchange = {
   received: string;
 };
 
-type DelegationProposal = {
+export type DelegationProposal = {
   targetAgentId: string;
   targetAgentName: string;
   objective: string;
   note: string;
 };
 
-type PendingDelegation = {
+export type PendingDelegation = {
   targetAgentId: string;
   targetAgentName: string;
 };
@@ -1377,6 +1391,201 @@ async function claimExchange(
   return { kind: "in_flight" };
 }
 
+export type ConverseAttachment = {
+  name: string;
+  mimeType: string;
+  encoding: "text" | "base64";
+  content: string;
+};
+
+export type ConverseWithAgentResult = {
+  reply: string;
+  proposedTaskObjective: string | null;
+  proposedDelegation: DelegationProposal | null;
+  pendingDelegation: PendingDelegation | null;
+  voice: "alloy" | "nova" | "onyx" | "shimmer" | null;
+};
+
+export class ConverseWithAgentError extends Error {
+  constructor(
+    readonly status: number,
+    readonly kind: "not_found" | "unavailable" | "in_flight" | "provider",
+    message: string,
+  ) {
+    super(message);
+    this.name = "ConverseWithAgentError";
+  }
+}
+
+/**
+ * Reusable Talk service shared by HTTP and trusted inbound channels. Durable
+ * claim/replay, transcript persistence, provider behavior, and workspace
+ * scoping are exactly the same regardless of caller.
+ */
+export async function converseWithAgent(input: {
+  workspaceId: string;
+  agentId: string;
+  text: string;
+  clientMessageId?: string;
+  history: ConverseTurn[];
+  pendingDelegationTargetId?: string;
+  attachments?: ConverseAttachment[];
+  signal?: AbortSignal;
+}): Promise<ConverseWithAgentResult> {
+  // Captured before any other await: a clear that lands anywhere after this
+  // point changes the epoch and vetoes this request's transcript persist.
+  const clearEpoch = await readClearEpoch(input.workspaceId, input.agentId);
+  const found = await findConversableAgent(input.workspaceId, input.agentId);
+  if (!found.ok) {
+    throw new ConverseWithAgentError(
+      found.status,
+      found.status === 404 ? "not_found" : "unavailable",
+      found.message,
+    );
+  }
+  const agent = found.agent;
+  let claimId: string | null = null;
+  if (input.clientMessageId) {
+    const claim = await claimExchange(
+      input.workspaceId,
+      agent.id,
+      input.clientMessageId,
+    );
+    if (claim.kind === "done") {
+      return claim.payload as ConverseWithAgentResult;
+    }
+    if (claim.kind === "in_flight") {
+      throw new ConverseWithAgentError(
+        409,
+        "in_flight",
+        "This message is already being delivered. Give it a moment.",
+      );
+    }
+    claimId = claim.claimId;
+  }
+
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (input.signal?.aborted) abort();
+  input.signal?.addEventListener("abort", abort, { once: true });
+  const timeout = setTimeout(abort, CONVERSE_TIMEOUT_MS * 2);
+  try {
+    const generated = await generateReply(
+      input.workspaceId,
+      agent,
+      input.text,
+      input.history,
+      controller.signal,
+      input.pendingDelegationTargetId,
+      input.attachments,
+    );
+    const {
+      reply,
+      taskObjective,
+      proposedDelegation,
+      pendingDelegation,
+      exchange,
+    } = generated;
+    const payload: ConverseWithAgentResult = {
+      reply,
+      proposedTaskObjective: taskObjective,
+      proposedDelegation,
+      pendingDelegation,
+      voice: agentVoice(agent),
+    };
+    if (claimId) {
+      const ownedClaimId = claimId;
+      const finalized = await db.transaction(async (tx) => {
+        const updated = await tx
+          .update(talkExchangesTable)
+          .set({ status: "done", responseJson: JSON.stringify(payload) })
+          .where(
+            and(
+              eq(talkExchangesTable.id, ownedClaimId),
+              eq(talkExchangesTable.status, "pending"),
+            ),
+          )
+          .returning({ id: talkExchangesTable.id });
+        if (updated.length === 0) return false;
+        await persistTranscript(
+          input.workspaceId,
+          agent,
+          input.text,
+          reply,
+          clearEpoch,
+          true,
+          tx,
+        );
+        await persistAgentExchange(tx, agent, exchange);
+        return true;
+      });
+      claimId = null;
+      if (!finalized) {
+        const [authoritative] = await db
+          .select()
+          .from(talkExchangesTable)
+          .where(
+            and(
+              eq(talkExchangesTable.workspaceId, input.workspaceId),
+              eq(talkExchangesTable.agentId, agent.id),
+              eq(talkExchangesTable.clientMessageId, input.clientMessageId!),
+            ),
+          )
+          .limit(1);
+        if (authoritative?.status === "done" && authoritative.responseJson) {
+          return JSON.parse(
+            authoritative.responseJson,
+          ) as ConverseWithAgentResult;
+        }
+        throw new ConverseWithAgentError(
+          409,
+          "in_flight",
+          "This message is being retried elsewhere. Give it a moment.",
+        );
+      }
+    } else {
+      await db.transaction(async (tx) => {
+        await persistTranscript(
+          input.workspaceId,
+          agent,
+          input.text,
+          reply,
+          clearEpoch,
+          true,
+          tx,
+        );
+        await persistAgentExchange(tx, agent, exchange);
+      });
+    }
+    await recordAudit(
+      input.workspaceId,
+      "voice.converse",
+      `${agent.name} chatted with the owner (text mode).`,
+    );
+    if (exchange) publish(input.workspaceId, "messages");
+    return payload;
+  } catch (error) {
+    if (claimId) {
+      await db
+        .delete(talkExchangesTable)
+        .where(
+          and(
+            eq(talkExchangesTable.id, claimId),
+            eq(talkExchangesTable.status, "pending"),
+          ),
+        )
+        .catch(() => {});
+    }
+    if (error instanceof ConverseWithAgentError) throw error;
+    logTalkFailure(agent.id, "text", error);
+    const { status, message } = providerErrorMessage(error);
+    throw new ConverseWithAgentError(status, "provider", message);
+  } finally {
+    clearTimeout(timeout);
+    input.signal?.removeEventListener("abort", abort);
+  }
+}
+
 /** Text fallback: plain JSON request/response, no speech services involved. */
 router.post(
   "/agents/:agentId/converse",
@@ -1386,173 +1595,29 @@ router.post(
       res.status(400).json({ error: "A text message is required." });
       return;
     }
-    // Captured before any other await: a clear that lands anywhere after this
-    // point changes the epoch and vetoes this request's transcript persist.
-    const clearEpoch = await readClearEpoch(
-      req.workspaceId!,
-      String(req.params.agentId),
-    );
-    const agent = await loadConversableAgent(
-      req.workspaceId!,
-      String(req.params.agentId),
-      res,
-    );
-    if (!agent) return;
-
-    const clientMessageId = parsed.data.clientMessageId;
-    let claimId: string | null = null;
-    if (clientMessageId) {
-      const claim = await claimExchange(
-        req.workspaceId!,
-        agent.id,
-        clientMessageId,
-      );
-      if (claim.kind === "done") {
-        res.json(claim.payload);
-        return;
-      }
-      if (claim.kind === "in_flight") {
-        res.status(409).json({
-          error: "This message is already being delivered. Give it a moment.",
-        });
-        return;
-      }
-      claimId = claim.claimId;
-    }
-
     const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      CONVERSE_TIMEOUT_MS * 2,
-    );
     req.on("close", () => controller.abort());
     try {
-      const history = (parsed.data.history ?? []) as ConverseTurn[];
-      const generated = await generateReply(
-        req.workspaceId!,
-        agent,
-        parsed.data.text,
-        history,
-        controller.signal,
-        parsed.data.pendingDelegationTargetId,
-        parsed.data.attachments,
+      res.json(
+        await converseWithAgent({
+          workspaceId: req.workspaceId!,
+          agentId: String(req.params.agentId),
+          text: parsed.data.text,
+          clientMessageId: parsed.data.clientMessageId,
+          history: (parsed.data.history ?? []) as ConverseTurn[],
+          pendingDelegationTargetId: parsed.data.pendingDelegationTargetId,
+          attachments: parsed.data.attachments,
+          signal: controller.signal,
+        }),
       );
-      const {
-        reply,
-        taskObjective,
-        proposedDelegation,
-        pendingDelegation,
-        exchange,
-      } = generated;
-      const payload = {
-        reply,
-        proposedTaskObjective: taskObjective,
-        proposedDelegation,
-        pendingDelegation,
-        voice: agentVoice(agent),
-      };
-      if (claimId) {
-        // Crash safety: history rows and the claim's "done" state commit
-        // atomically, so a crash before this point leaves nothing persisted
-        // (the released/expired claim lets a retry regenerate cleanly) and a
-        // crash after it replays the stored response. The status='pending'
-        // guard means a stolen/expired claim skips persisting instead of
-        // duplicating rows the reclaimer will write.
-        const ownedClaimId = claimId;
-        const finalized = await db.transaction(async (tx) => {
-          const updated = await tx
-            .update(talkExchangesTable)
-            .set({ status: "done", responseJson: JSON.stringify(payload) })
-            .where(
-              and(
-                eq(talkExchangesTable.id, ownedClaimId),
-                eq(talkExchangesTable.status, "pending"),
-              ),
-            )
-            .returning({ id: talkExchangesTable.id });
-          if (updated.length === 0) return false;
-          await persistTranscript(
-            req.workspaceId!,
-            agent,
-            parsed.data.text,
-            reply,
-            clearEpoch,
-            true,
-            tx,
-          );
-          await persistAgentExchange(tx, agent, exchange);
-          return true;
-        });
-        // Ownership is consumed either way: nothing past this point may
-        // release or delete the claim (a post-finalization failure such as a
-        // broken audit write must leave the done claim for replay).
-        claimId = null;
-        if (!finalized) {
-          // Lost ownership: our claim was reclaimed while we ran (stale-claim
-          // timeout). The reclaimer's outcome is authoritative — replay it
-          // rather than answering with our own uncommitted reply, which would
-          // double-deliver the message.
-          const [authoritative] = await db
-            .select()
-            .from(talkExchangesTable)
-            .where(
-              and(
-                eq(talkExchangesTable.workspaceId, req.workspaceId!),
-                eq(talkExchangesTable.agentId, agent.id),
-                eq(talkExchangesTable.clientMessageId, clientMessageId!),
-              ),
-            )
-            .limit(1);
-          if (authoritative?.status === "done" && authoritative.responseJson) {
-            res.json(JSON.parse(authoritative.responseJson));
-            return;
-          }
-          res.status(409).json({
-            error: "This message is being retried elsewhere. Give it a moment.",
-          });
-          return;
+    } catch (error) {
+      if (error instanceof ConverseWithAgentError) {
+        if (!res.headersSent) {
+          res.status(error.status).json({ error: error.message });
         }
-      } else {
-        await db.transaction(async (tx) => {
-          await persistTranscript(
-            req.workspaceId!,
-            agent,
-            parsed.data.text,
-            reply,
-            clearEpoch,
-            true,
-            tx,
-          );
-          await persistAgentExchange(tx, agent, exchange);
-        });
+        return;
       }
-      await recordAudit(
-        req.workspaceId!,
-        "voice.converse",
-        `${agent.name} chatted with the owner (text mode).`,
-      );
-      if (exchange) publish(req.workspaceId!, "messages");
-      res.json(payload);
-    } catch (err) {
-      // Release only a claim we still own and that never finalized, so the
-      // owner's resend can try again. A finalized claim must survive for
-      // replay even when later steps fail.
-      if (claimId) {
-        await db
-          .delete(talkExchangesTable)
-          .where(
-            and(
-              eq(talkExchangesTable.id, claimId),
-              eq(talkExchangesTable.status, "pending"),
-            ),
-          )
-          .catch(() => {});
-      }
-      logTalkFailure(agent.id, "text", err);
-      const { status, message } = providerErrorMessage(err);
-      if (!res.headersSent) res.status(status).json({ error: message });
-    } finally {
-      clearTimeout(timeout);
+      throw error;
     }
   },
 );

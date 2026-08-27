@@ -9,6 +9,7 @@ import {
 import { eq } from "drizzle-orm";
 import { publish } from "./events";
 import { logger } from "./lib/logger";
+import { pushTelegramNotification } from "./telegram/service";
 
 /**
  * In-app notification emission for task lifecycle events.
@@ -20,10 +21,7 @@ import { logger } from "./lib/logger";
  */
 
 export type TaskNotifyKind =
-  | "task_completed"
-  | "task_failed"
-  | "task_blocked"
-  | "approval_needed";
+  "task_completed" | "task_failed" | "task_blocked" | "approval_needed";
 
 const PREF_FOR_KIND: Record<TaskNotifyKind, keyof NotifyPrefs> = {
   task_completed: "onCompleted",
@@ -56,6 +54,8 @@ export async function notifyTaskEvent(
   >,
   detail?: string | null,
 ): Promise<void> {
+  let outbound:
+    { workspaceId: string; title: string; body: string } | undefined;
   try {
     if (task.scheduleId) {
       const [schedule] = await db
@@ -83,9 +83,39 @@ export async function notifyTaskEvent(
       taskId: task.id,
       agentId: task.agentId,
     });
-    if (task.workspaceId) publish(task.workspaceId, "notifications");
+    if (task.workspaceId) {
+      publish(task.workspaceId, "notifications");
+      outbound = {
+        workspaceId: task.workspaceId,
+        title: TITLE_FOR_KIND[kind],
+        body,
+      };
+    }
   } catch (error) {
-    logger.warn({ error, taskId: task.id, kind }, "Could not record notification");
+    logger.warn(
+      { error, taskId: task.id, kind },
+      "Could not record notification",
+    );
+    return;
+  }
+  if (outbound) {
+    try {
+      await pushTelegramNotification({
+        ...outbound,
+        kind,
+        taskId: task.id,
+      });
+    } catch (error) {
+      logger.warn(
+        {
+          taskId: task.id,
+          kind,
+          failureKind:
+            error instanceof Error ? error.constructor.name : "UnknownError",
+        },
+        "Could not push Telegram notification",
+      );
+    }
   }
 }
 
@@ -96,16 +126,40 @@ export async function notifyScheduleIssue(
   agentId: string | null,
   detail: string,
 ): Promise<void> {
+  const title = "Schedule needs attention";
+  const body = `"${clip(scheduleName, 80)}": ${clip(detail, 300)}`;
   try {
     await db.insert(notificationsTable).values({
       workspaceId,
       kind: "schedule_error",
-      title: "Schedule needs attention",
-      body: `"${clip(scheduleName, 80)}": ${clip(detail, 300)}`,
+      title,
+      body,
       agentId,
     });
     if (workspaceId) publish(workspaceId, "notifications");
   } catch (error) {
-    logger.warn({ error, scheduleName }, "Could not record schedule notification");
+    logger.warn(
+      { error, scheduleName },
+      "Could not record schedule notification",
+    );
+    return;
+  }
+  if (workspaceId) {
+    try {
+      await pushTelegramNotification({
+        workspaceId,
+        kind: "schedule_error",
+        title,
+        body,
+      });
+    } catch (error) {
+      logger.warn(
+        {
+          failureKind:
+            error instanceof Error ? error.constructor.name : "UnknownError",
+        },
+        "Could not push Telegram schedule notification",
+      );
+    }
   }
 }

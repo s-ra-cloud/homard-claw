@@ -1320,6 +1320,52 @@ paths:
                 $ref: "#/components/schemas/ConnectedApp"
         "404":
           description: Unknown app
+  /telegram/status:
+    get:
+      operationId: getTelegramStatus
+      tags: [office]
+      summary: Report whether Telegram is configured and linked for this workspace
+      responses:
+        "200":
+          description: Telegram bridge status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TelegramStatus"
+  /telegram/link-code:
+    post:
+      operationId: createTelegramLinkCode
+      tags: [office]
+      summary: Create a short-lived one-time code for linking a Telegram chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TelegramLinkInput"
+      responses:
+        "200":
+          description: One-time link code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TelegramLinkCode"
+        "404":
+          description: Agent not found in this workspace
+        "503":
+          description: Telegram is not configured
+  /telegram/link:
+    delete:
+      operationId: removeTelegramLink
+      tags: [office]
+      summary: Unlink this workspace from Telegram and invalidate outstanding codes
+      responses:
+        "200":
+          description: Telegram unlink result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TelegramUnlinkResult"
   /capabilities:
     get:
       operationId: listCapabilities
@@ -1816,6 +1862,35 @@ components:
       required: [disconnected]
       properties:
         disconnected: { type: boolean }
+    TelegramStatus:
+      type: object
+      required:
+        [available, reason, linked, agentId, agentName, verifiedAt, botUsername]
+      properties:
+        available: { type: boolean }
+        reason: { type: [string, "null"] }
+        linked: { type: boolean }
+        agentId: { type: [string, "null"] }
+        agentName: { type: [string, "null"] }
+        verifiedAt: { type: [string, "null"], format: date-time }
+        botUsername: { type: [string, "null"] }
+    TelegramLinkInput:
+      type: object
+      required: [agentId]
+      properties:
+        agentId: { type: string }
+    TelegramLinkCode:
+      type: object
+      required: [code, expiresAt, botUsername]
+      properties:
+        code: { type: string }
+        expiresAt: { type: string, format: date-time }
+        botUsername: { type: [string, "null"] }
+    TelegramUnlinkResult:
+      type: object
+      required: [unlinked]
+      properties:
+        unlinked: { type: boolean }
     ConnectedApp:
       type: object
       required:
