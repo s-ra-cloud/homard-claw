@@ -188,3 +188,6 @@ export * from './usageReportTotals';
 export * from './voiceConverseInput';
 export * from './voiceSettingsInput';
 export * from './voiceStatus';
+export * from './workspaceSkill';
+export * from './workspaceSkillInput';
+export * from './workspaceSkillUpdate';

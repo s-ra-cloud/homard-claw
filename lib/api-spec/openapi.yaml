@@ -1003,6 +1003,72 @@ paths:
           description: Memory deleted
         "404":
           description: Memory not found
+  /skills:
+    get:
+      operationId: listWorkspaceSkills
+      tags: [office]
+      summary: List owner-authored, toolless workspace skills
+      responses:
+        "200":
+          description: Workspace skills
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WorkspaceSkill"
+    post:
+      operationId: createWorkspaceSkill
+      tags: [office]
+      summary: Create owner-authored guidance for matching task objectives
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceSkillInput"
+      responses:
+        "201":
+          description: Created workspace skill
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceSkill"
+        "409":
+          description: Workspace skill limit reached
+  /skills/{skillId}:
+    patch:
+      operationId: updateWorkspaceSkill
+      tags: [office]
+      summary: Edit or enable an owner-authored workspace skill
+      parameters:
+        - $ref: "#/components/parameters/SkillId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceSkillUpdate"
+      responses:
+        "200":
+          description: Updated workspace skill
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceSkill"
+        "404":
+          description: Workspace skill not found
+    delete:
+      operationId: deleteWorkspaceSkill
+      tags: [office]
+      summary: Delete an owner-authored workspace skill
+      parameters:
+        - $ref: "#/components/parameters/SkillId"
+      responses:
+        "204":
+          description: Workspace skill deleted
+        "404":
+          description: Workspace skill not found
   /knowledge:
     get:
       operationId: listKnowledgeFiles
@@ -1441,6 +1507,11 @@ components:
       schema: { type: string }
     FileId:
       name: fileId
+      in: path
+      required: true
+      schema: { type: string }
+    SkillId:
+      name: skillId
       in: path
       required: true
       schema: { type: string }
@@ -2746,6 +2817,41 @@ components:
           items:
             $ref: "#/components/schemas/Memory"
         total: { type: number }
+    WorkspaceSkill:
+      type: object
+      required:
+        [id, title, triggers, instructions, enabled, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        triggers:
+          type: array
+          items: { type: string }
+        instructions: { type: string }
+        enabled: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    WorkspaceSkillInput:
+      type: object
+      required: [title, triggers, instructions]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 80 }
+        triggers:
+          type: array
+          maxItems: 10
+          items: { type: string, minLength: 1, maxLength: 40 }
+        instructions: { type: string, minLength: 1, maxLength: 2000 }
+        enabled: { type: boolean }
+    WorkspaceSkillUpdate:
+      type: object
+      properties:
+        title: { type: string, minLength: 1, maxLength: 80 }
+        triggers:
+          type: array
+          maxItems: 10
+          items: { type: string, minLength: 1, maxLength: 40 }
+        instructions: { type: string, minLength: 1, maxLength: 2000 }
+        enabled: { type: boolean }
     ClearMemoriesResult:
       type: object
       required: [deleted]

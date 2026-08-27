@@ -1790,6 +1790,56 @@ export interface MemoryList {
   total: number;
 }
 
+export interface WorkspaceSkill {
+  id: string;
+  title: string;
+  triggers: string[];
+  instructions: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkspaceSkillInput {
+  /**
+     * @minLength 1
+     * @maxLength 80
+     */
+  title: string;
+  /**
+     * @maxItems 10
+     * @items.minLength 1
+     * @items.maxLength 40
+     */
+  triggers: string[];
+  /**
+     * @minLength 1
+     * @maxLength 2000
+     */
+  instructions: string;
+  enabled?: boolean;
+}
+
+export interface WorkspaceSkillUpdate {
+  /**
+     * @minLength 1
+     * @maxLength 80
+     */
+  title?: string;
+  /**
+     * @maxItems 10
+     * @items.minLength 1
+     * @items.maxLength 40
+     */
+  triggers?: string[];
+  /**
+     * @minLength 1
+     * @maxLength 2000
+     */
+  instructions?: string;
+  enabled?: boolean;
+}
+
 export interface ClearMemoriesResult {
   deleted: number;
 }

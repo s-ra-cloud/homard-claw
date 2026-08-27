@@ -100,7 +100,10 @@ import type {
   UsageReport,
   VoiceConverseInput,
   VoiceSettingsInput,
-  VoiceStatus
+  VoiceStatus,
+  WorkspaceSkill,
+  WorkspaceSkillInput,
+  WorkspaceSkillUpdate
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -4273,6 +4276,297 @@ export const useDeleteMemory = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getDeleteMemoryMutationOptions(options));
+    }
+
+export const getListWorkspaceSkillsUrl = () => {
+
+
+
+
+  return `/api/skills`
+}
+
+/**
+ * @summary List owner-authored, toolless workspace skills
+ */
+export const listWorkspaceSkills = async ( options?: Parameters<typeof customFetch>[1]): Promise<WorkspaceSkill[]> => {
+
+  return customFetch<WorkspaceSkill[]>(getListWorkspaceSkillsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListWorkspaceSkillsQueryKey = () => {
+    return [
+    `/api/skills`
+    ] as const;
+    }
+
+
+export const getListWorkspaceSkillsQueryOptions = <TData = Awaited<ReturnType<typeof listWorkspaceSkills>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listWorkspaceSkills>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListWorkspaceSkillsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listWorkspaceSkills>>> = ({ signal }) => listWorkspaceSkills({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listWorkspaceSkills>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListWorkspaceSkillsQueryResult = NonNullable<Awaited<ReturnType<typeof listWorkspaceSkills>>>
+export type ListWorkspaceSkillsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List owner-authored, toolless workspace skills
+ */
+
+export function useListWorkspaceSkills<TData = Awaited<ReturnType<typeof listWorkspaceSkills>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listWorkspaceSkills>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListWorkspaceSkillsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateWorkspaceSkillUrl = () => {
+
+
+
+
+  return `/api/skills`
+}
+
+/**
+ * @summary Create owner-authored guidance for matching task objectives
+ */
+export const createWorkspaceSkill = async (workspaceSkillInput: WorkspaceSkillInput, options?: Parameters<typeof customFetch>[1]): Promise<WorkspaceSkill> => {
+
+  return customFetch<WorkspaceSkill>(getCreateWorkspaceSkillUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(workspaceSkillInput)
+  }
+);}
+
+
+
+
+
+export const getCreateWorkspaceSkillMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createWorkspaceSkill>>, TError,{data: BodyType<WorkspaceSkillInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createWorkspaceSkill>>, TError,{data: BodyType<WorkspaceSkillInput>}, TContext> => {
+
+const mutationKey = ['createWorkspaceSkill'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createWorkspaceSkill>>, {data: BodyType<WorkspaceSkillInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createWorkspaceSkill(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateWorkspaceSkillMutationResult = NonNullable<Awaited<ReturnType<typeof createWorkspaceSkill>>>
+    export type CreateWorkspaceSkillMutationBody = BodyType<WorkspaceSkillInput>
+    export type CreateWorkspaceSkillMutationError = ErrorType<void>
+
+    /**
+ * @summary Create owner-authored guidance for matching task objectives
+ */
+export const useCreateWorkspaceSkill = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createWorkspaceSkill>>, TError,{data: BodyType<WorkspaceSkillInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createWorkspaceSkill>>,
+        TError,
+        {data: BodyType<WorkspaceSkillInput>},
+        TContext
+      > => {
+      return useMutation(getCreateWorkspaceSkillMutationOptions(options));
+    }
+
+export const getUpdateWorkspaceSkillUrl = (skillId: string,) => {
+
+
+
+
+  return `/api/skills/${skillId}`
+}
+
+/**
+ * @summary Edit or enable an owner-authored workspace skill
+ */
+export const updateWorkspaceSkill = async (skillId: string,
+    workspaceSkillUpdate: WorkspaceSkillUpdate, options?: Parameters<typeof customFetch>[1]): Promise<WorkspaceSkill> => {
+
+  return customFetch<WorkspaceSkill>(getUpdateWorkspaceSkillUrl(skillId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(workspaceSkillUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdateWorkspaceSkillMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateWorkspaceSkill>>, TError,{skillId: string;data: BodyType<WorkspaceSkillUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateWorkspaceSkill>>, TError,{skillId: string;data: BodyType<WorkspaceSkillUpdate>}, TContext> => {
+
+const mutationKey = ['updateWorkspaceSkill'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateWorkspaceSkill>>, {skillId: string;data: BodyType<WorkspaceSkillUpdate>}> = (props) => {
+          const {skillId,data} = props ?? {};
+
+          return  updateWorkspaceSkill(skillId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateWorkspaceSkillMutationResult = NonNullable<Awaited<ReturnType<typeof updateWorkspaceSkill>>>
+    export type UpdateWorkspaceSkillMutationBody = BodyType<WorkspaceSkillUpdate>
+    export type UpdateWorkspaceSkillMutationError = ErrorType<void>
+
+    /**
+ * @summary Edit or enable an owner-authored workspace skill
+ */
+export const useUpdateWorkspaceSkill = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateWorkspaceSkill>>, TError,{skillId: string;data: BodyType<WorkspaceSkillUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateWorkspaceSkill>>,
+        TError,
+        {skillId: string;data: BodyType<WorkspaceSkillUpdate>},
+        TContext
+      > => {
+      return useMutation(getUpdateWorkspaceSkillMutationOptions(options));
+    }
+
+export const getDeleteWorkspaceSkillUrl = (skillId: string,) => {
+
+
+
+
+  return `/api/skills/${skillId}`
+}
+
+/**
+ * @summary Delete an owner-authored workspace skill
+ */
+export const deleteWorkspaceSkill = async (skillId: string, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+  return customFetch<void>(getDeleteWorkspaceSkillUrl(skillId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteWorkspaceSkillMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteWorkspaceSkill>>, TError,{skillId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteWorkspaceSkill>>, TError,{skillId: string}, TContext> => {
+
+const mutationKey = ['deleteWorkspaceSkill'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteWorkspaceSkill>>, {skillId: string}> = (props) => {
+          const {skillId} = props ?? {};
+
+          return  deleteWorkspaceSkill(skillId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteWorkspaceSkillMutationResult = NonNullable<Awaited<ReturnType<typeof deleteWorkspaceSkill>>>
+
+    export type DeleteWorkspaceSkillMutationError = ErrorType<void>
+
+    /**
+ * @summary Delete an owner-authored workspace skill
+ */
+export const useDeleteWorkspaceSkill = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteWorkspaceSkill>>, TError,{skillId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteWorkspaceSkill>>,
+        TError,
+        {skillId: string},
+        TContext
+      > => {
+      return useMutation(getDeleteWorkspaceSkillMutationOptions(options));
     }
 
 export const getListKnowledgeFilesUrl = () => {

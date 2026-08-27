@@ -124,6 +124,7 @@ import memoryRouter from "./memory";
 import notificationsRouter from "./notifications";
 import reportsRouter from "./reports";
 import schedulesRouter from "./schedules";
+import skillsRouter from "./skills";
 import teamsRouter from "./teams";
 import voiceRouter from "./voice";
 
@@ -137,6 +138,7 @@ const router: IRouter = Router();
 router.use(requireWorkspace);
 // Memory, knowledge, and team routes share the workspace gate above.
 router.use(memoryRouter);
+router.use(skillsRouter);
 router.use(teamsRouter);
 router.use(voiceRouter);
 router.use(schedulesRouter);

@@ -25,7 +25,15 @@
  * Conventions (see .agents/memory/api-server-test-conventions.md): tag +
  * clean up all rows, dedicated workspaces per run, never touch audit rows.
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import {
   agentAppGrantsTable,
   agentsTable,
@@ -33,6 +41,7 @@ import {
   db,
   pool,
   workspacesTable,
+  workspaceSkillsTable,
 } from "@workspace/db";
 import { eq, inArray } from "drizzle-orm";
 
@@ -106,18 +115,37 @@ beforeAll(async () => {
       status: "idle",
       paused: true,
       securityPreset: "assistant",
-      avatar: { shellColor: "#C34428", deskStyle: "standard", accessory: "none" },
+      avatar: {
+        shellColor: "#C34428",
+        deskStyle: "standard",
+        accessory: "none",
+      },
     })
     .returning();
   agentId = agent.id;
 });
 
 afterAll(async () => {
-  await db.delete(agentAppGrantsTable).where(eq(agentAppGrantsTable.agentId, agentId));
+  await db
+    .delete(workspaceSkillsTable)
+    .where(
+      inArray(workspaceSkillsTable.workspaceId, [
+        workspaceId,
+        otherWorkspaceId,
+      ]),
+    );
+  await db
+    .delete(agentAppGrantsTable)
+    .where(eq(agentAppGrantsTable.agentId, agentId));
   await db.delete(agentsTable).where(eq(agentsTable.id, agentId));
   await db
     .delete(capabilityPackagesTable)
-    .where(inArray(capabilityPackagesTable.workspaceId, [workspaceId, otherWorkspaceId]));
+    .where(
+      inArray(capabilityPackagesTable.workspaceId, [
+        workspaceId,
+        otherWorkspaceId,
+      ]),
+    );
   await db
     .delete(workspacesTable)
     .where(inArray(workspacesTable.id, [workspaceId, otherWorkspaceId]));
@@ -128,8 +156,27 @@ beforeEach(async () => {
   fetchMock.mockReset();
   await db
     .delete(capabilityPackagesTable)
-    .where(inArray(capabilityPackagesTable.workspaceId, [workspaceId, otherWorkspaceId]));
-  await db.delete(agentAppGrantsTable).where(eq(agentAppGrantsTable.agentId, agentId));
+    .where(
+      inArray(capabilityPackagesTable.workspaceId, [
+        workspaceId,
+        otherWorkspaceId,
+      ]),
+    );
+  await db
+    .delete(agentAppGrantsTable)
+    .where(eq(agentAppGrantsTable.agentId, agentId));
+  await db
+    .delete(workspaceSkillsTable)
+    .where(
+      inArray(workspaceSkillsTable.workspaceId, [
+        workspaceId,
+        otherWorkspaceId,
+      ]),
+    );
+  await db
+    .update(agentsTable)
+    .set({ sensitiveDataSandbox: false })
+    .where(eq(agentsTable.id, agentId));
 });
 
 function webResearchManifest(): CapabilityManifest {
@@ -162,7 +209,9 @@ describe("manifest contract", () => {
     const harmless = webResearchManifest();
     harmless.version = "1.0.1";
     harmless.tools[0]!.description = "Better wording.";
-    expect(computePermissionDiff(pinned, harmless).expandsPermissions).toBe(false);
+    expect(computePermissionDiff(pinned, harmless).expandsPermissions).toBe(
+      false,
+    );
 
     const escalated = webResearchManifest();
     escalated.version = "2.0.0";
@@ -176,7 +225,9 @@ describe("manifest contract", () => {
     const newTool = webResearchManifest();
     newTool.version = "2.0.0";
     newTool.tools.push({ ...newTool.tools[0]!, name: "web_research.post" });
-    expect(computePermissionDiff(pinned, newTool).expandsPermissions).toBe(true);
+    expect(computePermissionDiff(pinned, newTool).expandsPermissions).toBe(
+      true,
+    );
 
     // Claiming a formerly non-retryable/verifiable tool is now retry-safe
     // is the dangerous direction: recovery could start replaying it.
@@ -184,17 +235,23 @@ describe("manifest contract", () => {
     cautious.tools[0]!.recovery = "provider_verifiable";
     const braver = webResearchManifest();
     braver.version = "2.0.0";
-    expect(computePermissionDiff(cautious, braver).expandsPermissions).toBe(true);
+    expect(computePermissionDiff(cautious, braver).expandsPermissions).toBe(
+      true,
+    );
     // The opposite direction (becoming more cautious) is not an expansion.
     const toCautious = webResearchManifest();
     toCautious.version = "2.0.0";
     toCautious.tools[0]!.recovery = "non_retryable";
-    expect(computePermissionDiff(pinned, toCautious).expandsPermissions).toBe(false);
+    expect(computePermissionDiff(pinned, toCautious).expandsPermissions).toBe(
+      false,
+    );
 
     const schemaChange = webResearchManifest();
     schemaChange.version = "2.0.0";
     schemaChange.tools[0]!.params[0]!.maxLength = 99999;
-    expect(computePermissionDiff(pinned, schemaChange).expandsPermissions).toBe(true);
+    expect(computePermissionDiff(pinned, schemaChange).expandsPermissions).toBe(
+      true,
+    );
   });
 
   it("routing changes (MCP server, executor kind, remote name) always expand", () => {
@@ -212,7 +269,9 @@ describe("manifest contract", () => {
     const retoken = webResearchManifest();
     retoken.version = "1.0.1";
     retoken.mcpServer = { ...retoken.mcpServer!, authTokenEnv: "OTHER_TOKEN" };
-    expect(computePermissionDiff(pinned, retoken).expandsPermissions).toBe(true);
+    expect(computePermissionDiff(pinned, retoken).expandsPermissions).toBe(
+      true,
+    );
 
     // Remapping a tool to a different remote operation name.
     const remapped = webResearchManifest();
@@ -226,7 +285,9 @@ describe("manifest contract", () => {
     const flipped = webResearchManifest();
     flipped.version = "1.0.1";
     flipped.tools[0]!.executor = { kind: "builtin" };
-    expect(computePermissionDiff(pinned, flipped).expandsPermissions).toBe(true);
+    expect(computePermissionDiff(pinned, flipped).expandsPermissions).toBe(
+      true,
+    );
   });
 });
 
@@ -234,7 +295,12 @@ describe("registry", () => {
   it("carries the built-ins plus web_research, all signature-verified", () => {
     const ids = listRegistryEntries().map((e) => e.manifest.id);
     expect(ids).toEqual(
-      expect.arrayContaining(["gmail", "google_drive", "github", "web_research"]),
+      expect.arrayContaining([
+        "gmail",
+        "google_drive",
+        "github",
+        "web_research",
+      ]),
     );
   });
 });
@@ -585,6 +651,33 @@ describe("skills prompt assembly", () => {
     );
     expect(none).toBeNull();
   });
+
+  it("loads matching workspace skills without packages and excludes them from sandboxed agents", async () => {
+    await db.insert(workspaceSkillsTable).values({
+      workspaceId,
+      title: "Kelp briefing",
+      triggers: ["kelp outlook"],
+      instructions: "Lead with the current harvest forecast.",
+    });
+
+    const regular = await loadAgentAppAccess(agentId, workspaceId, {
+      objective: "Prepare the kelp outlook",
+    });
+    expect(regular.grants.size).toBe(0);
+    expect(regular.promptSection).toContain("[Your skill] Kelp briefing");
+    expect(regular.promptSection).toContain("current harvest forecast");
+
+    await db
+      .update(agentsTable)
+      .set({ sensitiveDataSandbox: true })
+      .where(eq(agentsTable.id, agentId));
+    const sandboxed = await loadAgentAppAccess(agentId, workspaceId, {
+      objective: "Prepare the kelp outlook",
+    });
+    expect(sandboxed.sensitiveDataSandbox).toBe(true);
+    expect(sandboxed.promptSection).not.toContain("Kelp briefing");
+    expect(sandboxed.promptSection).not.toContain("current harvest forecast");
+  });
 });
 
 describe("MCP execution", () => {
@@ -596,11 +689,17 @@ describe("MCP execution", () => {
 
   it("runs the starter tool end to end with bearer auth and bounded output", async () => {
     const tool = await resolvedTool("web_research.search");
-    fetchMock.mockResolvedValueOnce(rpcResponse(textResult("Result: kelp is up 12%")));
-    const outcome = await executeCapabilityTool(tool, { query: "kelp" }, {
-      actionId: "test-action",
-      workspaceId,
-    });
+    fetchMock.mockResolvedValueOnce(
+      rpcResponse(textResult("Result: kelp is up 12%")),
+    );
+    const outcome = await executeCapabilityTool(
+      tool,
+      { query: "kelp" },
+      {
+        actionId: "test-action",
+        workspaceId,
+      },
+    );
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
     expect(outcome.summary).toContain("kelp is up 12%");
@@ -611,16 +710,25 @@ describe("MCP execution", () => {
     );
     const body = JSON.parse(String(init.body));
     expect(body.method).toBe("tools/call");
-    expect(body.params).toEqual({ name: "search", arguments: { query: "kelp" } });
+    expect(body.params).toEqual({
+      name: "search",
+      arguments: { query: "kelp" },
+    });
   });
 
   it("truncates oversized results with an explicit marker", async () => {
     const tool = await resolvedTool("web_research.search");
-    fetchMock.mockResolvedValueOnce(rpcResponse(textResult("A".repeat(10_000))));
-    const outcome = await executeCapabilityTool(tool, { query: "kelp" }, {
-      actionId: "t",
-      workspaceId,
-    });
+    fetchMock.mockResolvedValueOnce(
+      rpcResponse(textResult("A".repeat(10_000))),
+    );
+    const outcome = await executeCapabilityTool(
+      tool,
+      { query: "kelp" },
+      {
+        actionId: "t",
+        workspaceId,
+      },
+    );
     if (!outcome.ok) throw new Error("expected success");
     expect(outcome.summary.length).toBeLessThan(5000);
     expect(outcome.summary).toContain("[truncated");
@@ -628,11 +736,17 @@ describe("MCP execution", () => {
 
   it("sanitizes failures: no URL or token ever surfaces", async () => {
     const tool = await resolvedTool("web_research.search");
-    fetchMock.mockRejectedValueOnce(new Error(`connect ECONNREFUSED ${MCP_URL}`));
-    const outcome = await executeCapabilityTool(tool, { query: "kelp" }, {
-      actionId: "t",
-      workspaceId,
-    });
+    fetchMock.mockRejectedValueOnce(
+      new Error(`connect ECONNREFUSED ${MCP_URL}`),
+    );
+    const outcome = await executeCapabilityTool(
+      tool,
+      { query: "kelp" },
+      {
+        actionId: "t",
+        workspaceId,
+      },
+    );
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.message).not.toContain(MCP_URL);
@@ -644,12 +758,17 @@ describe("MCP execution", () => {
     const tool = await resolvedTool("web_research.search");
     vi.stubEnv("WEB_RESEARCH_MCP_URL", "");
     try {
-      const outcome = await executeCapabilityTool(tool, { query: "kelp" }, {
-        actionId: "t",
-        workspaceId,
-      });
+      const outcome = await executeCapabilityTool(
+        tool,
+        { query: "kelp" },
+        {
+          actionId: "t",
+          workspaceId,
+        },
+      );
       expect(outcome.ok).toBe(false);
-      if (!outcome.ok) expect(outcome.message).toMatch(/not configured|unavailable/i);
+      if (!outcome.ok)
+        expect(outcome.message).toMatch(/not configured|unavailable/i);
       expect(fetchMock).not.toHaveBeenCalled();
     } finally {
       vi.stubEnv("WEB_RESEARCH_MCP_URL", MCP_URL);
@@ -670,10 +789,14 @@ describe("MCP execution", () => {
         ),
       ),
     );
-    const outcome = await executeCapabilityTool(tool, { query: "x" }, {
-      actionId: "t",
-      workspaceId,
-    });
+    const outcome = await executeCapabilityTool(
+      tool,
+      { query: "x" },
+      {
+        actionId: "t",
+        workspaceId,
+      },
+    );
     expect(outcome.ok).toBe(true);
     // The authorization gate is unchanged by whatever the tool returned.
     expect(

@@ -3,6 +3,7 @@ import {
   agentsTable,
   db,
   workspaceConnectedAppsTable,
+  workspaceSkillsTable,
   type AppAccessLevel,
 } from "@workspace/db";
 import { and, eq } from "drizzle-orm";
@@ -14,11 +15,7 @@ import {
   type WorkspaceCapabilities,
 } from "../capabilities/service";
 import { buildSkillsPromptSection } from "../capabilities/skills";
-import {
-  buildAppsPromptSection,
-  levelAllows,
-  validateParams,
-} from "./catalog";
+import { buildAppsPromptSection, levelAllows, validateParams } from "./catalog";
 
 /** Everything the worker needs to know about one agent's app access. */
 export type AgentAppAccess = {
@@ -56,40 +53,58 @@ export async function loadAgentAppAccess(
   workspaceId: string | null,
   options?: { objective?: string },
 ): Promise<AgentAppAccess> {
-  const [grantRows, settingRows, agentRows, capabilities] = await Promise.all([
-    db
-      .select({
-        app: agentAppGrantsTable.app,
-        accessLevel: agentAppGrantsTable.accessLevel,
-      })
-      .from(agentAppGrantsTable)
-      .innerJoin(agentsTable, eq(agentAppGrantsTable.agentId, agentsTable.id))
-      .where(
-        and(
-          eq(agentAppGrantsTable.agentId, agentId),
-          eq(agentsTable.workspaceId, workspaceId ?? ""),
+  const [grantRows, settingRows, agentRows, capabilities, workspaceSkills] =
+    await Promise.all([
+      db
+        .select({
+          app: agentAppGrantsTable.app,
+          accessLevel: agentAppGrantsTable.accessLevel,
+        })
+        .from(agentAppGrantsTable)
+        .innerJoin(agentsTable, eq(agentAppGrantsTable.agentId, agentsTable.id))
+        .where(
+          and(
+            eq(agentAppGrantsTable.agentId, agentId),
+            eq(agentsTable.workspaceId, workspaceId ?? ""),
+          ),
         ),
-      ),
-    workspaceId
-      ? db
-          .select()
-          .from(workspaceConnectedAppsTable)
-          .where(eq(workspaceConnectedAppsTable.workspaceId, workspaceId))
-      : Promise.resolve(
-          [] as (typeof workspaceConnectedAppsTable.$inferSelect)[],
-        ),
-    db
-      .select({ sensitiveDataSandbox: agentsTable.sensitiveDataSandbox })
-      .from(agentsTable)
-      .where(
-        and(
-          eq(agentsTable.id, agentId),
-          eq(agentsTable.workspaceId, workspaceId ?? ""),
-        ),
-      )
-      .limit(1),
-    loadWorkspaceCapabilities(workspaceId),
-  ]);
+      workspaceId
+        ? db
+            .select()
+            .from(workspaceConnectedAppsTable)
+            .where(eq(workspaceConnectedAppsTable.workspaceId, workspaceId))
+        : Promise.resolve(
+            [] as (typeof workspaceConnectedAppsTable.$inferSelect)[],
+          ),
+      db
+        .select({ sensitiveDataSandbox: agentsTable.sensitiveDataSandbox })
+        .from(agentsTable)
+        .where(
+          and(
+            eq(agentsTable.id, agentId),
+            eq(agentsTable.workspaceId, workspaceId ?? ""),
+          ),
+        )
+        .limit(1),
+      loadWorkspaceCapabilities(workspaceId),
+      workspaceId
+        ? db
+            .select({
+              title: workspaceSkillsTable.title,
+              triggers: workspaceSkillsTable.triggers,
+              instructions: workspaceSkillsTable.instructions,
+              enabled: workspaceSkillsTable.enabled,
+            })
+            .from(workspaceSkillsTable)
+            .where(
+              and(
+                eq(workspaceSkillsTable.workspaceId, workspaceId),
+                eq(workspaceSkillsTable.enabled, true),
+              ),
+            )
+            .orderBy(workspaceSkillsTable.createdAt)
+        : Promise.resolve([]),
+    ]);
   // Fail closed: an agent row we cannot read is treated as sandboxed.
   const sensitiveDataSandbox = agentRows[0]?.sensitiveDataSandbox ?? true;
   const disabled = new Set(
@@ -122,12 +137,15 @@ export async function loadAgentAppAccess(
         capabilities.packages.values(),
         new Set(grants.keys()),
         options.objective,
+        // Workspace skills are shared owner-authored context and therefore
+        // never enter a sensitive-data agent's prompt.
+        sensitiveDataSandbox ? [] : workspaceSkills,
       )
     : null;
   const promptSection =
     appsSection && skillsSection
       ? `${appsSection}\n\n${skillsSection}`
-      : (appsSection ?? null);
+      : (appsSection ?? skillsSection ?? null);
   return {
     grants,
     promptSection,

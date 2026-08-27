@@ -10,12 +10,18 @@ import {
   useUploadKnowledgeFile,
   useDeleteKnowledgeFile,
   useSetKnowledgeAssignments,
+  useListWorkspaceSkills,
+  useCreateWorkspaceSkill,
+  useUpdateWorkspaceSkill,
+  useDeleteWorkspaceSkill,
   exportMemories,
   getListMemoriesQueryKey,
   getListKnowledgeFilesQueryKey,
+  getListWorkspaceSkillsQueryKey,
   MemoryInputKind,
   type Memory,
   type KnowledgeFile,
+  type WorkspaceSkill,
 } from "@workspace/api-client-react";
 import { Shell } from "@/components/layout/Shell";
 import { PixelCard } from "@/components/ui/pixel-card";
@@ -52,12 +58,14 @@ import {
   Search,
   Plus,
   Users,
+  Sparkles,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
 const selectTriggerClass =
   "bg-background border-4 border-border rounded-none focus:ring-0 focus:border-primary font-mono text-sm uppercase";
-const selectContentClass = "border-4 border-border rounded-none bg-card max-h-72";
+const selectContentClass =
+  "border-4 border-border rounded-none bg-card max-h-72";
 const selectItemClass =
   "font-mono text-xs uppercase focus:bg-primary focus:text-primary-foreground";
 const inputClass =
@@ -80,13 +88,16 @@ const MEMORY_KINDS = Object.values(MemoryInputKind);
 async function readTextFile(file: File): Promise<string> {
   const text = await file.text();
   if (text.includes("\u0000")) {
-    throw new Error(`"${file.name}" looks binary; only text files are supported.`);
+    throw new Error(
+      `"${file.name}" looks binary; only text files are supported.`,
+    );
   }
   return text;
 }
 
 function apiErrorMessage(error: unknown, fallback: string): string {
-  const data = (error as { response?: { data?: { error?: string } } })?.response?.data;
+  const data = (error as { response?: { data?: { error?: string } } })?.response
+    ?.data;
   return data?.error ?? fallback;
 }
 
@@ -136,7 +147,9 @@ function MemoryEditorDialog({
       } else {
         await createMemory.mutateAsync({ data });
       }
-      await queryClient.invalidateQueries({ queryKey: getListMemoriesQueryKey() });
+      await queryClient.invalidateQueries({
+        queryKey: getListMemoriesQueryKey(),
+      });
       onOpenChange(false);
       toast({ title: memory ? "Memory updated" : "Memory saved" });
     } catch (error) {
@@ -156,7 +169,9 @@ function MemoryEditorDialog({
         </DialogTitle>
         <div className="space-y-4">
           <div>
-            <label className="text-[10px] font-bold uppercase text-muted-foreground">Memory</label>
+            <label className="text-[10px] font-bold uppercase text-muted-foreground">
+              Memory
+            </label>
             <Textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
@@ -169,9 +184,14 @@ function MemoryEditorDialog({
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="text-[10px] font-bold uppercase text-muted-foreground">Kind</label>
+              <label className="text-[10px] font-bold uppercase text-muted-foreground">
+                Kind
+              </label>
               <Select value={kind} onValueChange={setKind}>
-                <SelectTrigger className={selectTriggerClass} data-testid="select-memory-kind">
+                <SelectTrigger
+                  className={selectTriggerClass}
+                  data-testid="select-memory-kind"
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className={selectContentClass}>
@@ -184,17 +204,29 @@ function MemoryEditorDialog({
               </Select>
             </div>
             <div>
-              <label className="text-[10px] font-bold uppercase text-muted-foreground">Belongs To</label>
+              <label className="text-[10px] font-bold uppercase text-muted-foreground">
+                Belongs To
+              </label>
               <Select value={agentId} onValueChange={setAgentId}>
-                <SelectTrigger className={selectTriggerClass} data-testid="select-memory-agent">
+                <SelectTrigger
+                  className={selectTriggerClass}
+                  data-testid="select-memory-agent"
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className={selectContentClass}>
-                  <SelectItem value={SHARED_SENTINEL} className={selectItemClass}>
+                  <SelectItem
+                    value={SHARED_SENTINEL}
+                    className={selectItemClass}
+                  >
                     Shared (all agents)
                   </SelectItem>
                   {agents.map((agent) => (
-                    <SelectItem key={agent.id} value={agent.id} className={selectItemClass}>
+                    <SelectItem
+                      key={agent.id}
+                      value={agent.id}
+                      className={selectItemClass}
+                    >
                       {agent.name}
                     </SelectItem>
                   ))}
@@ -246,7 +278,10 @@ function MemoriesTab({ agents }: { agents: { id: string; name: string }[] }) {
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: getListMemoriesQueryKey() });
 
-  const toggle = async (memory: Memory, patch: { pinned?: boolean; disabled?: boolean }) => {
+  const toggle = async (
+    memory: Memory,
+    patch: { pinned?: boolean; disabled?: boolean },
+  ) => {
     try {
       await updateMemory.mutateAsync({ memoryId: memory.id, data: patch });
       await invalidate();
@@ -275,7 +310,8 @@ function MemoriesTab({ agents }: { agents: { id: string; name: string }[] }) {
   };
 
   const clearAll = async () => {
-    const scoped = agentFilter !== ALL_SENTINEL && agentFilter !== SHARED_SENTINEL;
+    const scoped =
+      agentFilter !== ALL_SENTINEL && agentFilter !== SHARED_SENTINEL;
     const message = scoped
       ? "Clear ALL memories for this agent? This cannot be undone."
       : "Clear ALL memories in the office? This cannot be undone.";
@@ -343,7 +379,11 @@ function MemoriesTab({ agents }: { agents: { id: string; name: string }[] }) {
               Shared Only
             </SelectItem>
             {agents.map((agent) => (
-              <SelectItem key={agent.id} value={agent.id} className={selectItemClass}>
+              <SelectItem
+                key={agent.id}
+                value={agent.id}
+                className={selectItemClass}
+              >
                 {agent.name}
               </SelectItem>
             ))}
@@ -376,7 +416,10 @@ function MemoriesTab({ agents }: { agents: { id: string; name: string }[] }) {
           className="font-bold uppercase rounded-none border-2 border-destructive text-destructive pixel-shadow text-xs ml-auto"
           data-testid="button-clear-memories"
         >
-          <Trash2 className="w-4 h-4 mr-1" /> Clear{agentFilter !== ALL_SENTINEL && agentFilter !== SHARED_SENTINEL ? " Agent" : " All"}
+          <Trash2 className="w-4 h-4 mr-1" /> Clear
+          {agentFilter !== ALL_SENTINEL && agentFilter !== SHARED_SENTINEL
+            ? " Agent"
+            : " All"}
         </Button>
       </div>
 
@@ -393,7 +436,8 @@ function MemoriesTab({ agents }: { agents: { id: string; name: string }[] }) {
           <Brain className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
           <div className="font-bold uppercase text-sm">No memories yet</div>
           <div className="text-xs text-muted-foreground mt-1">
-            Agents remember task outcomes automatically; you can add facts and decisions here.
+            Agents remember task outcomes automatically; you can add facts and
+            decisions here.
           </div>
         </PixelCard>
       ) : (
@@ -425,10 +469,14 @@ function MemoriesTab({ agents }: { agents: { id: string; name: string }[] }) {
                   </Badge>
                 )}
                 <span className="text-[10px] font-mono text-muted-foreground ml-auto">
-                  {formatDistanceToNow(new Date(memory.updatedAt), { addSuffix: true })}
+                  {formatDistanceToNow(new Date(memory.updatedAt), {
+                    addSuffix: true,
+                  })}
                 </span>
               </div>
-              <p className="text-sm font-mono whitespace-pre-wrap break-words">{memory.content}</p>
+              <p className="text-sm font-mono whitespace-pre-wrap break-words">
+                {memory.content}
+              </p>
               <div className="flex gap-1 mt-3">
                 <Button
                   size="sm"
@@ -437,7 +485,11 @@ function MemoriesTab({ agents }: { agents: { id: string; name: string }[] }) {
                   className="rounded-none text-[10px] uppercase font-bold h-7"
                   data-testid={`button-pin-${memory.id}`}
                 >
-                  {memory.pinned ? <PinOff className="w-3 h-3 mr-1" /> : <Pin className="w-3 h-3 mr-1" />}
+                  {memory.pinned ? (
+                    <PinOff className="w-3 h-3 mr-1" />
+                  ) : (
+                    <Pin className="w-3 h-3 mr-1" />
+                  )}
                   {memory.pinned ? "Unpin" : "Pin"}
                 </Button>
                 <Button
@@ -447,7 +499,11 @@ function MemoriesTab({ agents }: { agents: { id: string; name: string }[] }) {
                   className="rounded-none text-[10px] uppercase font-bold h-7"
                   data-testid={`button-disable-${memory.id}`}
                 >
-                  {memory.disabled ? <Eye className="w-3 h-3 mr-1" /> : <EyeOff className="w-3 h-3 mr-1" />}
+                  {memory.disabled ? (
+                    <Eye className="w-3 h-3 mr-1" />
+                  ) : (
+                    <EyeOff className="w-3 h-3 mr-1" />
+                  )}
                   {memory.disabled ? "Enable" : "Disable"}
                 </Button>
                 <Button
@@ -497,7 +553,9 @@ function KnowledgeTab({ agents }: { agents: { id: string; name: string }[] }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const invalidate = () =>
-    queryClient.invalidateQueries({ queryKey: getListKnowledgeFilesQueryKey() });
+    queryClient.invalidateQueries({
+      queryKey: getListKnowledgeFilesQueryKey(),
+    });
 
   const onUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -527,7 +585,8 @@ function KnowledgeTab({ agents }: { agents: { id: string; name: string }[] }) {
   };
 
   const remove = async (file: KnowledgeFile) => {
-    if (!window.confirm(`Delete "${file.name}" and its agent assignments?`)) return;
+    if (!window.confirm(`Delete "${file.name}" and its agent assignments?`))
+      return;
     try {
       await deleteFile.mutateAsync({ fileId: file.id });
       await invalidate();
@@ -546,7 +605,10 @@ function KnowledgeTab({ agents }: { agents: { id: string; name: string }[] }) {
       ? file.agentIds.filter((id) => id !== agentId)
       : [...file.agentIds, agentId];
     try {
-      await setAssignments.mutateAsync({ fileId: file.id, data: { agentIds: next } });
+      await setAssignments.mutateAsync({
+        fileId: file.id,
+        data: { agentIds: next },
+      });
       await invalidate();
     } catch (error) {
       toast({
@@ -591,18 +653,24 @@ function KnowledgeTab({ agents }: { agents: { id: string; name: string }[] }) {
           <FileText className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
           <div className="font-bold uppercase text-sm">No knowledge files</div>
           <div className="text-xs text-muted-foreground mt-1">
-            Upload documents, then assign them to the agents allowed to use them.
+            Upload documents, then assign them to the agents allowed to use
+            them.
           </div>
         </PixelCard>
       ) : (
         <div className="space-y-2">
           {files.map((file) => (
-            <PixelCard key={file.id} className="p-4" data-testid={`card-file-${file.id}`}>
+            <PixelCard
+              key={file.id}
+              className="p-4"
+              data-testid={`card-file-${file.id}`}
+            >
               <div className="flex flex-wrap items-center gap-2">
                 <FileText className="w-4 h-4 text-accent shrink-0" />
                 <span className="font-bold text-sm break-all">{file.name}</span>
                 <span className="text-[10px] font-mono text-muted-foreground uppercase">
-                  {(file.sizeBytes / 1000).toFixed(1)} kB · {file.wordCount} words · {file.mimeType}
+                  {(file.sizeBytes / 1000).toFixed(1)} kB · {file.wordCount}{" "}
+                  words · {file.mimeType}
                 </span>
                 <Button
                   size="sm"
@@ -615,7 +683,9 @@ function KnowledgeTab({ agents }: { agents: { id: string; name: string }[] }) {
                 </Button>
               </div>
               {file.description && (
-                <p className="text-xs font-mono text-muted-foreground mt-1">{file.description}</p>
+                <p className="text-xs font-mono text-muted-foreground mt-1">
+                  {file.description}
+                </p>
               )}
               <div className="mt-3">
                 <div className="text-[10px] font-bold uppercase text-muted-foreground mb-1">
@@ -655,11 +725,326 @@ function KnowledgeTab({ agents }: { agents: { id: string; name: string }[] }) {
   );
 }
 
+function SkillEditorDialog({
+  skill,
+  open,
+  onOpenChange,
+}: {
+  skill: WorkspaceSkill | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const createSkill = useCreateWorkspaceSkill();
+  const updateSkill = useUpdateWorkspaceSkill();
+  const [title, setTitle] = useState("");
+  const [triggersText, setTriggersText] = useState("");
+  const [instructions, setInstructions] = useState("");
+  const [enabled, setEnabled] = useState(true);
+  const openedFor = useRef<string | null>(null);
+
+  if (open && openedFor.current !== (skill?.id ?? "new")) {
+    openedFor.current = skill?.id ?? "new";
+    setTitle(skill?.title ?? "");
+    setTriggersText(skill?.triggers.join(", ") ?? "");
+    setInstructions(skill?.instructions ?? "");
+    setEnabled(skill?.enabled ?? true);
+  }
+  if (!open && openedFor.current !== null) openedFor.current = null;
+
+  const triggers = triggersText
+    .split(/[,\n]/)
+    .map((trigger) => trigger.trim())
+    .filter(Boolean);
+  const validTriggers =
+    triggers.length > 0 &&
+    triggers.length <= 10 &&
+    triggers.every((trigger) => trigger.length <= 40);
+  const busy = createSkill.isPending || updateSkill.isPending;
+
+  const save = async () => {
+    const data = {
+      title: title.trim(),
+      triggers: [...new Set(triggers)],
+      instructions: instructions.trim(),
+      enabled,
+    };
+    try {
+      if (skill) {
+        await updateSkill.mutateAsync({ skillId: skill.id, data });
+      } else {
+        await createSkill.mutateAsync({ data });
+      }
+      await queryClient.invalidateQueries({
+        queryKey: getListWorkspaceSkillsQueryKey(),
+      });
+      onOpenChange(false);
+      toast({ title: skill ? "Skill updated" : "Skill created" });
+    } catch (error) {
+      toast({
+        title: "Could not save skill",
+        description: apiErrorMessage(error, "Try again."),
+        variant: "destructive",
+      });
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="bg-card border-4 border-border rounded-none max-w-xl">
+        <DialogTitle className="font-display text-sm text-primary uppercase">
+          {skill ? "Edit Workspace Skill" : "New Workspace Skill"}
+        </DialogTitle>
+        <div className="space-y-4">
+          <div>
+            <label className="text-[10px] font-bold uppercase text-muted-foreground">
+              Title
+            </label>
+            <Input
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              maxLength={80}
+              className={inputClass}
+              placeholder="Weekly research brief"
+              data-testid="input-skill-title"
+            />
+          </div>
+          <div>
+            <label className="text-[10px] font-bold uppercase text-muted-foreground">
+              Triggers
+            </label>
+            <Input
+              value={triggersText}
+              onChange={(event) => setTriggersText(event.target.value)}
+              className={inputClass}
+              placeholder="research, market update, competitors"
+              data-testid="input-skill-triggers"
+            />
+            <p className="mt-1 text-[10px] font-mono text-muted-foreground uppercase">
+              Comma-separated · up to 10 · 40 characters each
+            </p>
+          </div>
+          <div>
+            <label className="text-[10px] font-bold uppercase text-muted-foreground">
+              Instructions
+            </label>
+            <Textarea
+              value={instructions}
+              onChange={(event) => setInstructions(event.target.value)}
+              maxLength={2000}
+              rows={8}
+              className={inputClass}
+              placeholder="Guidance the agent should follow when a trigger matches..."
+              data-testid="input-skill-instructions"
+            />
+            <p className="mt-1 text-[10px] font-mono text-muted-foreground text-right">
+              {instructions.length}/2000
+            </p>
+          </div>
+          <label className="flex items-center gap-2 text-xs font-bold uppercase cursor-pointer">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(event) => setEnabled(event.target.checked)}
+              className="w-4 h-4 accent-[hsl(13,90%,55%)]"
+              data-testid="checkbox-skill-enabled"
+            />
+            Enabled for matching tasks
+          </label>
+          <Button
+            onClick={save}
+            disabled={
+              busy ||
+              !title.trim() ||
+              title.trim().length > 80 ||
+              !validTriggers ||
+              !instructions.trim()
+            }
+            className="w-full bg-primary text-primary-foreground font-bold uppercase rounded-none pixel-shadow"
+            data-testid="button-save-skill"
+          >
+            {busy ? "Saving..." : skill ? "Save Changes" : "Create Skill"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SkillsTab() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const { data: skills, isLoading } = useListWorkspaceSkills();
+  const updateSkill = useUpdateWorkspaceSkill();
+  const deleteSkill = useDeleteWorkspaceSkill();
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editing, setEditing] = useState<WorkspaceSkill | null>(null);
+
+  const invalidate = () =>
+    queryClient.invalidateQueries({
+      queryKey: getListWorkspaceSkillsQueryKey(),
+    });
+
+  const toggle = async (skill: WorkspaceSkill) => {
+    try {
+      await updateSkill.mutateAsync({
+        skillId: skill.id,
+        data: { enabled: !skill.enabled },
+      });
+      await invalidate();
+    } catch (error) {
+      toast({
+        title: "Update failed",
+        description: apiErrorMessage(error, "Try again."),
+        variant: "destructive",
+      });
+    }
+  };
+
+  const remove = async (skill: WorkspaceSkill) => {
+    if (!window.confirm(`Delete the skill “${skill.title}”?`)) return;
+    try {
+      await deleteSkill.mutateAsync({ skillId: skill.id });
+      await invalidate();
+      toast({ title: "Skill deleted" });
+    } catch (error) {
+      toast({
+        title: "Delete failed",
+        description: apiErrorMessage(error, "Try again."),
+        variant: "destructive",
+      });
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <Button
+          onClick={() => {
+            setEditing(null);
+            setEditorOpen(true);
+          }}
+          disabled={(skills?.length ?? 0) >= 20}
+          className="bg-primary text-primary-foreground font-bold uppercase rounded-none pixel-shadow text-xs"
+          data-testid="button-new-skill"
+        >
+          <Plus className="w-4 h-4 mr-1" /> New Skill
+        </Button>
+        <span className="text-[10px] font-mono uppercase text-muted-foreground">
+          {skills?.length ?? 0}/20 · guidance only · grants no tools
+        </span>
+      </div>
+
+      {isLoading ? (
+        <PixelCard className="animate-pulse h-24 bg-muted/50">
+          <div />
+        </PixelCard>
+      ) : !skills || skills.length === 0 ? (
+        <PixelCard className="text-center p-8">
+          <Sparkles className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
+          <div className="font-bold uppercase text-sm">No workspace skills</div>
+          <div className="text-xs text-muted-foreground mt-1">
+            Add trigger-based working guidance without granting any new tools.
+          </div>
+        </PixelCard>
+      ) : (
+        <div className="space-y-2">
+          {skills.map((skill) => (
+            <PixelCard
+              key={skill.id}
+              className={`p-4 ${skill.enabled ? "" : "opacity-50"}`}
+              data-testid={`card-skill-${skill.id}`}
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <Sparkles className="w-4 h-4 text-accent" />
+                <span className="font-bold text-sm uppercase">
+                  {skill.title}
+                </span>
+                <Badge className="rounded-none border-2 border-border bg-muted text-[9px] uppercase">
+                  {skill.enabled ? "Enabled" : "Disabled"}
+                </Badge>
+                <span className="text-[10px] font-mono text-muted-foreground ml-auto">
+                  {formatDistanceToNow(new Date(skill.updatedAt), {
+                    addSuffix: true,
+                  })}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1 mt-2">
+                {skill.triggers.map((trigger) => (
+                  <Badge
+                    key={trigger}
+                    variant="outline"
+                    className="rounded-none text-[9px] font-mono"
+                  >
+                    {trigger}
+                  </Badge>
+                ))}
+              </div>
+              <p className="text-sm font-mono whitespace-pre-wrap break-words mt-3">
+                {skill.instructions}
+              </p>
+              <div className="flex gap-1 mt-3">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => toggle(skill)}
+                  className="rounded-none text-[10px] uppercase font-bold h-7"
+                  data-testid={`button-toggle-skill-${skill.id}`}
+                >
+                  {skill.enabled ? (
+                    <EyeOff className="w-3 h-3 mr-1" />
+                  ) : (
+                    <Eye className="w-3 h-3 mr-1" />
+                  )}
+                  {skill.enabled ? "Disable" : "Enable"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setEditing(skill);
+                    setEditorOpen(true);
+                  }}
+                  className="rounded-none text-[10px] uppercase font-bold h-7"
+                  data-testid={`button-edit-skill-${skill.id}`}
+                >
+                  <Pencil className="w-3 h-3 mr-1" /> Edit
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => remove(skill)}
+                  className="rounded-none text-[10px] uppercase font-bold h-7 text-destructive ml-auto"
+                  data-testid={`button-delete-skill-${skill.id}`}
+                >
+                  <Trash2 className="w-3 h-3 mr-1" /> Delete
+                </Button>
+              </div>
+            </PixelCard>
+          ))}
+        </div>
+      )}
+
+      <SkillEditorDialog
+        skill={editing}
+        open={editorOpen}
+        onOpenChange={setEditorOpen}
+      />
+    </div>
+  );
+}
+
 export default function MemoryPage() {
-  const [tab, setTab] = useState<"memories" | "knowledge">("memories");
+  const [tab, setTab] = useState<"memories" | "knowledge" | "skills">(
+    "memories",
+  );
   const { data: agents } = useListAgents();
   const activeAgents = useMemo(
-    () => (agents ?? []).filter((a) => !a.archived).map((a) => ({ id: a.id, name: a.name })),
+    () =>
+      (agents ?? [])
+        .filter((a) => !a.archived)
+        .map((a) => ({ id: a.id, name: a.name })),
     [agents],
   );
 
@@ -676,7 +1061,7 @@ export default function MemoryPage() {
         </div>
 
         <div className="flex gap-2">
-          {(["memories", "knowledge"] as const).map((key) => (
+          {(["memories", "knowledge", "skills"] as const).map((key) => (
             <button
               key={key}
               onClick={() => setTab(key)}
@@ -687,15 +1072,21 @@ export default function MemoryPage() {
               }`}
               data-testid={`tab-${key}`}
             >
-              {key === "memories" ? "Memories" : "Knowledge Files"}
+              {key === "memories"
+                ? "Memories"
+                : key === "knowledge"
+                  ? "Knowledge Files"
+                  : "Skills"}
             </button>
           ))}
         </div>
 
         {tab === "memories" ? (
           <MemoriesTab agents={activeAgents} />
-        ) : (
+        ) : tab === "knowledge" ? (
           <KnowledgeTab agents={activeAgents} />
+        ) : (
+          <SkillsTab />
         )}
       </div>
     </Shell>

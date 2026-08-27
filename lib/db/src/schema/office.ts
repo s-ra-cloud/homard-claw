@@ -636,6 +636,32 @@ export const memoriesTable = pgTable(
   ],
 );
 
+/**
+ * Owner-authored, workspace-wide guidance selected by objective triggers.
+ * These rows are deliberately toolless and are never capability manifests:
+ * no column can declare an executor, permission, connection, or operation.
+ */
+export const workspaceSkillsTable = pgTable(
+  "workspace_skills",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspacesTable.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    triggers: jsonb("triggers").$type<string[]>().notNull(),
+    instructions: text("instructions").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("workspace_skills_workspace_idx").on(table.workspaceId)],
+);
+
 // Owner-uploaded knowledge documents (extracted text only; binaries are
 // rejected at upload). Agents only see files explicitly assigned to them.
 export const knowledgeFilesTable = pgTable(
@@ -894,6 +920,7 @@ export type TaskRecord = typeof tasksTable.$inferSelect;
 export type TaskLogRecord = typeof taskLogsTable.$inferSelect;
 export type ApprovalRecord = typeof approvalsTable.$inferSelect;
 export type MemoryRecord = typeof memoriesTable.$inferSelect;
+export type WorkspaceSkillRecord = typeof workspaceSkillsTable.$inferSelect;
 export type ProviderConversationRecord =
   typeof providerConversationsTable.$inferSelect;
 export type ProviderLeaseRecord = typeof providerLeasesTable.$inferSelect;

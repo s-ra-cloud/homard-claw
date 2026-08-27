@@ -2528,6 +2528,97 @@ export const DeleteMemoryResponse = zod.void()
 
 
 /**
+ * @summary List owner-authored, toolless workspace skills
+ */
+export const ListWorkspaceSkillsResponseItem = zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "triggers": zod.array(zod.string()),
+  "instructions": zod.string(),
+  "enabled": zod.boolean(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+export const ListWorkspaceSkillsResponse = zod.array(ListWorkspaceSkillsResponseItem)
+
+
+/**
+ * @summary Create owner-authored guidance for matching task objectives
+ */
+export const createWorkspaceSkillBodyTitleMax = 80;
+
+export const createWorkspaceSkillBodyTriggersItemMax = 40;
+
+export const createWorkspaceSkillBodyTriggersMax = 10;
+
+export const createWorkspaceSkillBodyInstructionsMax = 2000;
+
+
+
+export const CreateWorkspaceSkillBody = zod.object({
+  "title": zod.string().min(1).max(createWorkspaceSkillBodyTitleMax),
+  "triggers": zod.array(zod.string().min(1).max(createWorkspaceSkillBodyTriggersItemMax)).max(createWorkspaceSkillBodyTriggersMax),
+  "instructions": zod.string().min(1).max(createWorkspaceSkillBodyInstructionsMax),
+  "enabled": zod.boolean().optional()
+})
+
+export const CreateWorkspaceSkillResponse = zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "triggers": zod.array(zod.string()),
+  "instructions": zod.string(),
+  "enabled": zod.boolean(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Edit or enable an owner-authored workspace skill
+ */
+export const UpdateWorkspaceSkillParams = zod.object({
+  "skillId": zod.coerce.string()
+})
+
+export const updateWorkspaceSkillBodyTitleMax = 80;
+
+export const updateWorkspaceSkillBodyTriggersItemMax = 40;
+
+export const updateWorkspaceSkillBodyTriggersMax = 10;
+
+export const updateWorkspaceSkillBodyInstructionsMax = 2000;
+
+
+
+export const UpdateWorkspaceSkillBody = zod.object({
+  "title": zod.string().min(1).max(updateWorkspaceSkillBodyTitleMax).optional(),
+  "triggers": zod.array(zod.string().min(1).max(updateWorkspaceSkillBodyTriggersItemMax)).max(updateWorkspaceSkillBodyTriggersMax).optional(),
+  "instructions": zod.string().min(1).max(updateWorkspaceSkillBodyInstructionsMax).optional(),
+  "enabled": zod.boolean().optional()
+})
+
+export const UpdateWorkspaceSkillResponse = zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "triggers": zod.array(zod.string()),
+  "instructions": zod.string(),
+  "enabled": zod.boolean(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Delete an owner-authored workspace skill
+ */
+export const DeleteWorkspaceSkillParams = zod.object({
+  "skillId": zod.coerce.string()
+})
+
+export const DeleteWorkspaceSkillResponse = zod.void()
+
+
+/**
  * @summary List uploaded knowledge files with their agent assignments
  */
 export const ListKnowledgeFilesResponseItem = zod.object({
