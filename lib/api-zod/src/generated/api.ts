@@ -1490,6 +1490,19 @@ export const GetRuntimeHealthResponse = zod.object({
 
 
 /**
+ * @summary Owner escape hatch for a stuck queue: take over stale worker ownership and requeue orphaned work. A healthy worker is never displaced; pressing this while the queue is fine is a safe no-op.
+ */
+export const RecoverQueueResponse = zod.object({
+  "outcome": zod.enum(['already_active', 'healthy_elsewhere', 'recovered']),
+  "ownershipChanged": zod.boolean(),
+  "recoveredTasks": zod.number(),
+  "generation": zod.number().nullable(),
+  "holder": zod.string().nullable(),
+  "message": zod.string()
+})
+
+
+/**
  * @summary List teams with their lead and members
  */
 export const ListTeamsResponseItem = zod.object({

@@ -49,8 +49,10 @@ import {
   QUEUE_OWNERSHIP_KEY,
   WORKER_INSTANCE_ID,
   acquireOrRenewOwnership,
+  getOwnershipSnapshot,
   releaseOwnership,
   renewOwnership,
+  withOwnershipFence,
 } from "./worker-ownership";
 import { codexAuthFingerprint } from "./codex/runtime";
 import { codexLeaseHeartbeatMs, codexLeaseTtlMs } from "./codex/config";
@@ -206,7 +208,58 @@ export function abortAllInFlight(reason: string): number {
  * Requeue tasks that were mid-flight when the previous process died. Runs
  * once per acquired worker lease, before claiming begins.
  */
-export async function recoverInterruptedTasks(): Promise<number> {
+/** The ownership epoch a recovery pass must still hold to mutate tasks. */
+export type OwnershipFence = { key: string; holder: string; generation: number };
+
+export type RequeuedTask = {
+  id: string;
+  workspaceId: string | null;
+  threadId: string | null;
+};
+
+/** Requeue every abandoned running task; run under a fence tx when given. */
+async function requeueRunningTasks(executor: Pick<typeof db, "update">) {
+  return executor
+    .update(tasksTable)
+    // Interrupted work is requeued, never marked completed: the phase goes
+    // back to "queued" so nothing shows a run still in progress, and any
+    // persisted provider thread id is kept so the turn can resume.
+    .set({
+      status: "queued",
+      providerPhase: "queued",
+      notBefore: null,
+      startedAt: null,
+    })
+    .where(eq(tasksTable.status, "running"))
+    .returning({
+      id: tasksTable.id,
+      workspaceId: tasksTable.workspaceId,
+      threadId: tasksTable.providerThreadId,
+    });
+}
+
+export async function recoverInterruptedTasks(
+  fence?: OwnershipFence,
+): Promise<number> {
+  const rows = await recoverInterruptedTaskRows(fence);
+  return rows === null ? 0 : rows.length;
+}
+
+/**
+ * Like recoverInterruptedTasks but returns the requeued rows (so callers
+ * can scope feedback to one workspace), and null when the fence was lost.
+ * When a fence is given, the requeue runs inside a transaction that holds
+ * the ownership row's lock and has re-verified holder + generation +
+ * expiry: a displaced or expired epoch aborts the requeue without touching
+ * any task, and a concurrent takeover waits for the commit — so a slow
+ * recovery pass can never requeue work a successor epoch has already
+ * claimed. The fence covers ONLY the running-task requeue; the legacy
+ * paused-status normalization and own-lease release that precede it are
+ * idempotent and instance-local, so they are safe under any epoch.
+ */
+export async function recoverInterruptedTaskRows(
+  fence?: OwnershipFence,
+): Promise<RequeuedTask[] | null> {
   // One-time migration: `paused` was removed from the task lifecycle. Any
   // legacy rows become `blocked` with an actionable reason so they satisfy
   // the current contract and can be retried by the owner.
@@ -242,22 +295,17 @@ export async function recoverInterruptedTasks(): Promise<number> {
     );
   }
 
-  const recovered = await db
-    .update(tasksTable)
-    // Interrupted work is requeued, never marked completed: the phase goes
-    // back to "queued" so nothing shows a run still in progress, and any
-    // persisted provider thread id is kept so the turn can resume.
-    .set({
-      status: "queued",
-      providerPhase: "queued",
-      notBefore: null,
-      startedAt: null,
-    })
-    .where(eq(tasksTable.status, "running"))
-    .returning({
-      id: tasksTable.id,
-      threadId: tasksTable.providerThreadId,
-    });
+  const recovered = fence
+    ? await withOwnershipFence(fence.key, fence.holder, fence.generation, (tx) =>
+        requeueRunningTasks(tx),
+      )
+    : await requeueRunningTasks(db);
+  if (recovered === null) {
+    // The epoch this pass was fenced to is gone: a successor owns the
+    // queue now and will run its own recovery. Touch nothing.
+    logger.warn({ fence }, "Ownership fence lost; skipped orphan requeue");
+    return null;
+  }
   for (const task of recovered) {
     await addTaskLog(
       task.id,
@@ -270,7 +318,7 @@ export async function recoverInterruptedTasks(): Promise<number> {
   if (recovered.length > 0) {
     logger.info({ count: recovered.length }, "Recovered interrupted tasks");
   }
-  return recovered.length;
+  return recovered;
 }
 
 /**
@@ -2668,14 +2716,173 @@ export async function heartbeatOwnershipOnce(): Promise<void> {
  */
 export function setOwnershipForTest(
   state: { key: string; generation: number; expiresAtMs: number } | null,
+  options?: { recovered?: boolean },
 ): void {
   ownership = state;
-  ownershipRecovered = state !== null;
+  ownershipRecovered = options?.recovered ?? state !== null;
+}
+
+/**
+ * Single-flight orphan recovery for the current ownership epoch: the tick
+ * loop and the owner's manual "Recover queue" action can both request it,
+ * but concurrent requests share one pass — a second pass could requeue a
+ * task the first pass already requeued and a claimer already restarted.
+ * Marks the epoch recovered only if ownership survived the pass unchanged.
+ */
+type RecoveryImpl = (
+  fence: OwnershipFence,
+) => Promise<RequeuedTask[] | null>;
+/**
+ * Test seam: the real recovery pass requeues running tasks across the
+ * whole database (one worker serves every workspace), which tests must
+ * never do against shared data. Tests inject a workspace-scoped impl that
+ * still runs under the real ownership fence.
+ */
+let recoveryImplOverride: RecoveryImpl | null = null;
+export function setRecoveryImplForTest(impl: RecoveryImpl | null): void {
+  recoveryImplOverride = impl;
+}
+
+let recoveryPass: Promise<RequeuedTask[]> | null = null;
+export async function runOwnershipRecoveryOnce(): Promise<RequeuedTask[]> {
+  if (ownershipRecovered) return [];
+  if (!recoveryPass) {
+    recoveryPass = (async () => {
+      const epoch = ownership;
+      if (!epoch) return [];
+      // Fenced to the epoch that requested it: if ownership moves on while
+      // the pass is in flight, the requeue aborts inside the fence
+      // transaction and the successor epoch runs its own recovery.
+      const impl = recoveryImplOverride ?? recoverInterruptedTaskRows;
+      const rows = await impl({
+        key: epoch.key,
+        holder: WORKER_INSTANCE_ID,
+        generation: epoch.generation,
+      });
+      if (rows === null) return [];
+      if (ownership !== null && ownership.generation === epoch.generation) {
+        ownershipRecovered = true;
+      }
+      return rows;
+    })().finally(() => {
+      recoveryPass = null;
+    });
+  }
+  return recoveryPass;
+}
+
+export type QueueRecoveryResult = {
+  /**
+   * already_active: this instance already held a fresh lease — no reset.
+   * healthy_elsewhere: another instance holds a fresh lease — no reset.
+   * recovered: stale/missing ownership replaced under a new generation.
+   */
+  outcome: "already_active" | "healthy_elsewhere" | "recovered";
+  ownershipChanged: boolean;
+  recoveredTasks: number;
+  generation: number | null;
+  holder: string | null;
+};
+
+/**
+ * Decision skeleton behind the owner's "Recover queue" action, shared with
+ * tests (which must bind it to their own ownership keys — the live row
+ * belongs to the running server's worker). All safety comes from the same
+ * primitives the polling loop uses: a fresh holder is reported, never
+ * displaced; only a (re)acquisition under a NEW generation runs the orphan
+ * recovery pass, so a healthy epoch's running tasks are never requeued.
+ */
+export async function performQueueRecovery(deps: {
+  /** Generation held fresh before this pass, or null when not the owner. */
+  previousGeneration: number | null;
+  acquire: () => Promise<
+    | { owned: true; generation: number; holder: string }
+    | { owned: false; generation: number | null; holder: string | null }
+  >;
+  /** Requeues orphaned work; invoked only under a new generation. */
+  recoverOrphans: () => Promise<number>;
+}): Promise<QueueRecoveryResult> {
+  const acquired = await deps.acquire();
+  if (!acquired.owned) {
+    return {
+      outcome: "healthy_elsewhere",
+      ownershipChanged: false,
+      recoveredTasks: 0,
+      generation: acquired.generation,
+      holder: acquired.holder,
+    };
+  }
+  const ownershipChanged = deps.previousGeneration !== acquired.generation;
+  const recoveredTasks = ownershipChanged ? await deps.recoverOrphans() : 0;
+  return {
+    outcome: ownershipChanged ? "recovered" : "already_active",
+    ownershipChanged,
+    recoveredTasks,
+    generation: acquired.generation,
+    holder: acquired.holder,
+  };
+}
+
+/**
+ * Owner-triggered escape hatch: run one ownership/recovery pass right now
+ * instead of waiting for polling. Reuses ensureWorkerOwnership, so every
+ * fencing invariant holds — a fresh holder elsewhere is left alone, a stale
+ * or missing row is taken over under a new generation (aborting any stale
+ * local work), and orphan recovery is single-flight with the tick loop.
+ */
+export async function recoverQueueNow(
+  /** Scope the reported requeue count to this workspace's own tasks. */
+  workspaceId?: string,
+): Promise<QueueRecoveryResult> {
+  const result = await performQueueRecovery({
+    previousGeneration: hasActiveOwnership()
+      ? (ownership?.generation ?? null)
+      : null,
+    acquire: async () => {
+      if (await ensureWorkerOwnership()) {
+        return {
+          owned: true,
+          generation: ownership?.generation ?? 0,
+          holder: WORKER_INSTANCE_ID,
+        };
+      }
+      const row = await getOwnershipSnapshot(QUEUE_OWNERSHIP_KEY);
+      return {
+        owned: false,
+        generation: row?.generation ?? null,
+        holder: row?.holder ?? null,
+      };
+    },
+    // The single-flight guard also covers "acquired but recovery already
+    // ran this epoch": it returns nothing instead of requeuing running
+    // work. The recovery pass itself is global (one worker serves every
+    // workspace), but the count reported back is the caller's own.
+    recoverOrphans: async () => {
+      const rows = await runOwnershipRecoveryOnce();
+      return workspaceId
+        ? rows.filter((row) => row.workspaceId === workspaceId).length
+        : rows.length;
+    },
+  });
+  if (result.outcome !== "healthy_elsewhere") {
+    // Claim immediately instead of waiting out the poll interval, so the
+    // owner sees queued work start moving right after the click.
+    wakeWorker();
+  }
+  logger.info({ ...result }, "Owner-triggered queue recovery pass");
+  return result;
 }
 
 let timer: NodeJS.Timeout | null = null;
 let draining = false;
 let lastTickAt: Date | null = null;
+/** Set while the polling loop runs, so recovery can trigger a tick early. */
+let tickNow: (() => Promise<void>) | null = null;
+
+/** Run one tick immediately (no-op when the loop is stopped or mid-tick). */
+export function wakeWorker(): void {
+  if (tickNow) void tickNow();
+}
 
 export type WorkerStatus = {
   /** active: this instance owns the queue. standby: polling for takeover. */
@@ -2732,10 +2939,7 @@ export function startWorker(intervalMs = POLL_INTERVAL_MS): void {
       // Only the ownership holder recovers and claims; other instances
       // keep polling and take over as soon as the holder's row expires.
       if (!(await ensureWorkerOwnership())) return;
-      if (!ownershipRecovered) {
-        await recoverInterruptedTasks();
-        ownershipRecovered = true;
-      }
+      await runOwnershipRecoveryOnce();
       await expireStaleApprovals();
       await reviewPendingApprovals();
       // Fire durable schedules before draining, so a task launched by a
@@ -2757,6 +2961,7 @@ export function startWorker(intervalMs = POLL_INTERVAL_MS): void {
   };
   timer = setInterval(() => void tick(), intervalMs);
   timer.unref();
+  tickNow = tick;
   // Renewal must outlive a busy tick: a single provider call can hold the
   // tick loop far longer than the ownership TTL.
   heartbeatTimer = setInterval(
@@ -2776,6 +2981,7 @@ export function startWorker(intervalMs = POLL_INTERVAL_MS): void {
 export async function stopWorker(): Promise<void> {
   if (timer) clearInterval(timer);
   timer = null;
+  tickNow = null;
   if (heartbeatTimer) clearInterval(heartbeatTimer);
   heartbeatTimer = null;
   const held = ownership;

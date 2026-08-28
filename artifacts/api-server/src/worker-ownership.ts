@@ -42,6 +42,46 @@ export type OwnershipOutcome =
       expiresAt: Date;
     };
 
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Run `fn` inside a transaction that holds the ownership row's lock and has
+ * verified the fence: the row still belongs to `holder` at `generation` and
+ * has not expired. Returns null without running `fn` when the fence no
+ * longer holds. Because a takeover is an UPDATE of the same row, a
+ * concurrent takeover blocks on the row lock until this transaction
+ * commits — work done under the fence can never interleave with a
+ * successor epoch's work.
+ */
+export async function withOwnershipFence<T>(
+  key: string,
+  holder: string,
+  generation: number,
+  fn: (tx: Tx) => Promise<T>,
+): Promise<T | null> {
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .select({
+        holder: workerOwnershipTable.holder,
+        generation: workerOwnershipTable.generation,
+        expiresAt: workerOwnershipTable.expiresAt,
+      })
+      .from(workerOwnershipTable)
+      .where(eq(workerOwnershipTable.key, key))
+      .for("update")
+      .limit(1);
+    if (
+      !row ||
+      row.holder !== holder ||
+      row.generation !== generation ||
+      row.expiresAt.getTime() <= Date.now()
+    ) {
+      return null;
+    }
+    return fn(tx);
+  });
+}
+
 /**
  * Acquire, renew, or observe queue ownership in one conditional upsert:
  * - no row → insert ours at generation 1

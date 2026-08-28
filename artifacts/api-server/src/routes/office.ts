@@ -29,6 +29,7 @@ import {
   GetProvidersResponse,
   GetRuntimeHealthResponse,
   GetTaskParams,
+  RecoverQueueResponse,
   GetTaskResponse,
   ListAgentsResponse,
   ListApprovalsResponse,
@@ -124,7 +125,7 @@ import { agentPromptContext, dispatchTask } from "../dispatch";
 import { publish } from "../events";
 import { effectivePermissions } from "../policy";
 import { DEFAULT_RUNTIME, listRuntimeHealth, queueHealth } from "../runtime";
-import { abortRunningTask, getWorkerStatus } from "../worker";
+import { abortRunningTask, getWorkerStatus, recoverQueueNow } from "../worker";
 import {
   QUEUE_OWNERSHIP_KEY,
   getOwnershipSnapshot,
@@ -228,6 +229,34 @@ router.get("/runtime/health", async (req: Request, res: Response) => {
       },
     }),
   );
+});
+
+/**
+ * Owner escape hatch for a queue that looks stuck. Safe by construction:
+ * a fresh (healthy) worker elsewhere is reported, never displaced; only a
+ * stale or missing ownership row is taken over, under a new generation
+ * that fences the old holder, and only that takeover requeues orphaned
+ * work. Repeating the click is a no-op once the queue is healthy again.
+ */
+router.post("/runtime/recover-queue", async (req, res): Promise<void> => {
+  const result = await recoverQueueNow(req.workspaceId!);
+  const message =
+    result.outcome === "healthy_elsewhere"
+      ? "The queue worker is healthy on another server instance; nothing was reset."
+      : result.outcome === "already_active"
+        ? "This server already runs the queue and its heartbeat is fresh; nothing was reset."
+        : result.recoveredTasks > 0
+          ? `Took over the stalled queue worker and requeued ${result.recoveredTasks} of your orphaned task${result.recoveredTasks === 1 ? "" : "s"}.`
+          : "Took over the stalled queue worker; none of your tasks needed requeuing.";
+  await recordAudit(
+    req.workspaceId!,
+    result.ownershipChanged ? "queue.recovered" : "queue.recovery_noop",
+    `The owner pressed Recover queue. ${message}`,
+  );
+  if (result.ownershipChanged) {
+    publish(req.workspaceId!, "tasks", "overview");
+  }
+  res.json(RecoverQueueResponse.parse({ ...result, message }));
 });
 
 type AppGrantJson = { app: string; accessLevel: AppAccessLevel };

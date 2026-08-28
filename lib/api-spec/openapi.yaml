@@ -404,6 +404,21 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RuntimeHealthReport"
+  /runtime/recover-queue:
+    post:
+      operationId: recoverQueue
+      tags: [office]
+      summary: >-
+        Owner escape hatch for a stuck queue: take over stale worker
+        ownership and requeue orphaned work. A healthy worker is never
+        displaced; pressing this while the queue is fine is a safe no-op.
+      responses:
+        "200":
+          description: Recovery outcome
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueueRecoveryReport"
   /teams:
     get:
       operationId: listTeams
@@ -2703,6 +2718,27 @@ components:
                 expiresAt: { type: [string, "null"], format: date-time }
                 heartbeatAgeSeconds: { type: [number, "null"] }
                 stale: { type: boolean }
+    QueueRecoveryReport:
+      type: object
+      required:
+        [outcome, ownershipChanged, recoveredTasks, generation, holder, message]
+      properties:
+        # already_active: this instance already held a fresh lease — no reset.
+        # healthy_elsewhere: another instance holds a fresh lease — no reset.
+        # recovered: stale or missing ownership was replaced under a new
+        # generation and orphaned running work was requeued.
+        outcome:
+          type: string
+          enum: [already_active, healthy_elsewhere, recovered]
+        ownershipChanged: { type: boolean }
+        # Orphaned tasks OF THE CALLING WORKSPACE requeued by this pass.
+        # The pass itself is global (one worker serves every workspace),
+        # but cross-tenant counts are never disclosed.
+        recoveredTasks: { type: number }
+        generation: { type: [number, "null"] }
+        holder: { type: [string, "null"] }
+        # Owner-facing explanation of what happened (or why nothing was reset).
+        message: { type: string }
     TaskSource:
       type: object
       required: [type, id, label, title]

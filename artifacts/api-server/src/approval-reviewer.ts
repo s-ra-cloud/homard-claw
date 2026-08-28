@@ -305,7 +305,7 @@ async function claimNextReview(
             select 1 from ${workspaceSettingsTable}
             where ${workspaceSettingsTable.workspaceId} = ${agentsTable.workspaceId}
               and ${workspaceSettingsTable.key} = ${APPROVAL_REVIEWER_SETTING}
-              and ${workspaceSettingsTable.value} = ${approvalsTable.reviewerAgentId}
+              and ${workspaceSettingsTable.value} = ${approvalsTable.reviewerAgentId}::text
           )`,
         ),
       )

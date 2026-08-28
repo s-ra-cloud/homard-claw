@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   useListTasks,
   useCreateTask,
+  useGetRuntimeHealth,
+  useRecoverQueue,
   useListAgents,
   useListProviderModels,
   useGetProviderSettings,
@@ -49,6 +51,8 @@ import {
   Paperclip,
   FileText,
   X,
+  HeartPulse,
+  Wrench,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
@@ -1126,6 +1130,136 @@ function TaskCostLine({ task }: { task: Task }) {
   return <>{parts}</>;
 }
 
+/**
+ * Queue-worker health strip with the owner's "Recover queue" escape hatch.
+ * The server side is safe by construction — a worker with a fresh heartbeat
+ * is never displaced — so the button can always be pressed: on a healthy
+ * queue it reports a no-op, on a stalled one it takes over ownership and
+ * requeues orphaned work.
+ */
+function QueueHealthPanel() {
+  // Polls so a dead worker heartbeat surfaces here without a reload.
+  const { data: health } = useGetRuntimeHealth({
+    query: { queryKey: ["/api/runtime/health"], refetchInterval: 10000 },
+  });
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const recoverQueue = useRecoverQueue({
+    mutation: {
+      onSuccess: (report) => {
+        toast({
+          title:
+            report.outcome === "recovered"
+              ? "Queue recovered"
+              : "Queue already healthy",
+          description: report.message,
+        });
+        queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/runtime/health"] });
+        setConfirmOpen(false);
+      },
+      onError: () => {
+        toast({
+          title: "Recovery attempt failed",
+          description:
+            "The server could not complete the recovery pass. Try again in a moment.",
+          variant: "destructive",
+        });
+      },
+    },
+  });
+
+  if (!health) return null;
+  const { worker, queue } = health;
+  // No fresh ownership row anywhere: heartbeats stopped (crash, freeze) or
+  // no worker ever started. Either way manual recovery is meaningful.
+  const stalled = worker.ownership.stale || worker.ownership.holder === null;
+  const heartbeatAge = worker.ownership.heartbeatAgeSeconds;
+  const statusLabel = stalled
+    ? "Stalled"
+    : worker.leaseHeld
+      ? "Active"
+      : "Active (other server)";
+
+  return (
+    <PixelCard
+      variant={stalled ? "destructive" : "default"}
+      className="p-4 flex flex-col sm:flex-row sm:items-center gap-3"
+      data-testid="panel-queue-health"
+    >
+      <div className="flex items-center gap-3 flex-1 flex-wrap">
+        <HeartPulse
+          className={`w-5 h-5 shrink-0 ${stalled ? "text-destructive" : "text-accent"}`}
+        />
+        <div>
+          <div
+            className="text-xs font-bold uppercase tracking-wider"
+            data-testid="status-queue-worker"
+          >
+            Queue worker: {statusLabel}
+          </div>
+          <div className="text-[10px] font-mono text-muted-foreground uppercase">
+            {worker.emergencyStop
+              ? "Emergency stop engaged — the worker is paused on purpose."
+              : stalled
+                ? worker.ownership.holder === null
+                  ? "No worker owns the queue right now."
+                  : `Last heartbeat ${heartbeatAge != null ? `${Math.round(heartbeatAge)}s ago` : "unknown"} — the owner looks dead.`
+                : `Heartbeat fresh${heartbeatAge != null ? ` (${Math.round(heartbeatAge)}s ago)` : ""} · ${queue.queued} queued / ${queue.running} running`}
+          </div>
+        </div>
+      </div>
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogTrigger asChild>
+          <Button
+            size="sm"
+            variant={stalled ? "primary" : "outline"}
+            data-testid="button-recover-queue"
+          >
+            <Wrench className="w-3.5 h-3.5 mr-1" />
+            Recover Queue
+          </Button>
+        </DialogTrigger>
+        <DialogContent className="border-4 border-border bg-card p-0 rounded-none max-w-md">
+          <div className="border-b-4 border-border p-4 bg-muted/30">
+            <DialogTitle className="font-display uppercase text-lg">
+              Recover the queue?
+            </DialogTitle>
+          </div>
+          <div className="p-6 space-y-4">
+            <p className="text-sm text-muted-foreground">
+              This checks the queue worker&apos;s heartbeat. If the worker is
+              healthy, nothing is touched. If it has gone silent, this server
+              takes over the queue and requeues any tasks the dead worker left
+              behind — they restart from scratch, and the old worker is fenced
+              off so nothing runs twice.
+            </p>
+            <div className="flex justify-end gap-4 pt-2 border-t-4 border-border">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setConfirmOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                disabled={recoverQueue.isPending}
+                onClick={() => recoverQueue.mutate()}
+                data-testid="button-confirm-recover"
+              >
+                {recoverQueue.isPending ? "Recovering..." : "Recover"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </PixelCard>
+  );
+}
+
 export default function TasksPage() {
   // The queue advances server-side; poll so status transitions appear live.
   const { data: tasks, isLoading: tasksLoading } = useListTasks({
@@ -1676,6 +1810,8 @@ export default function TasksPage() {
             </DialogContent>
           </Dialog>
         </div>
+
+        <QueueHealthPanel />
 
         {tasksLoading ? (
           <div className="space-y-4">

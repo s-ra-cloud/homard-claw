@@ -82,6 +82,7 @@ import type {
   ProviderSettings,
   ProviderSettingsInput,
   ProviderStatus,
+  QueueRecoveryReport,
   RetiredAgent,
   RuntimeHealthReport,
   Schedule,
@@ -1855,6 +1856,77 @@ export function useGetRuntimeHealth<TData = Awaited<ReturnType<typeof getRuntime
 
 
 
+
+export const getRecoverQueueUrl = () => {
+
+
+
+
+  return `/api/runtime/recover-queue`
+}
+
+/**
+ * @summary Owner escape hatch for a stuck queue: take over stale worker ownership and requeue orphaned work. A healthy worker is never displaced; pressing this while the queue is fine is a safe no-op.
+ */
+export const recoverQueue = async ( options?: Parameters<typeof customFetch>[1]): Promise<QueueRecoveryReport> => {
+
+  return customFetch<QueueRecoveryReport>(getRecoverQueueUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRecoverQueueMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recoverQueue>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof recoverQueue>>, TError,void, TContext> => {
+
+const mutationKey = ['recoverQueue'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recoverQueue>>, void> = () => {
+
+
+          return  recoverQueue(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecoverQueueMutationResult = NonNullable<Awaited<ReturnType<typeof recoverQueue>>>
+
+    export type RecoverQueueMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Owner escape hatch for a stuck queue: take over stale worker ownership and requeue orphaned work. A healthy worker is never displaced; pressing this while the queue is fine is a safe no-op.
+ */
+export const useRecoverQueue = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recoverQueue>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof recoverQueue>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getRecoverQueueMutationOptions(options));
+    }
 
 export const getListTeamsUrl = () => {
 

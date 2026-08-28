@@ -134,6 +134,8 @@ export * from './providerStatus';
 export * from './providerStatusAuthMode';
 export * from './providerStatusBilling';
 export * from './providerStatusProvider';
+export * from './queueRecoveryReport';
+export * from './queueRecoveryReportOutcome';
 export * from './retiredAgent';
 export * from './retiredAgentProvider';
 export * from './retiredAgentSecurityPreset';

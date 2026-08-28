@@ -1359,6 +1359,26 @@ export interface RuntimeHealthReport {
   worker: RuntimeHealthReportWorker;
 }
 
+export type QueueRecoveryReportOutcome = typeof QueueRecoveryReportOutcome[keyof typeof QueueRecoveryReportOutcome];
+
+
+export const QueueRecoveryReportOutcome = {
+  already_active: 'already_active',
+  healthy_elsewhere: 'healthy_elsewhere',
+  recovered: 'recovered',
+} as const;
+
+export interface QueueRecoveryReport {
+  outcome: QueueRecoveryReportOutcome;
+  ownershipChanged: boolean;
+  recoveredTasks: number;
+  /** @nullable */
+  generation: number | null;
+  /** @nullable */
+  holder: string | null;
+  message: string;
+}
+
 export type TaskLogLevel = typeof TaskLogLevel[keyof typeof TaskLogLevel];
 
 
