@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { CLAUDE_CODE_OAUTH_BETAS } from "./provider-credentials";
 
 /**
  * Provider execution: one authorized chat-completion call per task attempt.
@@ -393,7 +394,7 @@ async function callClaude(req: ProviderCallRequest): Promise<ProviderCallResult>
       headers: {
         Authorization: `Bearer ${token}`,
         "anthropic-version": "2023-06-01",
-        "anthropic-beta": "oauth-2025-04-20",
+        "anthropic-beta": CLAUDE_CODE_OAUTH_BETAS,
         "content-type": "application/json",
       },
       body: JSON.stringify({

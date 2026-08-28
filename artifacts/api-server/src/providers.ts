@@ -14,6 +14,7 @@ import { codexRuntimeState } from "./codex/runtime";
 import { codexSdkAvailable } from "./codex/sdk";
 import { clerkUserIdForWorkspace } from "./workspace";
 import {
+  CLAUDE_CODE_OAUTH_BETAS,
   getProviderCredential,
   hasProviderCredential,
   ProviderCredentialError,
@@ -257,7 +258,7 @@ async function checkClaude(workspaceId: string): Promise<ProviderHealth> {
       headers: {
         Authorization: `Bearer ${token}`,
         "anthropic-version": "2023-06-01",
-        "anthropic-beta": "oauth-2025-04-20",
+        "anthropic-beta": CLAUDE_CODE_OAUTH_BETAS,
       },
     });
     if (res.ok) {
