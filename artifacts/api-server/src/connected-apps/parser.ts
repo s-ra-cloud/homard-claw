@@ -22,8 +22,16 @@ export function parseAppActions(text: string): {
       let parsed: unknown;
       try {
         parsed = JSON.parse(inner);
-      } catch {
-        requests.push({ ok: false, error: "The action block is not valid JSON.", raw });
+      } catch (error) {
+        const detail =
+          error instanceof Error && error.message
+            ? ` (${error.message})`
+            : "";
+        requests.push({
+          ok: false,
+          error: `The action block is not valid JSON${detail}. It must be a single JSON object shaped like {"operation":"<name>","params":{...}}.`,
+          raw,
+        });
         return "";
       }
       const operation =
@@ -33,7 +41,8 @@ export function parseAppActions(text: string): {
       if (typeof operation !== "string" || operation.length === 0) {
         requests.push({
           ok: false,
-          error: 'The action block must contain an "operation" string.',
+          error:
+            'The action block must contain an "operation" string naming one of the listed operations, e.g. {"operation":"gmail.search","params":{"query":"..."}}.',
           raw,
         });
         return "";

@@ -193,6 +193,40 @@ describe("action block parser", () => {
     expect(requests).toHaveLength(2);
     expect(requests.every((r) => !r.ok)).toBe(true);
   });
+
+  it("returns a precise, actionable validation error for each failure mode", () => {
+    const [badJson] = parseAppActions(
+      "<app_action>{oops}</app_action>",
+    ).requests;
+    expect(badJson!.ok).toBe(false);
+    if (!badJson!.ok) {
+      expect(badJson!.error).toMatch(/not valid JSON/i);
+      // The error restates the exact shape a corrected block must take.
+      expect(badJson!.error).toContain('{"operation":"<name>","params":{...}}');
+    }
+
+    const [noOp] = parseAppActions(
+      '<app_action>{"params":{"query":"x"}}</app_action>',
+    ).requests;
+    expect(noOp!.ok).toBe(false);
+    if (!noOp!.ok) expect(noOp!.error).toMatch(/"operation" string/);
+
+    const [emptyOp] = parseAppActions(
+      '<app_action>{"operation":"","params":{}}</app_action>',
+    ).requests;
+    expect(emptyOp!.ok).toBe(false);
+    if (!emptyOp!.ok) expect(emptyOp!.error).toMatch(/"operation" string/);
+  });
+
+  it("keeps valid requests when a sibling block is malformed", () => {
+    const { requests, cleaned } = parseAppActions(
+      '<app_action>not json</app_action>\n<app_action>{"operation":"gmail.search","params":{"query":"q"}}</app_action>',
+    );
+    expect(requests).toHaveLength(2);
+    expect(requests[0]!.ok).toBe(false);
+    expect(requests[1]).toMatchObject({ ok: true, operation: "gmail.search" });
+    expect(cleaned).not.toContain("app_action");
+  });
 });
 
 describe("authorization deny matrix", () => {

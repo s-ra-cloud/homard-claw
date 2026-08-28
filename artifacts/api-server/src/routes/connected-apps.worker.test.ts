@@ -714,3 +714,135 @@ describe("multi-round budget ceiling", () => {
     ).toBe(true);
   });
 });
+
+describe("malformed action recovery", () => {
+  // Invalid JSON: bare identifiers, no quotes.
+  const BAD_JSON_BLOCK =
+    "Searching now.\n<app_action>{operation: gmail.search}</app_action>";
+  // Valid JSON, but no operation name — nothing to even authorize.
+  const NO_OPERATION_BLOCK =
+    'Trying again.\n<app_action>{"params":{"query":"from:alice"}}</app_action>';
+  const READ_BLOCK = `Searching properly.\n<app_action>${JSON.stringify({
+    operation: "gmail.search",
+    params: { query: "from:alice" },
+  })}</app_action>`;
+
+  it("fails the task when every round's action request stays malformed", async () => {
+    const agent = await createAgent("Garbled", [
+      { app: "gmail", accessLevel: "read" },
+    ]);
+    const task = await insertRunningTask(agent.id);
+    // The model never corrects itself: malformed blocks in every round the
+    // loop allows (MAX_ACTION_ROUNDS = 4).
+    queueCompletions([
+      completion(BAD_JSON_BLOCK),
+      completion(NO_OPERATION_BLOCK),
+      completion(BAD_JSON_BLOCK),
+      completion(BAD_JSON_BLOCK),
+    ]);
+
+    await runTask({ task, agent: await loadAgent(agent.id) });
+
+    // Every bounded corrective round was used, nothing was ever executed,
+    // and no action row was invented for an unparseable request.
+    expect(completionCalls()).toHaveLength(4);
+    expect(executeMock).not.toHaveBeenCalled();
+    expect(await getActions(task.id)).toHaveLength(0);
+
+    // The final prompt carried the precise validation feedback back.
+    const prompt = lastPromptSent();
+    expect(prompt).toContain("MALFORMED REQUEST — NOT EXECUTED");
+    expect(prompt).toMatch(/not valid JSON/i);
+
+    const done = await getTaskRow(task.id);
+    expect(done?.status).toBe("failed");
+    expect(done?.errorKind).toBe("malformed_app_actions");
+    expect(done?.errorMessage).toMatch(/no connected-app action was executed/i);
+    const logs = await getLogs(task.id);
+    expect(
+      logs.some((l) =>
+        l.message.includes("Rejected a malformed connected-app action request"),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not let a confident prose answer mask that no action ever ran", async () => {
+    const agent = await createAgent("Bluffer", [
+      { app: "gmail", accessLevel: "read" },
+    ]);
+    const task = await insertRunningTask(agent.id);
+    queueCompletions([
+      completion(NO_OPERATION_BLOCK),
+      completion("All done — I searched the mailbox and found nothing relevant."),
+    ]);
+
+    await runTask({ task, agent: await loadAgent(agent.id) });
+
+    expect(executeMock).not.toHaveBeenCalled();
+    expect(await getActions(task.id)).toHaveLength(0);
+    const done = await getTaskRow(task.id);
+    // The prose is preserved for context, but the status tells the truth.
+    expect(done?.status).toBe("failed");
+    expect(done?.errorKind).toBe("malformed_app_actions");
+    expect(done?.errorMessage).toMatch(/no connected-app action was executed/i);
+    expect(done?.output).toContain("All done");
+  });
+
+  it("recovers when the model corrects the block in a later round", async () => {
+    const agent = await createAgent("Corrected", [
+      { app: "gmail", accessLevel: "read" },
+    ]);
+    const task = await insertRunningTask(agent.id);
+    executeMock.mockResolvedValue({ ok: true, summary: "2 messages found." });
+    queueCompletions([
+      completion(BAD_JSON_BLOCK),
+      completion(READ_BLOCK),
+      completion("Found the thread; objective complete."),
+    ]);
+
+    await runTask({ task, agent: await loadAgent(agent.id) });
+
+    // Round two was prompted with the validation error it then corrected.
+    const calls = completionCalls();
+    expect(calls).toHaveLength(3);
+    const secondPrompt = String(
+      (calls[1] as [unknown, { body?: string }])[1]?.body ?? "",
+    );
+    expect(secondPrompt).toContain("MALFORMED REQUEST");
+
+    expect(executeMock).toHaveBeenCalledTimes(1);
+    const actions = await getActions(task.id);
+    expect(actions).toHaveLength(1);
+    expect(actions[0]?.operation).toBe("gmail.search");
+    expect(actions[0]?.status).toBe("executed");
+
+    const done = await getTaskRow(task.id);
+    expect(done?.status).toBe("completed");
+    expect(done?.output).toContain("objective complete");
+  });
+
+  it("completes a mixed round by running the valid request and reporting the malformed one", async () => {
+    const agent = await createAgent("Mixed", [
+      { app: "gmail", accessLevel: "read" },
+    ]);
+    const task = await insertRunningTask(agent.id);
+    executeMock.mockResolvedValue({ ok: true, summary: "2 messages found." });
+    queueCompletions([
+      completion(`${READ_BLOCK}\n<app_action>not json</app_action>`),
+      completion("Here is the summary."),
+    ]);
+
+    await runTask({ task, agent: await loadAgent(agent.id) });
+
+    // The valid request ran; the malformed one produced feedback, not an
+    // action row and not a guess.
+    expect(executeMock).toHaveBeenCalledTimes(1);
+    const actions = await getActions(task.id);
+    expect(actions).toHaveLength(1);
+    expect(actions[0]?.status).toBe("executed");
+    const prompt = lastPromptSent();
+    expect(prompt).toContain("MALFORMED REQUEST");
+    expect(prompt).toContain("SUCCESS");
+    expect((await getTaskRow(task.id))?.status).toBe("completed");
+  });
+});

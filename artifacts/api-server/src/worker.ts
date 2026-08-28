@@ -996,6 +996,15 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     );
   }
 
+  // Outcome-shape tracking for the honest terminal status at the end of the
+  // action loop: a run in which every connected-app request was malformed —
+  // so nothing was ever authorized, executed, denied, or parked — must end
+  // as a failure, never a success. Actions already settled for this task
+  // (e.g. an approved write executed before this attempt resumed) count as
+  // well-formed history and keep the normal completion path.
+  let wellFormedRequests = actionHistory.length;
+  let malformedRequests = 0;
+
   await addTaskLog(
     task.id,
     "info",
@@ -1506,6 +1515,14 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         const { requests, cleaned } = parseAppActions(result.output);
         finalOutput = requests.length === 0 ? result.output : cleaned;
         if (requests.length === 0) break;
+        // Count what the round asked for the moment it is parsed — before
+        // any break below — so the terminal status can distinguish "the
+        // model only ever produced malformed blocks" from "well-formed
+        // requests existed but were stopped by access, limits, or budget".
+        for (const request of requests) {
+          if (request.ok) wellFormedRequests += 1;
+          else malformedRequests += 1;
+        }
         // Without grants nothing executes; the blocks are stripped and the
         // refusal is recorded in the visible output.
         if (!appAccess.promptSection) {
@@ -1667,8 +1684,17 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         let parkedForApproval = false;
         for (const request of requests.slice(0, MAX_ACTIONS_PER_ROUND)) {
           if (!request.ok) {
+            // Strict parsing, honest feedback: the block is rejected without
+            // executing or guessing anything, and the precise validation
+            // error goes back to the model so the next round can resend a
+            // corrected block.
             actionHistory.push(
-              `A malformed action block was ignored: ${request.error}`,
+              `MALFORMED REQUEST — NOT EXECUTED: ${request.error} The block was discarded without running anything and without guessing its intent. To retry, resend one corrected block on its own line: <app_action>{"operation":"<operation name>","params":{...}}</app_action>`,
+            );
+            await addTaskLog(
+              task.id,
+              "warn",
+              `Rejected a malformed connected-app action request: ${request.error}`,
             );
             continue;
           }
@@ -1799,6 +1825,46 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         : null,
       providerThreadId: lastThreadId,
     };
+    // Honest terminal status: if the model requested connected-app actions
+    // but every single request was malformed — nothing was ever executed,
+    // denied, or parked for approval, this attempt or any earlier one — the
+    // task must not read as a success. The model already received each
+    // validation error and had further rounds to correct itself; report the
+    // exhausted recovery as a clear failure instead of trusting its prose.
+    if (malformedRequests > 0 && wellFormedRequests === 0) {
+      const failureMessage =
+        "No connected-app action was executed: every action request this run produced was malformed, and it was not corrected after the validation errors were sent back. Nothing external was run, and no intent was guessed. Retry the task to try again.";
+      const failed = await finishIfStillRunning(task.id, task.attempts, {
+        ...usage,
+        status: "failed",
+        errorKind: "malformed_app_actions",
+        errorMessage: failureMessage,
+        output: finalOutput,
+      });
+      if (failed) {
+        await setTaskPhase(task.id, task.attempts, "failed", workspaceId);
+        await addTaskLog(task.id, "error", `Failed: ${failureMessage}`);
+        await recordAudit(
+          workspaceId,
+          "task.failed",
+          `A task for ${agent.name} failed: every connected-app request it produced was malformed, so no action ran.`,
+        );
+      } else {
+        // Cancelled (or stopped) while the call was in flight; keep that
+        // status but still record what the attempt consumed.
+        await db
+          .update(tasksTable)
+          .set(usage)
+          .where(
+            and(
+              eq(tasksTable.id, task.id),
+              eq(tasksTable.attempts, task.attempts),
+            ),
+          );
+        await setTaskPhase(task.id, task.attempts, "cancelled", workspaceId);
+      }
+      return;
+    }
     const finished = await finishIfStillRunning(task.id, task.attempts, {
       ...usage,
       status: "completed",
