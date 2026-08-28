@@ -10,13 +10,7 @@ import "./marlow-lobster.css";
  */
 
 export type LobsterStatus =
-  | "idle"
-  | "working"
-  | "researching"
-  | "waiting"
-  | "paused"
-  | "error"
-  | string;
+  "idle" | "working" | "researching" | "waiting" | "paused" | "error" | string;
 
 import presets from "./lobster-presets.json";
 import frameLayouts from "./lobster-frames.json";
@@ -44,7 +38,9 @@ function parseHex(hex: string): [number, number, number] | null {
  * Avatars persist an arbitrary hex shell colour, so pick the sprite that sits
  * closest to it. Unparseable or legacy values fall back to the house shell.
  */
-export function presetForShellColor(shellColor: string | null | undefined): LobsterPreset {
+export function presetForShellColor(
+  shellColor: string | null | undefined,
+): LobsterPreset {
   const target = parseHex(shellColor ?? "");
   if (!target) return DEFAULT_PRESET;
   let best = DEFAULT_PRESET;
@@ -72,6 +68,9 @@ export function presetForShellColor(shellColor: string | null | undefined): Lobs
  * four floor workstations that expand the office beyond its four desks.
  * The "beach" pose is a transparent, towel-resting lobster; the towel remains
  * in the retirement island artwork so this pose can move without duplicating it.
+ * Hotel poses contain only the Crustabot and a small handheld accessory. They
+ * deliberately exclude chairs and room furniture so the hotel scene can anchor
+ * each guest directly to an appliance and animate the whole sprite safely.
  */
 export type LobsterPose =
   | "standing"
@@ -82,7 +81,15 @@ export type LobsterPose =
   | "idle-reading"
   | "idle-stretch"
   | "floor-working"
-  | "beach";
+  | "beach"
+  | "hotel-reading"
+  | "hotel-dancing"
+  | "hotel-drink"
+  | "hotel-arcade"
+  | "hotel-aquarium"
+  | "hotel-spa"
+  | "hotel-clapping"
+  | "hotel-resting";
 
 /**
  * Composite poses cannot be animated with a transform — that lifts the chair,
@@ -112,7 +119,9 @@ const FRAME_LAYOUTS = frameLayouts as Record<string, string[] | undefined>;
  */
 function framePositions(layout: string[]): Record<string, string> {
   const last = layout.length - 1;
-  const vars: Record<string, string> = { "--marlow-frames": String(layout.length) };
+  const vars: Record<string, string> = {
+    "--marlow-frames": String(layout.length),
+  };
   // Anything the pose does not draw falls back to holding the rest frame.
   for (const frame of MOVING_FRAMES) vars[`--marlow-${frame}`] = "0%";
   layout.forEach((frame, index) => {
@@ -175,6 +184,14 @@ export const POSE_CHARACTER_SCALE: Record<LobsterPose, number> = {
   "idle-stretch": 1.42,
   "floor-working": 1.07,
   beach: 1.09,
+  "hotel-reading": 1.08,
+  "hotel-dancing": 1.08,
+  "hotel-drink": 1.08,
+  "hotel-arcade": 1.08,
+  "hotel-aquarium": 1.08,
+  "hotel-spa": 1.08,
+  "hotel-clapping": 1.08,
+  "hotel-resting": 1.08,
 };
 const POSE_FOLDERS: Record<LobsterPose, string> = {
   standing: "lobsters",
@@ -186,6 +203,14 @@ const POSE_FOLDERS: Record<LobsterPose, string> = {
   "idle-stretch": "lobsters-idle-stretch",
   "floor-working": "lobsters-floor-working",
   beach: "lobsters-beach",
+  "hotel-reading": "lobsters-hotel-reading",
+  "hotel-dancing": "lobsters-hotel-dancing",
+  "hotel-drink": "lobsters-hotel-drink",
+  "hotel-arcade": "lobsters-hotel-arcade",
+  "hotel-aquarium": "lobsters-hotel-aquarium",
+  "hotel-spa": "lobsters-hotel-spa",
+  "hotel-clapping": "lobsters-hotel-clapping",
+  "hotel-resting": "lobsters-hotel-resting",
 };
 
 export interface MarlowLobsterProps {
@@ -214,7 +239,8 @@ export function MarlowLobster({
   className = "",
 }: MarlowLobsterProps) {
   const chosen =
-    LOBSTER_PRESETS.find((p) => p.id === preset) ?? presetForShellColor(shellColor);
+    LOBSTER_PRESETS.find((p) => p.id === preset) ??
+    presetForShellColor(shellColor);
   const folder = `${import.meta.env.BASE_URL}images/${POSE_FOLDERS[pose]}`;
   const layout = FRAME_LAYOUTS[POSE_FOLDERS[pose]];
   const classes = `marlow-lobster marlow-lobster--${status} marlow-lobster--pose-${pose}`;

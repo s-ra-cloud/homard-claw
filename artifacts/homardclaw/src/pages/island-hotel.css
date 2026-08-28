@@ -171,6 +171,53 @@
   --marlow-shadow: drop-shadow(2px 3px 0 rgba(76, 52, 42, 0.34));
 }
 
+.island-hotel__guest .island__nametag {
+  max-width: 92px;
+  font-size: 8px;
+}
+
+/*
+ * Hotel sprites contain no room furniture, so their complete silhouettes can
+ * move safely. Each appliance gets a small stepped loop that reads at game
+ * scale without making the lounge feel frantic.
+ */
+.island-hotel__guest
+  .marlow-lobster--motion.marlow-lobster--pose-hotel-reading {
+  animation: hotel-guest-read 4.8s steps(3, end) infinite;
+}
+
+.island-hotel__guest
+  .marlow-lobster--motion.marlow-lobster--pose-hotel-dancing {
+  animation: hotel-guest-dance 1.15s steps(4, end) infinite;
+}
+
+.island-hotel__guest .marlow-lobster--motion.marlow-lobster--pose-hotel-drink {
+  animation: hotel-guest-sip 4.2s steps(4, end) infinite;
+}
+
+.island-hotel__guest .marlow-lobster--motion.marlow-lobster--pose-hotel-arcade {
+  animation: hotel-guest-arcade 1.4s steps(3, end) infinite;
+}
+
+.island-hotel__guest
+  .marlow-lobster--motion.marlow-lobster--pose-hotel-aquarium {
+  animation: hotel-guest-wave 2.6s steps(4, end) infinite;
+}
+
+.island-hotel__guest .marlow-lobster--motion.marlow-lobster--pose-hotel-spa {
+  animation: hotel-guest-spa 3.8s steps(3, end) infinite;
+}
+
+.island-hotel__guest
+  .marlow-lobster--motion.marlow-lobster--pose-hotel-clapping {
+  animation: hotel-guest-clap 1.3s steps(3, end) infinite;
+}
+
+.island-hotel__guest
+  .marlow-lobster--motion.marlow-lobster--pose-hotel-resting {
+  animation: hotel-guest-look 5.2s steps(3, end) infinite;
+}
+
 .island-hotel__guest.is-reacting {
   animation: hotel-guest-shine 0.6s steps(2) 2;
 }
@@ -181,7 +228,8 @@
 
 .is-ambient-paused .hotel-ambient *,
 .is-ambient-paused .hotel-ambient *::before,
-.is-ambient-paused .hotel-ambient *::after {
+.is-ambient-paused .hotel-ambient *::after,
+.is-ambient-paused .island-hotel__guest .marlow-lobster {
   animation-play-state: paused !important;
 }
 
@@ -233,9 +281,77 @@
   }
 }
 
+@keyframes hotel-guest-read {
+  38% {
+    transform: translateY(1px) rotate(-1deg);
+  }
+  55% {
+    transform: translateY(1px) rotate(1deg);
+  }
+}
+
+@keyframes hotel-guest-dance {
+  25% {
+    transform: translate(-2px, -2px) rotate(-2deg);
+  }
+  50% {
+    transform: translateY(0) rotate(0);
+  }
+  75% {
+    transform: translate(2px, -2px) rotate(2deg);
+  }
+}
+
+@keyframes hotel-guest-sip {
+  42%,
+  54% {
+    transform: translateY(-1px) rotate(-3deg);
+  }
+}
+
+@keyframes hotel-guest-arcade {
+  35% {
+    transform: translateX(2px) skewY(-1deg);
+  }
+  70% {
+    transform: translateX(1px);
+  }
+}
+
+@keyframes hotel-guest-wave {
+  35% {
+    transform: rotate(2deg) translateY(-1px);
+  }
+  65% {
+    transform: rotate(-1deg);
+  }
+}
+
+@keyframes hotel-guest-spa {
+  50% {
+    transform: translateY(1px) scaleY(0.985);
+  }
+}
+
+@keyframes hotel-guest-clap {
+  45% {
+    transform: translateY(-2px) scale(1.025);
+  }
+}
+
+@keyframes hotel-guest-look {
+  40% {
+    transform: rotate(-1.5deg);
+  }
+  62% {
+    transform: rotate(1.5deg);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .hotel-ambient *,
-  .island-hotel__guest {
+  .island-hotel__guest,
+  .island-hotel__guest .marlow-lobster {
     animation: none !important;
   }
 }

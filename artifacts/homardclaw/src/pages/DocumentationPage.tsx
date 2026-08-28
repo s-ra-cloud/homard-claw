@@ -41,7 +41,8 @@ export default function DocumentationPage() {
   const [history, setHistory] = useState<DocumentationChatTurn[]>([]);
 
   const activeCrustabots = useMemo(
-    () => (agents ?? []).filter((agent) => !agent.archived && !agent.retired),
+    // listAgents already excludes retired Crustabots.
+    () => (agents ?? []).filter((agent) => !agent.archived),
     [agents],
   );
 
@@ -138,7 +139,9 @@ export default function DocumentationPage() {
         </header>
 
         {isLoading ? (
-          <PixelCard className="h-72 animate-pulse bg-muted/40" />
+          <PixelCard className="h-72 animate-pulse bg-muted/40">
+            <span className="sr-only">Loading documentation</span>
+          </PixelCard>
         ) : tab === "read" ? (
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
             {(documentation?.sections ?? []).map((section) => (
