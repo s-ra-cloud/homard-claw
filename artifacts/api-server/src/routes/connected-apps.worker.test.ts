@@ -74,8 +74,13 @@ vi.mock("../connected-apps/connections", async (importOriginal) => {
 
 import officeRouter from "./office";
 import { ApprovalDecisionError, decideApproval } from "../approvals";
-import { claimNextTask, runTask } from "../worker";
-import { claimApprovedAction, executeClaimedAction } from "../connected-apps/actions";
+import { OVER_PER_ROUND_NOTE, claimNextTask, runTask } from "../worker";
+import {
+  COMPACT_ACTION_ENTRY_MAX_CHARS,
+  claimApprovedAction,
+  executeClaimedAction,
+} from "../connected-apps/actions";
+import { estimatePromptTokens } from "../providers";
 import {
   clearGoogleTokenCache,
   encryptRefreshToken,
@@ -309,26 +314,28 @@ beforeAll(async () => {
     email: "worker-test@example.com",
     refreshTokenEnc: encryptRefreshToken("test-refresh-token"),
     scopes:
-      "openid email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/gmail.send",
+      "openid email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly",
   });
 
-  // Gmail must be enabled workspace-wide for grants to take effect;
-  // remember whatever the row was so teardown restores it exactly.
-  const [existing] = await db
-    .select()
-    .from(workspaceConnectedAppsTable)
-    .where(
-      and(
-        eq(workspaceConnectedAppsTable.workspaceId, workspaceId),
-        eq(workspaceConnectedAppsTable.app, "gmail"),
-      ),
-    )
-    .limit(1);
-  touchedSettings.set("gmail", existing ? { enabled: existing.enabled } : null);
-  const enable = await request(app)
-    .patch("/api/connected-apps/gmail")
-    .send({ enabled: true });
-  expect(enable.status).toBe(200);
+  // Apps must be enabled workspace-wide for grants to take effect;
+  // remember whatever the rows were so teardown restores them exactly.
+  for (const appId of ["gmail", "google_drive"]) {
+    const [existing] = await db
+      .select()
+      .from(workspaceConnectedAppsTable)
+      .where(
+        and(
+          eq(workspaceConnectedAppsTable.workspaceId, workspaceId),
+          eq(workspaceConnectedAppsTable.app, appId),
+        ),
+      )
+      .limit(1);
+    touchedSettings.set(appId, existing ? { enabled: existing.enabled } : null);
+    const enable = await request(app)
+      .patch(`/api/connected-apps/${appId}`)
+      .send({ enabled: true });
+    expect(enable.status).toBe(200);
+  }
 });
 
 beforeEach(async () => {
@@ -738,12 +745,13 @@ describe("malformed action recovery", () => {
       { app: "gmail", accessLevel: "read" },
     ]);
     const task = await insertRunningTask(agent.id);
-    // The model never corrects itself: malformed blocks in every round the
-    // loop allows (MAX_ACTION_ROUNDS = 4).
+    // The model never corrects itself: the initial dispatch plus every
+    // bounded correction round (MAX_MALFORMED_RECOVERY_ROUNDS = 2) stays
+    // malformed — and the correction allowance is its own small bound, not
+    // the full action-round allowance.
     queueCompletions([
       completion(BAD_JSON_BLOCK),
       completion(NO_OPERATION_BLOCK),
-      completion(BAD_JSON_BLOCK),
       completion(BAD_JSON_BLOCK),
     ]);
 
@@ -751,7 +759,7 @@ describe("malformed action recovery", () => {
 
     // Every bounded corrective round was used, nothing was ever executed,
     // and no action row was invented for an unparseable request.
-    expect(completionCalls()).toHaveLength(4);
+    expect(completionCalls()).toHaveLength(3);
     expect(executeMock).not.toHaveBeenCalled();
     expect(await getActions(task.id)).toHaveLength(0);
 
@@ -860,9 +868,10 @@ describe("round-limit continuation approval", () => {
 
   /**
    * Drive a segment that spends every bounded action round on well-formed
-   * reads: rounds 1-3 execute, round 4 still requests more work, so the
-   * task must park for an owner-approved continuation. Returns the parked
-   * task row and its pending continuation approval.
+   * reads: rounds 1-8 execute (MAX_ACTION_ROUNDS = 8), round 9 still
+   * requests more work, so the task must park for an owner-approved
+   * continuation. Returns the parked task row and its pending continuation
+   * approval.
    */
   async function parkOnRoundLimit(
     agentId: string,
@@ -871,12 +880,9 @@ describe("round-limit continuation approval", () => {
   ) {
     const task = await insertRunningTask(agentId, taskOverrides);
     executeMock.mockResolvedValue({ ok: true, summary: "2 messages found." });
-    queueCompletions([
-      completion(CONTINUE_READ_BLOCK, usage),
-      completion(CONTINUE_READ_BLOCK, usage),
-      completion(CONTINUE_READ_BLOCK, usage),
-      completion(CONTINUE_READ_BLOCK, usage),
-    ]);
+    queueCompletions(
+      Array.from({ length: 9 }, () => completion(CONTINUE_READ_BLOCK, usage)),
+    );
     await runTask({ task, agent: await loadAgent(agentId) });
     const parked = await getTaskRow(task.id);
     const approval = await getPendingApproval(task.id);
@@ -906,12 +912,12 @@ describe("round-limit continuation approval", () => {
     expect(task.output).toContain("Paused");
     expect(task.output).toContain("waiting for the owner's approval");
 
-    // Exactly the first three rounds executed; the fourth round's request
+    // Exactly the first eight rounds executed; the ninth round's request
     // was never authorized or run.
-    expect(executeMock).toHaveBeenCalledTimes(3);
-    expect(completionCalls()).toHaveLength(4);
+    expect(executeMock).toHaveBeenCalledTimes(8);
+    expect(completionCalls()).toHaveLength(9);
     const actions = await getActions(task.id);
-    expect(actions).toHaveLength(3);
+    expect(actions).toHaveLength(8);
     expect(actions.every((a) => a.status === "executed")).toBe(true);
 
     // The durable approval is the continuation kind, not an action gate.
@@ -920,11 +926,11 @@ describe("round-limit continuation approval", () => {
     expect(approval!.action).toContain("Continue task:");
     expect(approval!.details).toMatch(/one more bounded segment/i);
 
-    // Usage from the finished segment is recorded before the pause: four
+    // Usage from the finished segment is recorded before the pause: nine
     // rounds at 1000 prompt + 100 completion tokens, 0.2¢ each.
-    expect(task.actualInputTokens).toBe(4000);
-    expect(task.actualOutputTokens).toBe(400);
-    expect(task.actualCostCents).toBeCloseTo(0.8, 5);
+    expect(task.actualInputTokens).toBe(9000);
+    expect(task.actualOutputTokens).toBe(900);
+    expect(task.actualCostCents).toBeCloseTo(1.8, 5);
 
     const logs = await getLogs(task.id);
     expect(
@@ -957,10 +963,10 @@ describe("round-limit continuation approval", () => {
     ]);
     await resume(agent.id, task.id);
 
-    // One more execution — the three settled reads were not replayed.
-    expect(executeMock).toHaveBeenCalledTimes(4);
+    // One more execution — the eight settled reads were not replayed.
+    expect(executeMock).toHaveBeenCalledTimes(9);
     const actions = await getActions(task.id);
-    expect(actions).toHaveLength(4);
+    expect(actions).toHaveLength(9);
     expect(actions.every((a) => a.status === "executed")).toBe(true);
 
     // The resumed model saw the server-verified history of the earlier
@@ -972,11 +978,11 @@ describe("round-limit continuation approval", () => {
     const done = await getTaskRow(task.id);
     expect(done?.status).toBe("completed");
     expect(done?.output).toContain("objective complete");
-    // Cumulative ledger: 4 parked rounds + 2 resumed rounds of
+    // Cumulative ledger: 9 parked rounds + 2 resumed rounds of
     // 1000/100 tokens — the pause did not erase the earlier spend.
-    expect(done?.actualInputTokens).toBe(6000);
-    expect(done?.actualOutputTokens).toBe(600);
-    expect(done?.actualCostCents).toBeCloseTo(1.2, 5);
+    expect(done?.actualInputTokens).toBe(11000);
+    expect(done?.actualOutputTokens).toBe(1100);
+    expect(done?.actualCostCents).toBeCloseTo(2.2, 5);
     expect(done?.continuationSegments).toBe(1);
 
     const logs = await getLogs(task.id);
@@ -992,13 +998,10 @@ describe("round-limit continuation approval", () => {
     const { task, approval } = await parkOnRoundLimit(agent.id);
     await approve(approval!.id);
 
-    // The resumed segment burns all four rounds on well-formed reads again.
-    queueCompletions([
-      completion(CONTINUE_READ_BLOCK),
-      completion(CONTINUE_READ_BLOCK),
-      completion(CONTINUE_READ_BLOCK),
-      completion(CONTINUE_READ_BLOCK),
-    ]);
+    // The resumed segment burns all nine rounds on well-formed reads again.
+    queueCompletions(
+      Array.from({ length: 9 }, () => completion(CONTINUE_READ_BLOCK)),
+    );
     await resume(agent.id, task.id);
 
     const parkedAgain = await getTaskRow(task.id);
@@ -1011,13 +1014,13 @@ describe("round-limit continuation approval", () => {
     expect(second!.id).not.toBe(approval!.id);
     expect(second!.kind).toBe("task_continuation");
 
-    // Segment two executed its first three rounds; six settled in total.
-    expect(executeMock).toHaveBeenCalledTimes(6);
-    expect(await getActions(task.id)).toHaveLength(6);
+    // Segment two executed its first eight rounds; sixteen settled in total.
+    expect(executeMock).toHaveBeenCalledTimes(16);
+    expect(await getActions(task.id)).toHaveLength(16);
     // The ledger kept accumulating across both segments.
-    expect(parkedAgain?.actualInputTokens).toBe(8000);
-    expect(parkedAgain?.actualOutputTokens).toBe(800);
-    expect(parkedAgain?.actualCostCents).toBeCloseTo(1.6, 5);
+    expect(parkedAgain?.actualInputTokens).toBe(18000);
+    expect(parkedAgain?.actualOutputTokens).toBe(1800);
+    expect(parkedAgain?.actualCostCents).toBeCloseTo(3.6, 5);
   });
 
   it("ends the task cleanly when the continuation is rejected, keeping the completed work", async () => {
@@ -1042,7 +1045,7 @@ describe("round-limit continuation approval", () => {
     expect(
       await claimNextTask({ agentIds: [agent.id], includePausedAgents: true }),
     ).toBeNull();
-    expect(executeMock).toHaveBeenCalledTimes(3);
+    expect(executeMock).toHaveBeenCalledTimes(8);
 
     const logs = await getLogs(task.id);
     expect(
@@ -1092,20 +1095,21 @@ describe("round-limit continuation approval", () => {
     const agent = await createAgent("Ceilinged", [
       { app: "gmail", accessLevel: "read" },
     ]);
-    // 2¢ budget; each round reports 4000 prompt + 80 completion tokens
-    // (0.48¢), so the parked segment records 1.92¢ and only 0.08¢ remains.
+    // 6¢ budget; each round reports 1000 prompt + 500 completion tokens
+    // (0.6¢), so the parked segment records 5.4¢ and only 0.6¢ remains.
     // The long objective makes the resume preflight prompt alone cost more
-    // than that remainder.
+    // than that remainder — while still fitting inside the parked segment's
+    // per-round headroom.
     const { task, approval } = await parkOnRoundLimit(
       agent.id,
       {
-        budgetCents: 2,
-        objective: `${RUN_TAG} kelp census ${"survey the beds thoroughly ".repeat(200)}`,
+        budgetCents: 6,
+        objective: `${RUN_TAG} kelp census ${"survey the beds thoroughly ".repeat(900)}`,
       },
-      { prompt_tokens: 4000, completion_tokens: 80 },
+      { prompt_tokens: 1000, completion_tokens: 500 },
     );
     expect(task.status).toBe("waiting_approval");
-    expect(task.actualCostCents).toBeCloseTo(1.92, 5);
+    expect(task.actualCostCents).toBeCloseTo(5.4, 5);
     await approve(approval!.id);
 
     const completionsBefore = completionCalls().length;
@@ -1114,7 +1118,7 @@ describe("round-limit continuation approval", () => {
     // Preflight subtracted the earlier segments' spend: nothing was
     // dispatched and nothing external ran in the resumed segment.
     expect(completionCalls()).toHaveLength(completionsBefore);
-    expect(executeMock).toHaveBeenCalledTimes(3);
+    expect(executeMock).toHaveBeenCalledTimes(8);
     const blocked = await getTaskRow(task.id);
     expect(blocked?.status).toBe("blocked");
     expect(blocked?.errorKind).toBe("budget");
@@ -1139,10 +1143,355 @@ describe("round-limit continuation approval", () => {
 
     // Approval to continue is not approval to act: with no grant, nothing
     // external ran in the resumed segment and no action row was added.
-    expect(executeMock).toHaveBeenCalledTimes(3);
-    expect(await getActions(task.id)).toHaveLength(3);
+    expect(executeMock).toHaveBeenCalledTimes(8);
+    expect(await getActions(task.id)).toHaveLength(8);
     const done = await getTaskRow(task.id);
     expect(done?.status).toBe("completed");
     expect(done?.output).toContain("no app access");
+  });
+});
+
+describe("malformed recovery stays separate from workflow progress", () => {
+  const READ_BLOCK = `Searching.\n<app_action>${JSON.stringify({
+    operation: "gmail.search",
+    params: { query: "kelp" },
+  })}</app_action>`;
+  const BAD_BLOCK = "Searching.\n<app_action>{operation: gmail.search}</app_action>";
+
+  it("runs every valid sibling action from a round that also contains a malformed block", async () => {
+    const agent = await createAgent("Siblings", [
+      { app: "gmail", accessLevel: "read" },
+    ]);
+    const task = await insertRunningTask(agent.id);
+    executeMock.mockResolvedValue({ ok: true, summary: "2 messages found." });
+    const read = (q: string) =>
+      `<app_action>${JSON.stringify({ operation: "gmail.search", params: { query: q } })}</app_action>`;
+    queueCompletions([
+      completion(
+        `Scanning three folders.\n<app_action>not json</app_action>\n${read("inbox kelp")}\n${read("archive kelp")}\n${read("sent kelp")}`,
+      ),
+      completion("All three folders summarized; done."),
+    ]);
+
+    await runTask({ task, agent: await loadAgent(agent.id) });
+
+    // The malformed block got feedback but did not occupy a valid action
+    // slot: every well-formed sibling ran, up to the per-round limit.
+    expect(executeMock).toHaveBeenCalledTimes(3);
+    const actions = await getActions(task.id);
+    expect(actions).toHaveLength(3);
+    expect(actions.every((a) => a.status === "executed")).toBe(true);
+    expect(lastPromptSent()).toContain("MALFORMED REQUEST");
+    expect((await getTaskRow(task.id))?.status).toBe("completed");
+  });
+
+  it("gives a malformed-only response its correction round without consuming the action-round allowance", async () => {
+    const agent = await createAgent("Recoverer", [
+      { app: "gmail", accessLevel: "read" },
+    ]);
+    const task = await insertRunningTask(agent.id);
+    executeMock.mockResolvedValue({ ok: true, summary: "2 messages found." });
+    // One malformed-only response, then nine well-formed read rounds: the
+    // task still reaches all eight executed action rounds before parking —
+    // the correction round did not silently eat one of them.
+    queueCompletions([
+      completion(BAD_BLOCK),
+      ...Array.from({ length: 9 }, () => completion(READ_BLOCK)),
+    ]);
+
+    await runTask({ task, agent: await loadAgent(agent.id) });
+
+    expect(completionCalls()).toHaveLength(10);
+    expect(executeMock).toHaveBeenCalledTimes(8);
+    expect(await getActions(task.id)).toHaveLength(8);
+    const parked = await getTaskRow(task.id);
+    expect(parked?.status).toBe("waiting_approval");
+    expect((await getPendingApproval(task.id))?.kind).toBe("task_continuation");
+  });
+
+  it("stops honestly when corrections stay malformed after real work, never claiming the unrun requests succeeded", async () => {
+    const agent = await createAgent("Degrader", [
+      { app: "gmail", accessLevel: "read" },
+    ]);
+    const task = await insertRunningTask(agent.id);
+    executeMock.mockResolvedValue({ ok: true, summary: "2 messages found." });
+    // A real read succeeds, then the model degenerates into malformed-only
+    // output. The bounded correction allowance (2) runs out, and the task
+    // ends with an explicit note — not a guess, not an invented success.
+    queueCompletions([
+      completion(READ_BLOCK),
+      completion(BAD_BLOCK),
+      completion(BAD_BLOCK),
+      completion(BAD_BLOCK),
+    ]);
+
+    await runTask({ task, agent: await loadAgent(agent.id) });
+
+    expect(completionCalls()).toHaveLength(4);
+    expect(executeMock).toHaveBeenCalledTimes(1);
+    const done = await getTaskRow(task.id);
+    expect(done?.status).toBe("completed");
+    expect(done?.output).toMatch(/bounded correction allowance/i);
+    expect(done?.output).toMatch(/were not run/i);
+    const logs = await getLogs(task.id);
+    expect(
+      logs.some((l) =>
+        l.message.includes("correction allowance was exhausted"),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("bounded action-result context", () => {
+  it("compacts a huge external result before replaying it, keeping identifiers at both ends", async () => {
+    const agent = await createAgent("Bounded", [
+      { app: "gmail", accessLevel: "read" },
+    ]);
+    const task = await insertRunningTask(agent.id);
+    // A 200k-character result — the kind that used to balloon follow-up
+    // prompts into six-figure token counts.
+    executeMock.mockResolvedValueOnce({
+      ok: true,
+      summary: `Found thread thread-abc-123.\n${"x".repeat(200_000)}\nNewest message id msg-tail-789.`,
+    });
+    executeMock.mockResolvedValueOnce({ ok: true, summary: "Thread read." });
+    const read = (q: string) =>
+      `Searching.\n<app_action>${JSON.stringify({ operation: "gmail.search", params: { query: q } })}</app_action>`;
+    queueCompletions([
+      completion(read("kelp")),
+      completion(read("kelp follow-up")),
+      completion("Summarized the thread; done."),
+    ]);
+
+    await runTask({ task, agent: await loadAgent(agent.id) });
+
+    const calls = completionCalls();
+    expect(calls).toHaveLength(3);
+    const secondBody = String(
+      (calls[1] as [unknown, { body?: string }])[1]?.body ?? "",
+    );
+    // Bounded: the whole request stays a small fraction of the raw result.
+    expect(secondBody.length).toBeLessThan(30_000);
+    // The elision is explicit, and the identifiers at the head and tail of
+    // the result — what chaining needs — survive verbatim.
+    expect(secondBody).toContain("characters omitted");
+    expect(secondBody).toContain("thread-abc-123");
+    expect(secondBody).toContain("msg-tail-789");
+    // The final prompt (with both results replayed) stays bounded too.
+    expect(lastPromptSent().length).toBeLessThan(30_000);
+    expect((await getTaskRow(task.id))?.status).toBe("completed");
+  });
+
+  it("gates the follow-up dispatch on the actual next prompt, including the over-per-round marker", async () => {
+    const agent = await createAgent("Boundary", [
+      { app: "gmail", accessLevel: "read" },
+    ]);
+    executeMock.mockResolvedValue({ ok: true, summary: "2 messages found." });
+    const read = (q: string) =>
+      `<app_action>${JSON.stringify({ operation: "gmail.search", params: { query: q } })}</app_action>`;
+    // FOUR valid blocks: the loop runs only the first 3 and appends the
+    // over-per-round marker to the next prompt AFTER the budget gate.
+    const FOUR_BLOCKS = `Casting a wide net.\n${read("a")}\n${read("b")}\n${read("c")}\n${read("d")}`;
+
+    // Probe an identical unmetered task to measure the exact system and
+    // first-prompt sizes the metered gate will see (same agent, same
+    // default objective, deterministic prompts).
+    const probe = await insertRunningTask(agent.id);
+    queueCompletions([completion(FOUR_BLOCKS), completion("probe done")]);
+    await runTask({ task: probe, agent: await loadAgent(agent.id) });
+    expect((await getTaskRow(probe.id))?.status).toBe("completed");
+    const probeBody = JSON.parse(
+      String(
+        (completionCalls()[0] as [unknown, { body?: string }])[1]?.body ?? "{}",
+      ),
+    ) as { messages: Array<{ role: string; content: string }> };
+    const sysChars = probeBody.messages.find((m) => m.role === "system")!
+      .content.length;
+    const firstPromptChars = probeBody.messages.find((m) => m.role === "user")!
+      .content.length;
+    fetchMock.mockClear();
+    executeMock.mockClear();
+
+    // Reproduce the gate's arithmetic ($1/M prompt = 1e-4 ¢/token, $10/M
+    // completion = 1e-3 ¢/token; dispatch needs ≥ one affordable
+    // completion token). The stale estimate omitted the marker; the
+    // corrected one includes it.
+    const baseChars =
+      sysChars + firstPromptChars + 3 * COMPACT_ACTION_ENTRY_MAX_CHARS;
+    const staleTokens = estimatePromptTokens(baseChars);
+    const actualTokens = estimatePromptTokens(
+      baseChars + OVER_PER_ROUND_NOTE.length + 2,
+    );
+    // The window between the two estimates must dwarf the ±0.5-token
+    // rounding of the usage numbers below, or this boundary proves nothing.
+    expect(actualTokens - staleTokens).toBeGreaterThan(10);
+
+    // Position round-1 spend so the remaining budget sits mid-window: a
+    // gate using the stale estimate WOULD dispatch a follow-up whose real
+    // prompt cost breaks the ceiling; the corrected gate must stop.
+    const BUDGET_CENTS = 5;
+    const COMPLETION_TOKENS = 100;
+    const midTokens = (staleTokens + actualTokens) / 2;
+    const spentTarget = BUDGET_CENTS - 0.001 - midTokens * 1e-4;
+    const promptTokensUsage = Math.round(
+      (spentTarget - COMPLETION_TOKENS * 1e-3) / 1e-4,
+    );
+    const spent = promptTokensUsage * 1e-4 + COMPLETION_TOKENS * 1e-3;
+    // The boundary really separates the two estimates:
+    expect(BUDGET_CENTS - spent - staleTokens * 1e-4).toBeGreaterThanOrEqual(
+      0.001,
+    );
+    expect(BUDGET_CENTS - spent - actualTokens * 1e-4).toBeLessThan(0.001);
+
+    const task = await insertRunningTask(agent.id, {
+      budgetCents: BUDGET_CENTS,
+    });
+    queueCompletions([
+      completion(FOUR_BLOCKS, {
+        prompt_tokens: promptTokensUsage,
+        completion_tokens: COMPLETION_TOKENS,
+      }),
+    ]);
+    await runTask({ task, agent: await loadAgent(agent.id) });
+
+    // No over-budget follow-up was sent, and — because the gate sits before
+    // execution — none of the round's actions ran either.
+    expect(completionCalls()).toHaveLength(1);
+    expect(executeMock).not.toHaveBeenCalled();
+    expect(await getActions(task.id)).toHaveLength(0);
+    const done = await getTaskRow(task.id);
+    expect(done?.status).toBe("completed");
+    expect(done?.output).toContain("cannot fund another round");
+  });
+});
+
+describe("simple Gmail → Sheets → email chains finish end to end", () => {
+  async function resumeTask(agentId: string, taskId: string) {
+    const claimed = await claimNextTask({
+      agentIds: [agentId],
+      includePausedAgents: true,
+    });
+    expect(claimed?.task.id).toBe(taskId);
+    await runTask(claimed!);
+  }
+
+  it("reads context, creates and fills an app-created spreadsheet, and sends the email with only the two write approvals", async () => {
+    const agent = await createAgent("Chainer", [
+      { app: "gmail", accessLevel: "write" },
+      { app: "google_drive", accessLevel: "write" },
+    ]);
+    const task = await insertRunningTask(agent.id);
+    executeMock.mockImplementation(async (op: { name: string }) => {
+      switch (op.name) {
+        case "gmail.search":
+          return { ok: true, summary: "2 messages: kelp counts are 14 and 9." };
+        case "google_drive.create_spreadsheet":
+          return {
+            ok: true,
+            summary:
+              'Created spreadsheet "Kelp Census" (spreadsheetId sheet-kelp-42). Link: https://sheets.example/sheet-kelp-42',
+          };
+        case "google_drive.append_sheet_rows":
+          return {
+            ok: true,
+            summary: 'Appended 2 rows to tab "Sheet1" of sheet-kelp-42.',
+          };
+        case "gmail.send_email":
+          return { ok: true, summary: "Message sent (id msg-final-9)." };
+        default:
+          return {
+            ok: false,
+            kind: "failed",
+            message: `unexpected operation ${op.name}`,
+          };
+      }
+    });
+    const block = (operation: string, params: unknown) =>
+      `<app_action>${JSON.stringify({ operation, params })}</app_action>`;
+
+    // Segment 1: read email context, create the spreadsheet (draft level —
+    // runs without approval), then request the first external write, which
+    // must pause for the owner.
+    queueCompletions([
+      completion(`Reading recent context.\n${block("gmail.search", { query: "kelp census" })}`),
+      completion(`Creating the tracker.\n${block("google_drive.create_spreadsheet", { name: "Kelp Census" })}`),
+      completion(
+        `Filling it in.\n${block("google_drive.append_sheet_rows", {
+          spreadsheetId: "sheet-kelp-42",
+          tabTitle: "Sheet1",
+          values: JSON.stringify([
+            ["site", "count"],
+            ["north bed", "14"],
+          ]),
+        })}`,
+      ),
+    ]);
+    await runTask({ task, agent: await loadAgent(agent.id) });
+
+    expect((await getTaskRow(task.id))?.status).toBe("waiting_approval");
+    const firstApproval = await getPendingApproval(task.id);
+    expect(firstApproval?.kind).not.toBe("task_continuation");
+    expect(firstApproval?.action).toContain("Append rows");
+
+    // Segment 2: the approved append executes first, then the model resumes
+    // with its verified result and requests the send — the second approval.
+    await approve(firstApproval!.id);
+    queueCompletions([
+      completion(
+        `Sending the summary.\n${block("gmail.send_email", {
+          to: "alice@example.com",
+          subject: "Kelp census",
+          body: "Sheet: https://sheets.example/sheet-kelp-42",
+        })}`,
+      ),
+    ]);
+    await resumeTask(agent.id, task.id);
+    // The resumed prompt chained on the spreadsheet identifier.
+    expect(lastPromptSent()).toContain("sheet-kelp-42");
+
+    expect((await getTaskRow(task.id))?.status).toBe("waiting_approval");
+    const secondApproval = await getPendingApproval(task.id);
+    expect(secondApproval?.kind).not.toBe("task_continuation");
+    expect(secondApproval?.action).toContain("Send email");
+    expect(secondApproval!.id).not.toBe(firstApproval!.id);
+
+    // Segment 3: the approved send executes, and the task wraps up.
+    await approve(secondApproval!.id);
+    queueCompletions([
+      completion("Census logged in the sheet and emailed to Alice; objective complete."),
+    ]);
+    await resumeTask(agent.id, task.id);
+
+    const done = await getTaskRow(task.id);
+    expect(done?.status).toBe("completed");
+    expect(done?.output).toContain("objective complete");
+    // ONLY the two external writes paused the workflow — no round-limit
+    // continuation was ever needed for this ordinary chain.
+    const approvals = await db
+      .select()
+      .from(approvalsTable)
+      .where(eq(approvalsTable.taskId, task.id));
+    expect(approvals).toHaveLength(2);
+    expect(approvals.every((a) => a.kind !== "task_continuation")).toBe(true);
+    expect(done?.continuationSegments).toBe(0);
+
+    // Exactly the four requested operations ran, in order, each recorded
+    // truthfully as executed.
+    const ops = executeMock.mock.calls.map(
+      (c) => (c[0] as { name: string }).name,
+    );
+    expect(ops).toEqual([
+      "gmail.search",
+      "google_drive.create_spreadsheet",
+      "google_drive.append_sheet_rows",
+      "gmail.send_email",
+    ]);
+    const actions = await getActions(task.id);
+    expect(actions).toHaveLength(4);
+    expect(actions.every((a) => a.status === "executed")).toBe(true);
+
+    // The final prompt — objective plus the whole replayed chain — stayed
+    // compact for a simple task like this.
+    expect(lastPromptSent().length).toBeLessThan(30_000);
   });
 });

@@ -474,6 +474,91 @@ export async function settleActionForApproval(
   return row ?? null;
 }
 
+/**
+ * Bounds for the action-result replay in follow-up prompts. A single entry
+ * keeps a verbatim head (where operations put their status line and the
+ * identifiers needed for chaining — message ids, spreadsheet ids, links)
+ * and a verbatim tail (where listings end with the newest rows), with the
+ * middle elided. The whole replayed section then fits a hard character
+ * budget, so a simple task can never grow an unbounded prompt out of large
+ * external results.
+ */
+export const ACTION_RESULT_HEAD_CHARS = 1_200;
+export const ACTION_RESULT_TAIL_CHARS = 400;
+/** Worst-case size of one compacted entry, for budget preflight maths. */
+export const COMPACT_ACTION_ENTRY_MAX_CHARS =
+  ACTION_RESULT_HEAD_CHARS + ACTION_RESULT_TAIL_CHARS + 200;
+/** Hard budget for the whole replayed action-history section of a prompt. */
+export const ACTION_HISTORY_CHAR_BUDGET = 24_000;
+/** Older entries collapse to their status line under this secondary budget. */
+const COLLAPSED_ENTRY_CHARS = 200;
+const COLLAPSED_SECTION_CHAR_BUDGET = 4_000;
+
+/**
+ * Compact one replayed action entry to a bounded head+tail window. Entries
+ * already within bounds are returned verbatim; the elision marker states
+ * exactly how much was omitted, so the model never mistakes a truncated
+ * listing for a complete one.
+ */
+export function compactActionEntry(entry: string): string {
+  const keep = ACTION_RESULT_HEAD_CHARS + ACTION_RESULT_TAIL_CHARS;
+  // Slightly over-budget entries pass verbatim: an elision marker longer
+  // than the text it removes would make the prompt bigger, not smaller.
+  if (entry.length <= keep + 160) return entry;
+  const omitted = entry.length - keep;
+  return `${entry.slice(0, ACTION_RESULT_HEAD_CHARS)}\n…[${omitted} characters omitted from the middle of this result to keep the prompt bounded; the beginning and end are verbatim]…\n${entry.slice(-ACTION_RESULT_TAIL_CHARS)}`;
+}
+
+/** Collapse an entry to its first (status) line for the low-detail tier. */
+function collapseActionEntry(entry: string): string {
+  const newline = entry.indexOf("\n");
+  const firstLine = newline === -1 ? entry : entry.slice(0, newline);
+  const head =
+    firstLine.length > COLLAPSED_ENTRY_CHARS
+      ? `${firstLine.slice(0, COLLAPSED_ENTRY_CHARS)}…`
+      : firstLine;
+  return `${head} (result details omitted)`;
+}
+
+/**
+ * Bound a whole action history for replay in a prompt. The newest entries
+ * keep their (individually compacted) detail — they carry the identifiers
+ * and status evidence the next step chains on — older entries collapse to
+ * their one-line status, and anything beyond the secondary budget is
+ * summarized by count. Original order is preserved.
+ */
+export function compactActionHistoryForPrompt(
+  entries: readonly string[],
+): string[] {
+  const kept: (string | null)[] = new Array(entries.length).fill(null);
+  let detailedUsed = 0;
+  let collapsedUsed = 0;
+  let omittedCount = 0;
+  // Newest first: recency decides who keeps detail.
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    const detailed = compactActionEntry(entries[i]!);
+    if (detailedUsed + detailed.length <= ACTION_HISTORY_CHAR_BUDGET) {
+      kept[i] = detailed;
+      detailedUsed += detailed.length;
+      continue;
+    }
+    const collapsed = collapseActionEntry(entries[i]!);
+    if (collapsedUsed + collapsed.length <= COLLAPSED_SECTION_CHAR_BUDGET) {
+      kept[i] = collapsed;
+      collapsedUsed += collapsed.length;
+      continue;
+    }
+    omittedCount += 1;
+  }
+  const out = kept.filter((entry): entry is string => entry !== null);
+  if (omittedCount > 0) {
+    out.unshift(
+      `(${omittedCount} earlier settled action result(s) omitted to keep the prompt bounded; the statuses and results below are the most recent evidence.)`,
+    );
+  }
+  return out;
+}
+
 /** One line per settled action, replayed to the model on follow-up rounds. */
 export function describeActionForModel(action: AppActionRecord): string {
   const label =

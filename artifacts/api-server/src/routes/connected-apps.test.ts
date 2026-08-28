@@ -50,6 +50,14 @@ vi.mock("@clerk/express", () => ({
 
 import officeRouter from "./office";
 import { parseAppActions } from "../connected-apps/parser";
+import {
+  ACTION_HISTORY_CHAR_BUDGET,
+  ACTION_RESULT_HEAD_CHARS,
+  ACTION_RESULT_TAIL_CHARS,
+  COMPACT_ACTION_ENTRY_MAX_CHARS,
+  compactActionEntry,
+  compactActionHistoryForPrompt,
+} from "../connected-apps/actions";
 import { authorizeAppAction } from "../connected-apps/authorize";
 import {
   buildAppsPromptSection,
@@ -230,6 +238,61 @@ describe("action block parser", () => {
     expect(requests[0]!.ok).toBe(false);
     expect(requests[1]).toMatchObject({ ok: true, operation: "gmail.search" });
     expect(cleaned).not.toContain("app_action");
+  });
+});
+
+describe("action history compaction", () => {
+  it("returns bounded entries verbatim and elides only the middle of oversized ones", () => {
+    const short = "[Gmail] gmail.search → SUCCESS:\n2 messages.";
+    expect(compactActionEntry(short)).toBe(short);
+
+    const entry = `HEAD-id-123 ${"x".repeat(50_000)} TAIL-id-789`;
+    const compacted = compactActionEntry(entry);
+    expect(compacted.length).toBeLessThanOrEqual(COMPACT_ACTION_ENTRY_MAX_CHARS);
+    // The head and tail — where identifiers and newest rows live — are
+    // verbatim, and the marker states exactly how much was cut.
+    expect(compacted.startsWith("HEAD-id-123")).toBe(true);
+    expect(compacted.endsWith("TAIL-id-789")).toBe(true);
+    expect(compacted).toContain("characters omitted");
+    expect(compacted).toContain(
+      String(
+        entry.length - (ACTION_RESULT_HEAD_CHARS + ACTION_RESULT_TAIL_CHARS),
+      ),
+    );
+  });
+
+  it("keeps a slightly-over entry verbatim when an elision marker would not shrink it", () => {
+    const entry = "y".repeat(
+      ACTION_RESULT_HEAD_CHARS + ACTION_RESULT_TAIL_CHARS + 100,
+    );
+    expect(compactActionEntry(entry)).toBe(entry);
+  });
+
+  it("keeps newest entries detailed, collapses older ones, and counts the oldest out loud", () => {
+    // 150 large entries — far beyond every budget tier.
+    const entries = Array.from(
+      { length: 150 },
+      (_, i) => `entry-${i} status line\n${"z".repeat(3_000)}`,
+    );
+    const out = compactActionHistoryForPrompt(entries);
+    const joined = out.join("\n");
+
+    // The whole section respects the hard budgets (detailed + collapsed
+    // tiers plus one omission note), instead of 150 × 3k chars.
+    expect(joined.length).toBeLessThanOrEqual(
+      ACTION_HISTORY_CHAR_BUDGET + 4_000 + 300,
+    );
+    // Newest entry keeps (compacted) detail; its middle elision is explicit.
+    expect(joined).toContain("entry-149 status line");
+    expect(out[out.length - 1]).toContain("characters omitted");
+    // Older kept entries collapse to their status line — no silent detail.
+    expect(joined).toContain("(result details omitted)");
+    // The oldest are summarized by count, never dropped silently.
+    expect(out[0]).toMatch(/\d+ earlier settled action result/);
+    // Original order is preserved for everything that stayed.
+    expect(joined.indexOf("entry-100 ")).toBeLessThan(
+      joined.indexOf("entry-149 "),
+    );
   });
 });
 
