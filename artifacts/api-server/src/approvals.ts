@@ -26,6 +26,7 @@ export function toApprovalJson(
   approval: typeof approvalsTable.$inferSelect,
   agentName: string,
   taskObjective: string | null,
+  reviewerAgentName: string | null = null,
 ) {
   return {
     id: approval.id,
@@ -36,6 +37,10 @@ export function toApprovalJson(
     action: approval.action,
     details: approval.details,
     status: approval.status,
+    reviewerAgentId: approval.reviewerAgentId,
+    reviewerAgentName,
+    autoReviewStatus: approval.autoReviewStatus,
+    autoReviewReason: approval.autoReviewReason,
     decidedAt: approval.decidedAt ? approval.decidedAt.toISOString() : null,
     createdAt: approval.createdAt.toISOString(),
     expiresAt: approval.expiresAt.toISOString(),
@@ -51,15 +56,42 @@ export async function decideApproval(input: {
   workspaceId: string;
   approvalId: string;
   decision: ApprovalDecision;
+  /** Automatic reviewers may approve only; omission means the owner acted. */
+  reviewer?: { agentId: string; name: string; reason: string };
 }) {
+  if (input.reviewer && input.decision !== "approved") {
+    throw new Error("An automatic reviewer cannot reject an approval.");
+  }
   const outcome = await db.transaction(async (tx) => {
     const [approval] = await tx
       .update(approvalsTable)
-      .set({ status: input.decision, decidedAt: new Date() })
+      .set({
+        status: input.decision,
+        decidedAt: new Date(),
+        ...(input.reviewer
+          ? {
+              reviewerAgentId: input.reviewer.agentId,
+              autoReviewStatus: "approved",
+              autoReviewReason: input.reviewer.reason,
+              autoReviewedAt: new Date(),
+            }
+          : {
+              // A manual decision always wins a concurrent automatic review
+              // and must not remain labelled as queued/reviewing afterward.
+              autoReviewStatus: null,
+              autoReviewStartedAt: null,
+            }),
+      })
       .where(
         and(
           eq(approvalsTable.id, input.approvalId),
           eq(approvalsTable.status, "pending"),
+          ...(input.reviewer
+            ? [
+                eq(approvalsTable.reviewerAgentId, input.reviewer.agentId),
+                eq(approvalsTable.autoReviewStatus, "reviewing"),
+              ]
+            : []),
           sql`${approvalsTable.expiresAt} > now()`,
           sql`exists (select 1 from ${agentsTable} where ${agentsTable.id} = ${approvalsTable.agentId} and ${agentsTable.workspaceId} = ${input.workspaceId})`,
         ),
@@ -95,8 +127,12 @@ export async function decideApproval(input: {
             taskId: approval.taskId,
             level: "info",
             message: isContinuation
-              ? "Continuation approved by the owner; requeued for another bounded connected-app segment."
-              : "Approved by the owner; requeued to run.",
+              ? input.reviewer
+                ? `Continuation auto-approved by ${input.reviewer.name}; requeued for another bounded connected-app segment.`
+                : "Continuation approved by the owner; requeued for another bounded connected-app segment."
+              : input.reviewer
+                ? `Auto-approved by ${input.reviewer.name}; requeued to run.`
+                : "Approved by the owner; requeued to run.",
           });
         }
       } else {
@@ -139,7 +175,11 @@ export async function decideApproval(input: {
     await recordAudit(
       input.workspaceId,
       `approval.${input.decision}`,
-      `${approval.action} was ${input.decision} by the owner.${
+      `${approval.action} was ${input.decision} by ${
+        input.reviewer
+          ? `automatic reviewer ${input.reviewer.name}. Reason: ${input.reviewer.reason}`
+          : "the owner."
+      }${
         settledAction
           ? ` Linked connected-app action (${settledAction.targetSummary}) is now ${settledAction.status}.`
           : ""
@@ -150,6 +190,7 @@ export async function decideApproval(input: {
       approval,
       agent?.name ?? "Unknown agent",
       taskObjective,
+      input.reviewer?.name ?? null,
     );
   });
   if (!outcome) {

@@ -1366,6 +1366,19 @@ export const ApprovalStatus = {
   cancelled: 'cancelled',
 } as const;
 
+/**
+ * @nullable
+ */
+export type ApprovalAutoReviewStatus = typeof ApprovalAutoReviewStatus[keyof typeof ApprovalAutoReviewStatus] | null;
+
+
+export const ApprovalAutoReviewStatus = {
+  queued: 'queued',
+  reviewing: 'reviewing',
+  approved: 'approved',
+  notified: 'notified',
+} as const;
+
 export interface Approval {
   id: string;
   agentName: string;
@@ -1378,6 +1391,14 @@ export interface Approval {
   action: string;
   details?: string;
   status: ApprovalStatus;
+  /** @nullable */
+  reviewerAgentId: string | null;
+  /** @nullable */
+  reviewerAgentName: string | null;
+  /** @nullable */
+  autoReviewStatus: ApprovalAutoReviewStatus;
+  /** @nullable */
+  autoReviewReason: string | null;
   /** @nullable */
   decidedAt?: string | null;
   createdAt: string;
@@ -1536,6 +1557,18 @@ export const ApprovalDecisionDecision = {
 
 export interface ApprovalDecision {
   decision: ApprovalDecisionDecision;
+}
+
+export interface ApprovalSettings {
+  /** @nullable */
+  reviewerAgentId: string | null;
+  /** @nullable */
+  reviewerAgentName: string | null;
+}
+
+export interface ApprovalSettingsInput {
+  /** @nullable */
+  reviewerAgentId: string | null;
 }
 
 export type ProviderStatusProvider = typeof ProviderStatusProvider[keyof typeof ProviderStatusProvider];

@@ -302,6 +302,35 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Approval"
+  /approvals/settings:
+    get:
+      operationId: getApprovalSettings
+      tags: [office]
+      summary: Read the automatic approval reviewer selection
+      responses:
+        "200":
+          description: Approval reviewer settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalSettings"
+    put:
+      operationId: updateApprovalSettings
+      tags: [office]
+      summary: Select or disable the automatic approval reviewer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApprovalSettingsInput"
+      responses:
+        "200":
+          description: Updated approval reviewer settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalSettings"
   /approvals/{approvalId}:
     patch:
       operationId: decideApproval
@@ -2797,7 +2826,20 @@ components:
         costCents: { type: number, minimum: 0 }
     Approval:
       type: object
-      required: [id, agentName, kind, action, status, createdAt, expiresAt]
+      required:
+        [
+          id,
+          agentName,
+          kind,
+          action,
+          status,
+          reviewerAgentId,
+          reviewerAgentName,
+          autoReviewStatus,
+          autoReviewReason,
+          createdAt,
+          expiresAt,
+        ]
       properties:
         id: { type: string }
         agentName: { type: string }
@@ -2818,6 +2860,14 @@ components:
             type: string,
             enum: [pending, approved, rejected, expired, cancelled],
           }
+        reviewerAgentId: { type: [string, "null"] }
+        reviewerAgentName: { type: [string, "null"] }
+        autoReviewStatus:
+          {
+            type: [string, "null"],
+            enum: [queued, reviewing, approved, notified, null],
+          }
+        autoReviewReason: { type: [string, "null"] }
         decidedAt: { type: [string, "null"] }
         createdAt: { type: string, format: date-time }
         expiresAt: { type: string, format: date-time }
@@ -2826,6 +2876,17 @@ components:
       required: [decision]
       properties:
         decision: { type: string, enum: [approved, rejected] }
+    ApprovalSettings:
+      type: object
+      required: [reviewerAgentId, reviewerAgentName]
+      properties:
+        reviewerAgentId: { type: [string, "null"] }
+        reviewerAgentName: { type: [string, "null"] }
+    ApprovalSettingsInput:
+      type: object
+      required: [reviewerAgentId]
+      properties:
+        reviewerAgentId: { type: [string, "null"] }
     ProviderStatus:
       type: object
       required:

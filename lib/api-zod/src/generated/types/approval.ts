@@ -5,6 +5,7 @@
  * Crustabox private Crustabot office API
  * OpenAPI spec version: 0.1.0
  */
+import type { ApprovalAutoReviewStatus } from './approvalAutoReviewStatus';
 import type { ApprovalKind } from './approvalKind';
 import type { ApprovalStatus } from './approvalStatus';
 
@@ -20,6 +21,14 @@ export interface Approval {
   action: string;
   details?: string;
   status: ApprovalStatus;
+  /** @nullable */
+  reviewerAgentId: string | null;
+  /** @nullable */
+  reviewerAgentName: string | null;
+  /** @nullable */
+  autoReviewStatus: ApprovalAutoReviewStatus;
+  /** @nullable */
+  autoReviewReason: string | null;
   /** @nullable */
   decidedAt?: string | null;
   createdAt: Date;

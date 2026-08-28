@@ -12,9 +12,11 @@ import {
 import {
   agentMessagesTable,
   agentsTable,
+  appActionsTable,
   approvalsTable,
   auditEventsTable,
   db,
+  notificationsTable,
   pool,
   tasksTable,
   workspacesTable,
@@ -35,6 +37,7 @@ vi.stubGlobal("fetch", fetchMock);
 
 import officeRouter from "./office";
 import { claimNextTask, expireStaleApprovals, runTask } from "../worker";
+import { reviewPendingApprovals } from "../approval-reviewer";
 import { recordAudit, verifyAuditChain } from "../audit";
 import { effectivePermissions, evaluateTaskPolicy } from "../policy";
 import { clearProviderCaches } from "../providers";
@@ -441,6 +444,290 @@ describe("approval lifecycle", () => {
     expect(recaps[0]?.body).toContain("What I did and the main result");
     expect(recaps[0]?.body).toContain("Here is the finished work.");
     expect(recaps[0]?.body).toContain("No issues were reported.");
+  });
+
+  it("lets a selected Crustabot auto-approve a clear initial request", async () => {
+    const requester = await createAgent(`${RUN_TAG} Review Requester`, {
+      autonomy: "supervised",
+    });
+    const reviewer = await createAgent(`${RUN_TAG} Approval Officer`, {
+      autonomy: "autonomous",
+    });
+    await request(app)
+      .post(`/api/agents/${reviewer.id}/pause`)
+      .send({ paused: false });
+
+    const settings = await request(app)
+      .put("/api/approvals/settings")
+      .send({ reviewerAgentId: reviewer.id });
+    expect(settings.status).toBe(200);
+    expect(settings.body.reviewerAgentId).toBe(reviewer.id);
+    expect(
+      (await request(app).get("/api/approvals/settings")).body
+        .reviewerAgentName,
+    ).toBe(reviewer.name);
+
+    await insertTask(requester.id, { estimatedCostCents: 1 });
+    const claimed = await claimNextTask(scopeFor(requester.id));
+    await runTask(claimed!);
+    const approval = await getApprovalForTask(claimed!.task.id);
+    expect(approval?.status).toBe("pending");
+    expect(approval?.reviewerAgentId).toBe(reviewer.id);
+    expect(approval?.autoReviewStatus).toBe("queued");
+
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                decision: "approve",
+                certainty: "high",
+                reason: "The bounded request is clear and matches the task.",
+              }),
+            },
+          },
+        ],
+        usage: { prompt_tokens: 100, completion_tokens: 30 },
+      }),
+    );
+    expect(await reviewPendingApprovals({ approvalIds: [approval!.id] })).toBe(
+      1,
+    );
+
+    const decided = await getApprovalForTask(claimed!.task.id);
+    expect(decided?.status).toBe("approved");
+    expect(decided?.autoReviewStatus).toBe("approved");
+    expect((await getTaskRow(claimed!.task.id)).status).toBe("queued");
+    const notices = await db
+      .select()
+      .from(notificationsTable)
+      .where(eq(notificationsTable.taskId, claimed!.task.id));
+    expect(notices).toHaveLength(0);
+  });
+
+  it("falls back to notification when the reviewer is uncertain", async () => {
+    const requester = await createAgent(`${RUN_TAG} Uncertain Requester`, {
+      autonomy: "supervised",
+    });
+    const reviewer = await createAgent(`${RUN_TAG} Cautious Officer`, {
+      autonomy: "autonomous",
+    });
+    await request(app)
+      .post(`/api/agents/${reviewer.id}/pause`)
+      .send({ paused: false });
+    await request(app)
+      .put("/api/approvals/settings")
+      .send({ reviewerAgentId: reviewer.id });
+
+    await insertTask(requester.id, { estimatedCostCents: 1 });
+    const claimed = await claimNextTask(scopeFor(requester.id));
+    await runTask(claimed!);
+    const approval = await getApprovalForTask(claimed!.task.id);
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                decision: "notify",
+                certainty: "uncertain",
+                reason: "The request does not identify the final recipient.",
+              }),
+            },
+          },
+        ],
+        usage: { prompt_tokens: 100, completion_tokens: 30 },
+      }),
+    );
+    await reviewPendingApprovals({ approvalIds: [approval!.id] });
+
+    const deferred = await getApprovalForTask(claimed!.task.id);
+    expect(deferred?.status).toBe("pending");
+    expect(deferred?.autoReviewStatus).toBe("notified");
+    expect(deferred?.autoReviewReason).toMatch(/recipient/i);
+    expect((await getTaskRow(claimed!.task.id)).status).toBe(
+      "waiting_approval",
+    );
+    const notices = await db
+      .select()
+      .from(notificationsTable)
+      .where(eq(notificationsTable.taskId, claimed!.task.id));
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.kind).toBe("approval_needed");
+  });
+
+  it("returns queued reviews to notification mode when auto-review is disabled", async () => {
+    const requester = await createAgent(`${RUN_TAG} Manual Requester`, {
+      autonomy: "supervised",
+    });
+    const reviewer = await createAgent(`${RUN_TAG} Former Officer`, {
+      autonomy: "autonomous",
+    });
+    await request(app)
+      .post(`/api/agents/${reviewer.id}/pause`)
+      .send({ paused: false });
+    await request(app)
+      .put("/api/approvals/settings")
+      .send({ reviewerAgentId: reviewer.id });
+
+    await insertTask(requester.id, { estimatedCostCents: 1 });
+    const claimed = await claimNextTask(scopeFor(requester.id));
+    await runTask(claimed!);
+    const approval = await getApprovalForTask(claimed!.task.id);
+    expect(approval?.autoReviewStatus).toBe("queued");
+
+    const cleared = await request(app)
+      .put("/api/approvals/settings")
+      .send({ reviewerAgentId: null });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.reviewerAgentId).toBeNull();
+    expect(await reviewPendingApprovals({ approvalIds: [approval!.id] })).toBe(
+      0,
+    );
+
+    const manual = await getApprovalForTask(claimed!.task.id);
+    expect(manual?.status).toBe("pending");
+    expect(manual?.reviewerAgentId).toBeNull();
+    expect(manual?.autoReviewStatus).toBe("notified");
+    const notices = await db
+      .select()
+      .from(notificationsTable)
+      .where(eq(notificationsTable.taskId, claimed!.task.id));
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.kind).toBe("approval_needed");
+  });
+
+  it("uses the same reviewer for an exact connected-app action", async () => {
+    const requester = await createAgent(`${RUN_TAG} Action Requester`, {
+      autonomy: "autonomous",
+    });
+    const reviewer = await createAgent(`${RUN_TAG} Action Officer`, {
+      autonomy: "autonomous",
+    });
+    await request(app)
+      .post(`/api/agents/${reviewer.id}/pause`)
+      .send({ paused: false });
+    await request(app)
+      .put("/api/approvals/settings")
+      .send({ reviewerAgentId: reviewer.id });
+
+    const task = await insertTask(requester.id, {
+      status: "waiting_approval",
+      objective: `${RUN_TAG} send the approved status email`,
+    });
+    const [approval] = await db
+      .insert(approvalsTable)
+      .values({
+        agentId: requester.id,
+        taskId: task.id,
+        kind: "app_action",
+        action: "Send status email to director@example.test",
+        details: "Approving runs this exact connected-app action once.",
+        reviewerAgentId: reviewer.id,
+        autoReviewStatus: "queued",
+        expiresAt: new Date(Date.now() + 60_000),
+      })
+      .returning();
+    const [action] = await db
+      .insert(appActionsTable)
+      .values({
+        taskId: task.id,
+        agentId: requester.id,
+        app: "gmail",
+        operation: "gmail.send_email",
+        params: {
+          to: "director@example.test",
+          subject: "Status",
+          body: "Done",
+        },
+        targetSummary: "Send status email to director@example.test",
+        status: "waiting_approval",
+        approvalId: approval.id,
+      })
+      .returning();
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                decision: "approve",
+                certainty: "high",
+                reason: "The exact recipient and message match the objective.",
+              }),
+            },
+          },
+        ],
+        usage: { prompt_tokens: 120, completion_tokens: 30 },
+      }),
+    );
+
+    await reviewPendingApprovals({ approvalIds: [approval.id] });
+    expect((await getApprovalForTask(task.id))?.status).toBe("approved");
+    const [settledAction] = await db
+      .select()
+      .from(appActionsTable)
+      .where(eq(appActionsTable.id, action.id));
+    expect(settledAction?.status).toBe("approved");
+    expect((await getTaskRow(task.id)).status).toBe("queued");
+  });
+
+  it("uses the selected reviewer for task continuation approvals", async () => {
+    const requester = await createAgent(`${RUN_TAG} Continuation Requester`, {
+      autonomy: "autonomous",
+    });
+    const reviewer = await createAgent(`${RUN_TAG} Continuation Officer`, {
+      autonomy: "autonomous",
+    });
+    await request(app)
+      .post(`/api/agents/${reviewer.id}/pause`)
+      .send({ paused: false });
+    await request(app)
+      .put("/api/approvals/settings")
+      .send({ reviewerAgentId: reviewer.id });
+
+    const task = await insertTask(requester.id, {
+      status: "waiting_approval",
+      objective: `${RUN_TAG} continue the bounded connected-app work`,
+      continuationSegments: 1,
+    });
+    const [approval] = await db
+      .insert(approvalsTable)
+      .values({
+        agentId: requester.id,
+        taskId: task.id,
+        kind: "task_continuation",
+        action: "Continue for one more bounded connected-app segment",
+        details: "The previous segment completed and more work remains.",
+        reviewerAgentId: reviewer.id,
+        autoReviewStatus: "queued",
+        expiresAt: new Date(Date.now() + 60_000),
+      })
+      .returning();
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                decision: "approve",
+                certainty: "high",
+                reason:
+                  "The bounded continuation is clear and remains within the original objective.",
+              }),
+            },
+          },
+        ],
+        usage: { prompt_tokens: 120, completion_tokens: 30 },
+      }),
+    );
+
+    await reviewPendingApprovals({ approvalIds: [approval.id] });
+    const decided = await getApprovalForTask(task.id);
+    expect(decided?.status).toBe("approved");
+    expect(decided?.autoReviewStatus).toBe("approved");
+    expect((await getTaskRow(task.id)).status).toBe("queued");
   });
 
   it("rejecting an approval cancels the task", async () => {

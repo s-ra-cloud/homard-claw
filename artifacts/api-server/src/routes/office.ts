@@ -13,6 +13,7 @@ import {
   DecideApprovalBody,
   DecideApprovalParams,
   DecideApprovalResponse,
+  GetApprovalSettingsResponse,
   DecideTaskFallbackBody,
   DecideTaskFallbackParams,
   DecideTaskFallbackResponse,
@@ -62,6 +63,8 @@ import {
   UpdateAgentBody,
   UpdateAgentParams,
   UpdateAgentResponse,
+  UpdateApprovalSettingsBody,
+  UpdateApprovalSettingsResponse,
   UpdateProviderSettingsBody,
   UpdateProviderSettingsResponse,
 } from "@workspace/api-zod";
@@ -131,6 +134,11 @@ import {
   decideApproval,
   toApprovalJson,
 } from "../approvals";
+import {
+  ApprovalReviewerSettingsError,
+  getApprovalReviewerSettings,
+  updateApprovalReviewerSettings,
+} from "../approval-reviewer";
 import { findRegistryEntry } from "../capabilities/registry";
 import connectedAppsRouter from "./connected-apps";
 import capabilitiesRouter from "./capabilities";
@@ -1595,13 +1603,71 @@ router.get("/approvals", async (req, res): Promise<void> => {
     .leftJoin(tasksTable, eq(approvalsTable.taskId, tasksTable.id))
     .where(eq(agentsTable.workspaceId, req.workspaceId!))
     .orderBy(desc(approvalsTable.createdAt));
+  const reviewerIds = [
+    ...new Set(
+      rows
+        .map((row) => row.approval.reviewerAgentId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const reviewerRows =
+    reviewerIds.length > 0
+      ? await db
+          .select({ id: agentsTable.id, name: agentsTable.name })
+          .from(agentsTable)
+          .where(
+            and(
+              eq(agentsTable.workspaceId, req.workspaceId!),
+              inArray(agentsTable.id, reviewerIds),
+            ),
+          )
+      : [];
+  const reviewerNames = new Map(
+    reviewerRows.map((reviewer) => [reviewer.id, reviewer.name]),
+  );
   res.json(
     ListApprovalsResponse.parse(
       rows.map((row) =>
-        toApprovalJson(row.approval, row.agentName, row.taskObjective),
+        toApprovalJson(
+          row.approval,
+          row.agentName,
+          row.taskObjective,
+          row.approval.reviewerAgentId
+            ? (reviewerNames.get(row.approval.reviewerAgentId) ?? null)
+            : null,
+        ),
       ),
     ),
   );
+});
+
+router.get("/approvals/settings", async (req, res): Promise<void> => {
+  res.json(
+    GetApprovalSettingsResponse.parse(
+      await getApprovalReviewerSettings(req.workspaceId!),
+    ),
+  );
+});
+
+router.put("/approvals/settings", async (req, res): Promise<void> => {
+  const body = UpdateApprovalSettingsBody.safeParse(req.body);
+  if (!body.success) {
+    res.status(400).json({ error: "Choose a valid approval reviewer." });
+    return;
+  }
+  try {
+    const settings = await updateApprovalReviewerSettings(
+      req.workspaceId!,
+      body.data.reviewerAgentId,
+    );
+    res.json(UpdateApprovalSettingsResponse.parse(settings));
+  } catch (error) {
+    if (error instanceof ApprovalReviewerSettingsError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
+    throw error;
+  }
 });
 
 router.patch("/approvals/:approvalId", async (req, res): Promise<void> => {

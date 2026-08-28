@@ -1350,11 +1350,37 @@ export const ListApprovalsResponseItem = zod.object({
   "action": zod.string(),
   "details": zod.string().optional(),
   "status": zod.enum(['pending', 'approved', 'rejected', 'expired', 'cancelled']),
+  "reviewerAgentId": zod.string().nullable(),
+  "reviewerAgentName": zod.string().nullable(),
+  "autoReviewStatus": zod.union([zod.literal('queued'),zod.literal('reviewing'),zod.literal('approved'),zod.literal('notified'),zod.literal(null)]).nullable(),
+  "autoReviewReason": zod.string().nullable(),
   "decidedAt": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
   "expiresAt": zod.coerce.date()
 })
 export const ListApprovalsResponse = zod.array(ListApprovalsResponseItem)
+
+
+/**
+ * @summary Read the automatic approval reviewer selection
+ */
+export const GetApprovalSettingsResponse = zod.object({
+  "reviewerAgentId": zod.string().nullable(),
+  "reviewerAgentName": zod.string().nullable()
+})
+
+
+/**
+ * @summary Select or disable the automatic approval reviewer
+ */
+export const UpdateApprovalSettingsBody = zod.object({
+  "reviewerAgentId": zod.string().nullable()
+})
+
+export const UpdateApprovalSettingsResponse = zod.object({
+  "reviewerAgentId": zod.string().nullable(),
+  "reviewerAgentName": zod.string().nullable()
+})
 
 
 /**
@@ -1377,6 +1403,10 @@ export const DecideApprovalResponse = zod.object({
   "action": zod.string(),
   "details": zod.string().optional(),
   "status": zod.enum(['pending', 'approved', 'rejected', 'expired', 'cancelled']),
+  "reviewerAgentId": zod.string().nullable(),
+  "reviewerAgentName": zod.string().nullable(),
+  "autoReviewStatus": zod.union([zod.literal('queued'),zod.literal('reviewing'),zod.literal('approved'),zod.literal('notified'),zod.literal(null)]).nullable(),
+  "autoReviewReason": zod.string().nullable(),
   "decidedAt": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
   "expiresAt": zod.coerce.date()
@@ -2306,6 +2336,10 @@ export const GetTaskResponse = zod.object({
   "action": zod.string(),
   "details": zod.string().optional(),
   "status": zod.enum(['pending', 'approved', 'rejected', 'expired', 'cancelled']),
+  "reviewerAgentId": zod.string().nullable(),
+  "reviewerAgentName": zod.string().nullable(),
+  "autoReviewStatus": zod.union([zod.literal('queued'),zod.literal('reviewing'),zod.literal('approved'),zod.literal('notified'),zod.literal(null)]).nullable(),
+  "autoReviewReason": zod.string().nullable(),
   "decidedAt": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
   "expiresAt": zod.coerce.date()

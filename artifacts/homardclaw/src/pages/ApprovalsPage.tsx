@@ -1,7 +1,11 @@
 import React, { useState } from "react";
 import {
   useListApprovals,
+  useListAgents,
   useDecideApproval,
+  useGetApprovalSettings,
+  useUpdateApprovalSettings,
+  getGetApprovalSettingsQueryKey,
   useSearchAudit,
   useVerifyAudit,
   ApprovalDecisionDecision,
@@ -12,6 +16,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useToast } from "@/hooks/use-toast";
+import {
   Shield,
   Check,
   X,
@@ -21,15 +33,60 @@ import {
   Search,
   ShieldCheck,
   ShieldAlert,
+  UserCheck,
+  BellRing,
 } from "lucide-react";
 import { Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
 import { approvalKindLabel } from "@/lib/continuation";
 
+const MANUAL_REVIEW = "__manual_review__";
+
+function apiErrorMessage(error: unknown, fallback: string): string {
+  return (
+    (error as { response?: { data?: { error?: string } } })?.response?.data
+      ?.error ?? fallback
+  );
+}
+
 export default function ApprovalsPage() {
   const { data: approvals, isLoading } = useListApprovals();
+  const { data: agents } = useListAgents();
+  const { data: approvalSettings } = useGetApprovalSettings();
   const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  const eligibleReviewers = (agents ?? []).filter(
+    (agent) =>
+      !agent.archived &&
+      agent.status !== "paused" &&
+      !agent.sensitiveDataSandbox,
+  );
+
+  const updateApprovalSettings = useUpdateApprovalSettings({
+    mutation: {
+      onSuccess: async (settings) => {
+        queryClient.setQueryData(getGetApprovalSettingsQueryKey(), settings);
+        await queryClient.invalidateQueries({ queryKey: ["/api/approvals"] });
+        toast({
+          title: settings.reviewerAgentName
+            ? `${settings.reviewerAgentName} is on approval duty`
+            : "Automatic review disabled",
+          description: settings.reviewerAgentName
+            ? "Clear requests can be approved automatically; uncertain ones still notify you."
+            : "New approval requests will notify you directly.",
+        });
+      },
+      onError: (error) => {
+        toast({
+          variant: "destructive",
+          title: "Could not change the approval reviewer",
+          description: apiErrorMessage(error, "Try again."),
+        });
+      },
+    },
+  });
 
   const decideApproval = useDecideApproval({
     mutation: {
@@ -77,6 +134,76 @@ export default function ApprovalsPage() {
             {pendingApprovals.length} Pending
           </Badge>
         </div>
+
+        <PixelCard className="border-accent/50">
+          <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)] md:items-center">
+            <div className="flex items-start gap-3">
+              <div className="shrink-0 border-2 border-border bg-accent/15 p-2 text-accent pixel-shadow">
+                <UserCheck className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="font-display text-sm uppercase">
+                  Automatic approval officer
+                </h2>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  This Crustabot reads initial task requests, connected-app
+                  actions, and later task continuations. It approves only a
+                  clear, high-certainty request. If context is missing, the
+                  request stays pending and you receive the normal notification.
+                </p>
+                <p className="mt-2 text-[10px] font-mono uppercase text-muted-foreground">
+                  No self-approval · no auto-rejection · hard safety checks
+                  still apply
+                </p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold uppercase text-muted-foreground">
+                Crustabot on duty
+              </label>
+              <Select
+                value={approvalSettings?.reviewerAgentId ?? MANUAL_REVIEW}
+                onValueChange={(value) =>
+                  updateApprovalSettings.mutate({
+                    data: {
+                      reviewerAgentId: value === MANUAL_REVIEW ? null : value,
+                    },
+                  })
+                }
+                disabled={updateApprovalSettings.isPending}
+              >
+                <SelectTrigger
+                  className="rounded-none border-4 border-border bg-background font-mono text-xs uppercase focus:ring-0"
+                  aria-label="Choose the automatic approval reviewer"
+                >
+                  <SelectValue placeholder="Manual notification mode" />
+                </SelectTrigger>
+                <SelectContent className="max-h-72 rounded-none border-4 border-border bg-card">
+                  <SelectItem
+                    value={MANUAL_REVIEW}
+                    className="font-mono text-xs uppercase"
+                  >
+                    Manual notification mode
+                  </SelectItem>
+                  {eligibleReviewers.map((agent) => (
+                    <SelectItem
+                      key={agent.id}
+                      value={agent.id}
+                      className="font-mono text-xs uppercase"
+                    >
+                      {agent.name} — {agent.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[10px] leading-4 text-muted-foreground">
+                Uses that Crustabot&apos;s provider and model. If the reviewer
+                is unavailable or cannot safely decide, Crustabox switches this
+                request to notification mode.
+              </p>
+            </div>
+          </div>
+        </PixelCard>
 
         {isLoading ? (
           <div className="space-y-4">
@@ -142,6 +269,29 @@ export default function ApprovalsPage() {
                             {approval.details && (
                               <div className="bg-muted p-3 border-2 border-border font-mono text-sm">
                                 {approval.details}
+                              </div>
+                            )}
+                            {(approval.autoReviewStatus === "queued" ||
+                              approval.autoReviewStatus === "reviewing") && (
+                              <div className="mt-3 flex items-center gap-2 text-xs text-accent">
+                                <UserCheck className="h-4 w-4" />
+                                <span className="font-bold uppercase">
+                                  {approval.reviewerAgentName ??
+                                    "Approval officer"}{" "}
+                                  is reviewing
+                                </span>
+                              </div>
+                            )}
+                            {approval.autoReviewStatus === "notified" && (
+                              <div className="mt-3 border-2 border-border bg-background/60 p-3 text-xs">
+                                <div className="mb-1 flex items-center gap-2 font-bold uppercase text-accent">
+                                  <BellRing className="h-4 w-4" />
+                                  Manual decision requested
+                                </div>
+                                <p className="text-muted-foreground">
+                                  {approval.autoReviewReason ??
+                                    "The automatic reviewer was not certain enough to approve."}
+                                </p>
                               </div>
                             )}
                             {approval.taskId && (
@@ -228,6 +378,13 @@ export default function ApprovalsPage() {
                           >
                             {approval.status}
                           </Badge>
+                          {approval.autoReviewStatus === "approved" && (
+                            <Badge variant="outline">
+                              {approval.reviewerAgentName
+                                ? `Auto · ${approval.reviewerAgentName}`
+                                : "Auto-reviewed"}
+                            </Badge>
+                          )}
                           <span className="text-xs font-bold uppercase text-muted-foreground">
                             {approval.agentName}
                           </span>

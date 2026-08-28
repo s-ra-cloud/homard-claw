@@ -181,6 +181,8 @@ export type CodexTalkRequest = {
   attachments?: InputAttachment[];
   maxOutputTokens: number;
   signal: AbortSignal;
+  /** Start a fresh isolated conversation for one-shot system work. */
+  conversationMode?: "continue" | "new";
 };
 
 /**
@@ -284,8 +286,7 @@ export async function runCodexTalkTurn(
     try {
       sensitiveDataSandbox = (
         await loadAgentAppAccess(input.agent.id, input.agent.workspaceId)
-      )
-        .sensitiveDataSandbox;
+      ).sensitiveDataSandbox;
     } catch (error) {
       logger.warn(
         { agentId: input.agent.id, error },
@@ -297,7 +298,7 @@ export async function runCodexTalkTurn(
     // for continuity; if that resume is what failed (a wiped scratch disk
     // leaves stale thread ids behind after every deploy), the conversation
     // is marked unresumable and the turn runs once more on a fresh thread.
-    let mode: "continue" | "new" = "continue";
+    let mode: "continue" | "new" = input.conversationMode ?? "continue";
     for (let attempt = 0; ; attempt++) {
       // The agent's most recent resumable conversation keeps continuity
       // with its task history; a fresh agent gets a fresh workspace.
