@@ -14,11 +14,14 @@ import {
   useDelegateTask,
   useCancelTask,
   useRetryTask,
+  useDecideApproval,
   useDecideTaskFallback,
+  ApprovalDecisionDecision,
   TaskFallbackInputAction,
   TaskStatus,
   TaskInputPriority,
   TaskInputProviderOverride,
+  type Approval,
   type TaskInputReasoningOverride,
   type Task,
   type TaskEstimate,
@@ -71,6 +74,10 @@ import {
   attachmentLabel,
   readAttachment,
 } from "@/lib/attachments";
+import {
+  continuationBadgeLabel,
+  isPendingContinuation,
+} from "@/lib/continuation";
 
 const selectTriggerClass =
   "bg-background border-4 border-border rounded-none focus:ring-0 focus:border-primary font-mono text-sm uppercase";
@@ -479,6 +486,105 @@ function DelegationSection({ task }: { task: Task }) {
   );
 }
 
+/**
+ * Approve-to-continue panel shown while a task is paused at the bounded
+ * connected-app round limit. Approving requeues the SAME task for one more
+ * bounded segment; rejecting ends it with the work completed so far. Only a
+ * pending `task_continuation` approval renders this — action-level (write)
+ * approvals keep their own flow on the Authorization Desk.
+ */
+function ContinuationApprovalPanel({
+  approval,
+  taskId,
+}: {
+  approval: Approval;
+  taskId: string;
+}) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const decide = useDecideApproval({
+    mutation: {
+      onSuccess: (decided) => {
+        queryClient.invalidateQueries({ queryKey: [`/api/tasks/${taskId}`] });
+        queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/approvals"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/office/overview"] });
+        toast(
+          decided.status === "approved"
+            ? {
+                title: "Continuation approved",
+                description:
+                  "The task was requeued for another bounded segment.",
+              }
+            : {
+                title: "Continuation rejected",
+                description:
+                  "The task ended with the work completed so far.",
+              },
+        );
+      },
+      onError: (error: unknown) => {
+        toast({
+          title: "Decision failed",
+          description:
+            (error as { response?: { data?: { error?: string } } })?.response
+              ?.data?.error ??
+            "The approval may already be decided; refresh and try again.",
+          variant: "destructive",
+        });
+        queryClient.invalidateQueries({ queryKey: [`/api/tasks/${taskId}`] });
+        queryClient.invalidateQueries({ queryKey: ["/api/approvals"] });
+      },
+    },
+  });
+  return (
+    <div
+      className="border-4 border-accent bg-accent/10 p-3 space-y-3"
+      data-testid="panel-continuation-approval"
+    >
+      <div className="flex items-center gap-2 text-[10px] font-bold uppercase text-accent">
+        <RotateCcw className="w-3 h-3" />
+        Approval needed to continue
+      </div>
+      <p className="font-mono text-xs whitespace-pre-wrap">
+        {approval.details}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          disabled={decide.isPending}
+          onClick={() =>
+            decide.mutate({
+              approvalId: approval.id,
+              data: { decision: ApprovalDecisionDecision.approved },
+            })
+          }
+          data-testid="button-approve-continuation"
+        >
+          <CheckCircle className="w-3 h-3 mr-1" />
+          {decide.isPending ? "DECIDING..." : "APPROVE ANOTHER SEGMENT"}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="border-destructive text-destructive hover:bg-destructive hover:text-white"
+          disabled={decide.isPending}
+          onClick={() =>
+            decide.mutate({
+              approvalId: approval.id,
+              data: { decision: ApprovalDecisionDecision.rejected },
+            })
+          }
+          data-testid="button-reject-continuation"
+        >
+          <XCircle className="w-3 h-3 mr-1" />
+          REJECT
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function TaskDetailDialog({
   taskId,
   onClose,
@@ -494,7 +600,13 @@ function TaskDetailDialog({
       refetchInterval: (query) => {
         const status = (query.state.data as { task?: Task } | undefined)?.task
           ?.status;
-        return status === "running" || status === "queued" ? 2000 : false;
+        // waiting_approval polls too: a decision made from the
+        // Authorization Desk must refresh this dialog's progress.
+        return status === "running" ||
+          status === "queued" ||
+          status === "waiting_approval"
+          ? 2000
+          : false;
       },
     },
   });
@@ -535,6 +647,11 @@ function TaskDetailDialog({
               {task.attempts > 0 && (
                 <Badge variant="outline">Attempt {task.attempts}</Badge>
               )}
+              {continuationBadgeLabel(task) && (
+                <Badge variant="outline" data-testid="badge-continuation">
+                  {continuationBadgeLabel(task)}
+                </Badge>
+              )}
             </div>
 
             <div>
@@ -554,6 +671,14 @@ function TaskDetailDialog({
                 <p className="font-mono text-xs">{task.errorMessage}</p>
               </div>
             )}
+
+            {detail?.pendingApproval &&
+              isPendingContinuation(detail.pendingApproval) && (
+                <ContinuationApprovalPanel
+                  approval={detail.pendingApproval}
+                  taskId={task.id}
+                />
+              )}
 
             <TaskFallbackPanel task={task} />
 

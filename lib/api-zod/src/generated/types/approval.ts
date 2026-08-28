@@ -5,6 +5,7 @@
  * Crustabox private Crustabot office API
  * OpenAPI spec version: 0.1.0
  */
+import type { ApprovalKind } from './approvalKind';
 import type { ApprovalStatus } from './approvalStatus';
 
 export interface Approval {
@@ -14,6 +15,8 @@ export interface Approval {
   taskId?: string | null;
   /** @nullable */
   taskObjective?: string | null;
+  /** What this approval gates: "task" is the policy gate before a run, "app_action" one linked connected-app action, and "task_continuation" another bounded connected-app segment for a task that reached the round limit with work remaining. */
+  kind: ApprovalKind;
   action: string;
   details?: string;
   status: ApprovalStatus;

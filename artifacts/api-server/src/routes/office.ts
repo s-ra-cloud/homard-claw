@@ -1190,14 +1190,29 @@ router.get("/tasks/:taskId", async (req, res): Promise<void> => {
     res.status(404).json({ error: "Task not found" });
     return;
   }
-  const [logs, actions] = await Promise.all([
+  const [logs, actions, pendingApprovals] = await Promise.all([
     db
       .select()
       .from(taskLogsTable)
       .where(eq(taskLogsTable.taskId, row.task.id))
       .orderBy(taskLogsTable.createdAt),
     listTaskActions(row.task.id),
+    // The undecided approval this task is waiting on, if any. Its `kind`
+    // lets clients tell a round-limit continuation pause apart from an
+    // action-level or policy-gate approval.
+    db
+      .select()
+      .from(approvalsTable)
+      .where(
+        and(
+          eq(approvalsTable.taskId, row.task.id),
+          eq(approvalsTable.status, "pending"),
+        ),
+      )
+      .orderBy(desc(approvalsTable.createdAt))
+      .limit(1),
   ]);
+  const pendingApproval = pendingApprovals[0] ?? null;
   res.json(
     GetTaskResponse.parse({
       task: toTaskJson(row.task, row.agentName, {
@@ -1209,6 +1224,9 @@ router.get("/tasks/:taskId", async (req, res): Promise<void> => {
         createdAt: log.createdAt.toISOString(),
       })),
       actions: actions.map((action) => toAppActionJson(action)),
+      pendingApproval: pendingApproval
+        ? toApprovalJson(pendingApproval, row.agentName, row.task.objective)
+        : null,
     }),
   );
 });
@@ -1318,6 +1336,9 @@ router.post("/tasks/:taskId/retry", async (req, res): Promise<void> => {
         output: null,
         startedAt: null,
         finishedAt: null,
+        // A retry is a fresh run, not a continuation: the usage ledger
+        // starts over with the rest of the run state.
+        continuationSegments: 0,
       })
       .where(eq(tasksTable.id, row.task.id))
       .returning();

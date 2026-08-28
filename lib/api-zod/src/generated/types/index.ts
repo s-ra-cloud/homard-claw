@@ -36,6 +36,7 @@ export * from './appGrantAccessLevel';
 export * from './approval';
 export * from './approvalDecision';
 export * from './approvalDecisionDecision';
+export * from './approvalKind';
 export * from './approvalStatus';
 export * from './archiveInput';
 export * from './auditEvent';

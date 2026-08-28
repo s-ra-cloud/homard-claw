@@ -100,6 +100,15 @@ const TALK_HISTORY_LOCK = 872_005;
 const inFlight = new Map<string, AbortController>();
 
 /**
+ * Hard bound on provider rounds per attempt when connected-app results are
+ * fed back. A run that reaches this bound with well-formed requests still
+ * pending parks for an explicit owner-approved continuation — it never
+ * silently keeps spending, and never completes with unrun work.
+ */
+const MAX_ACTION_ROUNDS = 4;
+const MAX_ACTIONS_PER_ROUND = 3;
+
+/**
  * Record the coarse execution phase shown in the office while a task runs.
  * Purely cosmetic: `status` remains the durable lifecycle, so a phase write
  * that loses the attempts fence is simply skipped rather than retried.
@@ -709,6 +718,72 @@ async function parkForAppAction(
   );
 }
 
+/**
+ * Park a claimed task that used every bounded connected-app action round
+ * this segment while well-formed requests remain. The task is NOT completed
+ * with unrun work: it waits for the owner, who can approve ONE more bounded
+ * segment (same round cap, remaining budget, fresh grants and sandbox
+ * state, and per-action approvals for writes) or reject to end the task
+ * with the work completed so far. The caller already recorded usage and the
+ * provider thread; the partial output is stored here so the pause reads
+ * honestly in the task detail.
+ */
+async function parkForContinuation(
+  { task, agent }: ClaimedTask,
+  output: string,
+): Promise<void> {
+  const segment = task.continuationSegments + 1;
+  const details = `${agent.name} used all ${MAX_ACTION_ROUNDS} connected-app action rounds in this segment and still has actions to run. Approving continues the SAME task for one more bounded segment under the same round limit, remaining budget, and current app grants (write actions still need their own approval). Rejecting ends the task with the work completed so far.`;
+  const parked = await db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(tasksTable)
+      .set({
+        status: "waiting_approval",
+        // Waiting is not a failure: refund the attempt the claim consumed.
+        attempts: task.attempts - 1,
+        output,
+        continuationSegments: segment,
+      })
+      .where(
+        and(
+          eq(tasksTable.id, task.id),
+          eq(tasksTable.status, "running"),
+          eq(tasksTable.attempts, task.attempts),
+        ),
+      )
+      .returning({ id: tasksTable.id });
+    if (!updated) return false;
+    await tx.insert(approvalsTable).values({
+      agentId: agent.id,
+      taskId: task.id,
+      kind: "task_continuation",
+      action: `Continue task: ${task.objective.slice(0, 120)}`,
+      details,
+      expiresAt: new Date(Date.now() + APPROVAL_TTL_MS),
+    });
+    await recordAudit(
+      agent.workspaceId,
+      "approval.requested",
+      `${agent.name} paused a task at the connected-app round limit and needs approval to continue it (bounded segment ${segment + 1}).`,
+      tx,
+    );
+    return true;
+  });
+  if (parked) {
+    publish(agent.workspaceId, "tasks", "approvals", "overview");
+    await notifyTaskEvent(
+      "approval_needed",
+      task,
+      "The connected-app action-round limit was reached with work remaining. Approve to continue this task for another bounded segment.",
+    );
+  }
+  await addTaskLog(
+    task.id,
+    "info",
+    `Paused at the connected-app round limit (${MAX_ACTION_ROUNDS} rounds used this segment). Waiting for your approval to continue with the remaining actions.`,
+  );
+}
+
 /** Execute one claimed task attempt end to end. */
 export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
   const provider = task.provider as ProviderId;
@@ -1142,13 +1217,39 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     // by connected-app results must stop once the ceiling is spent.
     let budgetCeilingCents: number | null = null;
     if (isMeteredProvider(provider)) {
+      // A continuation segment spends what is LEFT of the task-level
+      // ceilings: earlier segments' recorded cost comes off both the task
+      // budget and the per-task cap. If that cost could not be measured,
+      // fail closed rather than grant the ceilings afresh.
+      const priorSpentCents =
+        task.continuationSegments > 0 ? task.actualCostCents : 0;
+      if (
+        priorSpentCents === null &&
+        (task.budgetCents != null || perms.maxTaskBudgetCents !== null)
+      ) {
+        const message =
+          "This task's earlier segments have no measured cost, so its budget ceiling cannot be enforced for a continuation. Retry with a model with known pricing.";
+        await finishIfStillRunning(task.id, task.attempts, {
+          status: "blocked",
+          errorKind: "budget",
+          errorMessage: message,
+        });
+        await addTaskLog(task.id, "warn", message);
+        return;
+      }
       const bounds: Array<{ cents: number; label: string }> = [];
       if (task.budgetCents != null) {
-        bounds.push({ cents: task.budgetCents, label: "task budget" });
+        bounds.push({
+          cents: Math.max(task.budgetCents - (priorSpentCents ?? 0), 0),
+          label: "task budget",
+        });
       }
       if (perms.maxTaskBudgetCents !== null) {
         bounds.push({
-          cents: perms.maxTaskBudgetCents,
+          cents: Math.max(
+            perms.maxTaskBudgetCents - (priorSpentCents ?? 0),
+            0,
+          ),
           label: `${agent.name}'s per-task cap`,
         });
       }
@@ -1408,8 +1509,6 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     // server-side authorize/execute pass, and the verified results are fed
     // back for another round — bounded hard by MAX_ACTION_ROUNDS, the run
     // clock above, and the metered budget ceiling.
-    const MAX_ACTION_ROUNDS = 4;
-    const MAX_ACTIONS_PER_ROUND = 3;
     const promptFor = (): string =>
       actionHistory.length === 0
         ? task.objective
@@ -1423,24 +1522,64 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     let cachedInputTotal: number | null = null;
     let cacheWriteTotal: number | null = null;
     let reasoningOutputTotal: number | null = null;
+    // An owner-approved continuation keeps ONE cumulative ledger per task:
+    // the totals recorded when the previous segment paused become this
+    // attempt's baseline, so usage writes below never erase what earlier
+    // segments spent. The round-loop budget maths stays segment-local — the
+    // preflight above already subtracted the prior cost from the ceilings.
+    const usageBaseline =
+      task.continuationSegments > 0
+        ? {
+            inputTokens: task.actualInputTokens ?? 0,
+            outputTokens: task.actualOutputTokens ?? 0,
+            costCents: task.actualCostCents,
+            cachedInputTokens: task.cachedInputTokens,
+            cacheWriteInputTokens: task.cacheWriteInputTokens,
+            reasoningOutputTokens: task.reasoningOutputTokens,
+            runMs: task.runMs ?? 0,
+          }
+        : {
+            inputTokens: 0,
+            outputTokens: 0,
+            costCents: null,
+            cachedInputTokens: null,
+            cacheWriteInputTokens: null,
+            reasoningOutputTokens: null,
+            runMs: 0,
+          };
+    const cumulativeUsage = async () => ({
+      actualInputTokens: usageBaseline.inputTokens + inputTokensTotal,
+      actualOutputTokens: usageBaseline.outputTokens + outputTokensTotal,
+      actualCostCents: addDetail(
+        usageBaseline.costCents,
+        await computeUsageCostCents(
+          provider,
+          task.model,
+          inputTokensTotal,
+          outputTokensTotal,
+        ),
+      ),
+      cachedInputTokens: addDetail(
+        usageBaseline.cachedInputTokens,
+        cachedInputTotal,
+      ),
+      cacheWriteInputTokens: addDetail(
+        usageBaseline.cacheWriteInputTokens,
+        cacheWriteTotal,
+      ),
+      reasoningOutputTokens: addDetail(
+        usageBaseline.reasoningOutputTokens,
+        reasoningOutputTotal,
+      ),
+      runMs: usageBaseline.runMs + (Date.now() - startedAtMs),
+    });
     let finalOutput = "";
     let lastThreadId: string | null = threadId;
     const recordUsageSoFar = async (): Promise<void> => {
       await db
         .update(tasksTable)
         .set({
-          actualInputTokens: inputTokensTotal,
-          actualOutputTokens: outputTokensTotal,
-          actualCostCents: await computeUsageCostCents(
-            provider,
-            task.model,
-            inputTokensTotal,
-            outputTokensTotal,
-          ),
-          cachedInputTokens: cachedInputTotal,
-          cacheWriteInputTokens: cacheWriteTotal,
-          reasoningOutputTokens: reasoningOutputTotal,
-          runMs: Date.now() - startedAtMs,
+          ...(await cumulativeUsage()),
           providerThreadId: lastThreadId,
         })
         .where(
@@ -1531,6 +1670,23 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
           break;
         }
         if (round === MAX_ACTION_ROUNDS) {
+          if (requests.some((request) => request.ok)) {
+            // Well-formed work remains at the bound: pause for an explicit
+            // owner-approved continuation instead of completing with unrun
+            // requests. Usage and the provider thread are recorded first —
+            // parking flips the running status that write is fenced on —
+            // so the resumed segment keeps the cumulative ledger and the
+            // thread context. Nothing from this round executes now; the
+            // resumed segment re-requests it under fresh authorization.
+            await recordUsageSoFar();
+            await parkForContinuation(
+              { task, agent },
+              `${cleaned}\n\n(Paused: this segment's connected-app action-round limit was reached with more actions still requested; waiting for the owner's approval to continue.)`.trim(),
+            );
+            return;
+          }
+          // Only malformed blocks remain — a continuation could not run
+          // anything either, so keep the honest terminal path unchanged.
           finalOutput =
             `${cleaned}\n\n(Note: more connected-app actions were requested, but this run's action-round limit was reached.)`.trim();
           await addTaskLog(
@@ -1806,6 +1962,8 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     }
     if (conversationId) await touchConversation(conversationId);
 
+    // Segment cost feeds the human-readable completion log; the durable
+    // usage write is cumulative across owner-approved continuation segments.
     const costCents = await computeUsageCostCents(
       provider,
       task.model,
@@ -1813,13 +1971,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
       outputTokensTotal,
     );
     const usage = {
-      actualInputTokens: inputTokensTotal,
-      actualOutputTokens: outputTokensTotal,
-      actualCostCents: costCents,
-      cachedInputTokens: cachedInputTotal,
-      cacheWriteInputTokens: cacheWriteTotal,
-      reasoningOutputTokens: reasoningOutputTotal,
-      runMs: Date.now() - startedAtMs,
+      ...(await cumulativeUsage()),
       queuedMs: task.startedAt
         ? Math.max(0, task.startedAt.getTime() - task.createdAt.getTime())
         : null,

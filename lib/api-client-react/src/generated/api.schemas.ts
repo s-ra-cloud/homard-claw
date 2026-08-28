@@ -399,6 +399,8 @@ export interface Task {
   /** @nullable */
   errorMessage?: string | null;
   attempts: number;
+  /** How many times this task paused at the bounded connected-app round limit to request an owner-approved continuation segment. */
+  continuationSegments?: number;
   /** @nullable */
   parentTaskId?: string | null;
   /** @nullable */
@@ -1341,10 +1343,53 @@ export interface TaskLog {
   createdAt: string;
 }
 
+/**
+ * What this approval gates: "task" is the policy gate before a run, "app_action" one linked connected-app action, and "task_continuation" another bounded connected-app segment for a task that reached the round limit with work remaining.
+ */
+export type ApprovalKind = typeof ApprovalKind[keyof typeof ApprovalKind];
+
+
+export const ApprovalKind = {
+  task: 'task',
+  app_action: 'app_action',
+  task_continuation: 'task_continuation',
+} as const;
+
+export type ApprovalStatus = typeof ApprovalStatus[keyof typeof ApprovalStatus];
+
+
+export const ApprovalStatus = {
+  pending: 'pending',
+  approved: 'approved',
+  rejected: 'rejected',
+  expired: 'expired',
+  cancelled: 'cancelled',
+} as const;
+
+export interface Approval {
+  id: string;
+  agentName: string;
+  /** @nullable */
+  taskId?: string | null;
+  /** @nullable */
+  taskObjective?: string | null;
+  /** What this approval gates: "task" is the policy gate before a run, "app_action" one linked connected-app action, and "task_continuation" another bounded connected-app segment for a task that reached the round limit with work remaining. */
+  kind: ApprovalKind;
+  action: string;
+  details?: string;
+  status: ApprovalStatus;
+  /** @nullable */
+  decidedAt?: string | null;
+  createdAt: string;
+  expiresAt: string;
+}
+
 export interface TaskDetail {
   task: Task;
   logs: TaskLog[];
   actions: AppAction[];
+  /** The undecided approval this task is waiting on, when its status is waiting_approval. Its kind distinguishes a round-limit continuation pause (task_continuation) from action-level or policy-gate approvals. */
+  pendingApproval?: Approval | null;
 }
 
 export type TaskInputPriority = typeof TaskInputPriority[keyof typeof TaskInputPriority];
@@ -1479,33 +1524,6 @@ export interface TaskUsageInput {
   outputTokens: number;
   /** @minimum 0 */
   costCents?: number;
-}
-
-export type ApprovalStatus = typeof ApprovalStatus[keyof typeof ApprovalStatus];
-
-
-export const ApprovalStatus = {
-  pending: 'pending',
-  approved: 'approved',
-  rejected: 'rejected',
-  expired: 'expired',
-  cancelled: 'cancelled',
-} as const;
-
-export interface Approval {
-  id: string;
-  agentName: string;
-  /** @nullable */
-  taskId?: string | null;
-  /** @nullable */
-  taskObjective?: string | null;
-  action: string;
-  details?: string;
-  status: ApprovalStatus;
-  /** @nullable */
-  decidedAt?: string | null;
-  createdAt: string;
-  expiresAt: string;
 }
 
 export type ApprovalDecisionDecision = typeof ApprovalDecisionDecision[keyof typeof ApprovalDecisionDecision];

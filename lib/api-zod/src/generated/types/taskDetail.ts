@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { AppAction } from './appAction';
+import type { Approval } from './approval';
 import type { Task } from './task';
 import type { TaskLog } from './taskLog';
 
@@ -13,4 +14,6 @@ export interface TaskDetail {
   task: Task;
   logs: TaskLog[];
   actions: AppAction[];
+  /** The undecided approval this task is waiting on, when its status is waiting_approval. Its kind distinguishes a round-limit continuation pause (task_continuation) from action-level or policy-gate approvals. */
+  pendingApproval?: Approval | null;
 }

@@ -32,6 +32,7 @@ export function toApprovalJson(
     agentName,
     taskId: approval.taskId,
     taskObjective,
+    kind: approval.kind,
     action: approval.action,
     details: approval.details,
     status: approval.status,
@@ -71,6 +72,11 @@ export async function decideApproval(input: {
       .where(eq(agentsTable.id, approval.agentId))
       .limit(1);
     let taskObjective: string | null = null;
+    // A continuation approval gates one more bounded connected-app segment
+    // of an already-running task, so its decisions read differently: the
+    // requeue is a resume, and a rejection is a clean end with the work
+    // completed so far — not a failure of the original request.
+    const isContinuation = approval.kind === "task_continuation";
     if (approval.taskId) {
       if (input.decision === "approved") {
         const [task] = await tx
@@ -88,7 +94,9 @@ export async function decideApproval(input: {
           await tx.insert(taskLogsTable).values({
             taskId: approval.taskId,
             level: "info",
-            message: "Approved by the owner; requeued to run.",
+            message: isContinuation
+              ? "Continuation approved by the owner; requeued for another bounded connected-app segment."
+              : "Approved by the owner; requeued to run.",
           });
         }
       } else {
@@ -97,8 +105,12 @@ export async function decideApproval(input: {
           .set({
             status: "cancelled",
             finishedAt: new Date(),
-            errorKind: "approval_rejected",
-            errorMessage: "The owner rejected this task's approval request.",
+            errorKind: isContinuation
+              ? "continuation_rejected"
+              : "approval_rejected",
+            errorMessage: isContinuation
+              ? "The owner declined another connected-app segment; the task ended with the work completed so far."
+              : "The owner rejected this task's approval request.",
           })
           .where(
             and(
@@ -112,7 +124,9 @@ export async function decideApproval(input: {
           await tx.insert(taskLogsTable).values({
             taskId: approval.taskId,
             level: "warn",
-            message: "Rejected by the owner; task cancelled.",
+            message: isContinuation
+              ? "Continuation rejected by the owner; the task ended with the work completed so far."
+              : "Rejected by the owner; task cancelled.",
           });
         }
       }

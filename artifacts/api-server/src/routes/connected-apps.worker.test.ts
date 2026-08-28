@@ -15,6 +15,11 @@
  *    claimable, so the approved write never executes
  *  - a metered multi-round run is stopped before the next dispatch when the
  *    budget ceiling is already spent
+ *  - a run that exhausts every bounded action round with well-formed work
+ *    remaining parks for an owner-approved continuation instead of
+ *    completing; approval resumes the SAME task for one more bounded
+ *    segment with prior verified results and a cumulative usage ledger,
+ *    rejection ends it cleanly, and repeated limits pause again
  *
  * Conventions (see .agents/memory/api-server-test-conventions.md):
  * impersonate the existing owner, keep test agents paused so the live dev
@@ -68,6 +73,7 @@ vi.mock("../connected-apps/connections", async (importOriginal) => {
 });
 
 import officeRouter from "./office";
+import { ApprovalDecisionError, decideApproval } from "../approvals";
 import { claimNextTask, runTask } from "../worker";
 import { claimApprovedAction, executeClaimedAction } from "../connected-apps/actions";
 import {
@@ -844,5 +850,299 @@ describe("malformed action recovery", () => {
     expect(prompt).toContain("MALFORMED REQUEST");
     expect(prompt).toContain("SUCCESS");
     expect((await getTaskRow(task.id))?.status).toBe("completed");
+  });
+});
+
+describe("round-limit continuation approval", () => {
+  const CONTINUE_READ_BLOCK = `Searching further.\n<app_action>${JSON.stringify(
+    { operation: "gmail.search", params: { query: "kelp" } },
+  )}</app_action>`;
+
+  /**
+   * Drive a segment that spends every bounded action round on well-formed
+   * reads: rounds 1-3 execute, round 4 still requests more work, so the
+   * task must park for an owner-approved continuation. Returns the parked
+   * task row and its pending continuation approval.
+   */
+  async function parkOnRoundLimit(
+    agentId: string,
+    taskOverrides: Partial<typeof tasksTable.$inferInsert> = {},
+    usage?: { prompt_tokens: number; completion_tokens: number },
+  ) {
+    const task = await insertRunningTask(agentId, taskOverrides);
+    executeMock.mockResolvedValue({ ok: true, summary: "2 messages found." });
+    queueCompletions([
+      completion(CONTINUE_READ_BLOCK, usage),
+      completion(CONTINUE_READ_BLOCK, usage),
+      completion(CONTINUE_READ_BLOCK, usage),
+      completion(CONTINUE_READ_BLOCK, usage),
+    ]);
+    await runTask({ task, agent: await loadAgent(agentId) });
+    const parked = await getTaskRow(task.id);
+    const approval = await getPendingApproval(task.id);
+    return { task: parked!, approval };
+  }
+
+  async function resume(agentId: string, taskId: string) {
+    const claimed = await claimNextTask({
+      agentIds: [agentId],
+      includePausedAgents: true,
+    });
+    expect(claimed?.task.id).toBe(taskId);
+    await runTask(claimed!);
+  }
+
+  it("parks at the round limit with the work, usage, and a continuation approval preserved", async () => {
+    const agent = await createAgent("Marathon", [
+      { app: "gmail", accessLevel: "read" },
+    ]);
+    const { task, approval } = await parkOnRoundLimit(agent.id);
+
+    // Not completed with unrun requests: waiting, attempt refunded, and
+    // the pause is counted so the next attempt knows it is a continuation.
+    expect(task.status).toBe("waiting_approval");
+    expect(task.attempts).toBe(0);
+    expect(task.continuationSegments).toBe(1);
+    expect(task.output).toContain("Paused");
+    expect(task.output).toContain("waiting for the owner's approval");
+
+    // Exactly the first three rounds executed; the fourth round's request
+    // was never authorized or run.
+    expect(executeMock).toHaveBeenCalledTimes(3);
+    expect(completionCalls()).toHaveLength(4);
+    const actions = await getActions(task.id);
+    expect(actions).toHaveLength(3);
+    expect(actions.every((a) => a.status === "executed")).toBe(true);
+
+    // The durable approval is the continuation kind, not an action gate.
+    expect(approval).toBeTruthy();
+    expect(approval!.kind).toBe("task_continuation");
+    expect(approval!.action).toContain("Continue task:");
+    expect(approval!.details).toMatch(/one more bounded segment/i);
+
+    // Usage from the finished segment is recorded before the pause: four
+    // rounds at 1000 prompt + 100 completion tokens, 0.2¢ each.
+    expect(task.actualInputTokens).toBe(4000);
+    expect(task.actualOutputTokens).toBe(400);
+    expect(task.actualCostCents).toBeCloseTo(0.8, 5);
+
+    const logs = await getLogs(task.id);
+    expect(
+      logs.some((l) =>
+        l.message.includes("Waiting for your approval to continue"),
+      ),
+    ).toBe(true);
+
+    // The task detail API exposes the pause distinguishably for clients.
+    const detail = await request(app).get(`/api/tasks/${task.id}`);
+    expect(detail.status).toBe(200);
+    expect(detail.body.pendingApproval?.id).toBe(approval!.id);
+    expect(detail.body.pendingApproval?.kind).toBe("task_continuation");
+    expect(detail.body.task.continuationSegments).toBe(1);
+    expect(detail.body.task.status).toBe("waiting_approval");
+  });
+
+  it("resumes the same task after approval with prior results and a cumulative usage ledger, never replaying executed actions", async () => {
+    const agent = await createAgent("Resumer", [
+      { app: "gmail", accessLevel: "read" },
+    ]);
+    const { task, approval } = await parkOnRoundLimit(agent.id);
+    await approve(approval!.id);
+    expect((await getTaskRow(task.id))?.status).toBe("queued");
+
+    // The resumed segment finishes the remaining read and wraps up.
+    queueCompletions([
+      completion(CONTINUE_READ_BLOCK),
+      completion("Compiled the kelp digest; objective complete."),
+    ]);
+    await resume(agent.id, task.id);
+
+    // One more execution — the three settled reads were not replayed.
+    expect(executeMock).toHaveBeenCalledTimes(4);
+    const actions = await getActions(task.id);
+    expect(actions).toHaveLength(4);
+    expect(actions.every((a) => a.status === "executed")).toBe(true);
+
+    // The resumed model saw the server-verified history of the earlier
+    // segment in its prompt.
+    const prompt = lastPromptSent();
+    expect(prompt).toContain("CONNECTED-APP ACTION RESULTS");
+    expect(prompt).toContain("SUCCESS");
+
+    const done = await getTaskRow(task.id);
+    expect(done?.status).toBe("completed");
+    expect(done?.output).toContain("objective complete");
+    // Cumulative ledger: 4 parked rounds + 2 resumed rounds of
+    // 1000/100 tokens — the pause did not erase the earlier spend.
+    expect(done?.actualInputTokens).toBe(6000);
+    expect(done?.actualOutputTokens).toBe(600);
+    expect(done?.actualCostCents).toBeCloseTo(1.2, 5);
+    expect(done?.continuationSegments).toBe(1);
+
+    const logs = await getLogs(task.id);
+    expect(
+      logs.some((l) => l.message.includes("Continuation approved")),
+    ).toBe(true);
+  });
+
+  it("pauses again for a fresh approval when the resumed segment hits the limit too", async () => {
+    const agent = await createAgent("Repeater", [
+      { app: "gmail", accessLevel: "read" },
+    ]);
+    const { task, approval } = await parkOnRoundLimit(agent.id);
+    await approve(approval!.id);
+
+    // The resumed segment burns all four rounds on well-formed reads again.
+    queueCompletions([
+      completion(CONTINUE_READ_BLOCK),
+      completion(CONTINUE_READ_BLOCK),
+      completion(CONTINUE_READ_BLOCK),
+      completion(CONTINUE_READ_BLOCK),
+    ]);
+    await resume(agent.id, task.id);
+
+    const parkedAgain = await getTaskRow(task.id);
+    expect(parkedAgain?.status).toBe("waiting_approval");
+    expect(parkedAgain?.continuationSegments).toBe(2);
+    // No indefinite continuation: a NEW pending approval, not a reuse of
+    // the decided one.
+    const second = await getPendingApproval(task.id);
+    expect(second).toBeTruthy();
+    expect(second!.id).not.toBe(approval!.id);
+    expect(second!.kind).toBe("task_continuation");
+
+    // Segment two executed its first three rounds; six settled in total.
+    expect(executeMock).toHaveBeenCalledTimes(6);
+    expect(await getActions(task.id)).toHaveLength(6);
+    // The ledger kept accumulating across both segments.
+    expect(parkedAgain?.actualInputTokens).toBe(8000);
+    expect(parkedAgain?.actualOutputTokens).toBe(800);
+    expect(parkedAgain?.actualCostCents).toBeCloseTo(1.6, 5);
+  });
+
+  it("ends the task cleanly when the continuation is rejected, keeping the completed work", async () => {
+    const agent = await createAgent("Declined", [
+      { app: "gmail", accessLevel: "read" },
+    ]);
+    const { task, approval } = await parkOnRoundLimit(agent.id);
+
+    const res = await request(app)
+      .patch(`/api/approvals/${approval!.id}`)
+      .send({ decision: "rejected" });
+    expect(res.status).toBe(200);
+
+    const done = await getTaskRow(task.id);
+    expect(done?.status).toBe("cancelled");
+    expect(done?.errorKind).toBe("continuation_rejected");
+    expect(done?.errorMessage).toMatch(/work completed so far/i);
+    // The partial output survives the rejection.
+    expect(done?.output).toContain("Paused");
+
+    // A rejected continuation is never claimable again.
+    expect(
+      await claimNextTask({ agentIds: [agent.id], includePausedAgents: true }),
+    ).toBeNull();
+    expect(executeMock).toHaveBeenCalledTimes(3);
+
+    const logs = await getLogs(task.id);
+    expect(
+      logs.some((l) => l.message.includes("Continuation rejected")),
+    ).toBe(true);
+  });
+
+  it("refuses a continuation decision from another workspace and a duplicate decision", async () => {
+    const agent = await createAgent("Fenced", [
+      { app: "gmail", accessLevel: "read" },
+    ]);
+    const { task, approval } = await parkOnRoundLimit(agent.id);
+
+    // A foreign workspace cannot decide it, no matter how it calls in.
+    const [foreign] = await db
+      .insert(workspacesTable)
+      .values({ clerkUserId: `continuation-foreign-${Date.now()}` })
+      .returning();
+    try {
+      await expect(
+        decideApproval({
+          workspaceId: foreign.id,
+          approvalId: approval!.id,
+          decision: "approved",
+        }),
+      ).rejects.toThrow(ApprovalDecisionError);
+    } finally {
+      await db
+        .delete(workspacesTable)
+        .where(eq(workspacesTable.id, foreign.id));
+    }
+    // Untouched: still pending, task still waiting.
+    expect((await getPendingApproval(task.id))?.id).toBe(approval!.id);
+    expect((await getTaskRow(task.id))?.status).toBe("waiting_approval");
+
+    // A stale duplicate decision after the real one is a 404, not a
+    // second requeue.
+    await approve(approval!.id);
+    const dup = await request(app)
+      .patch(`/api/approvals/${approval!.id}`)
+      .send({ decision: "rejected" });
+    expect(dup.status).toBe(404);
+    expect((await getTaskRow(task.id))?.status).toBe("queued");
+  });
+
+  it("re-checks the remaining budget on resume and blocks instead of granting the ceiling afresh", async () => {
+    const agent = await createAgent("Ceilinged", [
+      { app: "gmail", accessLevel: "read" },
+    ]);
+    // 2¢ budget; each round reports 4000 prompt + 80 completion tokens
+    // (0.48¢), so the parked segment records 1.92¢ and only 0.08¢ remains.
+    // The long objective makes the resume preflight prompt alone cost more
+    // than that remainder.
+    const { task, approval } = await parkOnRoundLimit(
+      agent.id,
+      {
+        budgetCents: 2,
+        objective: `${RUN_TAG} kelp census ${"survey the beds thoroughly ".repeat(200)}`,
+      },
+      { prompt_tokens: 4000, completion_tokens: 80 },
+    );
+    expect(task.status).toBe("waiting_approval");
+    expect(task.actualCostCents).toBeCloseTo(1.92, 5);
+    await approve(approval!.id);
+
+    const completionsBefore = completionCalls().length;
+    await resume(agent.id, task.id);
+
+    // Preflight subtracted the earlier segments' spend: nothing was
+    // dispatched and nothing external ran in the resumed segment.
+    expect(completionCalls()).toHaveLength(completionsBefore);
+    expect(executeMock).toHaveBeenCalledTimes(3);
+    const blocked = await getTaskRow(task.id);
+    expect(blocked?.status).toBe("blocked");
+    expect(blocked?.errorKind).toBe("budget");
+    expect(blocked?.continuationSegments).toBe(1);
+  });
+
+  it("denies resumed requests when the app grant was revoked after the continuation was approved", async () => {
+    const agent = await createAgent("Ungrannted", [
+      { app: "gmail", accessLevel: "read" },
+    ]);
+    const { task, approval } = await parkOnRoundLimit(agent.id);
+    await approve(approval!.id);
+
+    // The owner strips the grant while the approved continuation waits.
+    const revoke = await request(app)
+      .patch(`/api/agents/${agent.id}`)
+      .send({ appGrants: [] });
+    expect(revoke.status).toBe(200);
+
+    queueCompletions([completion(CONTINUE_READ_BLOCK)]);
+    await resume(agent.id, task.id);
+
+    // Approval to continue is not approval to act: with no grant, nothing
+    // external ran in the resumed segment and no action row was added.
+    expect(executeMock).toHaveBeenCalledTimes(3);
+    expect(await getActions(task.id)).toHaveLength(3);
+    const done = await getTaskRow(task.id);
+    expect(done?.status).toBe("completed");
+    expect(done?.output).toContain("no app access");
   });
 });

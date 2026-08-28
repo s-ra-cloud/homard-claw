@@ -272,6 +272,14 @@ export const tasksTable = pgTable("tasks", {
   errorKind: text("error_kind"),
   errorMessage: text("error_message"),
   attempts: integer("attempts").notNull().default(0),
+  /**
+   * How many times this task paused at the bounded connected-app round
+   * limit to request another owner-approved segment. > 0 marks a resumed
+   * attempt as a continuation, so usage accounting seeds from the totals
+   * recorded when the previous segment paused (the ledger stays cumulative
+   * across segments). Owner retries reset it with the rest of run state.
+   */
+  continuationSegments: integer("continuation_segments").notNull().default(0),
   // Which memories/knowledge files were injected into the prompt, so the
   // UI can show where the result drew from ([M1]/[F1] citations).
   contextSources: jsonb("context_sources").$type<TaskSource[]>(),
@@ -512,6 +520,14 @@ export const approvalsTable = pgTable("approvals", {
   taskId: uuid("task_id").references(() => tasksTable.id, {
     onDelete: "cascade",
   }),
+  /**
+   * What this approval gates: "task" (the policy gate before a run),
+   * "app_action" (one linked connected-app action), or "task_continuation"
+   * (another bounded connected-app segment for a task that reached the
+   * round limit with work remaining). Lets clients tell a continuation
+   * pause apart from action-level approvals.
+   */
+  kind: text("kind").notNull().default("task"),
   action: text("action").notNull(),
   details: text("details").notNull(),
   status: text("status").notNull().default("pending"),

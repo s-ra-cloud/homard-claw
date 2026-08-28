@@ -74,6 +74,8 @@ export interface Task {
   /** @nullable */
   errorMessage?: string | null;
   attempts: number;
+  /** How many times this task paused at the bounded connected-app round limit to request an owner-approved continuation segment. */
+  continuationSegments?: number;
   /** @nullable */
   parentTaskId?: string | null;
   /** @nullable */

@@ -25,6 +25,7 @@ import {
 import { Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
+import { approvalKindLabel } from "@/lib/continuation";
 
 export default function ApprovalsPage() {
   const { data: approvals, isLoading } = useListApprovals();
@@ -119,6 +120,14 @@ export default function ApprovalsPage() {
                               <Badge variant="outline">
                                 {approval.agentName}
                               </Badge>
+                              {approvalKindLabel(approval.kind) && (
+                                <Badge
+                                  variant="accent"
+                                  data-testid="badge-continuation-request"
+                                >
+                                  {approvalKindLabel(approval.kind)}
+                                </Badge>
+                              )}
                               <span className="text-muted-foreground text-[10px] ml-auto">
                                 Expires{" "}
                                 {formatDistanceToNow(
@@ -222,6 +231,11 @@ export default function ApprovalsPage() {
                           <span className="text-xs font-bold uppercase text-muted-foreground">
                             {approval.agentName}
                           </span>
+                          {approvalKindLabel(approval.kind) && (
+                            <Badge variant="outline" className="text-[9px]">
+                              {approvalKindLabel(approval.kind)}
+                            </Badge>
+                          )}
                         </div>
                         <div className="font-mono text-sm">
                           {approval.action}

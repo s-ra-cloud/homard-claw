@@ -2274,6 +2274,11 @@ components:
         errorKind: { type: [string, "null"] }
         errorMessage: { type: [string, "null"] }
         attempts: { type: number }
+        continuationSegments:
+          type: number
+          description: >-
+            How many times this task paused at the bounded connected-app
+            round limit to request an owner-approved continuation segment.
         parentTaskId: { type: [string, "null"] }
         rootTaskId: { type: [string, "null"] }
         depth: { type: number }
@@ -2695,6 +2700,15 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AppAction"
+        pendingApproval:
+          oneOf:
+            - $ref: "#/components/schemas/Approval"
+            - type: "null"
+          description: >-
+            The undecided approval this task is waiting on, when its status
+            is waiting_approval. Its kind distinguishes a round-limit
+            continuation pause (task_continuation) from action-level or
+            policy-gate approvals.
     TaskInput:
       type: object
       required: [agentId, objective]
@@ -2783,12 +2797,20 @@ components:
         costCents: { type: number, minimum: 0 }
     Approval:
       type: object
-      required: [id, agentName, action, status, createdAt, expiresAt]
+      required: [id, agentName, kind, action, status, createdAt, expiresAt]
       properties:
         id: { type: string }
         agentName: { type: string }
         taskId: { type: [string, "null"] }
         taskObjective: { type: [string, "null"] }
+        kind:
+          type: string
+          enum: [task, app_action, task_continuation]
+          description: >-
+            What this approval gates: "task" is the policy gate before a
+            run, "app_action" one linked connected-app action, and
+            "task_continuation" another bounded connected-app segment for a
+            task that reached the round limit with work remaining.
         action: { type: string }
         details: { type: string }
         status:
