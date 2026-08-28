@@ -5,12 +5,24 @@
  * Crustabox private Crustabot office API
  * OpenAPI spec version: 0.1.0
  */
+import type { RuntimeHealthReportWorkerOwnership } from './runtimeHealthReportWorkerOwnership';
+import type { RuntimeHealthReportWorkerState } from './runtimeHealthReportWorkerState';
 
 export type RuntimeHealthReportWorker = {
+  state: RuntimeHealthReportWorkerState;
   leaseHeld: boolean;
   running: boolean;
   inFlight: number;
   emergencyStop: boolean;
   /** @nullable */
   lastTickAt?: Date | null;
+  instanceId: string;
+  /** @nullable */
+  generation: number | null;
+  /** @nullable */
+  lastRenewalAt?: Date | null;
+  renewalFailures: number;
+  ownershipLosses: number;
+  takeovers: number;
+  ownership: RuntimeHealthReportWorkerOwnership;
 };

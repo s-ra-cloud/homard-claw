@@ -4,7 +4,6 @@ import {
   appActionsTable,
   approvalsTable,
   db,
-  pool,
   taskLogsTable,
   tasksTable,
   workspaceSettingsTable,
@@ -46,6 +45,13 @@ import {
   releaseProviderLease,
   renewProviderLease,
 } from "./provider-leases";
+import {
+  QUEUE_OWNERSHIP_KEY,
+  WORKER_INSTANCE_ID,
+  acquireOrRenewOwnership,
+  releaseOwnership,
+  renewOwnership,
+} from "./worker-ownership";
 import { codexAuthFingerprint } from "./codex/runtime";
 import { codexLeaseHeartbeatMs, codexLeaseTtlMs } from "./codex/config";
 import {
@@ -2490,60 +2496,181 @@ export async function workOnce(): Promise<boolean> {
 }
 
 /**
- * Postgres advisory lock making the worker a cluster-wide singleton. Without
- * it, a rolling restart could requeue (and re-run) tasks that are still
- * executing on another instance, duplicating provider spend.
+ * Cluster-wide queue ownership: a bounded, heartbeating row in Postgres
+ * (see worker-ownership.ts) instead of the session advisory lock this
+ * worker used to hold. The lock could survive its holder going idle on
+ * Autoscale — healthy instances then polled forever while the queue grew.
+ * Ownership now expires when heartbeats stop, so a healthy standby takes
+ * over within OWNERSHIP_TTL_MS without a redeploy.
+ *
+ * Duplicate-execution safety across a takeover is layered:
+ *  1. Renewal failure (holder/generation mismatch) aborts every local
+ *     provider call immediately.
+ *  2. Even with the database unreachable, claiming stops once the local
+ *     copy of the expiry passes — a frozen process that thaws after its
+ *     TTL cannot claim on stale ownership.
+ *  3. The attempts fence in finishIfStillRunning rejects a stale result
+ *     for any task the new owner recovered and reclaimed.
  */
-const WORKER_LOCK_KEY = 0x484f4d41; // "HOMA"
+const OWNERSHIP_TTL_MS = 30_000;
+const OWNERSHIP_HEARTBEAT_MS = 10_000;
 
-// Structurally typed to avoid a direct `pg` dep in api-server's package.json.
-type LeaseClient = {
-  query<T extends Record<string, unknown>>(
-    sql: string,
-    values?: unknown[],
-  ): Promise<{ rows: T[] }>;
-  release(err?: boolean | Error): void;
-  on(event: "error", listener: (err: Error) => void): unknown;
+type LocalOwnership = {
+  key: string;
+  generation: number;
+  /**
+   * Local wall-clock copy of the row's expiry. Fencing must not depend on
+   * reaching the database: when renewals fail, work stops at this instant
+   * because another instance may legitimately own the queue from then on.
+   */
+  expiresAtMs: number;
 };
-let leaseClient: LeaseClient | null = null;
-let leaseRecovered = false;
 
-async function ensureWorkerLease(): Promise<boolean> {
-  if (leaseClient) return true;
-  const client = await pool.connect();
-  try {
-    const result = await client.query<{ locked: boolean }>(
-      "SELECT pg_try_advisory_lock($1) AS locked",
-      [WORKER_LOCK_KEY],
-    );
-    if (!result.rows[0]?.locked) {
-      client.release();
-      return false;
+let ownership: LocalOwnership | null = null;
+/** Recovery runs once per acquired ownership, before any claiming. */
+let ownershipRecovered = false;
+let heartbeatTimer: NodeJS.Timeout | null = null;
+let consecutiveRenewalFailures = 0;
+let ownershipLosses = 0;
+let takeovers = 0;
+let lastRenewalAt: Date | null = null;
+
+/** Ownership is usable only while its (locally tracked) expiry is ahead. */
+function hasActiveOwnership(): boolean {
+  return ownership !== null && Date.now() < ownership.expiresAtMs;
+}
+
+function handleOwnershipLoss(reason: string): void {
+  const held = ownership;
+  ownership = null;
+  ownershipRecovered = false;
+  ownershipLosses += 1;
+  // Another instance may already have requeued and reclaimed these tasks;
+  // finishing them here as well would duplicate provider spend. The
+  // attempts fence in finishIfStillRunning covers the remaining window.
+  const aborted = abortAllInFlight("worker_ownership_lost");
+  logger.warn(
+    { reason, aborted, generation: held?.generation ?? null },
+    "Queue ownership lost; aborted in-flight provider calls",
+  );
+}
+
+/**
+ * Acquire or renew queue ownership for this tick. Standby instances keep
+ * calling this every poll, which is exactly how takeover happens: the
+ * first call after the holder's row expires steals it atomically.
+ */
+async function ensureWorkerOwnership(): Promise<boolean> {
+  const outcome = await acquireOrRenewOwnership(
+    QUEUE_OWNERSHIP_KEY,
+    WORKER_INSTANCE_ID,
+    OWNERSHIP_TTL_MS,
+  );
+  if (outcome.state === "standby") {
+    if (ownership !== null) {
+      // We thought we owned the queue but the row says otherwise (e.g. a
+      // clock-skewed competitor took over): stop everything local.
+      handleOwnershipLoss("ownership row held by another instance");
     }
-  } catch (error) {
-    client.release();
-    throw error;
+    return false;
   }
-  leaseClient = client;
-  leaseRecovered = false;
-  client.on("error", () => {
-    // Connection died: the advisory lock is gone with it, so another
-    // instance may already own the queue. Abort every in-flight provider
-    // call immediately — anything still running here could be requeued and
-    // re-executed elsewhere, and finishing both would duplicate spend. The
-    // attempts fence in finishIfStillRunning covers the remaining window.
-    const aborted = abortAllInFlight("lease_lost");
-    if (aborted > 0) {
+  const previousGeneration = ownership?.generation ?? null;
+  const freshAcquisition =
+    previousGeneration === null || previousGeneration !== outcome.generation;
+  ownership = {
+    key: QUEUE_OWNERSHIP_KEY,
+    generation: outcome.generation,
+    expiresAtMs: outcome.expiresAt.getTime(),
+  };
+  lastRenewalAt = new Date();
+  consecutiveRenewalFailures = 0;
+  if (freshAcquisition) {
+    if (previousGeneration !== null) {
+      // Our lease expired and we re-acquired under a new generation (e.g.
+      // the process was frozen past the TTL, thawed, and won the row back
+      // before any standby). Work started under the old generation must
+      // not keep running into the new epoch: the recovery pass below will
+      // requeue those tasks, and letting the stale calls continue would
+      // race the reclaimed attempts.
+      const aborted = abortAllInFlight("worker_ownership_generation_changed");
       logger.warn(
-        { aborted },
-        "Worker lease lost; aborted in-flight provider calls",
+        {
+          previousGeneration,
+          generation: outcome.generation,
+          aborted,
+        },
+        "Queue ownership re-acquired under a new generation; aborted stale in-flight work",
       );
     }
-    leaseClient = null;
-    leaseRecovered = false;
-  });
-  logger.info("Task worker lease acquired");
+    ownershipRecovered = false;
+    if (outcome.takeoverFrom) {
+      takeovers += 1;
+      logger.warn(
+        {
+          takenOverFrom: outcome.takeoverFrom,
+          generation: outcome.generation,
+        },
+        "Took over queue ownership from a stale holder",
+      );
+    } else {
+      logger.info(
+        { generation: outcome.generation },
+        "Queue ownership acquired",
+      );
+    }
+  }
   return true;
+}
+
+/**
+ * One ownership heartbeat. Runs on its own timer so renewal continues while
+ * a long provider call keeps the tick loop busy. Exported for tests, which
+ * drive it directly against a takeover to prove in-flight work is aborted.
+ */
+export async function heartbeatOwnershipOnce(): Promise<void> {
+  const held = ownership;
+  if (!held) return;
+  try {
+    const renewed = await renewOwnership(
+      held.key,
+      WORKER_INSTANCE_ID,
+      held.generation,
+      OWNERSHIP_TTL_MS,
+    );
+    if (!renewed) {
+      consecutiveRenewalFailures += 1;
+      handleOwnershipLoss("renewal rejected: holder or generation changed");
+      return;
+    }
+    consecutiveRenewalFailures = 0;
+    lastRenewalAt = new Date();
+    held.expiresAtMs = Date.now() + OWNERSHIP_TTL_MS;
+  } catch (error) {
+    // A transient database error is not proof of loss — but once our own
+    // expiry passes without a confirmed renewal, another instance may
+    // legitimately own the queue, so treat it as lost.
+    consecutiveRenewalFailures += 1;
+    logger.warn(
+      { error, consecutiveRenewalFailures },
+      "Could not renew queue ownership",
+    );
+    if (Date.now() >= held.expiresAtMs) {
+      handleOwnershipLoss("renewals failing past ownership expiry");
+    }
+  }
+}
+
+/**
+ * Test-only: install or clear this process's local ownership state so a
+ * suite can exercise heartbeat fencing and shutdown release against its own
+ * ownership key without running the polling loop (which would claim real
+ * queued tasks from the shared development database).
+ */
+export function setOwnershipForTest(
+  state: { key: string; generation: number; expiresAtMs: number } | null,
+): void {
+  ownership = state;
+  ownershipRecovered = state !== null;
 }
 
 let timer: NodeJS.Timeout | null = null;
@@ -2551,21 +2678,46 @@ let draining = false;
 let lastTickAt: Date | null = null;
 
 export type WorkerStatus = {
-  /** This process holds the singleton queue lease. */
+  /** active: this instance owns the queue. standby: polling for takeover. */
+  state: "active" | "standby";
+  /** Back-compat alias: this process currently owns the queue. */
   leaseHeld: boolean;
   /** The polling loop is scheduled. */
   running: boolean;
   /** Provider calls in flight in this process. */
   inFlight: number;
   lastTickAt: Date | null;
+  /** Stable identity of this process in the ownership row. */
+  instanceId: string;
+  /** Ownership generation this instance holds, when active. */
+  generation: number | null;
+  /** Local expiry of the held ownership, when active. */
+  ownershipExpiresAt: Date | null;
+  lastRenewalAt: Date | null;
+  /** Consecutive renewals that failed or errored; resets on success. */
+  renewalFailures: number;
+  /** Times this instance lost ownership (and aborted local work). */
+  ownershipLosses: number;
+  /** Times this instance took over from a stale holder. */
+  takeovers: number;
 };
 
 export function getWorkerStatus(): WorkerStatus {
+  const active = hasActiveOwnership();
   return {
-    leaseHeld: leaseClient !== null,
+    state: active ? "active" : "standby",
+    leaseHeld: active,
     running: timer !== null,
     inFlight: inFlight.size,
     lastTickAt,
+    instanceId: WORKER_INSTANCE_ID,
+    generation: active ? (ownership?.generation ?? null) : null,
+    ownershipExpiresAt:
+      active && ownership ? new Date(ownership.expiresAtMs) : null,
+    lastRenewalAt,
+    renewalFailures: consecutiveRenewalFailures,
+    ownershipLosses,
+    takeovers,
   };
 }
 
@@ -2577,12 +2729,12 @@ export function startWorker(intervalMs = POLL_INTERVAL_MS): void {
     draining = true;
     lastTickAt = new Date();
     try {
-      // Only the lease holder recovers and claims; other instances keep
-      // polling so one of them takes over if the holder dies.
-      if (!(await ensureWorkerLease())) return;
-      if (!leaseRecovered) {
+      // Only the ownership holder recovers and claims; other instances
+      // keep polling and take over as soon as the holder's row expires.
+      if (!(await ensureWorkerOwnership())) return;
+      if (!ownershipRecovered) {
         await recoverInterruptedTasks();
-        leaseRecovered = true;
+        ownershipRecovered = true;
       }
       await expireStaleApprovals();
       await reviewPendingApprovals();
@@ -2592,8 +2744,9 @@ export function startWorker(intervalMs = POLL_INTERVAL_MS): void {
       // Local, throttled, and self-disabling when Codex is off or has no
       // durable private home.
       await runCodexHealthCheck();
-      // Drain the queue: keep claiming until nothing is runnable.
-      while (await workOnce()) {
+      // Drain the queue: keep claiming until nothing is runnable — but
+      // never claim on ownership we can no longer prove is ours.
+      while (hasActiveOwnership() && (await workOnce())) {
         /* claimed and ran one task */
       }
     } catch (error) {
@@ -2604,20 +2757,41 @@ export function startWorker(intervalMs = POLL_INTERVAL_MS): void {
   };
   timer = setInterval(() => void tick(), intervalMs);
   timer.unref();
+  // Renewal must outlive a busy tick: a single provider call can hold the
+  // tick loop far longer than the ownership TTL.
+  heartbeatTimer = setInterval(
+    () => void heartbeatOwnershipOnce(),
+    OWNERSHIP_HEARTBEAT_MS,
+  );
+  heartbeatTimer.unref();
   void tick();
   logger.info({ intervalMs }, "Task worker started");
 }
 
-export function stopWorker(): void {
+/**
+ * Stop polling and hand the queue over cleanly: deleting our ownership row
+ * lets the next instance acquire immediately instead of waiting out the
+ * TTL. Callers abort in-flight work first (see index.ts shutdown order).
+ */
+export async function stopWorker(): Promise<void> {
   if (timer) clearInterval(timer);
   timer = null;
-  const client = leaseClient;
-  leaseClient = null;
-  leaseRecovered = false;
-  if (client) {
-    void client
-      .query("SELECT pg_advisory_unlock($1)", [WORKER_LOCK_KEY])
-      .catch(() => {})
-      .finally(() => client.release());
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  heartbeatTimer = null;
+  const held = ownership;
+  ownership = null;
+  ownershipRecovered = false;
+  if (held) {
+    try {
+      const released = await releaseOwnership(held.key, WORKER_INSTANCE_ID);
+      if (released) {
+        logger.info("Queue ownership released for clean handoff");
+      }
+    } catch (error) {
+      logger.warn(
+        { error },
+        "Could not release queue ownership on shutdown; it expires on its own",
+      );
+    }
   }
 }

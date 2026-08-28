@@ -498,6 +498,33 @@ export const providerLeasesTable = pgTable("provider_leases", {
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
 });
 
+/**
+ * Cluster-wide queue-worker ownership.
+ *
+ * Exactly one API instance may recover, claim, and run queued tasks at a
+ * time. Ownership used to be a session-scoped Postgres advisory lock, which
+ * an idle-but-alive Autoscale instance could hold forever while healthy
+ * instances polled uselessly. This row replaces it with a bounded lease:
+ * the holder heartbeats while healthy, ownership expires when heartbeats
+ * stop, and any instance may take over an expired row. `generation`
+ * increments on every change of holder, so a stale instance that wakes up
+ * after a takeover can recognize that its renewals no longer apply.
+ */
+export const workerOwnershipTable = pgTable("worker_ownership", {
+  key: text("key").primaryKey(),
+  holder: text("holder").notNull(),
+  generation: integer("generation").notNull(),
+  acquiredAt: timestamp("acquired_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  heartbeatAt: timestamp("heartbeat_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+});
+
+export type WorkerOwnershipRecord = typeof workerOwnershipTable.$inferSelect;
+
 export const taskLogsTable = pgTable("task_logs", {
   id: uuid("id").primaryKey().defaultRandom(),
   taskId: uuid("task_id")

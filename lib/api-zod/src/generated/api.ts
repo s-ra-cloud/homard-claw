@@ -1465,11 +1465,26 @@ export const GetRuntimeHealthResponse = zod.object({
   "oldestQueuedSeconds": zod.number().nullable()
 }),
   "worker": zod.object({
+  "state": zod.enum(['active', 'standby']),
   "leaseHeld": zod.boolean(),
   "running": zod.boolean(),
   "inFlight": zod.number(),
   "emergencyStop": zod.boolean(),
-  "lastTickAt": zod.coerce.date().nullish()
+  "lastTickAt": zod.coerce.date().nullish(),
+  "instanceId": zod.string(),
+  "generation": zod.number().nullable(),
+  "lastRenewalAt": zod.coerce.date().nullish(),
+  "renewalFailures": zod.number(),
+  "ownershipLosses": zod.number(),
+  "takeovers": zod.number(),
+  "ownership": zod.object({
+  "holder": zod.string().nullable(),
+  "generation": zod.number().nullable(),
+  "heartbeatAt": zod.coerce.date().nullable(),
+  "expiresAt": zod.coerce.date().nullable(),
+  "heartbeatAgeSeconds": zod.number().nullable(),
+  "stale": zod.boolean()
+})
 })
 })
 

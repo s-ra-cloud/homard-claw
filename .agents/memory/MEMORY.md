@@ -6,7 +6,8 @@
 - [API server test conventions](api-server-test-conventions.md) — Integration tests hit the dev Postgres; impersonate the existing owner, tag+clean up all rows, never clobber owner_clerk_id.
 - [OpenAPI codegen quirks](openapi-codegen-quirks.md) — Spec must use type: number (never integer) and union-type nullable enums, or Orval's generated Zod fails to compile.
 - [Agent delegation model](agent-delegation-model.md) — Delegation authority comes from team structure only; decide and insert in one locked transaction. OpenClaw stays an inert seam.
-- [Postgres advisory locks](postgres-advisory-locks.md) — Key registry; the worker lease holds 0x484f4d41 forever, so new xact locks need distinct keys or everything hangs.
+- [Postgres advisory locks](postgres-advisory-locks.md) — Key registry for xact locks; the old forever-held worker session lock is gone.
+- [Queue-worker ownership](worker-queue-ownership.md) — Worker singleton is an expiring heartbeated row with generation fencing; tests use their own keys, never the live one.
 - [Voice conversations](voice-conversations.md) — Speech runs on the workspace's own OpenAI key; agent replies use native providers, and chat can only propose tasks, never queue them.
 - [Workspace provider credentials](workspace-provider-credentials.md) — AI keys are encrypted per-workspace rows, never env vars; fail closed, and tests must seed credentials, not stub env.
 - [Durable scheduling](durable-scheduling.md) — Schedules fire via claim → dispatch → finalize with evidence-based crash recovery; paused agents defer, and tests scope the scheduler like the worker.

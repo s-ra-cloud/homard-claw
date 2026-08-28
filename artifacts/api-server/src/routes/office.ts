@@ -126,6 +126,10 @@ import { effectivePermissions } from "../policy";
 import { DEFAULT_RUNTIME, listRuntimeHealth, queueHealth } from "../runtime";
 import { abortRunningTask, getWorkerStatus } from "../worker";
 import {
+  QUEUE_OWNERSHIP_KEY,
+  getOwnershipSnapshot,
+} from "../worker-ownership";
+import {
   listRecentAgentActions,
   listTaskActions,
 } from "../connected-apps/actions";
@@ -176,10 +180,11 @@ router.use(connectedAppsRouter);
 router.use(capabilitiesRouter);
 
 router.get("/runtime/health", async (req: Request, res: Response) => {
-  const [runtimes, queue, stop] = await Promise.all([
+  const [runtimes, queue, stop, owner] = await Promise.all([
     listRuntimeHealth(req.workspaceId!),
     queueHealth(),
     getWorkspaceSetting(req.workspaceId!, "emergency_stop"),
+    getOwnershipSnapshot(QUEUE_OWNERSHIP_KEY),
   ]);
   const worker = getWorkerStatus();
   res.json(
@@ -188,11 +193,38 @@ router.get("/runtime/health", async (req: Request, res: Response) => {
       runtimes,
       queue,
       worker: {
+        // active: this instance drives the queue. standby: it polls and
+        // takes over once the current owner's row goes stale.
+        state: worker.state,
         leaseHeld: worker.leaseHeld,
         running: worker.running,
         inFlight: worker.inFlight,
         emergencyStop: stop === "true",
         lastTickAt: worker.lastTickAt ? worker.lastTickAt.toISOString() : null,
+        instanceId: worker.instanceId,
+        generation: worker.generation,
+        lastRenewalAt: worker.lastRenewalAt
+          ? worker.lastRenewalAt.toISOString()
+          : null,
+        renewalFailures: worker.renewalFailures,
+        ownershipLosses: worker.ownershipLosses,
+        takeovers: worker.takeovers,
+        // The durable ownership row itself — whichever instance serves this
+        // request. `stale: true` means heartbeats stopped (or no owner
+        // exists) and the next healthy poller will take over.
+        ownership: {
+          holder: owner?.holder ?? null,
+          generation: owner?.generation ?? null,
+          heartbeatAt: owner ? owner.heartbeatAt.toISOString() : null,
+          expiresAt: owner ? owner.expiresAt.toISOString() : null,
+          heartbeatAgeSeconds: owner
+            ? Math.max(
+                0,
+                Math.round((Date.now() - owner.heartbeatAt.getTime()) / 1000),
+              )
+            : null,
+          stale: owner ? owner.stale : true,
+        },
       },
     }),
   );

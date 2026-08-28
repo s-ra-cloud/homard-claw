@@ -850,6 +850,14 @@ describe("runtime limits and health", () => {
     expect(res.body.activeRuntime).toBe("native");
     expect(res.body.queue.queued).toBeGreaterThanOrEqual(1);
     expect(typeof res.body.worker.leaseHeld).toBe("boolean");
+    // Liveness state: active (owns the queue) vs standby (polling for
+    // takeover), plus the durable ownership row with its staleness flag.
+    expect(["active", "standby"]).toContain(res.body.worker.state);
+    expect(res.body.worker.leaseHeld).toBe(res.body.worker.state === "active");
+    expect(typeof res.body.worker.instanceId).toBe("string");
+    expect(typeof res.body.worker.renewalFailures).toBe("number");
+    expect(typeof res.body.worker.takeovers).toBe("number");
+    expect(typeof res.body.worker.ownership.stale).toBe("boolean");
     expect(res.body.runtimes).toHaveLength(2);
 
     const direct = await queueHealth();

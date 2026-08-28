@@ -487,7 +487,11 @@ export default function OfficeDashboard() {
     ? activeRuntime.status === "ready"
       ? runtimeHealth!.worker.leaseHeld
         ? "steady"
-        : "standby"
+        : // No fresh owner anywhere: this instance will take over the queue
+          // on its next poll. Otherwise another healthy instance owns it.
+          runtimeHealth!.worker.ownership.stale
+          ? "taking over"
+          : "standby"
       : activeRuntime.status.replace(/_/g, " ")
     : "checking";
   const queued = runtimeHealth?.queue.queued ?? 0;

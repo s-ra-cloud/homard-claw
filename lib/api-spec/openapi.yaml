@@ -2653,13 +2653,56 @@ components:
             oldestQueuedSeconds: { type: [number, "null"] }
         worker:
           type: object
-          required: [leaseHeld, running, inFlight, emergencyStop]
+          required:
+            [
+              state,
+              leaseHeld,
+              running,
+              inFlight,
+              emergencyStop,
+              instanceId,
+              generation,
+              renewalFailures,
+              ownershipLosses,
+              takeovers,
+              ownership,
+            ]
           properties:
+            # active: the instance answering this request drives the queue.
+            # standby: it polls and takes over once the owner's row goes stale.
+            state: { type: string, enum: [active, standby] }
+            # Back-compat alias of state == active.
             leaseHeld: { type: boolean }
             running: { type: boolean }
             inFlight: { type: number }
             emergencyStop: { type: boolean }
             lastTickAt: { type: [string, "null"], format: date-time }
+            instanceId: { type: string }
+            generation: { type: [number, "null"] }
+            lastRenewalAt: { type: [string, "null"], format: date-time }
+            renewalFailures: { type: number }
+            ownershipLosses: { type: number }
+            takeovers: { type: number }
+            # The durable ownership row. stale=true (or holder=null) means
+            # heartbeats stopped and a takeover is imminent or in progress.
+            ownership:
+              type: object
+              required:
+                [
+                  holder,
+                  generation,
+                  heartbeatAt,
+                  expiresAt,
+                  heartbeatAgeSeconds,
+                  stale,
+                ]
+              properties:
+                holder: { type: [string, "null"] }
+                generation: { type: [number, "null"] }
+                heartbeatAt: { type: [string, "null"], format: date-time }
+                expiresAt: { type: [string, "null"], format: date-time }
+                heartbeatAgeSeconds: { type: [number, "null"] }
+                stale: { type: boolean }
     TaskSource:
       type: object
       required: [type, id, label, title]

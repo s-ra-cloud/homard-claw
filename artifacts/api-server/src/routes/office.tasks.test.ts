@@ -28,9 +28,20 @@ import officeRouter from "./office";
 import {
   abortAllInFlight,
   claimNextTask,
+  getWorkerStatus,
+  heartbeatOwnershipOnce,
   recoverInterruptedTasks,
   runTask,
+  setOwnershipForTest,
+  stopWorker,
 } from "../worker";
+import {
+  WORKER_INSTANCE_ID,
+  acquireOrRenewOwnership,
+  deleteOwnershipRow,
+  getOwnershipSnapshot,
+  renewOwnership,
+} from "../worker-ownership";
 import { clearProviderCaches } from "../providers";
 import {
   deleteProviderCredential,
@@ -658,6 +669,116 @@ describe("worker execution", () => {
     expect(after?.status).toBe("cancelled");
     expect(after?.output).toBeNull();
     releaseCall?.();
+  });
+});
+
+describe("queue ownership fencing", () => {
+  // Every key is run-unique: the production ownership row ("queue-worker")
+  // belongs to the live development server's worker and is never touched.
+  const OWNERSHIP_RUN = `test-fence-${Date.now()}`;
+
+  it("aborts a long provider call and completes nothing when ownership is taken over", async () => {
+    const key = `${OWNERSHIP_RUN}-takeover`;
+    try {
+      // This process acquires with a tiny TTL, then "freezes": no
+      // heartbeats until the takeover has already happened. The local
+      // state is installed as if the worker loop had acquired normally.
+      const acquired = await acquireOrRenewOwnership(key, WORKER_INSTANCE_ID, 50);
+      expect(acquired.state).toBe("acquired");
+      setOwnershipForTest({
+        key,
+        generation: 1,
+        expiresAtMs: Date.now() + 60_000,
+      });
+
+      const agent = await createAgent(`${RUN_TAG} Takeover`);
+      const task = await insertTask(agent.id, { status: "running", attempts: 1 });
+      fetchMock.mockImplementationOnce(
+        (_url: unknown, init?: { signal?: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+              reject(Object.assign(new Error("aborted"), { name: "AbortError" })),
+            );
+          }),
+      );
+      const run = runTask({ task, agent: await loadAgent(agent.id) });
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+
+      // The TTL passes; a healthy rival instance takes over and, as the new
+      // owner would, requeues and reclaims the interrupted task
+      // (attempts increments — the completion fence).
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      const rival = await acquireOrRenewOwnership(key, "rival-instance", 60_000);
+      expect(rival).toMatchObject({
+        state: "acquired",
+        generation: 2,
+        takeoverFrom: WORKER_INSTANCE_ID,
+      });
+      await db
+        .update(tasksTable)
+        .set({ status: "running", attempts: 2 })
+        .where(eq(tasksTable.id, task.id));
+
+      // The stale holder's next heartbeat is rejected — it must abort its
+      // in-flight provider call immediately and drop to standby.
+      await heartbeatOwnershipOnce();
+      const status = getWorkerStatus();
+      expect(status.state).toBe("standby");
+      expect(status.leaseHeld).toBe(false);
+      expect(status.ownershipLosses).toBeGreaterThanOrEqual(1);
+      await run;
+
+      // The stale attempt wrote no terminal state over the new attempt, and
+      // made exactly one (aborted) provider call: nothing completed or was
+      // billed twice.
+      const after = await getTaskRow(task.id);
+      expect(after?.status).toBe("running");
+      expect(after?.attempts).toBe(2);
+      expect(after?.output).toBeNull();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      // Fencing holds durably too: the displaced generation can never renew.
+      expect(await renewOwnership(key, WORKER_INSTANCE_ID, 1, 60_000)).toBe(
+        false,
+      );
+
+      // Park the row so nothing else touches it.
+      await db
+        .update(tasksTable)
+        .set({ status: "cancelled" })
+        .where(eq(tasksTable.id, task.id));
+    } finally {
+      setOwnershipForTest(null);
+      await deleteOwnershipRow(key);
+    }
+  });
+
+  it("releases ownership on clean shutdown so a successor takes over immediately", async () => {
+    const key = `${OWNERSHIP_RUN}-shutdown`;
+    try {
+      const acquired = await acquireOrRenewOwnership(
+        key,
+        WORKER_INSTANCE_ID,
+        60_000,
+      );
+      expect(acquired.state).toBe("acquired");
+      setOwnershipForTest({
+        key,
+        generation: acquired.state === "acquired" ? acquired.generation : 1,
+        expiresAtMs: Date.now() + 60_000,
+      });
+
+      await stopWorker();
+
+      // The row is gone — no successor waits out a 60s TTL after SIGTERM.
+      expect(await getOwnershipSnapshot(key)).toBeNull();
+      const successor = await acquireOrRenewOwnership(key, "successor", 60_000);
+      expect(successor.state).toBe("acquired");
+      expect(getWorkerStatus().state).toBe("standby");
+    } finally {
+      setOwnershipForTest(null);
+      await deleteOwnershipRow(key);
+    }
   });
 });
 

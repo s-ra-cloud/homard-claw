@@ -1311,13 +1311,45 @@ export type RuntimeHealthReportQueue = {
   oldestQueuedSeconds: number | null;
 };
 
+export type RuntimeHealthReportWorkerState = typeof RuntimeHealthReportWorkerState[keyof typeof RuntimeHealthReportWorkerState];
+
+
+export const RuntimeHealthReportWorkerState = {
+  active: 'active',
+  standby: 'standby',
+} as const;
+
+export type RuntimeHealthReportWorkerOwnership = {
+  /** @nullable */
+  holder: string | null;
+  /** @nullable */
+  generation: number | null;
+  /** @nullable */
+  heartbeatAt: string | null;
+  /** @nullable */
+  expiresAt: string | null;
+  /** @nullable */
+  heartbeatAgeSeconds: number | null;
+  stale: boolean;
+};
+
 export type RuntimeHealthReportWorker = {
+  state: RuntimeHealthReportWorkerState;
   leaseHeld: boolean;
   running: boolean;
   inFlight: number;
   emergencyStop: boolean;
   /** @nullable */
   lastTickAt?: string | null;
+  instanceId: string;
+  /** @nullable */
+  generation: number | null;
+  /** @nullable */
+  lastRenewalAt?: string | null;
+  renewalFailures: number;
+  ownershipLosses: number;
+  takeovers: number;
+  ownership: RuntimeHealthReportWorkerOwnership;
 };
 
 export interface RuntimeHealthReport {

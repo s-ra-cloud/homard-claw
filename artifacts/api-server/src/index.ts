@@ -63,9 +63,10 @@ const server = app.listen(port, (err) => {
       logger.error({ err }, "Workspace backfill failed");
     })
     .finally(() => {
-      // The task queue lives in Postgres. The worker acquires a cluster-wide
-      // lease, recovers anything that was mid-flight when the previous holder
-      // died, then starts claiming work.
+      // The task queue lives in Postgres. The worker acquires expiring,
+      // heartbeated cluster-wide ownership (taking over automatically when
+      // a previous holder stops renewing), recovers anything that was
+      // mid-flight when the previous holder died, then starts claiming.
       startWorker();
     });
 });
@@ -76,8 +77,9 @@ const server = app.listen(port, (err) => {
  *  1. Abort in-flight provider calls while we still hold the worker lease —
  *     their abort handlers append a log and settle agent status, which is
  *     only safe while no other instance can have reclaimed the task.
- *  2. Give those abort handlers a moment to settle, then release the lease
- *     so the next holder's recovery pass can requeue interrupted tasks.
+ *  2. Give those abort handlers a moment to settle, then release queue
+ *     ownership so the next holder can take over immediately (instead of
+ *     waiting out the TTL) and requeue interrupted tasks.
  *  3. Close the HTTP server AND force-terminate held-open connections —
  *     /api/events keeps SSE sockets open indefinitely, so a bare
  *     server.close() would never finish.
@@ -99,10 +101,10 @@ async function shutdown(signal: string): Promise<void> {
     if (aborted > 0) {
       logger.warn({ aborted }, "Aborted in-flight provider calls");
       // Let the abort handlers finish their (fenced) bookkeeping writes
-      // before we release the lease and drain the pool.
+      // before we release ownership and drain the pool.
       await new Promise((resolve) => setTimeout(resolve, 1_000));
     }
-    stopWorker();
+    await stopWorker();
 
     await new Promise<void>((resolve) => {
       server.close(() => resolve());

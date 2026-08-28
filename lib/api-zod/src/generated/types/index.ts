@@ -140,6 +140,8 @@ export * from './retiredAgentSecurityPreset';
 export * from './runtimeHealthReport';
 export * from './runtimeHealthReportQueue';
 export * from './runtimeHealthReportWorker';
+export * from './runtimeHealthReportWorkerOwnership';
+export * from './runtimeHealthReportWorkerState';
 export * from './runtimeInfo';
 export * from './runtimeInfoStatus';
 export * from './schedule';
