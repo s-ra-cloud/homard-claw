@@ -150,7 +150,7 @@ export default function TalkPage() {
               recorderSupported={recorderSupported}
               autoApproveTalkTasks={voiceStatus?.autoApproveTalkTasks ?? false}
               onHangUp={isDesktop ? undefined : () => setLocation("/talk")}
-              headerAction={settingsFor("call")}
+              onOpenAgent={() => setLocation(`/agents/${agent.id}/edit`)}
             />
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
