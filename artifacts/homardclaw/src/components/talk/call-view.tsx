@@ -8,13 +8,7 @@
  * playback hooks live in the page above so a contact switch cannot leak an
  * extra AudioContext.
  */
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   Agent,
   AgentDelegationProposal,
@@ -28,6 +22,7 @@ import {
   useClearTalkHistory,
   useConverseWithAgent,
   useCreateTask,
+  useGetProviderSettings,
   useGetTalkHistory,
 } from "@workspace/api-client-react";
 import {
@@ -63,10 +58,12 @@ import {
   Send,
   Square,
   Trash2,
+  UserRoundCog,
   Volume2,
   X,
 } from "lucide-react";
 import { presenceForStatus } from "./agent-presence";
+import { agentRuntimeSummary } from "./agent-runtime-summary";
 import {
   ATTACHMENT_ACCEPT,
   MAX_ATTACHMENTS,
@@ -182,8 +179,8 @@ export interface CallViewProps {
   autoApproveTalkTasks: boolean;
   /** Back to the contacts list; omitted when both panes are on screen. */
   onHangUp?: () => void;
-  /** Settings gear, so the call screen is never a dead end on a phone. */
-  headerAction?: ReactNode;
+  /** Open this Crustabot's personnel page. */
+  onOpenAgent: () => void;
 }
 
 export function CallView({
@@ -195,11 +192,12 @@ export function CallView({
   recorderSupported,
   autoApproveTalkTasks,
   onHangUp,
-  headerAction,
+  onOpenAgent,
 }: CallViewProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const agentId = agent.id;
+  const { data: providerSettings } = useGetProviderSettings();
 
   const [turns, setTurns] = useState<Turn[]>([]);
   const [phase, setPhase] = useState<Phase>("idle");
@@ -854,6 +852,7 @@ export function CallView({
   }, [phase, playback.state]);
 
   const presence = presenceForStatus(agent.status);
+  const runtime = agentRuntimeSummary(agent, providerSettings);
   const canRecord = voiceOn && speechAvailable && recorderSupported;
   const phaseLabel =
     phase === "recording"
@@ -886,7 +885,7 @@ export function CallView({
             seed={agent.id}
           />
         </span>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <h2 className="font-bold text-sm uppercase truncate">{agent.name}</h2>
           <p className="text-[10px] font-mono uppercase text-muted-foreground truncate flex items-center gap-2">
             <span
@@ -897,8 +896,40 @@ export function CallView({
             />
             {agent.title} · {phaseLabel}
           </p>
+          <div
+            className="mt-1 hidden min-w-0 flex-wrap items-center gap-1 sm:flex"
+            aria-label={`${agent.name} runtime and app authorisations`}
+          >
+            <span
+              className="max-w-52 truncate border border-border/60 bg-muted/50 px-1.5 py-0.5 font-mono text-[8px] uppercase text-muted-foreground"
+              title={`Provider: ${runtime.provider}`}
+            >
+              Provider: {runtime.provider}
+            </span>
+            <span
+              className="max-w-52 truncate border border-border/60 bg-muted/50 px-1.5 py-0.5 font-mono text-[8px] uppercase text-muted-foreground"
+              title={`Model: ${runtime.model}`}
+            >
+              Model: {runtime.model}
+            </span>
+            {runtime.apps.length === 0 ? (
+              <span className="border border-border/60 bg-muted/50 px-1.5 py-0.5 font-mono text-[8px] uppercase text-muted-foreground">
+                Apps: no access
+              </span>
+            ) : (
+              runtime.apps.map((grant) => (
+                <span
+                  key={`${grant.app}-${grant.accessLevel}`}
+                  className="border border-border/60 bg-muted/50 px-1.5 py-0.5 font-mono text-[8px] uppercase text-muted-foreground"
+                  title={`${grant.app} authorisation: ${grant.accessLevel}`}
+                >
+                  {grant.app}: {grant.accessLevel}
+                </span>
+              ))
+            )}
+          </div>
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <button
@@ -944,7 +975,16 @@ export function CallView({
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
-          {headerAction}
+          <button
+            type="button"
+            onClick={onOpenAgent}
+            className="flex h-9 w-9 shrink-0 items-center justify-center border-2 border-border bg-muted/40 text-foreground pixel-shadow"
+            aria-label={`Open ${agent.name}'s Crustabot page`}
+            title={`Open ${agent.name}'s Crustabot page`}
+            data-testid="button-open-agent"
+          >
+            <UserRoundCog className="h-4 w-4" aria-hidden="true" />
+          </button>
         </div>
       </header>
 
