@@ -22,7 +22,8 @@ import {
   ANTHROPIC_MESSAGES_URL,
   claudeOAuthHeaders,
   claudeSystemBlocks,
-  describeClaudeAuthRejection,
+  classifyClaudeAuthFailure,
+  readClaudeErrorInfo,
 } from "./claude-oauth";
 
 /**
@@ -291,11 +292,18 @@ async function checkClaude(workspaceId: string): Promise<ProviderHealth> {
       };
     }
     if (res.status === 401 || res.status === 403) {
+      // The error body is consulted ONLY to pick a fixed classification —
+      // bad token value vs. expired vs. the app's Claude Code emulation
+      // being refused — and is never echoed into the status message.
+      const failure = classifyClaudeAuthFailure(
+        res.status,
+        await readClaudeErrorInfo(res),
+      );
       return {
         ...base,
         configured: true,
         healthy: false,
-        message: describeClaudeAuthRejection(res.status),
+        message: failure.message,
       };
     }
     if (res.status === 429) {

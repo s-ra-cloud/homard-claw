@@ -4,7 +4,8 @@ import {
   ANTHROPIC_MESSAGES_URL,
   claudeOAuthHeaders,
   claudeSystemBlocks,
-  describeClaudeAuthRejection,
+  classifyClaudeAuthFailure,
+  readClaudeErrorInfo,
 } from "./claude-oauth";
 
 /**
@@ -219,14 +220,10 @@ function mapHttpError(
   provider: "Claude" | "OpenRouter",
 ): ProviderCallError {
   if (status === 401 || status === 403) {
-    if (provider === "Claude") {
-      // Setup-token failures have precise, fixed remediations; the text is
-      // composed entirely server-side and never quotes the response body.
-      return new ProviderCallError(
-        "auth",
-        describeClaudeAuthRejection(status),
-      );
-    }
+    // Claude 401/403s never reach here: callClaude classifies them first
+    // (via the shared claude-oauth classifier, which inspects but never
+    // quotes the response body) so owners can tell a bad token from a
+    // stale Claude Code protocol emulation.
     return new ProviderCallError(
       "auth",
       "The provider rejected the stored credential. Re-check the configured secret.",
@@ -453,6 +450,17 @@ async function callClaude(req: ProviderCallRequest): Promise<ProviderCallResult>
     });
   } catch (error) {
     throw mapNetworkError(error, req.signal);
+  }
+  if (res.status === 401 || res.status === 403) {
+    // Same classifier the health probe uses: the error body is inspected
+    // only to choose between fixed explanations (bad token value, expired
+    // token, or Anthropic refusing the app's Claude Code emulation) and
+    // is never copied into the error, task record, or logs.
+    const failure = classifyClaudeAuthFailure(
+      res.status,
+      await readClaudeErrorInfo(res),
+    );
+    throw new ProviderCallError("auth", failure.message);
   }
   if (!res.ok) throw mapHttpError(res.status, "Claude");
   let payload: {

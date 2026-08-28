@@ -276,7 +276,7 @@ describe("setup-token shape validation before storage", () => {
 });
 
 describe("setup-token save and immediate health probe", () => {
-  it("probes /v1/messages with the full Claude Code OAuth contract", async () => {
+  it("probes with the complete verified Claude Code OAuth contract, asserted literally", async () => {
     const probe = mockAnthropic(200);
     const res = await putCredential(userA, TOKEN_A);
     expect(res.status).toBe(200);
@@ -289,32 +289,104 @@ describe("setup-token save and immediate health probe", () => {
     expect(probe.requests).toHaveLength(1);
     const sent = probe.requests[0]!;
     expect(sent.method).toBe("POST");
-    // The OAuth contract: Bearer auth (never x-api-key), both beta
-    // capabilities, and the CLI identity headers.
+    // Every field below is a LITERAL from the verified contract (Claude
+    // Code 2.1.232, checked 2026-08-28) — deliberately NOT imported from
+    // claude-oauth.ts, so any drift in the module fails this test and
+    // forces re-verification against the real CLI.
+    // OAuth tokens must hit the beta messages surface.
+    expect(sent.url).toBe("https://api.anthropic.com/v1/messages?beta=true");
+    // Bearer auth, never x-api-key.
     expect(sent.headers.authorization).toBe(`Bearer ${TOKEN_A}`);
     expect(sent.headers["x-api-key"]).toBeUndefined();
     expect(sent.headers["anthropic-version"]).toBe("2023-06-01");
-    expect(sent.headers["anthropic-beta"]).toContain("oauth-2025-04-20");
-    expect(sent.headers["anthropic-beta"]).toContain("claude-code-20250219");
-    expect(sent.headers["user-agent"]).toMatch(/^claude-cli\//);
+    // Both beta capabilities, exact value and order.
+    expect(sent.headers["anthropic-beta"]).toBe(
+      "claude-code-20250219,oauth-2025-04-20",
+    );
+    // Exact CLI identity.
+    expect(sent.headers["user-agent"]).toBe(
+      "claude-cli/2.1.232 (external, cli)",
+    );
     expect(sent.headers["x-app"]).toBe("cli");
-    // A minimal real message: the identity sentence must be the entire
-    // first system block.
+    expect(sent.headers["content-type"]).toBe("application/json");
+    // A minimal real message on the cheapest catalog model; the identity
+    // sentence must be the ENTIRE first system block, verbatim.
+    expect(sent.body.model).toBe("claude-haiku-4-5");
     expect(sent.body.max_tokens).toBe(1);
-    expect(sent.body.system?.[0]?.text).toBe(CLAUDE_CODE_SYSTEM_IDENTITY);
+    expect(sent.body.system?.[0]).toEqual({
+      type: "text",
+      text: "You are Claude Code, Anthropic's official CLI for Claude.",
+    });
+    expect(sent.body.messages).toEqual([{ role: "user", content: "ping" }]);
   });
 
-  it("maps HTTP 401 to expired/revoked guidance without echoing the body or token", async () => {
-    mockAnthropic(401);
+  it("labels an invalid-token 401 as an incomplete/bad token value, not as expired", async () => {
+    mockAnthropic(401, {
+      type: "error",
+      error: { type: "authentication_error", message: "OAuth access token is invalid." },
+    });
     const res = await putCredential(userA, TOKEN_A);
     expect(res.status).toBe(200);
     expect(res.body.configured).toBe(true);
     expect(res.body.healthy).toBe(false);
+    // Points at the most common cause — a truncated paste — with re-copy
+    // guidance, instead of claiming a fresh token already expired.
+    expect(res.body.message).toMatch(/entire token/i);
+    expect(res.body.message).toMatch(/wrap/i);
+    expect(res.body.message).not.toMatch(/expired/i);
+  });
+
+  it("maps an explicit expiry 401 to rotate-the-token guidance", async () => {
+    mockAnthropic(401, {
+      type: "error",
+      error: { type: "authentication_error", message: "OAuth token has expired." },
+    });
+    const res = await putCredential(userA, TOKEN_A);
+    expect(res.body.healthy).toBe(false);
     expect(res.body.message).toMatch(/expired or been revoked/i);
     expect(res.body.message).toMatch(/setup-token/i);
+  });
+
+  it("reports a client-protocol 401 as the app's incompatibility, never as a token to rotate", async () => {
+    mockAnthropic(401, {
+      type: "error",
+      error: {
+        type: "authentication_error",
+        message: "OAuth authentication is currently not supported.",
+      },
+    });
+    const res = await putCredential(userA, TOKEN_A);
+    expect(res.body.healthy).toBe(false);
+    expect(res.body.message).toMatch(/not your token/i);
+    expect(res.body.message).toMatch(/out of date/i);
+    expect(res.body.message).toMatch(/will not help/i);
+    expect(res.body.message).not.toMatch(/expired/i);
+  });
+
+  it("keeps an unidentified 401 diagnostic: verify in Claude Code before rotating", async () => {
+    // Default mock body carries an unrecognized (sensitive) message.
+    mockAnthropic(401);
+    const res = await putCredential(userA, TOKEN_A);
+    expect(res.body.healthy).toBe(false);
+    // Both hypotheses are surfaced instead of a blanket "expired".
+    expect(res.body.message).toMatch(/works in claude code/i);
+    expect(res.body.message).toMatch(/out of date/i);
+    expect(res.body.message).not.toMatch(/has expired/i);
     const serialized = JSON.stringify(res.body);
     expect(serialized).not.toContain("SENSITIVE-UPSTREAM-BODY");
     expect(serialized).not.toContain(TOKEN_A);
+  });
+
+  it("maps HTTP 403 to subscription-authorization guidance", async () => {
+    mockAnthropic(403, {
+      type: "error",
+      error: { type: "permission_error", message: "SENSITIVE-UPSTREAM-BODY" },
+    });
+    const res = await putCredential(userA, TOKEN_A);
+    expect(res.body.healthy).toBe(false);
+    expect(res.body.message).toMatch(/HTTP 403/);
+    expect(res.body.message).toMatch(/not authorized/i);
+    expect(JSON.stringify(res.body)).not.toContain("SENSITIVE-UPSTREAM-BODY");
   });
 
   it("treats rate limiting as proof the token authenticates", async () => {
@@ -385,19 +457,29 @@ describe("execution uses the identical OAuth contract", () => {
       `Bearer ${TOKEN_B}`,
     ]);
     for (const sent of anthropic.requests) {
-      // Execution presents the exact contract the health check validated.
-      expect(sent.headers["anthropic-beta"]).toContain("oauth-2025-04-20");
-      expect(sent.headers["anthropic-beta"]).toContain("claude-code-20250219");
-      expect(sent.headers["user-agent"]).toMatch(/^claude-cli\//);
+      // Execution presents the exact contract the health check validated —
+      // asserted with the same literals so drift fails here too.
+      expect(sent.url).toBe("https://api.anthropic.com/v1/messages?beta=true");
+      expect(sent.headers["anthropic-version"]).toBe("2023-06-01");
+      expect(sent.headers["anthropic-beta"]).toBe(
+        "claude-code-20250219,oauth-2025-04-20",
+      );
+      expect(sent.headers["user-agent"]).toBe(
+        "claude-cli/2.1.232 (external, cli)",
+      );
       expect(sent.headers["x-app"]).toBe("cli");
-      expect(sent.body.system?.[0]?.text).toBe(CLAUDE_CODE_SYSTEM_IDENTITY);
+      expect(sent.headers["x-api-key"]).toBeUndefined();
+      expect(sent.body.system?.[0]).toEqual({
+        type: "text",
+        text: CLAUDE_CODE_SYSTEM_IDENTITY,
+      });
       // The real agent prompt rides along as its own separate block.
       expect(sent.body.system!.length).toBeGreaterThan(1);
       expect(sent.body.system?.[1]?.text ?? "").not.toBe("");
     }
   });
 
-  it("maps an execution 401 to sanitized setup-token guidance with no leakage", async () => {
+  it("maps an unidentified execution 401 to diagnostic guidance with no leakage", async () => {
     await saveProviderCredential(wsA, "claude_max", TOKEN_A);
     const agent = await createAgentAs(userA, `${RUN_TAG} Expired`);
     mockAnthropic(401);
@@ -408,7 +490,9 @@ describe("execution uses the identical OAuth contract", () => {
     const failed = await getTaskRow(task.id);
     expect(failed.status).not.toBe("completed");
     expect(failed.errorKind).toBe("auth");
-    expect(failed.errorMessage ?? "").toMatch(/expired or been revoked/i);
+    // An unrecognized 401 body must not be flattened into "expired" —
+    // the owner is told how to tell a bad token from a stale app contract.
+    expect(failed.errorMessage ?? "").toMatch(/works in claude code/i);
     expect(failed.errorMessage ?? "").toMatch(/setup-token/i);
     // Neither the task row nor any task log carries token or body material.
     expect(failed.errorMessage ?? "").not.toContain(TOKEN_A);
@@ -420,5 +504,28 @@ describe("execution uses the identical OAuth contract", () => {
     const logText = logs.map((l) => l.message).join("\n");
     expect(logText).not.toContain(TOKEN_A);
     expect(logText).not.toContain("SENSITIVE-UPSTREAM-BODY");
+  });
+
+  it("maps a protocol-drift execution 401 to app-incompatibility guidance, not token rotation", async () => {
+    await saveProviderCredential(wsA, "claude_max", TOKEN_A);
+    const agent = await createAgentAs(userA, `${RUN_TAG} Drift`);
+    mockAnthropic(401, {
+      type: "error",
+      error: {
+        type: "authentication_error",
+        message: "OAuth authentication is currently not supported.",
+      },
+    });
+
+    const task = await insertTask(wsA, agent.id);
+    await runTask({ task, agent: await loadAgent(agent.id) });
+
+    const failed = await getTaskRow(task.id);
+    expect(failed.status).not.toBe("completed");
+    expect(failed.errorKind).toBe("auth");
+    expect(failed.errorMessage ?? "").toMatch(/not your token/i);
+    expect(failed.errorMessage ?? "").toMatch(/out of date/i);
+    expect(failed.errorMessage ?? "").not.toMatch(/expired/i);
+    expect(failed.errorMessage ?? "").not.toContain(TOKEN_A);
   });
 });

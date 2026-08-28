@@ -603,8 +603,9 @@ function ProviderCredentialActions({ provider }: { provider: ProviderStatus }) {
             <>
               On a machine where Claude Code is signed in, run{" "}
               <span className="text-foreground">claude setup-token</span> and
-              paste the long-lived token it prints. It is encrypted before it
-              is stored and is never shown again.
+              paste the long-lived token it prints. The token is long and can
+              wrap across terminal lines — copy the entire value as one line.
+              It is encrypted before it is stored and is never shown again.
             </>
           ) : (
             <>
