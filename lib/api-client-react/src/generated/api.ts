@@ -3641,7 +3641,7 @@ export const setProviderCredential = async (provider: 'claude_max' | 'openrouter
 
 
 
-export const getSetProviderCredentialMutationOptions = <TError = ErrorType<unknown>,
+export const getSetProviderCredentialMutationOptions = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setProviderCredential>>, TError,{provider: 'claude_max' | 'openrouter';data: BodyType<ProviderCredentialInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof setProviderCredential>>, TError,{provider: 'claude_max' | 'openrouter';data: BodyType<ProviderCredentialInput>}, TContext> => {
 
@@ -3670,12 +3670,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type SetProviderCredentialMutationResult = NonNullable<Awaited<ReturnType<typeof setProviderCredential>>>
     export type SetProviderCredentialMutationBody = BodyType<ProviderCredentialInput>
-    export type SetProviderCredentialMutationError = ErrorType<unknown>
+    export type SetProviderCredentialMutationError = ErrorType<void>
 
     /**
  * @summary Store this workspace's own credential for a provider
  */
-export const useSetProviderCredential = <TError = ErrorType<unknown>,
+export const useSetProviderCredential = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setProviderCredential>>, TError,{provider: 'claude_max' | 'openrouter';data: BodyType<ProviderCredentialInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof setProviderCredential>>,

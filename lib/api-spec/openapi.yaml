@@ -860,6 +860,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProviderStatus"
+        "400":
+          description: >-
+            The credential is missing or is not the expected kind of secret
+            for this provider (e.g. a Console API key where a Claude Code
+            setup token is required). Nothing was stored.
     delete:
       operationId: deleteProviderCredential
       tags: [office]

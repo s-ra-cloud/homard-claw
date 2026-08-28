@@ -107,6 +107,7 @@ import {
   ProviderCredentialError,
   saveProviderCredential,
 } from "../provider-credentials";
+import { claudeSetupTokenProblem } from "../claude-oauth";
 import {
   bootstrapCodexHome,
   connectCodexCredential,
@@ -1690,6 +1691,15 @@ router.put(
         error: "A credential of at least 8 characters is required.",
       });
       return;
+    }
+    if (provider === "claude_max") {
+      // Reject the wrong kind of secret before it is stored, with precise
+      // remediation. The guidance never quotes the submitted value.
+      const problem = claudeSetupTokenProblem(parsed.data.credential);
+      if (problem) {
+        res.status(400).json({ error: problem });
+        return;
+      }
     }
     try {
       await saveProviderCredential(

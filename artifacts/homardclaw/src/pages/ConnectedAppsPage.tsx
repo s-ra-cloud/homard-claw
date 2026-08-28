@@ -288,7 +288,10 @@ function TelegramCard() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const statusQuery = useGetTelegramStatus({
-    query: { refetchInterval: linkCode ? 5_000 : false },
+    query: {
+      queryKey: getGetTelegramStatusQueryKey(),
+      refetchInterval: linkCode ? 5_000 : false,
+    },
   });
   const agentsQuery = useListAgents();
   const agents = (agentsQuery.data ?? []).filter((agent) => !agent.archived);

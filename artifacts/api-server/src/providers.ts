@@ -14,11 +14,16 @@ import { codexRuntimeState } from "./codex/runtime";
 import { codexSdkAvailable } from "./codex/sdk";
 import { clerkUserIdForWorkspace } from "./workspace";
 import {
-  CLAUDE_CODE_OAUTH_BETAS,
   getProviderCredential,
   hasProviderCredential,
   ProviderCredentialError,
 } from "./provider-credentials";
+import {
+  ANTHROPIC_MESSAGES_URL,
+  claudeOAuthHeaders,
+  claudeSystemBlocks,
+  describeClaudeAuthRejection,
+} from "./claude-oauth";
 
 /**
  * Server-side provider registry: credentials, health, model discovery,
@@ -177,6 +182,13 @@ const CLAUDE_CATALOG: ProviderModel[] = [
   { id: "claude-3-5-haiku-latest", name: "Claude Haiku 3.5", contextLength: 200000, promptCentsPerMTok: 80, completionCentsPerMTok: 400 },
 ];
 
+/**
+ * Cheapest catalog model, used for the 1-token health probe. Every Claude
+ * subscription tier includes Haiku, so probe failures always mean auth or
+ * availability — never a plan that lacks the probe model.
+ */
+const HEALTH_PROBE_MODEL = "claude-haiku-4-5";
+
 const HEALTH_TTL_MS = 60_000;
 const MODELS_TTL_MS = 5 * 60_000;
 const FETCH_TIMEOUT_MS = 6_000;
@@ -254,12 +266,20 @@ async function checkClaude(workspaceId: string): Promise<ProviderHealth> {
     };
   }
   try {
-    const res = await timedFetch("https://api.anthropic.com/v1/models?limit=1", {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "anthropic-version": "2023-06-01",
-        "anthropic-beta": CLAUDE_CODE_OAUTH_BETAS,
-      },
+    // Setup tokens are only valid for the /v1/messages family — a model
+    // listing probe would 401 even with a perfectly good token. The probe
+    // is therefore a minimal real message (1 output token on the cheapest
+    // model) built with the exact same authentication contract execution
+    // uses, so "healthy" genuinely means "a task call will authenticate".
+    const res = await timedFetch(ANTHROPIC_MESSAGES_URL, {
+      method: "POST",
+      headers: claudeOAuthHeaders(token),
+      body: JSON.stringify({
+        model: HEALTH_PROBE_MODEL,
+        max_tokens: 1,
+        system: claudeSystemBlocks(""),
+        messages: [{ role: "user", content: "ping" }],
+      }),
     });
     if (res.ok) {
       return {
@@ -267,17 +287,44 @@ async function checkClaude(workspaceId: string): Promise<ProviderHealth> {
         configured: true,
         healthy: true,
         usesSubscriptionAllowance: true,
-        message: "Claude endpoint reachable and credential accepted.",
+        message: "Claude Code endpoint reachable and the setup token was accepted.",
+      };
+    }
+    if (res.status === 401 || res.status === 403) {
+      return {
+        ...base,
+        configured: true,
+        healthy: false,
+        message: describeClaudeAuthRejection(res.status),
+      };
+    }
+    if (res.status === 429) {
+      // Rate limiting happens AFTER authentication, so the credential is
+      // proven good; report online rather than scaring the owner into
+      // rotating a working token.
+      return {
+        ...base,
+        configured: true,
+        healthy: true,
+        usesSubscriptionAllowance: true,
+        message:
+          "Claude Code accepted the setup token but is rate limiting requests right now.",
+      };
+    }
+    if (res.status === 400) {
+      return {
+        ...base,
+        configured: true,
+        healthy: false,
+        message:
+          "Anthropic rejected the health request itself (HTTP 400). That points at a Claude Code protocol change rather than your token; the app's Anthropic request format may need updating.",
       };
     }
     return {
       ...base,
       configured: true,
       healthy: false,
-      message:
-        res.status === 401 || res.status === 403
-          ? `Claude rejected the credential (HTTP ${res.status}). Enter a fresh Claude Code OAuth token.`
-          : `Claude endpoint returned HTTP ${res.status}.`,
+      message: `Claude endpoint returned HTTP ${res.status}.`,
     };
   } catch (error) {
     return {

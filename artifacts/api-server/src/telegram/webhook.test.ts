@@ -66,7 +66,7 @@ const signedPost = (body: unknown) =>
   request(app)
     .post("/api/telegram/webhook")
     .set("X-Telegram-Bot-Api-Secret-Token", "correct-webhook-secret")
-    .send(body);
+    .send(body as object);
 
 beforeEach(() => {
   mocks.available = true;

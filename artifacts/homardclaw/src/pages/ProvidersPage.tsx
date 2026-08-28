@@ -7,6 +7,8 @@ import {
   useTestCodexConnection,
   useConnectCodex,
   useDisconnectCodex,
+  useSetProviderCredential,
+  useDeleteProviderCredential,
   getGetProvidersQueryKey,
   getGetProviderSettingsQueryKey,
   ProviderSettingsDefaultProvider,
@@ -525,6 +527,133 @@ function CodexActions({ provider }: { provider: ProviderStatus }) {
   );
 }
 
+/**
+ * Entering this workspace's own Claude Code setup token or OpenRouter API
+ * key. The value is encrypted server-side, never echoed back, and the box
+ * is cleared the moment it is sent — success or not.
+ */
+function ProviderCredentialActions({ provider }: { provider: ProviderStatus }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [credential, setCredential] = useState("");
+  const providerId = provider.provider as "claude_max" | "openrouter";
+  const isClaude = providerId === "claude_max";
+
+  const refresh = () =>
+    queryClient.invalidateQueries({ queryKey: getGetProvidersQueryKey() });
+
+  const save = useSetProviderCredential({
+    mutation: {
+      onSuccess: (status) => {
+        refresh();
+        if (status.healthy) {
+          toast({
+            title: `${provider.label} is online`,
+            description: status.message,
+          });
+        } else {
+          toast({
+            variant: "destructive",
+            title: `${provider.label} credential saved, but the check failed`,
+            description: status.message,
+          });
+        }
+      },
+      onError: (error) =>
+        toast({
+          variant: "destructive",
+          title: "Could not save the credential",
+          description: error.message,
+        }),
+    },
+  });
+
+  const remove = useDeleteProviderCredential({
+    mutation: {
+      onSuccess: () => {
+        refresh();
+        toast({ title: `${provider.label} credential removed` });
+      },
+      onError: (error) =>
+        toast({
+          variant: "destructive",
+          title: "Could not remove the credential",
+          description: error.message,
+        }),
+    },
+  });
+
+  return (
+    <div className="mt-4 border-t-2 border-border/30 pt-4 space-y-3">
+      <div className="space-y-2">
+        <label
+          className="uppercase font-bold text-xs"
+          htmlFor={`credential-${providerId}`}
+        >
+          {provider.configured
+            ? isClaude
+              ? "Replace your setup token"
+              : "Replace your API key"
+            : isClaude
+              ? "Connect with a setup token"
+              : "Connect with an API key"}
+        </label>
+        <p className="text-[10px] text-muted-foreground uppercase font-bold leading-relaxed">
+          {isClaude ? (
+            <>
+              On a machine where Claude Code is signed in, run{" "}
+              <span className="text-foreground">claude setup-token</span> and
+              paste the long-lived token it prints. It is encrypted before it
+              is stored and is never shown again.
+            </>
+          ) : (
+            <>
+              Paste an API key from your own OpenRouter account. It is
+              encrypted before it is stored and is never shown again.
+            </>
+          )}
+        </p>
+        <Input
+          id={`credential-${providerId}`}
+          type="password"
+          value={credential}
+          onChange={(event) => setCredential(event.target.value)}
+          placeholder={isClaude ? "Claude Code setup token" : "OpenRouter API key"}
+          spellCheck={false}
+          autoComplete="off"
+          className="font-mono bg-background border-4 border-border rounded-none focus-visible:ring-0 focus-visible:border-primary text-xs"
+          data-testid={`input-credential-${providerId}`}
+        />
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          onClick={() => {
+            const pasted = credential.trim();
+            // Cleared as it leaves the browser — a credential has no
+            // business sitting in a text box.
+            setCredential("");
+            save.mutate({ provider: providerId, data: { credential: pasted } });
+          }}
+          disabled={save.isPending || credential.trim().length < 8}
+          data-testid={`button-save-credential-${providerId}`}
+        >
+          {save.isPending ? "CHECKING..." : "SAVE & TEST"}
+        </Button>
+        {provider.configured ? (
+          <Button
+            variant="outline"
+            onClick={() => remove.mutate({ provider: providerId })}
+            disabled={remove.isPending}
+            data-testid={`button-remove-credential-${providerId}`}
+          >
+            {remove.isPending ? "REMOVING..." : "REMOVE"}
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 /** Codex-only rows: what the credential actually bills, and what we cannot know. */
 function CodexStatusRows({ provider }: { provider: ProviderStatus }) {
   const apiBilled = provider.authMode === "api_key";
@@ -699,13 +828,10 @@ export default function ProvidersPage() {
                       )}
                     </div>
 
-                    {isCodex ? <CodexActions provider={provider} /> : null}
-
-                    {!provider.configured && !isCodex && (
-                      <div className="mt-4 text-[10px] text-muted-foreground uppercase text-center border-t-2 border-border/30 pt-4">
-                        Add the required environment variables in the Replit
-                        Secrets tool to enable this provider.
-                      </div>
+                    {isCodex ? (
+                      <CodexActions provider={provider} />
+                    ) : (
+                      <ProviderCredentialActions provider={provider} />
                     )}
                   </PixelCard>
                 );

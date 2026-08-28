@@ -19,3 +19,4 @@
 - [Gmail HTML email bodies](gmail-html-email.md) — outbound email goes through the shared sanitizer + multipart builder; base64 parts block boundary/header injection.
 - [Capability packages](capability-packages.md) — new capabilities are signed data-only manifests in the compiled registry; never mutate a published version, expansions park for owner review.
 - [Per-user OAuth credentials](google-oauth-credentials.md) — Gmail/Drive share one Google account (incremental consent, scope union); GitHub has its own OAuth-app flow; all per-workspace, encrypted, no connector.
+- [Claude setup-token auth](claude-setup-token-auth.md) — OAuth tokens only work on /v1/messages with both betas, CLI identity headers, and the exact Claude Code identity system block first.

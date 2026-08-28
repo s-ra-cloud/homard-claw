@@ -35,14 +35,6 @@ export const CREDENTIALED_PROVIDERS: CredentialedProvider[] = [
   "openai_voice",
 ];
 
-/**
- * Claude Code subscription OAuth tokens require both beta capabilities.
- * Sending only oauth-2025-04-20 makes Anthropic reject an otherwise valid
- * setup-token credential with HTTP 401.
- */
-export const CLAUDE_CODE_OAUTH_BETAS =
-  "oauth-2025-04-20,claude-code-20250219";
-
 export function isCredentialedProvider(
   value: string,
 ): value is CredentialedProvider {

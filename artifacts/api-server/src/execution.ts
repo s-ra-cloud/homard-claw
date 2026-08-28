@@ -1,6 +1,11 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { CLAUDE_CODE_OAUTH_BETAS } from "./provider-credentials";
+import {
+  ANTHROPIC_MESSAGES_URL,
+  claudeOAuthHeaders,
+  claudeSystemBlocks,
+  describeClaudeAuthRejection,
+} from "./claude-oauth";
 
 /**
  * Provider execution: one authorized chat-completion call per task attempt.
@@ -214,6 +219,14 @@ function mapHttpError(
   provider: "Claude" | "OpenRouter",
 ): ProviderCallError {
   if (status === 401 || status === 403) {
+    if (provider === "Claude") {
+      // Setup-token failures have precise, fixed remediations; the text is
+      // composed entirely server-side and never quotes the response body.
+      return new ProviderCallError(
+        "auth",
+        describeClaudeAuthRejection(status),
+      );
+    }
     return new ProviderCallError(
       "auth",
       "The provider rejected the stored credential. Re-check the configured secret.",
@@ -423,19 +436,18 @@ async function callClaude(req: ProviderCallRequest): Promise<ProviderCallResult>
   const token = await credentialFor(req.workspaceId, "claude_max");
   let res: globalThis.Response;
   try {
-    res = await fetch("https://api.anthropic.com/v1/messages", {
+    res = await fetch(ANTHROPIC_MESSAGES_URL, {
       method: "POST",
       signal: req.signal,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "anthropic-version": "2023-06-01",
-        "anthropic-beta": CLAUDE_CODE_OAUTH_BETAS,
-        "content-type": "application/json",
-      },
+      // The same header builder the health check uses: a token that passed
+      // configuration is guaranteed to be presented identically here.
+      headers: claudeOAuthHeaders(token),
       body: JSON.stringify({
         model: req.model,
         max_tokens: req.maxOutputTokens,
-        system: req.system,
+        // OAuth requests must open with the Claude Code identity block;
+        // the task's real system prompt follows as its own block.
+        system: claudeSystemBlocks(req.system),
         messages: [{ role: "user", content: claudeContent(req.prompt, req.attachments) }],
       }),
     });
