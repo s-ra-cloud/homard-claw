@@ -74,6 +74,18 @@ const num = (name: string, required = true): ParamSpec => ({
   required,
   kind: "number",
 });
+/**
+ * A JSON payload of spreadsheet row values. Multiline is safe: it feeds a
+ * JSON request body — never a header, URL, or path — and the executor
+ * re-parses and bounds it before anything reaches Google.
+ */
+const sheetValues = (): ParamSpec => ({
+  name: "values",
+  required: true,
+  kind: "string",
+  maxLength: 20000,
+  multiline: true,
+});
 
 export const APP_OPERATIONS: AppOperation[] = [
   {
@@ -147,6 +159,89 @@ export const APP_OPERATIONS: AppOperation[] = [
       "Create a new text file in the owner's Drive; params: name, content",
     params: [str("name", true, 300), str("content", true, 100000)],
     target: (p) => `Create Drive file "${p.name}"`,
+  },
+  /* ----- Google Sheets (native spreadsheets, on the same Drive consent).
+   * Reads use drive.readonly; every mutation runs under drive.file, so
+   * Google itself limits edits to spreadsheets this app created or was
+   * explicitly handed. There is deliberately NO delete, clear, or share. */
+  {
+    name: "google_drive.create_spreadsheet",
+    app: "google_drive",
+    level: "draft",
+    description:
+      "Create a new, empty native Google Sheets spreadsheet in the owner's Drive; params: name. Returns the spreadsheetId and a stable link.",
+    params: [str("name", true, 300)],
+    target: (p) => `Create Google spreadsheet "${p.name}"`,
+  },
+  {
+    name: "google_drive.list_sheet_tabs",
+    app: "google_drive",
+    level: "read",
+    description:
+      "List a spreadsheet's tabs (title, sheetId, size); params: spreadsheetId",
+    params: [str("spreadsheetId", true, 200)],
+    target: (p) => `List tabs of spreadsheet ${p.spreadsheetId}`,
+  },
+  {
+    name: "google_drive.read_sheet_range",
+    app: "google_drive",
+    level: "read",
+    description:
+      "Read a bounded A1 range from a spreadsheet (max 5000 cells); params: spreadsheetId, range (explicit corners, e.g. Sheet1!A1:D50)",
+    params: [str("spreadsheetId", true, 200), str("range", true, 200)],
+    target: (p) => `Read range ${p.range} of spreadsheet ${p.spreadsheetId}`,
+  },
+  {
+    name: "google_drive.write_sheet_range",
+    app: "google_drive",
+    level: "write",
+    description:
+      "Overwrite an explicit A1 range with values — existing cells in the range are REPLACED (max 500 cells); params: spreadsheetId, range (with tab, e.g. Sheet1!A1:C10), values (JSON array of row arrays matching the range exactly; strings starting with = are formulas)",
+    params: [
+      str("spreadsheetId", true, 200),
+      str("range", true, 200),
+      sheetValues(),
+    ],
+    target: (p) =>
+      `Overwrite range ${p.range} in spreadsheet ${p.spreadsheetId}`,
+  },
+  {
+    name: "google_drive.append_sheet_rows",
+    app: "google_drive",
+    level: "write",
+    description:
+      "Append rows after the last row with data on a tab — never overwrites existing cells (max 100 rows); params: spreadsheetId, tabTitle, values (JSON array of row arrays; strings starting with = are formulas)",
+    params: [
+      str("spreadsheetId", true, 200),
+      str("tabTitle", true, 100),
+      sheetValues(),
+    ],
+    target: (p) =>
+      `Append rows to tab "${p.tabTitle}" of spreadsheet ${p.spreadsheetId}`,
+  },
+  {
+    name: "google_drive.add_sheet_tab",
+    app: "google_drive",
+    level: "write",
+    description:
+      "Add a new empty tab to an existing spreadsheet; params: spreadsheetId, tabTitle",
+    params: [str("spreadsheetId", true, 200), str("tabTitle", true, 100)],
+    target: (p) =>
+      `Add tab "${p.tabTitle}" to spreadsheet ${p.spreadsheetId}`,
+  },
+  {
+    name: "google_drive.rename_sheet_tab",
+    app: "google_drive",
+    level: "write",
+    description:
+      "Rename an existing tab (its data is unchanged; formulas referring to the old name may break); params: spreadsheetId, tabTitle (current), newTitle",
+    params: [
+      str("spreadsheetId", true, 200),
+      str("tabTitle", true, 100),
+      str("newTitle", true, 100),
+    ],
+    target: (p) =>
+      `Rename tab "${p.tabTitle}" to "${p.newTitle}" in spreadsheet ${p.spreadsheetId}`,
   },
   {
     name: "github.list_repos",

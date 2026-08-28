@@ -59,6 +59,7 @@ const realFetch = globalThis.fetch;
 const PROVIDER_BASES: Record<string, string> = {
   "https://gmail.googleapis.com": "gmail",
   "https://www.googleapis.com": "google_drive",
+  "https://sheets.googleapis.com": "sheets",
   "https://api.github.com": "github",
 };
 vi.stubGlobal(
@@ -646,5 +647,478 @@ describe("reconcileStaleExecutingActions", () => {
     const row = await reloadAction(action.id);
     expect(row.status).toBe("executed");
     expect(row.resultSummary).toContain("#8");
+  });
+});
+
+/** Handler fragment: the tab-resolution GET used by sheets mutations. */
+function tabsResponse(tabs: { sheetId: number; title: string }[]) {
+  return {
+    status: 200,
+    body: { sheets: tabs.map((properties) => ({ properties })) },
+  };
+}
+
+function batchUpdateCalls(): ProxyCall[] {
+  return proxyState.calls.filter(
+    (c) => c.method === "POST" && c.path.includes(":batchUpdate"),
+  );
+}
+
+describe("google sheets executors", () => {
+  it("ships every mutation and its action marker in one atomic batchUpdate", async () => {
+    const actionId = "99999999-8888-7777-6666-555555555555";
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("/v4/spreadsheets/")) {
+        return tabsResponse([{ sheetId: 31, title: "Data" }]);
+      }
+      if (call.method === "POST" && call.path.includes(":batchUpdate")) {
+        return { status: 200, body: { replies: [{}, {}] } };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const op = findOperation("google_drive.append_sheet_rows");
+    expect(op).not.toBeNull();
+    const outcome = await executeOperation(
+      op!,
+      {
+        spreadsheetId: "sheet-1",
+        tabTitle: "Data",
+        values: '[["Ada",42],["Bob",7]]',
+      },
+      { actionId, workspaceId },
+    );
+    expect(outcome.ok).toBe(true);
+    expect(outcome.ok && outcome.summary).toContain("Appended 2 row(s)");
+    const [batch] = batchUpdateCalls();
+    const body = batch.body as {
+      requests: Record<string, Record<string, unknown>>[];
+    };
+    expect(body.requests).toHaveLength(2);
+    expect(body.requests[0].appendCells).toMatchObject({
+      sheetId: 31,
+      fields: "userEnteredValue",
+    });
+    expect(body.requests[1].createDeveloperMetadata).toEqual({
+      developerMetadata: {
+        metadataKey: "homardclawActionId",
+        metadataValue: actionId,
+        location: { spreadsheet: true },
+        visibility: "DOCUMENT",
+      },
+    });
+  });
+
+  it("writes formulas only for leading '=' strings, typing other cells", async () => {
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("/v4/spreadsheets/")) {
+        return tabsResponse([{ sheetId: 0, title: "Data" }]);
+      }
+      if (call.method === "POST" && call.path.includes(":batchUpdate")) {
+        return { status: 200, body: { replies: [{}, {}] } };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const op = findOperation("google_drive.write_sheet_range");
+    const outcome = await executeOperation(
+      op!,
+      {
+        spreadsheetId: "sheet-1",
+        range: "Data!A1:C1",
+        values: '[["label","=SUM(B2:B9)",3.5]]',
+      },
+      { actionId: "act-w1", workspaceId },
+    );
+    expect(outcome.ok).toBe(true);
+    const body = batchUpdateCalls()[0].body as {
+      requests: {
+        updateCells?: {
+          range: Record<string, number>;
+          rows: { values: { userEnteredValue?: Record<string, unknown> }[] }[];
+        };
+      }[];
+    };
+    const update = body.requests[0].updateCells!;
+    expect(update.range).toEqual({
+      sheetId: 0,
+      startRowIndex: 0,
+      endRowIndex: 1,
+      startColumnIndex: 0,
+      endColumnIndex: 3,
+    });
+    expect(update.rows[0].values.map((v) => v.userEnteredValue)).toEqual([
+      { stringValue: "label" },
+      { formulaValue: "=SUM(B2:B9)" },
+      { numberValue: 3.5 },
+    ]);
+  });
+
+  it("refuses a write whose values do not match the range — before any provider call", async () => {
+    proxyState.handler = (call) => {
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const op = findOperation("google_drive.write_sheet_range");
+    const outcome = await executeOperation(
+      op!,
+      { spreadsheetId: "s", range: "Data!A1:B2", values: '[["only one"]]' },
+      { actionId: "act-w2", workspaceId },
+    );
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.message).toContain("must match exactly");
+    expect(proxyState.calls).toHaveLength(0);
+  });
+
+  it("requires an explicit tab on writes and bounded ranges on reads", async () => {
+    proxyState.handler = (call) => {
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const write = await executeOperation(
+      findOperation("google_drive.write_sheet_range")!,
+      { spreadsheetId: "s", range: "A1:B2", values: '[["a","b"],["c","d"]]' },
+      { actionId: "act-w3", workspaceId },
+    );
+    expect(write.ok).toBe(false);
+    expect(!write.ok && write.message).toContain("tab");
+    const openEnded = await executeOperation(
+      findOperation("google_drive.read_sheet_range")!,
+      { spreadsheetId: "s", range: "Data!A:A" },
+      { actionId: null, workspaceId },
+    );
+    expect(openEnded.ok).toBe(false);
+    expect(!openEnded.ok && openEnded.message).toContain("bounded");
+    const oversized = await executeOperation(
+      findOperation("google_drive.read_sheet_range")!,
+      { spreadsheetId: "s", range: "Data!A1:Z201" }, // 26 x 201 = 5226 cells
+      { actionId: null, workspaceId },
+    );
+    expect(oversized.ok).toBe(false);
+    expect(!oversized.ok && oversized.message).toContain("5000");
+    expect(proxyState.calls).toHaveLength(0);
+  });
+
+  it("resolves tab titles case-insensitively only when unambiguous", async () => {
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("/v4/spreadsheets/")) {
+        return tabsResponse([{ sheetId: 5, title: "data" }]);
+      }
+      if (call.method === "POST" && call.path.includes(":batchUpdate")) {
+        return { status: 200, body: { replies: [{}, {}] } };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const op = findOperation("google_drive.append_sheet_rows");
+    const relaxed = await executeOperation(
+      op!,
+      { spreadsheetId: "s", tabTitle: "Data", values: '[["x"]]' },
+      { actionId: "act-a1", workspaceId },
+    );
+    expect(relaxed.ok).toBe(true);
+    expect(relaxed.ok && relaxed.summary).toContain('"data"');
+
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("/v4/spreadsheets/")) {
+        return tabsResponse([
+          { sheetId: 5, title: "data" },
+          { sheetId: 6, title: "DATA" },
+        ]);
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const ambiguous = await executeOperation(
+      op!,
+      { spreadsheetId: "s", tabTitle: "Data", values: '[["x"]]' },
+      { actionId: "act-a2", workspaceId },
+    );
+    expect(ambiguous.ok).toBe(false);
+    expect(!ambiguous.ok && ambiguous.message).toContain("ambiguous");
+    expect(!ambiguous.ok && ambiguous.message).toContain('"DATA"');
+  });
+
+  it("lists tabs the agent can disambiguate with when the title is missing", async () => {
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("/v4/spreadsheets/")) {
+        return tabsResponse([{ sheetId: 1, title: "Budget" }]);
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.rename_sheet_tab")!,
+      { spreadsheetId: "s", tabTitle: "Nope", newTitle: "Still nope" },
+      { actionId: "act-r1", workspaceId },
+    );
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.message).toContain('"Budget"');
+    expect(batchUpdateCalls()).toHaveLength(0);
+  });
+
+  it("explains a drive.file edit denial instead of asking the owner to reconnect", async () => {
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("/v4/spreadsheets/")) {
+        return tabsResponse([{ sheetId: 2, title: "Data" }]);
+      }
+      if (call.method === "POST" && call.path.includes(":batchUpdate")) {
+        return {
+          status: 403,
+          body: { error: { message: "The caller does not have permission" } },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.add_sheet_tab")!,
+      { spreadsheetId: "not-ours", tabTitle: "Extra" },
+      { actionId: "act-t1", workspaceId },
+    );
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.kind).toBe("failed");
+    expect(!outcome.ok && outcome.message).toContain(
+      "only edit spreadsheets it created",
+    );
+  });
+
+  it("keeps a genuine missing-scope 403 as a reconnectable auth outcome", async () => {
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("/v4/spreadsheets/")) {
+        return tabsResponse([{ sheetId: 2, title: "Data" }]);
+      }
+      if (call.method === "POST" && call.path.includes(":batchUpdate")) {
+        return {
+          status: 403,
+          body: {
+            error: {
+              message:
+                "Request had insufficient authentication scopes.",
+            },
+          },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.add_sheet_tab")!,
+      { spreadsheetId: "s", tabTitle: "Extra" },
+      { actionId: "act-t2", workspaceId },
+    );
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.kind).toBe("auth");
+  });
+
+  it("creates a native spreadsheet through Drive with the action marker", async () => {
+    proxyState.handler = (call) => {
+      if (call.method === "POST" && call.path.includes("/drive/v3/files")) {
+        return { status: 200, body: { id: "spread-1" } };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.create_spreadsheet")!,
+      { name: "Q3 Budget" },
+      { actionId: "act-c1", workspaceId },
+    );
+    expect(outcome.ok).toBe(true);
+    expect(outcome.ok && outcome.summary).toContain(
+      "https://docs.google.com/spreadsheets/d/spread-1/edit",
+    );
+    const body = proxyState.calls[0].body as Record<string, unknown>;
+    expect(body.mimeType).toBe("application/vnd.google-apps.spreadsheet");
+    expect(body.appProperties).toEqual({ homardclawActionId: "act-c1" });
+  });
+
+  it("reads a bounded range and reports emptiness explicitly", async () => {
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("/values/")) {
+        expect(decodeURIComponent(call.path)).toContain("'Data'!A1:B2");
+        return { status: 200, body: { values: [["Name", "Total"], ["Ada", "42"]] } };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const read = await executeOperation(
+      findOperation("google_drive.read_sheet_range")!,
+      { spreadsheetId: "s", range: "Data!A1:B2" },
+      { actionId: null, workspaceId },
+    );
+    expect(read.ok).toBe(true);
+    expect(read.ok && read.summary).toContain("Name | Total");
+
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("/values/")) {
+        return { status: 200, body: {} };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const empty = await executeOperation(
+      findOperation("google_drive.read_sheet_range")!,
+      { spreadsheetId: "s", range: "Data!A1:B2" },
+      { actionId: null, workspaceId },
+    );
+    expect(empty.ok).toBe(true);
+    expect(empty.ok && empty.summary).toContain("is empty");
+  });
+});
+
+describe("google sheets crash recovery", () => {
+  it("confirms a stranded sheets append by its embedded action marker", async () => {
+    const approvalId = await insertApproval();
+    const action = await insertExecutingAction({
+      operation: "google_drive.append_sheet_rows",
+      app: "google_drive",
+      params: { spreadsheetId: "sheet-1", tabTitle: "Data", values: '[["x"]]' },
+      approvalId,
+    });
+    proxyState.handler = (call) => {
+      if (
+        call.method === "POST" &&
+        call.path.includes("developerMetadata:search")
+      ) {
+        const body = call.body as {
+          dataFilters: { developerMetadataLookup: Record<string, string> }[];
+        };
+        expect(body.dataFilters[0].developerMetadataLookup).toEqual({
+          metadataKey: "homardclawActionId",
+          metadataValue: action.id,
+        });
+        return {
+          status: 200,
+          body: { matchedDeveloperMetadata: [{ developerMetadata: {} }] },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    expect(resolved.resolution).toBe("confirmed");
+    const row = await reloadAction(action.id);
+    expect(row.status).toBe("executed");
+    expect(row.resultSummary).toContain("Confirmed");
+    expect(batchUpdateCalls()).toHaveLength(0);
+  });
+
+  it("never replays on a fresh absent marker — the crashed batch may still be in flight", async () => {
+    // The race the marker cannot rule out: our process died after sending
+    // the batchUpdate, Google is still executing it, and recovery's
+    // metadata search (which reads the document, not a lagging index)
+    // simply runs BEFORE the batch commits. A retry here would duplicate
+    // the append once the original lands. Fresh absence must settle as
+    // unknown, with no provider mutation of any kind.
+    const approvalId = await insertApproval();
+    const action = await insertExecutingAction({
+      operation: "google_drive.append_sheet_rows",
+      app: "google_drive",
+      params: { spreadsheetId: "sheet-1", tabTitle: "Data", values: '[["x"]]' },
+      approvalId,
+      executingAt: new Date(), // interrupted seconds ago
+    });
+    proxyState.handler = (call) => {
+      if (
+        call.method === "POST" &&
+        call.path.includes("developerMetadata:search")
+      ) {
+        return { status: 200, body: {} }; // no marker — yet
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    expect(resolved.resolution).toBe("unknown");
+    const row = await reloadAction(action.id);
+    expect(row.status).toBe("failed");
+    expect(row.errorMessage).toContain("too recent");
+    // Nothing was re-run and nothing will be: no batchUpdate ever went out.
+    expect(batchUpdateCalls()).toHaveLength(0);
+    expect(await claimApprovedAction(action.id)).toBeNull();
+  });
+
+  it("re-queues a marker-absent mutation only after the in-flight grace window", async () => {
+    const approvalId = await insertApproval();
+    const action = await insertExecutingAction({
+      operation: "google_drive.append_sheet_rows",
+      app: "google_drive",
+      params: { spreadsheetId: "sheet-1", tabTitle: "Data", values: '[["x"]]' },
+      approvalId,
+      // Default executingAt is minutes old: the crashed request can no
+      // longer be in flight, so absence is conclusive.
+    });
+    proxyState.handler = (call) => {
+      if (
+        call.method === "POST" &&
+        call.path.includes("developerMetadata:search")
+      ) {
+        return { status: 200, body: {} }; // no marker: provably not applied
+      }
+      if (call.method === "GET" && call.path.includes("/v4/spreadsheets/")) {
+        return tabsResponse([{ sheetId: 3, title: "Data" }]);
+      }
+      if (call.method === "POST" && call.path.includes(":batchUpdate")) {
+        return { status: 200, body: { replies: [{}, {}] } };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    expect(resolved.resolution).toBe("requeued");
+    expect((await reloadAction(action.id)).status).toBe("approved");
+    expect(batchUpdateCalls()).toHaveLength(0);
+
+    // The retry carries the SAME action marker, and the claim is the
+    // exactly-once fence.
+    const claimed = await claimApprovedAction(action.id);
+    expect(claimed).not.toBeNull();
+    expect(await claimApprovedAction(action.id)).toBeNull();
+    const { action: finalized } = await executeClaimedAction(claimed!, "Tester", workspaceId);
+    expect(finalized.status).toBe("executed");
+    const batches = batchUpdateCalls();
+    expect(batches).toHaveLength(1);
+    const body = batches[0].body as {
+      requests: { createDeveloperMetadata?: { developerMetadata: { metadataValue: string } } }[];
+    };
+    expect(
+      body.requests[1].createDeveloperMetadata!.developerMetadata
+        .metadataValue,
+    ).toBe(action.id);
+  });
+
+  it("treats a fresh absence of a created spreadsheet as unknown (eventual index)", async () => {
+    const approvalId = await insertApproval();
+    const action = await insertExecutingAction({
+      operation: "google_drive.create_spreadsheet",
+      app: "google_drive",
+      params: { name: "Q3 Budget" },
+      approvalId,
+      executingAt: new Date(), // Drive's search index may lag
+    });
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("appProperties")) {
+        return { status: 200, body: { files: [] } };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    expect(resolved.resolution).toBe("unknown");
+    const row = await reloadAction(action.id);
+    expect(row.status).toBe("failed");
+    expect(row.errorMessage).toContain("too recent");
+  });
+
+  it("confirms a stranded spreadsheet creation by its Drive marker", async () => {
+    const action = await insertExecutingAction({
+      operation: "google_drive.create_spreadsheet",
+      app: "google_drive",
+      params: { name: "Q3 Budget" },
+    });
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("appProperties")) {
+        expect(decodeURIComponent(call.path)).toContain(action.id);
+        return {
+          status: 200,
+          body: { files: [{ id: "spread-9", name: "Q3 Budget" }] },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    expect(resolved.resolution).toBe("confirmed");
+    const row = await reloadAction(action.id);
+    expect(row.status).toBe("executed");
+    expect(row.resultSummary).toContain(
+      "https://docs.google.com/spreadsheets/d/spread-9/edit",
+    );
+    // Only the verification read hit the provider — nothing was created.
+    expect(proxyState.calls.every((c) => c.method === "GET")).toBe(true);
   });
 });

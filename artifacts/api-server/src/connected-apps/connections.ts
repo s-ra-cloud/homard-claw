@@ -1,6 +1,15 @@
 import { type AppOperation, type ConnectedAppId } from "./catalog";
 import { buildRfc822, sanitizeEmailHtml } from "./email-mime";
 import {
+  MAX_APPEND_ROWS,
+  MAX_MUTATION_CELLS,
+  MAX_READ_CELLS,
+  parseA1Range,
+  parseSheetValues,
+  quoteTab,
+  rowsToRowData,
+} from "./sheets";
+import {
   GoogleAuthError,
   driveAccessToken,
   gmailAccessToken,
@@ -579,6 +588,410 @@ async function driveCreateFile(
   };
 }
 
+/* ---------------------------- Google Sheets ----------------------------- */
+
+/**
+ * Call the Sheets API as the workspace's own Google account. Sheets rides
+ * on the SAME Drive consent — deliberately no new scope is ever requested:
+ * drive.readonly covers reading any spreadsheet the account can see, and
+ * drive.file limits every edit to spreadsheets HomardClaw itself created
+ * (or was explicitly handed). The account-wide "spreadsheets" edit scope
+ * is never asked for, so no tool here can touch data the owner did not
+ * make available to this app.
+ */
+async function sheetsJson(
+  workspaceId: string | null,
+  path: string,
+  options?: { method?: string; body?: unknown },
+): Promise<JsonResult> {
+  return providerJson({
+    workspaceId,
+    providerLabel: "Google Sheets",
+    baseUrl: "https://sheets.googleapis.com",
+    resolveToken: async (id) => (await driveAccessToken(id)).token,
+    path,
+    options,
+  });
+}
+
+/** The stable link for a spreadsheet id. */
+function spreadsheetLink(id: string): string {
+  return `https://docs.google.com/spreadsheets/d/${id}/edit`;
+}
+
+/**
+ * Translate the drive.file denial into something actionable. A 403 on a
+ * Sheets mutation almost always means "this spreadsheet was never made
+ * available to HomardClaw" — reconnecting would not change that, so it
+ * must not surface as an auth problem the owner tries to fix by
+ * reconnecting. (Missing scopes are caught before any call is made.)
+ */
+function explainSheetsEditDenied(outcome: ExecutionOutcome): ExecutionOutcome {
+  if (
+    outcome.ok ||
+    outcome.kind !== "auth" ||
+    !outcome.message.includes("HTTP 403") ||
+    /insufficient|scope/i.test(outcome.message)
+  ) {
+    return outcome;
+  }
+  return {
+    ok: false,
+    kind: "failed",
+    message:
+      "Google refused the edit (HTTP 403). HomardClaw can only edit spreadsheets it created itself — other spreadsheets in the connected account stay read-only by design. Create a new spreadsheet with google_drive.create_spreadsheet and work there instead.",
+  };
+}
+
+async function driveCreateSpreadsheet(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  // One atomic Drive call creates the native spreadsheet; the action id
+  // rides along as an app property exactly like create_file, so recovery
+  // can ask Drive "does the spreadsheet created by action X exist?".
+  const created = await driveJson(ctx.workspaceId, "/drive/v3/files", {
+    method: "POST",
+    body: {
+      name: String(params.name),
+      mimeType: DRIVE_SPREADSHEET_MIME,
+      ...(ctx.actionId
+        ? { appProperties: { [DRIVE_ACTION_KEY]: ctx.actionId } }
+        : {}),
+    },
+  });
+  if (!created.ok) return created.outcome;
+  const file = created.data as { id?: string } | null;
+  if (!file?.id) {
+    return {
+      ok: false,
+      kind: "failed",
+      message: "Drive did not return a spreadsheet id.",
+    };
+  }
+  return {
+    ok: true,
+    summary: `Created Google spreadsheet "${params.name}" (spreadsheetId ${file.id}). Link: ${spreadsheetLink(file.id)}`,
+  };
+}
+
+type SheetTabProperties = {
+  sheetId?: number;
+  title?: string;
+  index?: number;
+  gridProperties?: { rowCount?: number; columnCount?: number };
+};
+
+async function sheetsListTabs(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const id = String(params.spreadsheetId);
+  const fields = encodeURIComponent(
+    "properties.title,sheets(properties(sheetId,title,index,gridProperties(rowCount,columnCount)))",
+  );
+  const result = await sheetsJson(
+    ctx.workspaceId,
+    `/v4/spreadsheets/${encodeURIComponent(id)}?fields=${fields}`,
+  );
+  if (!result.ok) return result.outcome;
+  const data = result.data as {
+    properties?: { title?: string };
+    sheets?: { properties?: SheetTabProperties }[];
+  } | null;
+  const tabs = data?.sheets ?? [];
+  const lines = tabs.map((sheet) => {
+    const p = sheet.properties ?? {};
+    return `- tab "${p.title ?? "?"}" (sheetId ${p.sheetId ?? "?"}) | ${p.gridProperties?.rowCount ?? "?"} rows x ${p.gridProperties?.columnCount ?? "?"} columns`;
+  });
+  return {
+    ok: true,
+    summary: truncate(
+      `Spreadsheet "${data?.properties?.title ?? id}" (spreadsheetId ${id}) has ${tabs.length} tab(s):\n${lines.join("\n")}`,
+    ),
+  };
+}
+
+async function sheetsReadRange(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const parsed = parseA1Range(String(params.range));
+  if (!parsed.ok) return { ok: false, kind: "failed", message: parsed.error };
+  if (parsed.range.cellCount > MAX_READ_CELLS) {
+    return {
+      ok: false,
+      kind: "failed",
+      message: `The range ${parsed.range.normalized} covers ${parsed.range.cellCount} cells; reads are limited to ${MAX_READ_CELLS}. Read a smaller range.`,
+    };
+  }
+  const id = String(params.spreadsheetId);
+  const result = await sheetsJson(
+    ctx.workspaceId,
+    `/v4/spreadsheets/${encodeURIComponent(id)}/values/${encodeURIComponent(parsed.range.normalized)}?majorDimension=ROWS`,
+  );
+  if (!result.ok) return result.outcome;
+  const values =
+    (result.data as { values?: unknown[][] } | null)?.values ?? [];
+  if (values.length === 0) {
+    return {
+      ok: true,
+      summary: `Range ${parsed.range.normalized} of spreadsheet ${id} is empty.`,
+    };
+  }
+  const lines = values.map((row) =>
+    row.map((cell) => String(cell ?? "")).join(" | "),
+  );
+  return {
+    ok: true,
+    summary: truncate(
+      `Values in ${parsed.range.normalized} of spreadsheet ${id} (${values.length} row(s), cells separated by " | "):\n${lines.join("\n")}`,
+    ),
+  };
+}
+
+/**
+ * Resolve a tab title to its sheetId, with disambiguation the agent can
+ * act on: exact title first, then a unique case-insensitive match; zero or
+ * several matches list the actual tabs instead of guessing.
+ */
+async function sheetsResolveTab(
+  workspaceId: string | null,
+  spreadsheetId: string,
+  tabTitle: string,
+): Promise<
+  | { ok: true; sheetId: number; title: string }
+  | { ok: false; outcome: ExecutionOutcome }
+> {
+  const fields = encodeURIComponent("sheets(properties(sheetId,title))");
+  const result = await sheetsJson(
+    workspaceId,
+    `/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=${fields}`,
+  );
+  if (!result.ok) return { ok: false, outcome: result.outcome };
+  const tabs = (
+    (result.data as { sheets?: { properties?: SheetTabProperties }[] } | null)
+      ?.sheets ?? []
+  )
+    .map((sheet) => sheet.properties ?? {})
+    .filter(
+      (p): p is { sheetId: number; title: string } =>
+        typeof p.sheetId === "number" && typeof p.title === "string",
+    );
+  const exact = tabs.filter((p) => p.title === tabTitle);
+  const relaxed =
+    exact.length > 0
+      ? exact
+      : tabs.filter((p) => p.title.toLowerCase() === tabTitle.toLowerCase());
+  if (relaxed.length === 1) {
+    return { ok: true, sheetId: relaxed[0].sheetId, title: relaxed[0].title };
+  }
+  const listing = tabs.map((p) => `"${p.title}"`).join(", ") || "(none)";
+  return {
+    ok: false,
+    outcome: {
+      ok: false,
+      kind: "failed",
+      message:
+        relaxed.length === 0
+          ? `No tab named "${tabTitle}" exists in spreadsheet ${spreadsheetId}. Its tabs are: ${listing}.`
+          : `The tab name "${tabTitle}" is ambiguous in spreadsheet ${spreadsheetId}. Its tabs are: ${listing}. Use the exact title.`,
+    },
+  };
+}
+
+/**
+ * One spreadsheet mutation plus its action marker, in a single atomic
+ * batchUpdate: Sheets applies all requests or none, so the developer
+ * metadata (key = the same marker key Drive files use, value = action id)
+ * exists exactly when the mutation landed. That equivalence is what makes
+ * interrupted writes verifiable instead of guessable.
+ */
+async function sheetsBatchUpdate(
+  workspaceId: string | null,
+  spreadsheetId: string,
+  request: Record<string, unknown>,
+  actionId: string | null,
+): Promise<JsonResult> {
+  const requests: Record<string, unknown>[] = [request];
+  if (actionId) {
+    requests.push({
+      createDeveloperMetadata: {
+        developerMetadata: {
+          metadataKey: DRIVE_ACTION_KEY,
+          metadataValue: actionId,
+          location: { spreadsheet: true },
+          visibility: "DOCUMENT",
+        },
+      },
+    });
+  }
+  const result = await sheetsJson(
+    workspaceId,
+    `/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`,
+    { method: "POST", body: { requests } },
+  );
+  if (!result.ok) {
+    return { ok: false, outcome: explainSheetsEditDenied(result.outcome) };
+  }
+  return result;
+}
+
+async function sheetsWriteRange(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const parsed = parseA1Range(String(params.range));
+  if (!parsed.ok) return { ok: false, kind: "failed", message: parsed.error };
+  const range = parsed.range;
+  if (!range.tab) {
+    return {
+      ok: false,
+      kind: "failed",
+      message:
+        "Writes need the tab in the range, e.g. Sheet1!A1:C10 — never an implicit first tab.",
+    };
+  }
+  if (range.cellCount > MAX_MUTATION_CELLS) {
+    return {
+      ok: false,
+      kind: "failed",
+      message: `The range ${range.normalized} covers ${range.cellCount} cells; a single write is limited to ${MAX_MUTATION_CELLS}.`,
+    };
+  }
+  const values = parseSheetValues(String(params.values), {
+    maxRows: range.rowCount,
+    maxCells: MAX_MUTATION_CELLS,
+  });
+  if (!values.ok) return { ok: false, kind: "failed", message: values.error };
+  if (
+    !values.rectangular ||
+    values.rowCount !== range.rowCount ||
+    values.columnCount !== range.columnCount
+  ) {
+    return {
+      ok: false,
+      kind: "failed",
+      message: `values is ${values.rowCount} row(s) x ${values.columnCount} column(s)${values.rectangular ? "" : " (ragged)"}, but the range ${range.normalized} is ${range.rowCount} x ${range.columnCount}. They must match exactly so the approved range is exactly what changes.`,
+    };
+  }
+  const id = String(params.spreadsheetId);
+  const tab = await sheetsResolveTab(ctx.workspaceId, id, range.tab);
+  if (!tab.ok) return tab.outcome;
+  const result = await sheetsBatchUpdate(
+    ctx.workspaceId,
+    id,
+    {
+      updateCells: {
+        range: {
+          sheetId: tab.sheetId,
+          startRowIndex: range.startRowIndex,
+          endRowIndex: range.endRowIndex,
+          startColumnIndex: range.startColumnIndex,
+          endColumnIndex: range.endColumnIndex,
+        },
+        rows: rowsToRowData(values.rows),
+        fields: "userEnteredValue",
+      },
+    },
+    ctx.actionId,
+  );
+  if (!result.ok) return result.outcome;
+  return {
+    ok: true,
+    summary: `Wrote ${values.rowCount} row(s) x ${values.columnCount} column(s) to ${quoteTab(tab.title)}!${range.normalized.split("!").pop()} in spreadsheet ${id}, replacing whatever the range held.`,
+  };
+}
+
+async function sheetsAppendRows(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const values = parseSheetValues(String(params.values), {
+    maxRows: MAX_APPEND_ROWS,
+    maxCells: MAX_MUTATION_CELLS,
+  });
+  if (!values.ok) return { ok: false, kind: "failed", message: values.error };
+  const id = String(params.spreadsheetId);
+  const tab = await sheetsResolveTab(
+    ctx.workspaceId,
+    id,
+    String(params.tabTitle),
+  );
+  if (!tab.ok) return tab.outcome;
+  const result = await sheetsBatchUpdate(
+    ctx.workspaceId,
+    id,
+    {
+      appendCells: {
+        sheetId: tab.sheetId,
+        rows: rowsToRowData(values.rows),
+        fields: "userEnteredValue",
+      },
+    },
+    ctx.actionId,
+  );
+  if (!result.ok) return result.outcome;
+  return {
+    ok: true,
+    summary: `Appended ${values.rowCount} row(s) (up to ${values.columnCount} column(s) wide) to tab "${tab.title}" of spreadsheet ${id}, after the last row with data. No existing cells were changed.`,
+  };
+}
+
+async function sheetsAddTab(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const id = String(params.spreadsheetId);
+  const title = String(params.tabTitle);
+  const result = await sheetsBatchUpdate(
+    ctx.workspaceId,
+    id,
+    { addSheet: { properties: { title } } },
+    ctx.actionId,
+  );
+  if (!result.ok) return result.outcome;
+  const replies =
+    (result.data as {
+      replies?: { addSheet?: { properties?: { sheetId?: number } } }[];
+    } | null)?.replies ?? [];
+  const sheetId = replies[0]?.addSheet?.properties?.sheetId;
+  return {
+    ok: true,
+    summary: `Added tab "${title}" (sheetId ${sheetId ?? "?"}) to spreadsheet ${id}.`,
+  };
+}
+
+async function sheetsRenameTab(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const id = String(params.spreadsheetId);
+  const newTitle = String(params.newTitle);
+  const tab = await sheetsResolveTab(
+    ctx.workspaceId,
+    id,
+    String(params.tabTitle),
+  );
+  if (!tab.ok) return tab.outcome;
+  const result = await sheetsBatchUpdate(
+    ctx.workspaceId,
+    id,
+    {
+      updateSheetProperties: {
+        properties: { sheetId: tab.sheetId, title: newTitle },
+        fields: "title",
+      },
+    },
+    ctx.actionId,
+  );
+  if (!result.ok) return result.outcome;
+  return {
+    ok: true,
+    summary: `Renamed tab "${tab.title}" to "${newTitle}" in spreadsheet ${id}. Its data is unchanged; formulas that referenced the old name now point at "${newTitle}" automatically inside this spreadsheet, but external references may break.`,
+  };
+}
+
 /* ------------------------------- GitHub -------------------------------- */
 
 async function githubListRepos(
@@ -726,6 +1139,13 @@ const EXECUTORS: Record<
   "google_drive.search": driveSearch,
   "google_drive.read_file": driveReadFile,
   "google_drive.create_file": driveCreateFile,
+  "google_drive.create_spreadsheet": driveCreateSpreadsheet,
+  "google_drive.list_sheet_tabs": sheetsListTabs,
+  "google_drive.read_sheet_range": sheetsReadRange,
+  "google_drive.write_sheet_range": sheetsWriteRange,
+  "google_drive.append_sheet_rows": sheetsAppendRows,
+  "google_drive.add_sheet_tab": sheetsAddTab,
+  "google_drive.rename_sheet_tab": sheetsRenameTab,
   "github.list_repos": githubListRepos,
   "github.read_file": githubReadFile,
   "github.list_issues": githubListIssues,
@@ -928,6 +1348,85 @@ async function verifyDriveCreateFile(
   };
 }
 
+async function verifyDriveCreateSpreadsheet(
+  params: Record<string, unknown>,
+  actionId: string,
+  workspaceId: string | null,
+): Promise<VerificationResult> {
+  // Same marker, same query as create_file: the appProperties key carries
+  // the action id, so Drive answers "did action X create its spreadsheet?"
+  // exactly. Creation is a single call, so found = fully done.
+  const q = encodeURIComponent(
+    `appProperties has { key='${DRIVE_ACTION_KEY}' and value='${actionId}' } and trashed = false`,
+  );
+  const result = await driveJson(
+    workspaceId,
+    `/drive/v3/files?q=${q}&pageSize=1&fields=${encodeURIComponent("files(id,name)")}`,
+  );
+  if (!result.ok) {
+    return { kind: "unknown", message: failureMessage(result.outcome) };
+  }
+  const files =
+    (result.data as { files?: { id: string; name: string }[] } | null)
+      ?.files ?? [];
+  if (files.length === 0) return { kind: "not_executed" };
+  const file = files[0];
+  return {
+    kind: "executed",
+    summary: `Created Google spreadsheet "${file.name}" (spreadsheetId ${file.id}). Link: ${spreadsheetLink(file.id)} — confirmed after an interrupted run.`,
+  };
+}
+
+/**
+ * Shared verifier for the four spreadsheet mutations. Every mutation ships
+ * in one atomic batchUpdate with a developer-metadata marker keyed by the
+ * action id, so the marker's presence in the document IS the mutation's
+ * receipt: found ⇒ it landed. Absence is weaker: the metadata search reads
+ * the document, but it cannot order itself against the ORIGINAL request,
+ * which may still be executing inside Google after our process died. An
+ * absent marker therefore only proves non-execution once the interrupted
+ * attempt is old enough that no HTTP request could still be in flight —
+ * which is exactly the "eventual" grace protocol below.
+ */
+function verifySheetsMutation(
+  describe: (params: Record<string, unknown>) => string,
+): (
+  params: Record<string, unknown>,
+  actionId: string,
+  workspaceId: string | null,
+) => Promise<VerificationResult> {
+  return async (params, actionId, workspaceId) => {
+    const result = await sheetsJson(
+      workspaceId,
+      `/v4/spreadsheets/${encodeURIComponent(String(params.spreadsheetId))}/developerMetadata:search`,
+      {
+        method: "POST",
+        body: {
+          dataFilters: [
+            {
+              developerMetadataLookup: {
+                metadataKey: DRIVE_ACTION_KEY,
+                metadataValue: actionId,
+              },
+            },
+          ],
+        },
+      },
+    );
+    if (!result.ok) {
+      return { kind: "unknown", message: failureMessage(result.outcome) };
+    }
+    const matches =
+      (result.data as { matchedDeveloperMetadata?: unknown[] } | null)
+        ?.matchedDeveloperMetadata ?? [];
+    if (matches.length === 0) return { kind: "not_executed" };
+    return {
+      kind: "executed",
+      summary: `${describe(params)} Confirmed by the spreadsheet's embedded action marker after an interrupted run.`,
+    };
+  };
+}
+
 /**
  * How trustworthy a verifier's "absent" answer is. GitHub's REST list
  * endpoints are read-after-write consistent, so absence there is proof.
@@ -960,6 +1459,45 @@ const VERIFIERS: Record<
   "google_drive.create_file": {
     consistency: "eventual",
     verify: verifyDriveCreateFile,
+  },
+  "google_drive.create_spreadsheet": {
+    consistency: "eventual",
+    verify: verifyDriveCreateSpreadsheet,
+  },
+  // Sheets mutations are "eventual" NOT because the metadata read lags —
+  // it reads the document — but because absence cannot be ordered against
+  // the interrupted batchUpdate itself, which may still be running inside
+  // Google when recovery looks seconds after a crash. Requeueing on a
+  // fresh absence could double-apply an append or tab change (metadata
+  // keys are not unique), so absence only counts once the attempt is old
+  // enough that the original request can no longer be in flight.
+  "google_drive.write_sheet_range": {
+    consistency: "eventual",
+    verify: verifySheetsMutation(
+      (p) =>
+        `Wrote the approved values to ${p.range} in spreadsheet ${p.spreadsheetId}.`,
+    ),
+  },
+  "google_drive.append_sheet_rows": {
+    consistency: "eventual",
+    verify: verifySheetsMutation(
+      (p) =>
+        `Appended the approved rows to tab "${p.tabTitle}" of spreadsheet ${p.spreadsheetId}.`,
+    ),
+  },
+  "google_drive.add_sheet_tab": {
+    consistency: "eventual",
+    verify: verifySheetsMutation(
+      (p) =>
+        `Added tab "${p.tabTitle}" to spreadsheet ${p.spreadsheetId}.`,
+    ),
+  },
+  "google_drive.rename_sheet_tab": {
+    consistency: "eventual",
+    verify: verifySheetsMutation(
+      (p) =>
+        `Renamed tab "${p.tabTitle}" to "${p.newTitle}" in spreadsheet ${p.spreadsheetId}.`,
+    ),
   },
 };
 

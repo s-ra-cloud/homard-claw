@@ -51,7 +51,11 @@ vi.mock("@clerk/express", () => ({
 import officeRouter from "./office";
 import { parseAppActions } from "../connected-apps/parser";
 import { authorizeAppAction } from "../connected-apps/authorize";
-import { buildAppsPromptSection } from "../connected-apps/catalog";
+import {
+  buildAppsPromptSection,
+  findOperation,
+  validateParams,
+} from "../connected-apps/catalog";
 import { encryptRefreshToken } from "../google/credentials";
 import type { AppAccessLevel, ConnectedAppId } from "@workspace/db";
 
@@ -327,6 +331,56 @@ describe("prompt section", () => {
     expect(section).toContain("gmail.search");
     expect(section).not.toContain("gmail.create_draft");
     expect(section).not.toContain("github.");
+  });
+
+  it("gates the Sheets operations by grant level like any other Drive op", () => {
+    const read = buildAppsPromptSection(
+      new Map<ConnectedAppId, AppAccessLevel>([["google_drive", "read"]]),
+    );
+    expect(read).toContain("google_drive.list_sheet_tabs");
+    expect(read).toContain("google_drive.read_sheet_range");
+    expect(read).not.toContain("google_drive.create_spreadsheet");
+    expect(read).not.toContain("google_drive.append_sheet_rows");
+    const draft = buildAppsPromptSection(
+      new Map<ConnectedAppId, AppAccessLevel>([["google_drive", "draft"]]),
+    );
+    expect(draft).toContain("google_drive.create_spreadsheet");
+    expect(draft).not.toContain("google_drive.write_sheet_range");
+    const write = buildAppsPromptSection(
+      new Map<ConnectedAppId, AppAccessLevel>([["google_drive", "write"]]),
+    );
+    for (const op of [
+      "google_drive.write_sheet_range",
+      "google_drive.append_sheet_rows",
+      "google_drive.add_sheet_tab",
+      "google_drive.rename_sheet_tab",
+    ]) {
+      expect(write).toContain(op);
+    }
+    // A sandboxed agent never sees the spreadsheet mutations.
+    const sandboxed = buildAppsPromptSection(
+      new Map<ConnectedAppId, AppAccessLevel>([["google_drive", "write"]]),
+      { sensitiveDataSandbox: true },
+    );
+    expect(sandboxed).toContain("google_drive.read_sheet_range");
+    expect(sandboxed).not.toContain("google_drive.write_sheet_range");
+    expect(sandboxed).not.toContain("google_drive.append_sheet_rows");
+  });
+
+  it("accepts multiline JSON in the values param but not in single-line params", () => {
+    const op = findOperation("google_drive.append_sheet_rows")!;
+    const multiline = validateParams(op, {
+      spreadsheetId: "s",
+      tabTitle: "Data",
+      values: '[\n  ["a", 1],\n  ["b", 2]\n]',
+    });
+    expect(multiline.ok).toBe(true);
+    const sneakyTab = validateParams(op, {
+      spreadsheetId: "s",
+      tabTitle: "Data\nInjected",
+      values: '[["a"]]',
+    });
+    expect(sneakyTab.ok).toBe(false);
   });
 });
 

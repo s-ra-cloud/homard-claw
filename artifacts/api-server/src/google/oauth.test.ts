@@ -194,6 +194,29 @@ describe("start", () => {
     // The verifier stays server-side: it never appears in the consent URL.
     expect(res_urlHasVerifier(authUrl, row.codeVerifier)).toBe(false);
   });
+
+  it("keeps the Drive consent minimal — the Sheets tools add no new scope", async () => {
+    const res = await request(app)
+      .post("/api/google/oauth/start")
+      .set("x-forwarded-proto", "https")
+      .set("x-forwarded-host", "test.homardclaw.example")
+      .send({ service: "google_drive" });
+    expect(res.status).toBe(200);
+    const scope = new URL(res.body.authUrl).searchParams.get("scope")!;
+    // Sheets rides on the Drive grant: drive.readonly for reads,
+    // drive.file so edits reach only spreadsheets this app created or was
+    // explicitly handed. The account-wide spreadsheets edit scope — and
+    // full Drive — are never requested.
+    expect(scope).toContain("drive.readonly");
+    expect(scope).toContain("drive.file");
+    expect(scope).not.toContain("auth/spreadsheets");
+    expect(scope.split(" ")).not.toContain(
+      "https://www.googleapis.com/auth/drive",
+    );
+    // Incremental consent: connecting Drive must not drop Gmail.
+    const authUrl = new URL(res.body.authUrl);
+    expect(authUrl.searchParams.get("include_granted_scopes")).toBe("true");
+  });
 });
 
 function res_urlHasVerifier(url: URL, verifier: string): boolean {

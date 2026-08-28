@@ -339,6 +339,29 @@ describe("registry", () => {
       ]),
     );
   });
+
+  it("exposes the bounded Sheets toolset in the Drive package — and nothing destructive", () => {
+    const drive = listRegistryEntries().find(
+      (e) => e.manifest.id === "google_drive",
+    )!.manifest;
+    expect(drive.version).toBe("1.1.0");
+    const byName = new Map(drive.tools.map((t) => [t.name, t]));
+    // The seven Sheets operations, with their exact risk levels.
+    expect(byName.get("google_drive.create_spreadsheet")?.level).toBe("draft");
+    expect(byName.get("google_drive.list_sheet_tabs")?.level).toBe("read");
+    expect(byName.get("google_drive.read_sheet_range")?.level).toBe("read");
+    expect(byName.get("google_drive.write_sheet_range")?.level).toBe("write");
+    expect(byName.get("google_drive.append_sheet_rows")?.level).toBe("write");
+    expect(byName.get("google_drive.add_sheet_tab")?.level).toBe("write");
+    expect(byName.get("google_drive.rename_sheet_tab")?.level).toBe("write");
+    // No delete, clear, share, move, or trash tool may ever appear.
+    for (const tool of drive.tools) {
+      expect(tool.name).not.toMatch(/delete|clear|share|move|trash/i);
+    }
+    // The teaching skill for spreadsheets ships with the package.
+    const skillIds = drive.skills.map((s) => s.id);
+    expect(skillIds).toContain("drive-sheets-editing");
+  });
 });
 
 describe("install lifecycle and tenancy", () => {

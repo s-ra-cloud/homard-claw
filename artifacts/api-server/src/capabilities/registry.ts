@@ -43,11 +43,12 @@ function builtinPackage(
   displayName: string,
   description: string,
   skills: CapabilityManifest["skills"],
+  version = "1.0.0",
 ): CapabilityManifest {
   return {
     id,
     displayName,
-    version: "1.0.0",
+    version,
     description,
     publisher: "Crustabox (built-in)",
     connection: id,
@@ -75,16 +76,36 @@ const GMAIL_PACKAGE = builtinPackage(
 const DRIVE_PACKAGE = builtinPackage(
   "google_drive",
   "Google Drive",
-  "Find and read files, and create new text files, in the owner's Google Drive.",
+  "Find and read files, create text files and native Google Sheets spreadsheets, and edit spreadsheet tabs, ranges, and rows in the owner's Google Drive.",
   [
     {
       id: "drive-file-handling",
       title: "Working with Drive files",
-      triggers: ["drive", "document", "file", "spreadsheet", "sheet", "doc"],
+      triggers: ["drive", "document", "file", "doc"],
       instructions:
-        "Search by name or content first, then read only the files that matter. Sheets come back as CSV text — parse rows rather than guessing. When creating files, use clear names the owner will recognize later.",
+        "Search by name or content first, then read only the files that matter. When creating files, use clear names the owner will recognize later. For native spreadsheet work, prefer the sheet tools over read_file's CSV export.",
+    },
+    {
+      id: "drive-sheets-editing",
+      title: "Working with Google Sheets",
+      triggers: [
+        "spreadsheet",
+        "sheets",
+        "sheet",
+        "tab",
+        "rows",
+        "cells",
+        "table",
+        "excel",
+        "csv",
+      ],
+      instructions:
+        "Never guess spreadsheet or tab names: find the file with google_drive.search, then google_drive.list_sheet_tabs to confirm the exact tab before touching data. Inspect before editing — read the target range first so you know what is there. Always use explicit bounded ranges like Sheet1!A2:D20; open-ended ranges are refused. To add data, prefer append_sheet_rows, which never overwrites; write_sheet_range REPLACES every cell in its range. Strings starting with = are written as formulas — only pass formulas the owner asked for. Afterwards, report exactly what changed: spreadsheet, tab, range, and how many rows or cells you wrote.",
     },
   ],
+  // 1.1.0 added the bounded Google Sheets toolset (create spreadsheet,
+  // list tabs, bounded reads, range writes, row appends, add/rename tab).
+  "1.1.0",
 );
 
 const GITHUB_PACKAGE = builtinPackage(
