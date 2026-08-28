@@ -20,3 +20,4 @@
 - [Capability packages](capability-packages.md) — new capabilities are signed data-only manifests in the compiled registry; never mutate a published version, expansions park for owner review.
 - [Per-user OAuth credentials](google-oauth-credentials.md) — Gmail/Drive share one Google account (incremental consent, scope union); GitHub has its own OAuth-app flow; all per-workspace, encrypted, no connector.
 - [Claude setup-token auth](claude-setup-token-auth.md) — OAuth tokens only work on /v1/messages with both betas, CLI identity headers, and the exact Claude Code identity system block first.
+- [Internal read capabilities](internal-read-capabilities.md) — internal agent reads ride the app_action channel but bypass the catalog: server-supplied caller, no action rows, sandbox denied both ways.

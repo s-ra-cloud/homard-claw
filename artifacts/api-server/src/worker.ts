@@ -73,6 +73,11 @@ import {
   settleActionForApproval,
 } from "./connected-apps/actions";
 import { parseAppActions } from "./connected-apps/parser";
+import {
+  executeTaskResultRead,
+  isTaskResultOperation,
+  TASK_RESULTS_PROMPT_SECTION,
+} from "./task-results";
 import { publish } from "./events";
 import { notifyTaskEvent } from "./notifications";
 import { runCodexHealthCheck, runDueSchedules } from "./scheduler";
@@ -1118,6 +1123,12 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     );
   }
 
+  // Internal office task-record reads (no connected app involved) are open
+  // to any non-sandboxed agent with a workspace. Tracked as a function of
+  // the live appAccess so a mid-run sandbox toggle withdraws them too.
+  const taskRecordReadsAvailable = () =>
+    Boolean(workspaceId) && !appAccess.sensitiveDataSandbox;
+
   // Rebuilt whenever grants/sandbox state is refreshed mid-run, so every
   // provider round is prompted with the access it actually has.
   const buildSystem = () =>
@@ -1126,6 +1137,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
       appAccess.sensitiveDataSandbox ? null : handoffPromptSection,
       context.promptSection,
       appAccess.promptSection,
+      taskRecordReadsAvailable() ? TASK_RESULTS_PROMPT_SECTION : null,
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -1662,11 +1674,23 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
           if (request.ok) wellFormedRequests += 1;
           else malformedRequests += 1;
         }
-        // Without grants nothing executes; the blocks are stripped and the
-        // refusal is recorded in the visible output.
-        if (!appAccess.promptSection) {
-          finalOutput =
-            `${cleaned}\n\n(Note: connected-app actions were requested, but this agent has no app access; nothing was run.)`.trim();
+        // Without grants nothing external executes; the blocks are stripped
+        // and the refusal is recorded in the visible output. The one
+        // exception: internal office task-record reads need no grants, so a
+        // round that actually requests one keeps the loop running for an
+        // eligible agent with zero connected-app access.
+        const requestedTaskRecordRead = requests.some(
+          (request) => request.ok && isTaskResultOperation(request.operation),
+        );
+        if (
+          !appAccess.promptSection &&
+          !(requestedTaskRecordRead && taskRecordReadsAvailable())
+        ) {
+          finalOutput = `${cleaned}\n\n(Note: ${
+            requestedTaskRecordRead
+              ? "actions were requested, but this agent has no app access and office task records are not available to it; nothing was run."
+              : "connected-app actions were requested, but this agent has no app access; nothing was run."
+          })`.trim();
           break;
         }
         if (round === MAX_ACTION_ROUNDS) {
@@ -1852,6 +1876,42 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
               "warn",
               `Rejected a malformed connected-app action request: ${request.error}`,
             );
+            continue;
+          }
+          if (isTaskResultOperation(request.operation)) {
+            // Internal read over the office's own completed-task records:
+            // no connector, no approval, no appActions row. Caller identity
+            // comes from the server (this task's workspace and the LIVE
+            // sandbox flag), never from the model's arguments, and the
+            // executor re-checks the sandbox itself.
+            const outcome = await executeTaskResultRead(
+              {
+                workspaceId,
+                agentId: agent.id,
+                sensitiveDataSandbox: appAccess.sensitiveDataSandbox,
+              },
+              request.operation,
+              request.params,
+            );
+            if (outcome.ok) {
+              actionHistory.push(
+                `[Office task records] ${request.operation} → SUCCESS:\n${outcome.summary}`,
+              );
+              await addTaskLog(
+                task.id,
+                "info",
+                `Read the office task records: ${outcome.target}.`,
+              );
+            } else {
+              actionHistory.push(
+                `[Office task records] ${request.operation} → ${outcome.kind === "denied" ? "DENIED" : "FAILED"}: ${outcome.message}`,
+              );
+              await addTaskLog(
+                task.id,
+                "warn",
+                `${outcome.kind === "denied" ? "Denied" : "Failed"} an office task-record read: ${outcome.message}`,
+              );
+            }
             continue;
           }
           const verdict = authorizeAppAction(
