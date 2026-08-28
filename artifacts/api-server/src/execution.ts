@@ -20,7 +20,11 @@ export type ProviderCallErrorKind =
   | "not_configured"
   | "auth"
   | "rate_limit"
-  /** Provider 5xx or a dropped/refused connection: worth another attempt. */
+  /**
+   * Worth another attempt: provider 5xx, a dropped/refused connection, or a
+   * completion the provider abandoned mid-generation (upstream error, or the
+   * whole token budget consumed before any visible text).
+   */
   | "transient"
   /** A subscription plan allowance is exhausted; money would be needed. */
   | "allowance"
@@ -486,6 +490,81 @@ async function callClaude(req: ProviderCallRequest): Promise<ProviderCallResult>
   };
 }
 
+/** Shape-tolerant view of one OpenRouter completion choice. */
+type OpenRouterChoice = {
+  finish_reason?: unknown;
+  error?: unknown;
+  message?: { content?: unknown; reasoning?: unknown } | null;
+};
+
+/**
+ * OpenRouter's OpenAI-compatible schema allows `message.content` to be a
+ * plain string or an array of typed parts (some upstream providers answer
+ * multimodal requests that way). Extract every supported text
+ * representation; a non-text shape yields null so the caller can classify
+ * WHY the completion carried no text instead of guessing.
+ */
+function openRouterTextContent(content: unknown): string | null {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter(
+        (part): part is { type: "text"; text: string } =>
+          typeof part === "object" &&
+          part !== null &&
+          (part as { type?: unknown }).type === "text" &&
+          typeof (part as { text?: unknown }).text === "string",
+      )
+      .map((part) => part.text)
+      .join("\n");
+  }
+  return null;
+}
+
+/**
+ * Only finish reasons from OpenRouter's documented normalized set may be
+ * persisted; anything else is an arbitrary provider string and is reduced
+ * to "unknown" before it can reach durable errorMessage storage.
+ */
+const OPENROUTER_FINISH_REASONS: ReadonlySet<string> = new Set([
+  "stop",
+  "length",
+  "content_filter",
+  "error",
+  "tool_calls",
+]);
+
+function openRouterFinishReason(choice: OpenRouterChoice): string {
+  const raw = choice.finish_reason;
+  return typeof raw === "string" && OPENROUTER_FINISH_REASONS.has(raw)
+    ? raw
+    : "unknown";
+}
+
+/**
+ * OpenRouter can deliver a failure as HTTP 200 with an `error` object in
+ * the body (e.g. moderation blocks, upstream failures discovered after
+ * headers were sent). Its `code` mirrors HTTP status semantics, so a valid
+ * numeric code reuses the exact status classification — auth, rate limit,
+ * allowance, transient — the worker already retries or blocks on. The
+ * provider's error MESSAGE is deliberately ignored: it can echo the prompt
+ * or request material, and our messages flow into durable task records.
+ */
+function openRouterBodyError(code: unknown): ProviderCallError {
+  const numeric =
+    typeof code === "number" && Number.isInteger(code) ? code : null;
+  if (numeric !== null && numeric >= 400 && numeric <= 599) {
+    return mapHttpError(numeric, "OpenRouter");
+  }
+  return new ProviderCallError(
+    "provider_error",
+    numeric !== null
+      ? `OpenRouter reported error code ${numeric}.`
+      : "OpenRouter reported an error for this request.",
+    "OpenRouter reported an error while handling this request. Check the selected model and attached file types, then resend.",
+  );
+}
+
 async function callOpenRouter(req: ProviderCallRequest): Promise<ProviderCallResult> {
   const key = await credentialFor(req.workspaceId, "openrouter");
   let res: globalThis.Response;
@@ -511,7 +590,8 @@ async function callOpenRouter(req: ProviderCallRequest): Promise<ProviderCallRes
   }
   if (!res.ok) throw mapHttpError(res.status, "OpenRouter");
   let payload: {
-    choices?: Array<{ message?: { content?: string } }>;
+    error?: unknown;
+    choices?: OpenRouterChoice[];
     usage?: { prompt_tokens?: number; completion_tokens?: number };
   };
   try {
@@ -519,15 +599,70 @@ async function callOpenRouter(req: ProviderCallRequest): Promise<ProviderCallRes
   } catch {
     throw new ProviderCallError("provider_error", "OpenRouter returned a malformed response.");
   }
-  const output = payload.choices?.[0]?.message?.content;
-  if (typeof output !== "string" || output === "") {
-    throw new ProviderCallError("provider_error", "OpenRouter returned no text output.");
+  if (payload.error && typeof payload.error === "object") {
+    throw openRouterBodyError((payload.error as { code?: unknown }).code);
   }
-  return {
-    output,
-    inputTokens: Math.max(0, Math.round(payload.usage?.prompt_tokens ?? 0)),
-    outputTokens: Math.max(0, Math.round(payload.usage?.completion_tokens ?? 0)),
-  };
+  const choice = Array.isArray(payload.choices) ? payload.choices[0] : undefined;
+  if (!choice || typeof choice !== "object") {
+    throw new ProviderCallError(
+      "provider_error",
+      "OpenRouter returned no completion choices.",
+      "OpenRouter answered without any completion. Resend the task, or choose a different OpenRouter model if this repeats.",
+    );
+  }
+  const finishReason = openRouterFinishReason(choice);
+  if (choice.error && typeof choice.error === "object") {
+    // A choice-level error means the upstream model failed mid-generation.
+    // Like a 5xx, that says nothing about the request itself and usually
+    // clears on its own, so it is worth another attempt.
+    throw new ProviderCallError(
+      "transient",
+      "The OpenRouter upstream provider failed while generating this completion.",
+    );
+  }
+  const output = openRouterTextContent(choice.message?.content ?? null);
+  if (typeof output === "string" && output !== "") {
+    return {
+      output,
+      inputTokens: Math.max(0, Math.round(payload.usage?.prompt_tokens ?? 0)),
+      outputTokens: Math.max(0, Math.round(payload.usage?.completion_tokens ?? 0)),
+    };
+  }
+  // No usable text. Classify why, so the worker can retry what is worth
+  // retrying and the owner can act on what is not.
+  if (finishReason === "length") {
+    // The whole output budget was consumed (reasoning models often spend it
+    // all before the first visible token). Generation is nondeterministic,
+    // so a retry under the worker's existing backoff frequently succeeds.
+    throw new ProviderCallError(
+      "transient",
+      "OpenRouter hit the output token limit before producing any text (finish reason: length).",
+      "The model spent its entire output budget before writing any text. This is retried automatically; if it keeps happening, choose a different OpenRouter model.",
+    );
+  }
+  if (finishReason === "content_filter") {
+    throw new ProviderCallError(
+      "provider_error",
+      "OpenRouter withheld this completion (finish reason: content_filter).",
+      "The provider's content filter withheld the reply. Rephrase the objective or choose a different OpenRouter model.",
+    );
+  }
+  if (finishReason === "tool_calls") {
+    throw new ProviderCallError(
+      "provider_error",
+      "OpenRouter returned a tool call instead of text (finish reason: tool_calls).",
+      "The selected model answered with a tool call, which tasks cannot execute. Choose an OpenRouter model that replies in plain text.",
+    );
+  }
+  const reasoning = choice.message?.reasoning;
+  const reasoningOnly = typeof reasoning === "string" && reasoning.trim() !== "";
+  throw new ProviderCallError(
+    "provider_error",
+    reasoningOnly
+      ? `OpenRouter returned only reasoning output and no final text (finish reason: ${finishReason}).`
+      : `OpenRouter returned no text output (finish reason: ${finishReason}).`,
+    "The model finished without producing any text. Resend the task, or choose a different OpenRouter model if this repeats.",
+  );
 }
 
 // ---------------------------------------------------------------------------
