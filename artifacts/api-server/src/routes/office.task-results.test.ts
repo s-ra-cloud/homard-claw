@@ -55,10 +55,13 @@ vi.stubGlobal("fetch", fetchMock);
 import officeRouter from "./office";
 import { runTask } from "../worker";
 import {
+  collectTaskResultsForTalk,
   executeTaskResultRead,
+  TALK_RESULT_MAX_RECORDS,
   TASK_RESULT_READ_OPERATION,
   TASK_RESULT_SEARCH_OPERATION,
 } from "../task-results";
+import { TZDate } from "@date-fns/tz";
 import { clearProviderCaches } from "../providers";
 import { saveProviderCredential } from "../provider-credentials";
 
@@ -165,6 +168,18 @@ async function insertRunningTask(agentId: string, objective: string) {
     })
     .returning();
   return task;
+}
+
+function utcDayStr(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * Noon UTC of the current day: an anchor for "same day" fixtures so
+ * minute-scale offsets can never cross a midnight boundary mid-test.
+ */
+function utcNoonToday(): Date {
+  return new Date(`${utcDayStr(new Date())}T12:00:00.000Z`);
 }
 
 function caller(overrides: Partial<Parameters<typeof executeTaskResultRead>[0]> = {}) {
@@ -771,6 +786,109 @@ describe("Talk conversation path", () => {
     expect(calls).toBe(1);
   });
 
+  it("answers 'every task today' from the complete same-day set", async () => {
+    // The deployed regression: >5 records finished today, and the owner
+    // asks for all of them. The answering round must receive every record,
+    // not just the first page of five.
+    const digest = await createAgent("Digestor");
+    const noon = utcNoonToday();
+    const day = utcDayStr(noon);
+    const ids: string[] = [];
+    for (let i = 0; i < 7; i += 1) {
+      const task = await insertCompletedTask(digest.id, workspaceId, {
+        objective: `daily errand ${i}`,
+        output: `Errand ${i} finished without incident.`,
+        finishedAt: new Date(noon.getTime() - i * 60_000),
+      });
+      ids.push(task.id);
+    }
+    const stale = await insertCompletedTask(digest.id, workspaceId, {
+      objective: "old errand",
+      output: "Ancient errand, long done.",
+      finishedAt: new Date(noon.getTime() - 5 * 24 * 60 * 60 * 1000),
+    });
+    queueCompletions([
+      completion(
+        JSON.stringify({
+          reply: "Let me pull up today's records.",
+          taskObjective: null,
+          agentRequest: null,
+          // Browse contract: no full-text query, explicit date bounds.
+          taskResultsQuery: { agentName: digest.name, since: day, until: day },
+        }),
+      ),
+      completion("Today we completed seven tasks; here's the rundown."),
+    ]);
+
+    const res = await request(app)
+      .post(`/api/agents/${digest.id}/converse`)
+      .send({
+        text: "Summarize every task we've done today.",
+        ownerTimezone: "UTC",
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.reply).toBe(
+      "Today we completed seven tasks; here's the rundown.",
+    );
+    expect(completionCalls()).toHaveLength(2);
+    // The Talk contract grounds "today" on the owner's calendar and
+    // teaches the browse mode explicitly.
+    expect(completionBody(0)).toContain(day);
+    expect(completionBody(0)).toContain("OMIT query");
+    // The answering round received every same-day record — all 7, in one
+    // summary, marked as the complete set — and no older distractor.
+    const compose = completionBody(1);
+    for (const id of ids) expect(compose).toContain(id);
+    expect(compose).not.toContain(stale.id);
+    expect(compose).toContain("COMPLETE set");
+    expect(compose).toContain("All 7 matching completed task result(s)");
+    expect(compose).not.toContain("not browsable");
+  });
+
+  it("tells the answering round when records remain beyond the Talk bound", async () => {
+    const overflow = await createAgent("Overflow");
+    const noon = utcNoonToday();
+    const day = utcDayStr(noon);
+    const total = TALK_RESULT_MAX_RECORDS + 2;
+    for (let i = 0; i < total; i += 1) {
+      await insertCompletedTask(overflow.id, workspaceId, {
+        objective: `bulk chore ${i}`,
+        output: `Bulk chore ${i} done.`,
+        finishedAt: new Date(noon.getTime() - i * 60_000),
+      });
+    }
+    queueCompletions([
+      completion(
+        JSON.stringify({
+          reply: "Checking the day's records.",
+          taskObjective: null,
+          agentRequest: null,
+          taskResultsQuery: {
+            agentName: overflow.name,
+            since: day,
+            until: day,
+          },
+        }),
+      ),
+      completion(
+        `I show the ${TALK_RESULT_MAX_RECORDS} most recent of ${total} tasks; 2 more finished earlier today.`,
+      ),
+    ]);
+
+    const res = await request(app)
+      .post(`/api/agents/${overflow.id}/converse`)
+      .send({ text: "List everything we did today.", ownerTimezone: "UTC" });
+    expect(res.status).toBe(200);
+    const compose = completionBody(1);
+    // The answering round is told, in its instructions AND in the records,
+    // that this is a partial set — it can never present it as complete.
+    expect(compose).toContain("NEVER present them as the complete history");
+    expect(compose).toContain(
+      `only the ${TALK_RESULT_MAX_RECORDS} most recent of ${total}`,
+    );
+    expect(compose).not.toContain("COMPLETE set of matching results");
+  });
+
   it("still proposes tasks normally when no lookup is requested", async () => {
     const planner = await createAgent("Planner");
     queueCompletions([
@@ -789,5 +907,245 @@ describe("Talk conversation path", () => {
       .send({ text: "Can you draft the weekly reef report?" });
     expect(res.status).toBe(200);
     expect(res.body.proposedTaskObjective).toBe("Draft the weekly reef report");
+  });
+});
+
+describe("complete Talk task history (bounded-exhaustive browse)", () => {
+  it("browses a whole day chronologically with no query — every record, newest first", async () => {
+    const chronicle = await createAgent("Chronicle");
+    const noon = utcNoonToday();
+    const day = utcDayStr(noon);
+    const ids: string[] = [];
+    for (let i = 0; i < 7; i += 1) {
+      const task = await insertCompletedTask(chronicle.id, workspaceId, {
+        objective: `digest entry ${i}`,
+        output: `Digest entry ${i} recorded.`,
+        finishedAt: new Date(noon.getTime() - i * 60_000),
+      });
+      ids.push(task.id);
+    }
+    const distractors = [];
+    for (let i = 0; i < 2; i += 1) {
+      distractors.push(
+        await insertCompletedTask(chronicle.id, workspaceId, {
+          objective: `stale digest ${i}`,
+          output: "Old digest, different day.",
+          finishedAt: new Date(noon.getTime() - (i + 3) * 24 * 60 * 60 * 1000),
+        }),
+      );
+    }
+
+    const lookup = await collectTaskResultsForTalk(caller(), {
+      agentName: chronicle.name,
+      since: day,
+      until: day,
+    });
+    expect(lookup.ok).toBe(true);
+    if (!lookup.ok) return;
+    expect(lookup.total).toBe(7);
+    expect(lookup.shown).toBe(7);
+    expect(lookup.complete).toBe(true);
+    // Every same-day record present, newest first; no older distractors.
+    const positions = ids.map((id) => lookup.summary.indexOf(id));
+    expect(positions.every((position) => position >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+    for (const old of distractors) {
+      expect(lookup.summary).not.toContain(old.id);
+    }
+    expect(lookup.summary).toContain("complete set");
+  });
+
+  it("treats a filler query like 'all tasks today' as browsing today, never as full-text terms", async () => {
+    const broad = await createAgent("Broadside");
+    const noon = utcNoonToday();
+    const ids: string[] = [];
+    for (let i = 0; i < 6; i += 1) {
+      const task = await insertCompletedTask(broad.id, workspaceId, {
+        objective: `sweep round ${i}`,
+        output: `Sweep round ${i} clear.`,
+        finishedAt: new Date(noon.getTime() - i * 60_000),
+      });
+      ids.push(task.id);
+    }
+    const old = await insertCompletedTask(broad.id, workspaceId, {
+      objective: "sweep round from last week",
+      output: "Old sweep.",
+      finishedAt: new Date(noon.getTime() - 6 * 24 * 60 * 60 * 1000),
+    });
+
+    // No since/until given: the filler words themselves name the day.
+    const lookup = await collectTaskResultsForTalk(caller(), {
+      query: "all tasks today",
+      agentName: broad.name,
+    });
+    expect(lookup.ok).toBe(true);
+    if (!lookup.ok) return;
+    expect(lookup.total).toBe(6);
+    expect(lookup.complete).toBe(true);
+    for (const id of ids) expect(lookup.summary).toContain(id);
+    expect(lookup.summary).not.toContain(old.id);
+    // The filler was never demanded as a literal text match.
+    expect(lookup.summary).not.toContain('matching "all tasks today"');
+  });
+
+  it("follows pages up to the documented bound and reports exactly what remains", async () => {
+    const prolific = await createAgent("Prolific");
+    const noon = utcNoonToday();
+    const day = utcDayStr(noon);
+    const total = TALK_RESULT_MAX_RECORDS + 3;
+    const ids: string[] = [];
+    for (let i = 0; i < total; i += 1) {
+      const task = await insertCompletedTask(prolific.id, workspaceId, {
+        objective: `harbor log ${i}`,
+        output: `Harbor log ${i}.`,
+        finishedAt: new Date(noon.getTime() - i * 60_000),
+      });
+      ids.push(task.id);
+    }
+
+    const lookup = await collectTaskResultsForTalk(caller(), {
+      agentName: prolific.name,
+      since: day,
+      until: day,
+    });
+    expect(lookup.ok).toBe(true);
+    if (!lookup.ok) return;
+    expect(lookup.total).toBe(total);
+    expect(lookup.shown).toBe(TALK_RESULT_MAX_RECORDS);
+    expect(lookup.complete).toBe(false);
+    // The newest records fill the bound; the overflow is named, not hidden.
+    for (const id of ids.slice(0, TALK_RESULT_MAX_RECORDS)) {
+      expect(lookup.summary).toContain(id);
+    }
+    for (const id of ids.slice(TALK_RESULT_MAX_RECORDS)) {
+      expect(lookup.summary).not.toContain(id);
+    }
+    expect(lookup.summary).toContain(
+      `only the ${TALK_RESULT_MAX_RECORDS} most recent of ${total}`,
+    );
+    expect(lookup.summary).toContain("3 more exist");
+  });
+
+  it("distinguishes unbrowsable records instead of implying they do not exist", async () => {
+    const mixed = await createAgent("Mixedbag");
+    const noon = utcNoonToday();
+    const day = utcDayStr(noon);
+    const done = await insertCompletedTask(mixed.id, workspaceId, {
+      objective: "sort the shells",
+      output: "Shells sorted into 4 bins.",
+      finishedAt: noon,
+    });
+    await insertRunningTask(mixed.id, "still sorting the shells");
+    // Completed but with no stored output: eligible-looking, not browsable.
+    await db.insert(tasksTable).values({
+      agentId: mixed.id,
+      workspaceId,
+      objective: `${RUN_TAG} finished without output`,
+      output: "",
+      provider: "openrouter",
+      model: "test-vendor/test-model",
+      status: "completed",
+      attempts: 1,
+      startedAt: new Date(noon.getTime() - 60_000),
+      finishedAt: noon,
+    });
+
+    const lookup = await collectTaskResultsForTalk(caller(), {
+      agentName: mixed.name,
+      since: day,
+      until: day,
+    });
+    expect(lookup.ok).toBe(true);
+    if (!lookup.ok) return;
+    expect(lookup.total).toBe(1);
+    expect(lookup.summary).toContain(done.id);
+    expect(lookup.summary).toContain(
+      "2 other task(s) in this range are not browsable",
+    );
+
+    // A sandboxed agent's record in an otherwise empty range: reported as
+    // unbrowsable by count only — its content never appears.
+    const hidden = await createAgent("Hiddenwork");
+    const past = new Date(noon.getTime() - 30 * 24 * 60 * 60 * 1000);
+    await insertCompletedTask(hidden.id, workspaceId, {
+      objective: "secret survey",
+      output: "Secret survey findings.",
+      finishedAt: past,
+    });
+    await setSandbox(hidden.id, true);
+    const gone = await collectTaskResultsForTalk(caller(), {
+      since: utcDayStr(past),
+      until: utcDayStr(past),
+    });
+    expect(gone.ok).toBe(true);
+    if (!gone.ok) return;
+    expect(gone.total).toBe(0);
+    expect(gone.summary).toContain("No completed task results matched");
+    expect(gone.summary).toContain(
+      "1 other task(s) in this range are not browsable",
+    );
+    expect(gone.summary).not.toContain("Secret survey");
+  });
+
+  it("resolves date-only bounds on the owner's calendar day, not the server's", async () => {
+    const boundary = await createAgent("Boundary");
+    // UTC+14, no DST: the owner's "today" differs maximally from UTC.
+    const tz = "Pacific/Kiritimati";
+    const today = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+    const [y, m, d] = today.split("-").map(Number);
+    const dayStart = new Date(new TZDate(y, m - 1, d, 0, 0, 0, tz).getTime());
+    const early = await insertCompletedTask(boundary.id, workspaceId, {
+      objective: "sunrise patrol",
+      output: "Sunrise patrol done.",
+      finishedAt: new Date(dayStart.getTime() + 10 * 60_000),
+    });
+    const late = await insertCompletedTask(boundary.id, workspaceId, {
+      objective: "midnight patrol",
+      output: "Midnight patrol done.",
+      finishedAt: new Date(dayStart.getTime() + (23 * 60 + 50) * 60_000),
+    });
+    const priorDay = await insertCompletedTask(boundary.id, workspaceId, {
+      objective: "yesterday patrol",
+      output: "Yesterday patrol done.",
+      finishedAt: new Date(dayStart.getTime() - 10 * 60_000),
+    });
+
+    const owner = await collectTaskResultsForTalk(
+      caller(),
+      { agentName: boundary.name, since: today, until: today },
+      { timezone: tz },
+    );
+    expect(owner.ok).toBe(true);
+    if (!owner.ok) return;
+    expect(owner.total).toBe(2);
+    expect(owner.summary).toContain(early.id);
+    expect(owner.summary).toContain(late.id);
+    expect(owner.summary).not.toContain(priorDay.id);
+
+    // The relative words resolve on the same owner calendar.
+    const relative = await collectTaskResultsForTalk(
+      caller(),
+      { agentName: boundary.name, since: "today", until: "today" },
+      { timezone: tz },
+    );
+    expect(relative.ok).toBe(true);
+    if (!relative.ok) return;
+    expect(relative.total).toBe(2);
+
+    // Without the owner's timezone the same dates are a different window:
+    // the owner's early-morning record falls outside the UTC day.
+    const utc = await collectTaskResultsForTalk(caller(), {
+      agentName: boundary.name,
+      since: today,
+      until: today,
+    });
+    expect(utc.ok).toBe(true);
+    if (!utc.ok) return;
+    expect(utc.summary).not.toContain(early.id);
   });
 });

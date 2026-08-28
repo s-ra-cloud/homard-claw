@@ -132,6 +132,19 @@ function confirmationIntent(utterance: string): "confirm" | "cancel" | null {
   return null;
 }
 
+/**
+ * The owner's IANA timezone, sent with every converse request so the server
+ * resolves "today" on the owner's calendar day rather than the server's.
+ */
+function detectOwnerTimezone(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+}
+const OWNER_TIMEZONE = detectOwnerTimezone();
+
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -580,6 +593,7 @@ export function CallView({
             text,
             history: contextTurns(),
             clientMessageId: turnKey,
+            ...(OWNER_TIMEZONE ? { ownerTimezone: OWNER_TIMEZONE } : {}),
             ...(pendingDelegationRef.current
               ? {
                   pendingDelegationTargetId:
@@ -723,6 +737,7 @@ export function CallView({
           body: JSON.stringify({
             audio,
             history: contextTurns(),
+            ...(OWNER_TIMEZONE ? { ownerTimezone: OWNER_TIMEZONE } : {}),
             ...(pendingDelegationRef.current
               ? {
                   pendingDelegationTargetId:

@@ -14,4 +14,9 @@ export interface VoiceConverseInput {
   history?: ConverseTurn[];
   /** Teammate selected by an earlier clarification turn. Authority is revalidated by the server. */
   pendingDelegationTargetId?: string;
+  /**
+     * IANA timezone of the owner's device (e.g. Europe/Paris). Used to resolve relative days like "today" to the owner's calendar day in task-history lookups. Invalid or missing values fall back to UTC.
+     * @maxLength 80
+     */
+  ownerTimezone?: string;
 }

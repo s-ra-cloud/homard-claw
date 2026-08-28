@@ -24,12 +24,14 @@ import {
   pool,
   systemStateTable,
   talkExchangesTable,
+  tasksTable,
   teamMembersTable,
   teamsTable,
   workspaceSettingsTable,
   workspacesTable,
 } from "@workspace/db";
 import { and, eq, inArray, or } from "drizzle-orm";
+import { TZDate } from "@date-fns/tz";
 
 const authState = vi.hoisted(() => ({ userId: "hc-voice-test-owner" }));
 
@@ -351,6 +353,9 @@ afterAll(async () => {
     if (createdTeamIds.length > 0) {
       await db.delete(teamsTable).where(inArray(teamsTable.id, createdTeamIds));
     }
+    await db
+      .delete(tasksTable)
+      .where(inArray(tasksTable.agentId, createdAgentIds));
     await db
       .delete(agentsTable)
       .where(inArray(agentsTable.id, createdAgentIds));
@@ -1656,6 +1661,137 @@ describe("voice conversations", () => {
       );
     expect(events.find((e) => e.type === "reply")?.voice).toBeNull();
     expect(events.some((e) => e.type === "audio")).toBe(false);
+  });
+
+  it("resolves 'today' on the owner's calendar and answers from the complete set", async () => {
+    const agent = await createAgent(`${RUN_TAG} Day Chronicler`);
+    // UTC+14, no DST: the owner's "today" differs maximally from UTC.
+    const tz = "Pacific/Kiritimati";
+    const today = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+    const [y, m, d] = today.split("-").map(Number);
+    const dayStart = new Date(new TZDate(y, m - 1, d, 0, 0, 0, tz).getTime());
+    const insert = async (objective: string, finishedAt: Date) => {
+      const [task] = await db
+        .insert(tasksTable)
+        .values({
+          agentId: agent.id,
+          workspaceId: wsId,
+          objective: `${RUN_TAG} ${objective}`,
+          output: `${objective} — done.`,
+          provider: "openrouter",
+          model: "test-vendor/test-model",
+          status: "completed",
+          attempts: 1,
+          startedAt: new Date(finishedAt.getTime() - 60_000),
+          finishedAt,
+        })
+        .returning();
+      return task;
+    };
+    const ids: string[] = [];
+    for (let i = 0; i < 6; i += 1) {
+      ids.push(
+        (
+          await insert(
+            `tide check ${i}`,
+            new Date(dayStart.getTime() + (i + 1) * 60 * 60_000),
+          )
+        ).id,
+      );
+    }
+    const prior = await insert(
+      "stale tide check",
+      new Date(dayStart.getTime() - 10 * 60_000),
+    );
+
+    // Round 1: the model asks for a browse of "today" (owner's calendar);
+    // round 2 composes the spoken answer from the collected records.
+    const outputs = [
+      JSON.stringify({
+        reply: "Checking today's records.",
+        taskObjective: null,
+        agentRequest: null,
+        taskResultsQuery: {
+          agentName: agent.name,
+          since: "today",
+          until: "today",
+        },
+      }),
+      "You finished six tasks today, boss.",
+    ];
+    fetchMock.mockImplementation(async (url: unknown) => {
+      const target = String(url);
+      if (target.includes("/models")) {
+        return jsonResponse({
+          data: [
+            {
+              id: "test-vendor/test-model",
+              name: "Test Model",
+              context_length: 8192,
+              pricing: { prompt: "0.000001", completion: "0.00001" },
+            },
+          ],
+        });
+      }
+      if (target.includes("/audio/transcriptions")) {
+        return jsonResponse({ text: "Summarize every task we've done today" });
+      }
+      if (
+        target.includes("api.openai.com") &&
+        target.includes("/chat/completions")
+      ) {
+        return sseResponse(['{"choices":[{"delta":{"audio":{"data":"QUFBQQ=="}}}]}']);
+      }
+      if (target.includes("/chat/completions")) {
+        return jsonResponse({
+          choices: [{ message: { content: outputs.shift() ?? "No answer." } }],
+          usage: { prompt_tokens: 50, completion_tokens: 20 },
+        });
+      }
+      throw new Error(`unexpected fetch in test: ${target}`);
+    });
+
+    const res = await request(app)
+      .post(`/api/agents/${agent.id}/voice-converse`)
+      .send({ audio: FAKE_WAV_BASE64, ownerTimezone: tz })
+      .buffer(true)
+      .parse((response, callback) => {
+        let text = "";
+        response.on("data", (chunk: Buffer) => (text += chunk.toString()));
+        response.on("end", () => callback(null, text));
+      });
+    expect(res.status).toBe(200);
+    const events = String(res.body)
+      .split("\n\n")
+      .filter((f) => f.startsWith("data: "))
+      .map(
+        (f) => JSON.parse(f.slice(6)) as { type: string; text?: string },
+      );
+    expect(events.find((e) => e.type === "reply")?.text).toBe(
+      "You finished six tasks today, boss.",
+    );
+
+    const chatBodies = fetchMock.mock.calls
+      .filter(
+        ([url]) =>
+          String(url).includes("/chat/completions") &&
+          !String(url).includes("api.openai.com"),
+      )
+      .map(([, init]) => String((init as { body?: string })?.body ?? ""));
+    expect(chatBodies).toHaveLength(2);
+    // The voice contract carries the owner's calendar, same as text mode.
+    expect(chatBodies[0]).toContain(today);
+    expect(chatBodies[0]).toContain(tz);
+    // The answering round received all six same-day records as a complete
+    // set — and not the record from before the owner's midnight.
+    for (const id of ids) expect(chatBodies[1]).toContain(id);
+    expect(chatBodies[1]).not.toContain(prior.id);
+    expect(chatBodies[1]).toContain("COMPLETE set");
   });
 
   it("reports a transcription failure as a clear in-stream error", async () => {
