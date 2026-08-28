@@ -31,6 +31,12 @@ const RETRYABLE_KINDS: ReadonlySet<ProviderCallErrorKind> = new Set([
 export class ProviderCallError extends Error {
   readonly kind: ProviderCallErrorKind;
   /**
+   * Optional owner-facing explanation composed entirely by this server.
+   * Upstream response bodies must never be copied here because they can echo
+   * request content or credentials.
+   */
+  readonly userMessage: string | null;
+  /**
    * Rate limits and transient outages are retryable with backoff. Auth
    * failures, allowance exhaustion, policy blocks, timeouts, and malformed
    * responses are not: repeating them would just burn attempts on a problem
@@ -45,11 +51,16 @@ export class ProviderCallError extends Error {
    */
   turnStarted: boolean | null = null;
 
-  constructor(kind: ProviderCallErrorKind, message: string) {
+  constructor(
+    kind: ProviderCallErrorKind,
+    message: string,
+    userMessage: string | null = null,
+  ) {
     super(message);
     this.name = "ProviderCallError";
     this.kind = kind;
     this.retryable = RETRYABLE_KINDS.has(kind);
+    this.userMessage = userMessage;
   }
 }
 
@@ -198,7 +209,10 @@ async function credentialFor(
  * can echo request data (including Authorization material through proxies),
  * and errorMessage flows into durable logs and the UI. Status code only.
  */
-function mapHttpError(status: number): ProviderCallError {
+function mapHttpError(
+  status: number,
+  provider: "Claude" | "OpenRouter",
+): ProviderCallError {
   if (status === 401 || status === 403) {
     return new ProviderCallError(
       "auth",
@@ -209,6 +223,27 @@ function mapHttpError(status: number): ProviderCallError {
     return new ProviderCallError(
       "rate_limit",
       "The provider is rate limiting requests.",
+    );
+  }
+  if (status === 402) {
+    return new ProviderCallError(
+      "allowance",
+      `${provider} returned HTTP 402.`,
+      `${provider} reports that this account has insufficient credits or allowance. Check the provider account, then resend.`,
+    );
+  }
+  if (provider === "OpenRouter" && status === 404) {
+    return new ProviderCallError(
+      "provider_error",
+      "OpenRouter returned HTTP 404.",
+      "OpenRouter could not find an available endpoint for the selected model and request (HTTP 404). Choose another OpenRouter model; attached files can also limit which endpoints are eligible.",
+    );
+  }
+  if (status === 400 || status === 422) {
+    return new ProviderCallError(
+      "provider_error",
+      `${provider} returned HTTP ${status}.`,
+      `${provider} rejected this request (HTTP ${status}). Check the selected model and attached file types, then resend.`,
     );
   }
   // 5xx means the provider itself is unhealthy (502/503 behind a load
@@ -407,7 +442,7 @@ async function callClaude(req: ProviderCallRequest): Promise<ProviderCallResult>
   } catch (error) {
     throw mapNetworkError(error, req.signal);
   }
-  if (!res.ok) throw mapHttpError(res.status);
+  if (!res.ok) throw mapHttpError(res.status, "Claude");
   let payload: {
     content?: Array<{ type?: string; text?: string }>;
     usage?: { input_tokens?: number; output_tokens?: number };
@@ -454,7 +489,7 @@ async function callOpenRouter(req: ProviderCallRequest): Promise<ProviderCallRes
   } catch (error) {
     throw mapNetworkError(error, req.signal);
   }
-  if (!res.ok) throw mapHttpError(res.status);
+  if (!res.ok) throw mapHttpError(res.status, "OpenRouter");
   let payload: {
     choices?: Array<{ message?: { content?: string } }>;
     usage?: { prompt_tokens?: number; completion_tokens?: number };

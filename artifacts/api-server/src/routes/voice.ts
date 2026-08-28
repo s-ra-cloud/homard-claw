@@ -1253,10 +1253,19 @@ function providerErrorMessage(err: unknown): {
           status: 503,
           message: "The response provider timed out. Try again.",
         };
+      case "allowance":
+        return {
+          status: 503,
+          message:
+            err.userMessage ??
+            "The response provider account has no credits or allowance left. Check the provider account, then resend.",
+        };
       default:
         return {
           status: 503,
-          message: "The response provider failed. Try again.",
+          message:
+            err.userMessage ??
+            "The response provider failed. Check Providers for connection and model status, then try again.",
         };
     }
   }
