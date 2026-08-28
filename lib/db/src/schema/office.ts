@@ -531,6 +531,23 @@ export const approvalsTable = pgTable("approvals", {
   action: text("action").notNull(),
   details: text("details").notNull(),
   status: text("status").notNull().default("pending"),
+  /**
+   * The workspace's designated approval reviewer at request creation time.
+   * This is a snapshot: changing the setting affects new requests without
+   * silently changing who was responsible for an in-flight review.
+   */
+  reviewerAgentId: uuid("reviewer_agent_id").references(() => agentsTable.id, {
+    onDelete: "set null",
+  }),
+  // null | queued | reviewing | approved | notified. The automatic reviewer
+  // may approve, but every uncertain/error path ends at `notified` so the
+  // owner keeps the final decision.
+  autoReviewStatus: text("auto_review_status"),
+  autoReviewReason: text("auto_review_reason"),
+  autoReviewStartedAt: timestamp("auto_review_started_at", {
+    withTimezone: true,
+  }),
+  autoReviewedAt: timestamp("auto_reviewed_at", { withTimezone: true }),
   decidedAt: timestamp("decided_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()

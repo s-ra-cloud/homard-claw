@@ -42,6 +42,7 @@ export const CRUSTABOX_DOCUMENTATION = [
       "Create tasks manually, from Talk, through delegation, or from recurring schedules. Attach images and documents when relevant.",
       "Review status, provider/model routing, estimates, token usage, logs, results, blockers, and replicated tasks from the Tasks screen.",
       "Risky or costly actions wait in Approvals unless policy explicitly allows them. Inbox reports task results and approval requests.",
+      "In Approvals, you may appoint an active non-sandboxed Crustabot to review initial task gates, connected-app actions, and later task continuations. It auto-approves only clear, high-certainty requests; uncertainty or any failure leaves the request pending and notifies you.",
     ],
   },
   {

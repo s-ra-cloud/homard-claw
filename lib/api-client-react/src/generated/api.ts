@@ -27,6 +27,8 @@ import type {
   AgentUpdate,
   Approval,
   ApprovalDecision,
+  ApprovalSettings,
+  ApprovalSettingsInput,
   ArchiveInput,
   AuditPage,
   AuditVerification,
@@ -1395,6 +1397,154 @@ export function useListApprovals<TData = Awaited<ReturnType<typeof listApprovals
 
 
 
+
+export const getGetApprovalSettingsUrl = () => {
+
+
+
+
+  return `/api/approvals/settings`
+}
+
+/**
+ * @summary Read the automatic approval reviewer selection
+ */
+export const getApprovalSettings = async ( options?: Parameters<typeof customFetch>[1]): Promise<ApprovalSettings> => {
+
+  return customFetch<ApprovalSettings>(getGetApprovalSettingsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetApprovalSettingsQueryKey = () => {
+    return [
+    `/api/approvals/settings`
+    ] as const;
+    }
+
+
+export const getGetApprovalSettingsQueryOptions = <TData = Awaited<ReturnType<typeof getApprovalSettings>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getApprovalSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetApprovalSettingsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getApprovalSettings>>> = ({ signal }) => getApprovalSettings({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getApprovalSettings>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetApprovalSettingsQueryResult = NonNullable<Awaited<ReturnType<typeof getApprovalSettings>>>
+export type GetApprovalSettingsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Read the automatic approval reviewer selection
+ */
+
+export function useGetApprovalSettings<TData = Awaited<ReturnType<typeof getApprovalSettings>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getApprovalSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetApprovalSettingsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateApprovalSettingsUrl = () => {
+
+
+
+
+  return `/api/approvals/settings`
+}
+
+/**
+ * @summary Select or disable the automatic approval reviewer
+ */
+export const updateApprovalSettings = async (approvalSettingsInput: ApprovalSettingsInput, options?: Parameters<typeof customFetch>[1]): Promise<ApprovalSettings> => {
+
+  return customFetch<ApprovalSettings>(getUpdateApprovalSettingsUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(approvalSettingsInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateApprovalSettingsMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateApprovalSettings>>, TError,{data: BodyType<ApprovalSettingsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateApprovalSettings>>, TError,{data: BodyType<ApprovalSettingsInput>}, TContext> => {
+
+const mutationKey = ['updateApprovalSettings'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateApprovalSettings>>, {data: BodyType<ApprovalSettingsInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateApprovalSettings(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateApprovalSettingsMutationResult = NonNullable<Awaited<ReturnType<typeof updateApprovalSettings>>>
+    export type UpdateApprovalSettingsMutationBody = BodyType<ApprovalSettingsInput>
+    export type UpdateApprovalSettingsMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Select or disable the automatic approval reviewer
+ */
+export const useUpdateApprovalSettings = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateApprovalSettings>>, TError,{data: BodyType<ApprovalSettingsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateApprovalSettings>>,
+        TError,
+        {data: BodyType<ApprovalSettingsInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateApprovalSettingsMutationOptions(options));
+    }
 
 export const getDecideApprovalUrl = (approvalId: string,) => {
 

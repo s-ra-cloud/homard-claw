@@ -82,6 +82,10 @@ import { publish } from "./events";
 import { notifyTaskEvent } from "./notifications";
 import { runCodexHealthCheck, runDueSchedules } from "./scheduler";
 import { logger } from "./lib/logger";
+import {
+  approvalReviewSnapshot,
+  reviewPendingApprovals,
+} from "./approval-reviewer";
 
 /**
  * Persistent task runner: the tasks table is the queue, this module is the
@@ -605,6 +609,7 @@ async function parkForApproval(
   { task, agent }: ClaimedTask,
   reason: string,
 ): Promise<void> {
+  const review = await approvalReviewSnapshot(agent.workspaceId!);
   const parked = await db.transaction(async (tx) => {
     const [updated] = await tx
       .update(tasksTable)
@@ -635,7 +640,22 @@ async function parkForApproval(
         action: `Run task: ${task.objective.slice(0, 120)}`,
         details: reason,
         expiresAt: new Date(Date.now() + APPROVAL_TTL_MS),
+        ...(review ?? {}),
       });
+    } else if (review) {
+      // A recovered task can encounter an older pending row. Attach the
+      // current reviewer before suppressing the owner notification so the
+      // request cannot become silently stranded.
+      await tx
+        .update(approvalsTable)
+        .set(review)
+        .where(
+          and(
+            eq(approvalsTable.id, pending.id),
+            eq(approvalsTable.status, "pending"),
+            isNull(approvalsTable.autoReviewStatus),
+          ),
+        );
     }
     await recordAudit(
       agent.workspaceId,
@@ -647,7 +667,7 @@ async function parkForApproval(
   });
   if (parked) {
     publish(agent.workspaceId, "tasks", "approvals", "overview");
-    await notifyTaskEvent("approval_needed", task, reason);
+    if (!review) await notifyTaskEvent("approval_needed", task, reason);
   }
   await addTaskLog(task.id, "info", `Waiting for your approval: ${reason}`);
 }
@@ -667,6 +687,7 @@ async function parkForAppAction(
     targetSummary: string;
   },
 ): Promise<void> {
+  const review = await approvalReviewSnapshot(agent.workspaceId!);
   const parked = await db.transaction(async (tx) => {
     const [updated] = await tx
       .update(tasksTable)
@@ -685,9 +706,11 @@ async function parkForAppAction(
       .values({
         agentId: agent.id,
         taskId: task.id,
+        kind: "app_action",
         action: request.targetSummary.slice(0, 200),
         details: `${agent.name} wants to use a connected app: ${request.targetSummary} (operation ${request.operation}). Approving runs this exact action once; rejecting cancels the task.`,
         expiresAt: new Date(Date.now() + APPROVAL_TTL_MS),
+        ...(review ?? {}),
       })
       .returning();
     await tx.insert(appActionsTable).values({
@@ -710,11 +733,13 @@ async function parkForAppAction(
   });
   if (parked) {
     publish(agent.workspaceId, "tasks", "approvals", "overview");
-    await notifyTaskEvent(
-      "approval_needed",
-      task,
-      `Connected-app action: ${request.targetSummary}`,
-    );
+    if (!review) {
+      await notifyTaskEvent(
+        "approval_needed",
+        task,
+        `Connected-app action: ${request.targetSummary}`,
+      );
+    }
   }
   await addTaskLog(
     task.id,
@@ -739,6 +764,7 @@ async function parkForContinuation(
 ): Promise<void> {
   const segment = task.continuationSegments + 1;
   const details = `${agent.name} used all ${MAX_ACTION_ROUNDS} connected-app action rounds in this segment and still has actions to run. Approving continues the SAME task for one more bounded segment under the same round limit, remaining budget, and current app grants (write actions still need their own approval). Rejecting ends the task with the work completed so far.`;
+  const review = await approvalReviewSnapshot(agent.workspaceId!);
   const parked = await db.transaction(async (tx) => {
     const [updated] = await tx
       .update(tasksTable)
@@ -765,6 +791,7 @@ async function parkForContinuation(
       action: `Continue task: ${task.objective.slice(0, 120)}`,
       details,
       expiresAt: new Date(Date.now() + APPROVAL_TTL_MS),
+      ...(review ?? {}),
     });
     await recordAudit(
       agent.workspaceId,
@@ -776,11 +803,13 @@ async function parkForContinuation(
   });
   if (parked) {
     publish(agent.workspaceId, "tasks", "approvals", "overview");
-    await notifyTaskEvent(
-      "approval_needed",
-      task,
-      "The connected-app action-round limit was reached with work remaining. Approve to continue this task for another bounded segment.",
-    );
+    if (!review) {
+      await notifyTaskEvent(
+        "approval_needed",
+        task,
+        "The connected-app action-round limit was reached with work remaining. Approve to continue this task for another bounded segment.",
+      );
+    }
   }
   await addTaskLog(
     task.id,
@@ -1203,7 +1232,9 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     const readiness = await providerReadiness(
       workspaceId,
       provider,
-      provider === "codex_chatgpt" ? (task.ownerClerkUserId ?? null) : undefined,
+      provider === "codex_chatgpt"
+        ? (task.ownerClerkUserId ?? null)
+        : undefined,
     );
     if (!readiness.ready) {
       await setTaskPhase(task.id, task.attempts, "auth_required", workspaceId);
@@ -1258,10 +1289,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
       }
       if (perms.maxTaskBudgetCents !== null) {
         bounds.push({
-          cents: Math.max(
-            perms.maxTaskBudgetCents - (priorSpentCents ?? 0),
-            0,
-          ),
+          cents: Math.max(perms.maxTaskBudgetCents - (priorSpentCents ?? 0), 0),
           label: `${agent.name}'s per-task cap`,
         });
       }
@@ -2296,7 +2324,9 @@ async function offerFallback(
     const readiness = await providerReadiness(
       task.workspaceId ?? "",
       candidate,
-      candidate === "codex_chatgpt" ? (task.ownerClerkUserId ?? null) : undefined,
+      candidate === "codex_chatgpt"
+        ? (task.ownerClerkUserId ?? null)
+        : undefined,
     );
     if (readiness.ready) healthy.push(candidate);
   }
@@ -2464,6 +2494,7 @@ export function startWorker(intervalMs = POLL_INTERVAL_MS): void {
         leaseRecovered = true;
       }
       await expireStaleApprovals();
+      await reviewPendingApprovals();
       // Fire durable schedules before draining, so a task launched by a
       // just-due schedule runs in the same tick.
       await runDueSchedules();
