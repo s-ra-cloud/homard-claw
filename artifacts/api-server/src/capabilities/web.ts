@@ -365,7 +365,7 @@ async function requestPageOnce(
           accept:
             "text/html, text/plain, application/xhtml+xml, application/json;q=0.7, */*;q=0.1",
           "accept-encoding": "identity",
-          "user-agent": "HomardClaw-WebResearch/2.0",
+          "user-agent": "Crustabox-WebResearch/2.0",
         },
         // Pin the connection to an address that passed validation. TLS still
         // authenticates target.url.hostname through the original URL/SNI.

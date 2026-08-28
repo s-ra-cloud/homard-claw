@@ -62,11 +62,31 @@ export const AUTONOMY_OPTIONS = [
 // profile default they fall back to. Cosmetic only — the server enforces.
 const PROFILE_DEFAULTS: Record<
   string,
-  { maxTaskBudgetCents: number; dailyBudgetCents: number; maxTasksPerDay: number; approvalThresholdCents: number }
+  {
+    maxTaskBudgetCents: number;
+    dailyBudgetCents: number;
+    maxTasksPerDay: number;
+    approvalThresholdCents: number;
+  }
 > = {
-  observer: { maxTaskBudgetCents: 5, dailyBudgetCents: 25, maxTasksPerDay: 10, approvalThresholdCents: 0 },
-  assistant: { maxTaskBudgetCents: 50, dailyBudgetCents: 250, maxTasksPerDay: 50, approvalThresholdCents: 20 },
-  operator: { maxTaskBudgetCents: 250, dailyBudgetCents: 1000, maxTasksPerDay: 200, approvalThresholdCents: 100 },
+  observer: {
+    maxTaskBudgetCents: 5,
+    dailyBudgetCents: 25,
+    maxTasksPerDay: 10,
+    approvalThresholdCents: 0,
+  },
+  assistant: {
+    maxTaskBudgetCents: 50,
+    dailyBudgetCents: 250,
+    maxTasksPerDay: 50,
+    approvalThresholdCents: 20,
+  },
+  operator: {
+    maxTaskBudgetCents: 250,
+    dailyBudgetCents: 1000,
+    maxTasksPerDay: 200,
+    approvalThresholdCents: 100,
+  },
 };
 
 const limitField = z
@@ -105,7 +125,9 @@ export const agentFormSchema = z.object({
   dailyBudgetCents: limitField,
   maxTasksPerDay: limitField,
   approvalThresholdCents: limitField,
-  shellColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/, "Must be a valid hex color"),
+  shellColor: z
+    .string()
+    .regex(/^#[0-9A-Fa-f]{6}$/, "Must be a valid hex color"),
   /**
    * Connected-app access, keyed by app id. "none" means no grant row is
    * sent — access to the owner's external accounts is always opt-in.
@@ -229,7 +251,11 @@ const selectItemClass =
   "font-mono text-xs uppercase focus:bg-primary focus:text-primary-foreground";
 const messageClass = "text-[10px] uppercase font-bold text-destructive";
 
-export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues> }) {
+export function AgentFormFields({
+  form,
+}: {
+  form: UseFormReturn<AgentFormValues>;
+}) {
   const { data: providers } = useGetProviders();
   const codexEnabled = Boolean(
     providers?.find((p) => p.provider === AgentProvider.codex_chatgpt)?.enabled,
@@ -242,7 +268,9 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
           name="name"
           render={({ field }) => (
             <FormItem>
-              <FormLabel className="uppercase font-bold text-xs">Designation (Name)</FormLabel>
+              <FormLabel className="uppercase font-bold text-xs">
+                Designation (Name)
+              </FormLabel>
               <FormControl>
                 <Input {...field} className={inputClass} />
               </FormControl>
@@ -256,7 +284,9 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
           name="title"
           render={({ field }) => (
             <FormItem>
-              <FormLabel className="uppercase font-bold text-xs">Role Title</FormLabel>
+              <FormLabel className="uppercase font-bold text-xs">
+                Role Title
+              </FormLabel>
               <FormControl>
                 <Input {...field} className={inputClass} />
               </FormControl>
@@ -271,7 +301,9 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
         name="specialization"
         render={({ field }) => (
           <FormItem>
-            <FormLabel className="uppercase font-bold text-xs">Specialization</FormLabel>
+            <FormLabel className="uppercase font-bold text-xs">
+              Specialization
+            </FormLabel>
             <FormControl>
               <Input
                 {...field}
@@ -280,7 +312,7 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
               />
             </FormControl>
             <FormDescription className="text-[10px] uppercase">
-              Optional. What this agent is best at.
+              Optional. What this Crustabot is best at.
             </FormDescription>
             <FormMessage className={messageClass} />
           </FormItem>
@@ -292,12 +324,14 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
         name="mission"
         render={({ field }) => (
           <FormItem>
-            <FormLabel className="uppercase font-bold text-xs">Core Mission / System Prompt</FormLabel>
+            <FormLabel className="uppercase font-bold text-xs">
+              Core Mission / System Prompt
+            </FormLabel>
             <FormControl>
               <Textarea {...field} rows={5} className={textareaClass} />
             </FormControl>
             <FormDescription className="text-[10px] uppercase">
-              Defines the agent's primary directives and constraints.
+              Defines the Crustabot&apos;s primary directives and constraints.
             </FormDescription>
             <FormMessage className={messageClass} />
           </FormItem>
@@ -309,7 +343,9 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
         name="personality"
         render={({ field }) => (
           <FormItem>
-            <FormLabel className="uppercase font-bold text-xs">Personality Profile</FormLabel>
+            <FormLabel className="uppercase font-bold text-xs">
+              Personality Profile
+            </FormLabel>
             <FormControl>
               <Textarea
                 {...field}
@@ -332,7 +368,9 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
           name="goals"
           render={({ field }) => (
             <FormItem>
-              <FormLabel className="uppercase font-bold text-xs">Standing Goals</FormLabel>
+              <FormLabel className="uppercase font-bold text-xs">
+                Standing Goals
+              </FormLabel>
               <FormControl>
                 <Textarea
                   {...field}
@@ -354,7 +392,9 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
           name="instructions"
           render={({ field }) => (
             <FormItem>
-              <FormLabel className="uppercase font-bold text-xs">Operating Instructions</FormLabel>
+              <FormLabel className="uppercase font-bold text-xs">
+                Operating Instructions
+              </FormLabel>
               <FormControl>
                 <Textarea
                   {...field}
@@ -364,7 +404,7 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
                 />
               </FormControl>
               <FormDescription className="text-[10px] uppercase">
-                Optional. Rules the agent must follow.
+                Optional. Rules the Crustabot must follow.
               </FormDescription>
               <FormMessage className={messageClass} />
             </FormItem>
@@ -378,7 +418,9 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
           name="provider"
           render={({ field }) => (
             <FormItem>
-              <FormLabel className="uppercase font-bold text-xs">Compute Provider</FormLabel>
+              <FormLabel className="uppercase font-bold text-xs">
+                Compute Provider
+              </FormLabel>
               <Select onValueChange={field.onChange} value={field.value}>
                 <FormControl>
                   <SelectTrigger className={selectTriggerClass}>
@@ -386,16 +428,35 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
                   </SelectTrigger>
                 </FormControl>
                 <SelectContent className={selectContentClass}>
-                  <SelectItem value="workspace_default" className={selectItemClass}>Workspace Default</SelectItem>
-                  <SelectItem value={AgentProvider.claude_max} className={selectItemClass}>Claude Code</SelectItem>
+                  <SelectItem
+                    value="workspace_default"
+                    className={selectItemClass}
+                  >
+                    Workspace Default
+                  </SelectItem>
+                  <SelectItem
+                    value={AgentProvider.claude_max}
+                    className={selectItemClass}
+                  >
+                    Claude Code
+                  </SelectItem>
                   {/* Codex appears only while the server flag is on; an
                       agent already saved on Codex keeps its value either way. */}
-                  {codexEnabled || field.value === AgentProvider.codex_chatgpt ? (
-                    <SelectItem value={AgentProvider.codex_chatgpt} className={selectItemClass}>
+                  {codexEnabled ||
+                  field.value === AgentProvider.codex_chatgpt ? (
+                    <SelectItem
+                      value={AgentProvider.codex_chatgpt}
+                      className={selectItemClass}
+                    >
                       Codex via ChatGPT Plus
                     </SelectItem>
                   ) : null}
-                  <SelectItem value={AgentProvider.openrouter} className={selectItemClass}>OpenRouter</SelectItem>
+                  <SelectItem
+                    value={AgentProvider.openrouter}
+                    className={selectItemClass}
+                  >
+                    OpenRouter
+                  </SelectItem>
                 </SelectContent>
               </Select>
               <FormMessage className={messageClass} />
@@ -414,7 +475,9 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
           name="securityPreset"
           render={({ field }) => (
             <FormItem>
-              <FormLabel className="uppercase font-bold text-xs">Clearance Level</FormLabel>
+              <FormLabel className="uppercase font-bold text-xs">
+                Clearance Level
+              </FormLabel>
               <Select onValueChange={field.onChange} value={field.value}>
                 <FormControl>
                   <SelectTrigger className={selectTriggerClass}>
@@ -422,9 +485,24 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
                   </SelectTrigger>
                 </FormControl>
                 <SelectContent className={selectContentClass}>
-                  <SelectItem value={AgentSecurityPreset.observer} className={selectItemClass}>Observer (Read Only)</SelectItem>
-                  <SelectItem value={AgentSecurityPreset.assistant} className={selectItemClass}>Assistant (Ask Confirm)</SelectItem>
-                  <SelectItem value={AgentSecurityPreset.operator} className={selectItemClass}>Operator (Full Auto)</SelectItem>
+                  <SelectItem
+                    value={AgentSecurityPreset.observer}
+                    className={selectItemClass}
+                  >
+                    Observer (Read Only)
+                  </SelectItem>
+                  <SelectItem
+                    value={AgentSecurityPreset.assistant}
+                    className={selectItemClass}
+                  >
+                    Assistant (Ask Confirm)
+                  </SelectItem>
+                  <SelectItem
+                    value={AgentSecurityPreset.operator}
+                    className={selectItemClass}
+                  >
+                    Operator (Full Auto)
+                  </SelectItem>
                 </SelectContent>
               </Select>
               <FormMessage className={messageClass} />
@@ -437,8 +515,13 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
           name="voiceStyle"
           render={({ field }) => (
             <FormItem>
-              <FormLabel className="uppercase font-bold text-xs">Voice</FormLabel>
-              <Select onValueChange={field.onChange} value={field.value || "none"}>
+              <FormLabel className="uppercase font-bold text-xs">
+                Voice
+              </FormLabel>
+              <Select
+                onValueChange={field.onChange}
+                value={field.value || "none"}
+              >
                 <FormControl>
                   <SelectTrigger className={selectTriggerClass}>
                     <SelectValue placeholder="Select voice" />
@@ -446,7 +529,11 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
                 </FormControl>
                 <SelectContent className={selectContentClass}>
                   {VOICE_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value} className={selectItemClass}>
+                    <SelectItem
+                      key={option.value}
+                      value={option.value}
+                      className={selectItemClass}
+                    >
                       {option.label}
                     </SelectItem>
                   ))}
@@ -466,7 +553,9 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
         name="autonomy"
         render={({ field }) => (
           <FormItem>
-            <FormLabel className="uppercase font-bold text-xs">Autonomy Level</FormLabel>
+            <FormLabel className="uppercase font-bold text-xs">
+              Autonomy Level
+            </FormLabel>
             <Select onValueChange={field.onChange} value={field.value}>
               <FormControl>
                 <SelectTrigger className={selectTriggerClass}>
@@ -475,7 +564,11 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
               </FormControl>
               <SelectContent className={selectContentClass}>
                 {AUTONOMY_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value} className={selectItemClass}>
+                  <SelectItem
+                    key={option.value}
+                    value={option.value}
+                    className={selectItemClass}
+                  >
                     {option.label}
                   </SelectItem>
                 ))}
@@ -483,7 +576,7 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
             </Select>
             <FormDescription className="text-[10px] uppercase">
               {AUTONOMY_OPTIONS.find((o) => o.value === field.value)?.blurb ??
-                "How much this agent may do without your sign-off."}
+                "How much this Crustabot may do without your sign-off."}
             </FormDescription>
             <FormMessage className={messageClass} />
           </FormItem>
@@ -501,7 +594,9 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
         name="shellColor"
         render={({ field }) => (
           <FormItem>
-            <FormLabel className="uppercase font-bold text-xs">Issued Shell</FormLabel>
+            <FormLabel className="uppercase font-bold text-xs">
+              Issued Shell
+            </FormLabel>
             <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
               {LOBSTER_PRESETS.map((preset) => {
                 const selected =
@@ -521,7 +616,9 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
                     }`}
                   >
                     <MarlowLobster size={56} preset={preset.id} status="idle" />
-                    <span className="text-[9px] font-bold uppercase leading-none">{preset.name}</span>
+                    <span className="text-[9px] font-bold uppercase leading-none">
+                      {preset.name}
+                    </span>
                   </button>
                 );
               })}
@@ -541,14 +638,30 @@ export function AgentFormFields({ form }: { form: UseFormReturn<AgentFormValues>
  * Custom budget/limit overrides. Blank fields fall back to the selected
  * clearance profile; the placeholder shows that fallback value.
  */
-function CustomLimitsFields({ form }: { form: UseFormReturn<AgentFormValues> }) {
+function CustomLimitsFields({
+  form,
+}: {
+  form: UseFormReturn<AgentFormValues>;
+}) {
   const preset = form.watch("securityPreset");
   const defaults = PROFILE_DEFAULTS[preset] ?? PROFILE_DEFAULTS.assistant;
   const limits = [
-    { name: "maxTaskBudgetCents", label: "Per-Task Cap (¢)", hint: "Tasks estimated above this are blocked" },
-    { name: "dailyBudgetCents", label: "Daily Budget (¢)", hint: "Spending stops here each day" },
+    {
+      name: "maxTaskBudgetCents",
+      label: "Per-Task Cap (¢)",
+      hint: "Tasks estimated above this are blocked",
+    },
+    {
+      name: "dailyBudgetCents",
+      label: "Daily Budget (¢)",
+      hint: "Spending stops here each day",
+    },
     { name: "maxTasksPerDay", label: "Tasks / Day", hint: "Daily run limit" },
-    { name: "approvalThresholdCents", label: "Approval Above (¢)", hint: "Costlier tasks ask first" },
+    {
+      name: "approvalThresholdCents",
+      label: "Approval Above (¢)",
+      hint: "Costlier tasks ask first",
+    },
   ] as const;
   return (
     <div className="border-4 border-border bg-muted/20 p-4 space-y-3">
@@ -566,7 +679,9 @@ function CustomLimitsFields({ form }: { form: UseFormReturn<AgentFormValues> }) 
             name={limit.name}
             render={({ field }) => (
               <FormItem>
-                <FormLabel className="uppercase font-bold text-[10px]">{limit.label}</FormLabel>
+                <FormLabel className="uppercase font-bold text-[10px]">
+                  {limit.label}
+                </FormLabel>
                 <FormControl>
                   <Input
                     {...field}
@@ -575,7 +690,9 @@ function CustomLimitsFields({ form }: { form: UseFormReturn<AgentFormValues> }) 
                     className={inputClass}
                   />
                 </FormControl>
-                <FormDescription className="text-[9px] uppercase">{limit.hint}</FormDescription>
+                <FormDescription className="text-[9px] uppercase">
+                  {limit.hint}
+                </FormDescription>
                 <FormMessage className={messageClass} />
               </FormItem>
             )}
@@ -589,8 +706,16 @@ function CustomLimitsFields({ form }: { form: UseFormReturn<AgentFormValues> }) 
 const ACCESS_LEVEL_OPTIONS = [
   { value: "none", label: "No Access", blurb: "Cannot touch this app at all." },
   { value: "read", label: "Read", blurb: "Search and read data only." },
-  { value: "draft", label: "Draft", blurb: "Read, plus prepare drafts nobody outside sees." },
-  { value: "write", label: "Write (Approval)", blurb: "Full access; visible changes still wait for your approval." },
+  {
+    value: "draft",
+    label: "Draft",
+    blurb: "Read, plus prepare drafts nobody outside sees.",
+  },
+  {
+    value: "write",
+    label: "Write (Approval)",
+    blurb: "Full access; visible changes still wait for your approval.",
+  },
 ] as const;
 
 /**
@@ -599,7 +724,11 @@ const ACCESS_LEVEL_OPTIONS = [
  * live connection status is shown so a grant to a disconnected app is
  * visibly pointless rather than silently broken.
  */
-function ConnectedAppsFields({ form }: { form: UseFormReturn<AgentFormValues> }) {
+function ConnectedAppsFields({
+  form,
+}: {
+  form: UseFormReturn<AgentFormValues>;
+}) {
   const { data: connectedApps } = useListConnectedApps();
   const { data: capabilities } = useListCapabilities();
   const apps = connectedApps?.apps ?? [];
@@ -614,16 +743,16 @@ function ConnectedAppsFields({ form }: { form: UseFormReturn<AgentFormValues> })
       <div>
         <div className="uppercase font-bold text-xs">Connected App Access</div>
         <p className="text-[10px] text-muted-foreground uppercase font-bold">
-          What this agent may do with your already-connected accounts.
+          What this Crustabot may do with your already-connected accounts.
           Default: nothing.
         </p>
         <p className="text-[10px] text-muted-foreground mt-1">
-          These dropdowns only grant permission — they don't connect an
-          account. You connect your own accounts (like your Gmail) on the{" "}
+          These dropdowns only grant permission — they don't connect an account.
+          You connect your own accounts (like your Gmail) on the{" "}
           <Link href="/connected-apps" className="underline font-bold">
             Connected Apps
           </Link>{" "}
-          page; they belong to your workspace alone, and agents never see
+          page; they belong to your workspace alone, and Crustabots never see
           credentials.
         </p>
       </div>
@@ -639,7 +768,9 @@ function ConnectedAppsFields({ form }: { form: UseFormReturn<AgentFormValues> })
                 <FormItem className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 border-2 border-border/50 bg-background/50 p-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="font-bold uppercase text-xs">{app.displayName}</span>
+                      <span className="font-bold uppercase text-xs">
+                        {app.displayName}
+                      </span>
                       {!app.enabled ? (
                         <Badge variant="destructive">Disabled</Badge>
                       ) : app.status === "connected" ? (
@@ -657,7 +788,8 @@ function ConnectedAppsFields({ form }: { form: UseFormReturn<AgentFormValues> })
                         Account: {app.accountLabel}
                       </p>
                     ) : null}
-                    {app.status === "not_connected" || app.status === "expired" ? (
+                    {app.status === "not_connected" ||
+                    app.status === "expired" ? (
                       <p className="text-[9px] mt-1">
                         <Link
                           href="/connected-apps"
@@ -670,18 +802,27 @@ function ConnectedAppsFields({ form }: { form: UseFormReturn<AgentFormValues> })
                       </p>
                     ) : null}
                     <p className="text-[9px] text-muted-foreground uppercase font-bold mt-1">
-                      {ACCESS_LEVEL_OPTIONS.find((o) => o.value === level)?.blurb}
+                      {
+                        ACCESS_LEVEL_OPTIONS.find((o) => o.value === level)
+                          ?.blurb
+                      }
                     </p>
                   </div>
                   <Select onValueChange={field.onChange} value={level}>
                     <FormControl>
-                      <SelectTrigger className={`${selectTriggerClass} sm:w-44`}>
+                      <SelectTrigger
+                        className={`${selectTriggerClass} sm:w-44`}
+                      >
                         <SelectValue />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent className={selectContentClass}>
                       {ACCESS_LEVEL_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value} className={selectItemClass}>
+                        <SelectItem
+                          key={option.value}
+                          value={option.value}
+                          className={selectItemClass}
+                        >
                           {option.label}
                         </SelectItem>
                       ))}
@@ -704,29 +845,41 @@ function ConnectedAppsFields({ form }: { form: UseFormReturn<AgentFormValues> })
                 <FormItem className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 border-2 border-border/50 bg-background/50 p-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="font-bold uppercase text-xs">{pkg.displayName}</span>
+                      <span className="font-bold uppercase text-xs">
+                        {pkg.displayName}
+                      </span>
                       <Badge variant="outline">Package</Badge>
                       {!pkg.enabled ? (
                         <Badge variant="destructive">Disabled</Badge>
-                      ) : pkg.health === "connected" || pkg.health === "none_required" ? (
+                      ) : pkg.health === "connected" ||
+                        pkg.health === "none_required" ? (
                         <Badge variant="success">Ready</Badge>
                       ) : (
                         <Badge variant="warning">Not Connected</Badge>
                       )}
                     </div>
                     <p className="text-[9px] text-muted-foreground uppercase font-bold mt-1">
-                      {ACCESS_LEVEL_OPTIONS.find((o) => o.value === level)?.blurb}
+                      {
+                        ACCESS_LEVEL_OPTIONS.find((o) => o.value === level)
+                          ?.blurb
+                      }
                     </p>
                   </div>
                   <Select onValueChange={field.onChange} value={level}>
                     <FormControl>
-                      <SelectTrigger className={`${selectTriggerClass} sm:w-44`}>
+                      <SelectTrigger
+                        className={`${selectTriggerClass} sm:w-44`}
+                      >
                         <SelectValue />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent className={selectContentClass}>
                       {ACCESS_LEVEL_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value} className={selectItemClass}>
+                        <SelectItem
+                          key={option.value}
+                          value={option.value}
+                          className={selectItemClass}
+                        >
                           {option.label}
                         </SelectItem>
                       ))}
@@ -749,7 +902,11 @@ function ConnectedAppsFields({ form }: { form: UseFormReturn<AgentFormValues> })
  * email/files can be locked down so nothing it reads can leave — read-only
  * apps, no internet for its tools, no delegation, no shared memory.
  */
-function SensitiveDataSandboxField({ form }: { form: UseFormReturn<AgentFormValues> }) {
+function SensitiveDataSandboxField({
+  form,
+}: {
+  form: UseFormReturn<AgentFormValues>;
+}) {
   return (
     <FormField
       control={form.control}
@@ -761,14 +918,14 @@ function SensitiveDataSandboxField({ form }: { form: UseFormReturn<AgentFormValu
               Sensitive Data Sandbox
             </FormLabel>
             <p className="text-[10px] text-muted-foreground uppercase font-bold">
-              For agents that read confidential email or files.
+              For Crustabots that read confidential email or files.
             </p>
             <p className="text-[10px] text-muted-foreground">
-              When on, the server locks this agent down: connected apps become
-              read-only (no drafts, no sends), its tools get no internet or web
-              search, it cannot delegate work or receive delegated work or
-              message other agents, and shared memories and knowledge files
-              stay out of its context. You still see its task results and
+              When on, the server locks this Crustabot down: connected apps
+              become read-only (no drafts, no sends), its tools get no internet
+              or web search, it cannot delegate work or receive delegated work
+              or message other Crustabots, and shared memories and knowledge
+              files stay out of its context. You still see its task results and
               action history.
             </p>
           </div>
@@ -793,7 +950,11 @@ const DEFAULT_MODEL_SENTINEL = "__workspace_default__";
  * offer a combination the server would reject. The whole block stays
  * hidden until the agent is actually pointed at Codex.
  */
-function CodexPreferenceFields({ form }: { form: UseFormReturn<AgentFormValues> }) {
+function CodexPreferenceFields({
+  form,
+}: {
+  form: UseFormReturn<AgentFormValues>;
+}) {
   const providerChoice = form.watch("provider");
   const { data: settings } = useGetProviderSettings();
   const { data: providers } = useGetProviders();
@@ -815,8 +976,8 @@ function CodexPreferenceFields({ form }: { form: UseFormReturn<AgentFormValues> 
   if (status && !status.enabled) {
     return (
       <div className="border-4 border-border border-dashed p-3 text-[10px] uppercase font-bold text-muted-foreground">
-        Codex is switched off on the server. This agent will not be able to run
-        until it is re-enabled.
+        Codex is switched off on the server. This Crustabot will not be able to
+        run until it is re-enabled.
       </div>
     );
   }
@@ -830,7 +991,9 @@ function CodexPreferenceFields({ form }: { form: UseFormReturn<AgentFormValues> 
         name="codexModel"
         render={({ field }) => (
           <FormItem>
-            <FormLabel className="uppercase font-bold text-xs">Codex Model</FormLabel>
+            <FormLabel className="uppercase font-bold text-xs">
+              Codex Model
+            </FormLabel>
             <Select
               onValueChange={(val) =>
                 field.onChange(val === DEFAULT_MODEL_SENTINEL ? "" : val)
@@ -843,11 +1006,18 @@ function CodexPreferenceFields({ form }: { form: UseFormReturn<AgentFormValues> 
                 </SelectTrigger>
               </FormControl>
               <SelectContent className={selectContentClass}>
-                <SelectItem value={DEFAULT_MODEL_SENTINEL} className={selectItemClass}>
+                <SelectItem
+                  value={DEFAULT_MODEL_SENTINEL}
+                  className={selectItemClass}
+                >
                   Workspace Default
                 </SelectItem>
                 {(catalog?.models ?? []).map((model) => (
-                  <SelectItem key={model.id} value={model.id} className={selectItemClass}>
+                  <SelectItem
+                    key={model.id}
+                    value={model.id}
+                    className={selectItemClass}
+                  >
                     {model.name}
                   </SelectItem>
                 ))}
@@ -866,7 +1036,9 @@ function CodexPreferenceFields({ form }: { form: UseFormReturn<AgentFormValues> 
         name="codexReasoning"
         render={({ field }) => (
           <FormItem>
-            <FormLabel className="uppercase font-bold text-xs">Reasoning Effort</FormLabel>
+            <FormLabel className="uppercase font-bold text-xs">
+              Reasoning Effort
+            </FormLabel>
             <Select
               onValueChange={(val) =>
                 field.onChange(val === DEFAULT_MODEL_SENTINEL ? "" : val)
@@ -879,11 +1051,18 @@ function CodexPreferenceFields({ form }: { form: UseFormReturn<AgentFormValues> 
                 </SelectTrigger>
               </FormControl>
               <SelectContent className={selectContentClass}>
-                <SelectItem value={DEFAULT_MODEL_SENTINEL} className={selectItemClass}>
+                <SelectItem
+                  value={DEFAULT_MODEL_SENTINEL}
+                  className={selectItemClass}
+                >
                   Workspace Default
                 </SelectItem>
                 {levels.map((level) => (
-                  <SelectItem key={level} value={level} className={selectItemClass}>
+                  <SelectItem
+                    key={level}
+                    value={level}
+                    className={selectItemClass}
+                  >
                     {level}
                   </SelectItem>
                 ))}
@@ -923,7 +1102,9 @@ function ModelField({ form }: { form: UseFormReturn<AgentFormValues> }) {
       name="model"
       render={({ field }) => (
         <FormItem>
-          <FormLabel className="uppercase font-bold text-xs">Preferred Model</FormLabel>
+          <FormLabel className="uppercase font-bold text-xs">
+            Preferred Model
+          </FormLabel>
           {hasCatalog ? (
             <Select
               onValueChange={(val) =>
@@ -937,7 +1118,10 @@ function ModelField({ form }: { form: UseFormReturn<AgentFormValues> }) {
                 </SelectTrigger>
               </FormControl>
               <SelectContent className={`${selectContentClass} max-h-72`}>
-                <SelectItem value={DEFAULT_MODEL_SENTINEL} className={selectItemClass}>
+                <SelectItem
+                  value={DEFAULT_MODEL_SENTINEL}
+                  className={selectItemClass}
+                >
                   Workspace Default
                 </SelectItem>
                 {field.value &&
@@ -947,7 +1131,11 @@ function ModelField({ form }: { form: UseFormReturn<AgentFormValues> }) {
                     </SelectItem>
                   )}
                 {catalog!.models.map((model) => (
-                  <SelectItem key={model.id} value={model.id} className={selectItemClass}>
+                  <SelectItem
+                    key={model.id}
+                    value={model.id}
+                    className={selectItemClass}
+                  >
                     {model.name}
                   </SelectItem>
                 ))}
@@ -957,7 +1145,9 @@ function ModelField({ form }: { form: UseFormReturn<AgentFormValues> }) {
             <FormControl>
               <Input
                 {...field}
-                placeholder={isLoading ? "Loading models..." : "Workspace default"}
+                placeholder={
+                  isLoading ? "Loading models..." : "Workspace default"
+                }
                 className={inputClass}
               />
             </FormControl>
@@ -975,7 +1165,11 @@ function ModelField({ form }: { form: UseFormReturn<AgentFormValues> }) {
   );
 }
 
-export function AgentPreviewCard({ form }: { form: UseFormReturn<AgentFormValues> }) {
+export function AgentPreviewCard({
+  form,
+}: {
+  form: UseFormReturn<AgentFormValues>;
+}) {
   const shellColor = form.watch("shellColor");
   return (
     <>
@@ -984,9 +1178,15 @@ export function AgentPreviewCard({ form }: { form: UseFormReturn<AgentFormValues
       </div>
       <div className="space-y-4">
         <div>
-          <div className="text-[10px] text-muted-foreground uppercase font-bold mb-1">ID Badge</div>
-          <div className="font-bold uppercase text-lg leading-tight">{form.watch("name") || "UNKNOWN"}</div>
-          <div className="text-accent text-xs font-mono">{form.watch("title") || "UNASSIGNED"}</div>
+          <div className="text-[10px] text-muted-foreground uppercase font-bold mb-1">
+            ID Badge
+          </div>
+          <div className="font-bold uppercase text-lg leading-tight">
+            {form.watch("name") || "UNKNOWN"}
+          </div>
+          <div className="text-accent text-xs font-mono">
+            {form.watch("title") || "UNASSIGNED"}
+          </div>
           {form.watch("specialization") ? (
             <div className="text-muted-foreground text-[10px] font-mono mt-1">
               {form.watch("specialization")}
@@ -996,14 +1196,25 @@ export function AgentPreviewCard({ form }: { form: UseFormReturn<AgentFormValues
 
         <div className="grid grid-cols-2 gap-2 border-t-4 border-border pt-4">
           <div>
-            <div className="text-[10px] text-muted-foreground uppercase font-bold mb-1">Clearance</div>
-            <Badge variant={
-              form.watch("securityPreset") === 'operator' ? 'destructive' :
-              form.watch("securityPreset") === 'assistant' ? 'accent' : 'default'
-            }>{form.watch("securityPreset")}</Badge>
+            <div className="text-[10px] text-muted-foreground uppercase font-bold mb-1">
+              Clearance
+            </div>
+            <Badge
+              variant={
+                form.watch("securityPreset") === "operator"
+                  ? "destructive"
+                  : form.watch("securityPreset") === "assistant"
+                    ? "accent"
+                    : "default"
+              }
+            >
+              {form.watch("securityPreset")}
+            </Badge>
           </div>
           <div>
-            <div className="text-[10px] text-muted-foreground uppercase font-bold mb-1">Provider</div>
+            <div className="text-[10px] text-muted-foreground uppercase font-bold mb-1">
+              Provider
+            </div>
             <Badge variant="outline">
               {form.watch("provider") === "workspace_default"
                 ? "default"

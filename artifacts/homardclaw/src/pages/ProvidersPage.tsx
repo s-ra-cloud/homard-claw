@@ -7,8 +7,6 @@ import {
   useTestCodexConnection,
   useConnectCodex,
   useDisconnectCodex,
-  useSetProviderCredential,
-  useDeleteProviderCredential,
   getGetProvidersQueryKey,
   getGetProviderSettingsQueryKey,
   ProviderSettingsDefaultProvider,
@@ -41,7 +39,8 @@ import {
 
 const selectTriggerClass =
   "bg-background border-4 border-border rounded-none focus:ring-0 focus:border-primary font-mono text-xs uppercase font-bold";
-const selectContentClass = "border-4 border-border rounded-none bg-card max-h-72";
+const selectContentClass =
+  "border-4 border-border rounded-none bg-card max-h-72";
 const selectItemClass =
   "font-mono text-xs uppercase focus:bg-primary focus:text-primary-foreground";
 
@@ -83,7 +82,11 @@ function DefaultModelPicker({
               </SelectItem>
             )}
             {catalog!.models.map((model) => (
-              <SelectItem key={model.id} value={model.id} className={selectItemClass}>
+              <SelectItem
+                key={model.id}
+                value={model.id}
+                className={selectItemClass}
+              >
                 {model.name}
               </SelectItem>
             ))}
@@ -100,7 +103,8 @@ function DefaultModelPicker({
       <p className="text-[10px] text-muted-foreground uppercase font-bold">
         {hasCatalog
           ? `${catalog!.models.length} models available`
-          : (catalog?.message ?? "Model catalog unavailable — enter a model id manually.")}
+          : (catalog?.message ??
+            "Model catalog unavailable — enter a model id manually.")}
       </p>
     </div>
   );
@@ -111,7 +115,9 @@ function RoutingDefaultsCard() {
   const { toast } = useToast();
   const { data: settings, isLoading } = useGetProviderSettings();
   const [defaultProvider, setDefaultProvider] =
-    useState<ProviderSettingsDefaultProvider>(ProviderSettingsDefaultProvider.claude_max);
+    useState<ProviderSettingsDefaultProvider>(
+      ProviderSettingsDefaultProvider.claude_max,
+    );
   const [claudeModel, setClaudeModel] = useState("");
   const [openrouterModel, setOpenrouterModel] = useState("");
   const [codexModel, setCodexModel] = useState("");
@@ -139,7 +145,9 @@ function RoutingDefaultsCard() {
   const update = useUpdateProviderSettings({
     mutation: {
       onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: getGetProviderSettingsQueryKey() });
+        queryClient.invalidateQueries({
+          queryKey: getGetProviderSettingsQueryKey(),
+        });
         toast({ title: "Routing defaults saved" });
       },
       onError: (error) => {
@@ -162,7 +170,8 @@ function RoutingDefaultsCard() {
       data: {
         defaultProvider,
         claudeModel: claudeModel.trim() === "" ? null : claudeModel.trim(),
-        openrouterModel: openrouterModel.trim() === "" ? null : openrouterModel.trim(),
+        openrouterModel:
+          openrouterModel.trim() === "" ? null : openrouterModel.trim(),
         codexModel: codexModel.trim() === "" ? null : codexModel.trim(),
         codexReasoning:
           codexReasoning.trim() === ""
@@ -170,7 +179,9 @@ function RoutingDefaultsCard() {
             : (codexReasoning.trim() as ProviderSettingsCodexReasoning),
         paidFallbackConsent,
         paidFallbackLimitCents:
-          paidFallbackLimit.trim() === "" ? null : Math.round(limitDollars * 100),
+          paidFallbackLimit.trim() === ""
+            ? null
+            : Math.round(limitDollars * 100),
       },
     });
   };
@@ -186,14 +197,16 @@ function RoutingDefaultsCard() {
               <Route className="w-5 h-5" />
             </div>
             <p className="text-xs text-muted-foreground">
-              Workspace-wide defaults. Agents without their own provider or model
-              preference route here; task-level overrides always win.
+              Workspace-wide defaults. Crustabots without their own provider or
+              model preference route here; task-level overrides always win.
             </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-2">
-              <label className="uppercase font-bold text-xs">Default Provider</label>
+              <label className="uppercase font-bold text-xs">
+                Default Provider
+              </label>
               <Select
                 value={defaultProvider}
                 onValueChange={(val) =>
@@ -204,21 +217,30 @@ function RoutingDefaultsCard() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className={selectContentClass}>
-                  <SelectItem value={ProviderSettingsDefaultProvider.claude_max} className={selectItemClass}>
+                  <SelectItem
+                    value={ProviderSettingsDefaultProvider.claude_max}
+                    className={selectItemClass}
+                  >
                     Claude Code
                   </SelectItem>
                   {codex?.enabled || defaultProvider === "codex_chatgpt" ? (
-                    <SelectItem value={ProviderSettingsDefaultProvider.codex_chatgpt} className={selectItemClass}>
+                    <SelectItem
+                      value={ProviderSettingsDefaultProvider.codex_chatgpt}
+                      className={selectItemClass}
+                    >
                       Codex via ChatGPT Plus
                     </SelectItem>
                   ) : null}
-                  <SelectItem value={ProviderSettingsDefaultProvider.openrouter} className={selectItemClass}>
+                  <SelectItem
+                    value={ProviderSettingsDefaultProvider.openrouter}
+                    className={selectItemClass}
+                  >
                     OpenRouter
                   </SelectItem>
                 </SelectContent>
               </Select>
               <p className="text-[10px] text-muted-foreground uppercase font-bold">
-                Used when an agent has no provider preference.
+                Used when a Crustabot has no provider preference.
               </p>
             </div>
 
@@ -245,7 +267,9 @@ function RoutingDefaultsCard() {
                 onChange={setCodexModel}
               />
               <div className="space-y-2">
-                <label className="uppercase font-bold text-xs">Codex Reasoning Effort</label>
+                <label className="uppercase font-bold text-xs">
+                  Codex Reasoning Effort
+                </label>
                 <Select
                   value={codexReasoning || DEFAULT_SENTINEL}
                   onValueChange={(val) =>
@@ -256,11 +280,18 @@ function RoutingDefaultsCard() {
                     <SelectValue placeholder="Built-in default" />
                   </SelectTrigger>
                   <SelectContent className={selectContentClass}>
-                    <SelectItem value={DEFAULT_SENTINEL} className={selectItemClass}>
+                    <SelectItem
+                      value={DEFAULT_SENTINEL}
+                      className={selectItemClass}
+                    >
                       Built-in Default
                     </SelectItem>
                     {(codex.reasoningLevels ?? []).map((level) => (
-                      <SelectItem key={level} value={level} className={selectItemClass}>
+                      <SelectItem
+                        key={level}
+                        value={level}
+                        className={selectItemClass}
+                      >
                         {level}
                       </SelectItem>
                     ))}
@@ -335,13 +366,12 @@ function RoutingDefaultsCard() {
   );
 }
 
-
 /**
  * Connecting your own ChatGPT account to Codex.
  *
  * There is no official "sign in with ChatGPT" flow on the web, so the
  * session has to come from `codex login` on a desktop. The pasted file is
- * encrypted server-side and stored against your account — your agents run
+ * encrypted server-side and stored against your account — your Crustabots run
  * on your allowance, and the box is cleared the moment it is sent.
  */
 function CodexActions({ provider }: { provider: ProviderStatus }) {
@@ -393,7 +423,10 @@ function CodexActions({ provider }: { provider: ProviderStatus }) {
       onSuccess: (result) => {
         setChecks(null);
         refresh();
-        toast({ title: "Codex account disconnected", description: result.detail });
+        toast({
+          title: "Codex account disconnected",
+          description: result.detail,
+        });
       },
       onError: (error) =>
         toast({
@@ -411,13 +444,15 @@ function CodexActions({ provider }: { provider: ProviderStatus }) {
           className="uppercase font-bold text-xs"
           htmlFor="codex-auth-json"
         >
-          {connected ? "Replace your ChatGPT session" : "Connect your ChatGPT account"}
+          {connected
+            ? "Replace your ChatGPT session"
+            : "Connect your ChatGPT account"}
         </label>
         <p className="text-[10px] text-muted-foreground uppercase font-bold leading-relaxed">
           On a desktop, run <span className="text-foreground">codex login</span>{" "}
           and choose the ChatGPT sign-in, then paste the contents of{" "}
-          <span className="text-foreground">~/.codex/auth.json</span> here. It is
-          encrypted before it is stored and is never shown again.
+          <span className="text-foreground">~/.codex/auth.json</span> here. It
+          is encrypted before it is stored and is never shown again.
         </p>
         <Textarea
           id="codex-auth-json"
@@ -471,7 +506,10 @@ function CodexActions({ provider }: { provider: ProviderStatus }) {
       {checks ? (
         <ul className="space-y-1" data-testid="list-codex-checks">
           {checks.map((check) => (
-            <li key={check.name} className="flex items-start gap-2 text-[11px] font-mono">
+            <li
+              key={check.name}
+              className="flex items-start gap-2 text-[11px] font-mono"
+            >
               {check.ok ? (
                 <CheckCircle className="w-3 h-3 mt-0.5 text-green-500 shrink-0" />
               ) : (
@@ -487,120 +525,15 @@ function CodexActions({ provider }: { provider: ProviderStatus }) {
   );
 }
 
-/**
- * Paste-your-own-key actions for Claude and OpenRouter. Each workspace stores
- * its own encrypted credential; there is no shared server key to fall back on.
- */
-function ProviderKeyActions({ provider }: { provider: ProviderStatus }) {
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
-  const [keyDraft, setKeyDraft] = useState("");
-  const providerId = provider.provider as "claude_max" | "openrouter";
-  const isClaude = providerId === "claude_max";
-
-  const refresh = () =>
-    queryClient.invalidateQueries({ queryKey: getGetProvidersQueryKey() });
-
-  const save = useSetProviderCredential({
-    mutation: {
-      onSuccess: () => {
-        refresh();
-        toast({
-          title: `${provider.label} key saved`,
-          description: "Stored encrypted for this workspace. It is never shown again.",
-        });
-      },
-      onError: (error) =>
-        toast({
-          variant: "destructive",
-          title: "Could not save the key",
-          description: error.message,
-        }),
-    },
-  });
-
-  const remove = useDeleteProviderCredential({
-    mutation: {
-      onSuccess: () => {
-        refresh();
-        toast({ title: `${provider.label} key removed` });
-      },
-      onError: (error) =>
-        toast({
-          variant: "destructive",
-          title: "Could not remove the key",
-          description: error.message,
-        }),
-    },
-  });
-
-  const pending = save.isPending || remove.isPending;
-
-  return (
-    <div className="mt-4 border-t-2 border-border/30 pt-4 space-y-3">
-      <div className="space-y-2">
-        <label
-          className="uppercase font-bold text-xs"
-          htmlFor={`credential-${providerId}`}
-        >
-          {provider.configured
-            ? `Replace your ${provider.label} ${isClaude ? "token" : "API key"}`
-            : `Connect your ${provider.label} account`}
-        </label>
-        <p className="text-[10px] text-muted-foreground uppercase font-bold leading-relaxed">
-          {isClaude
-            ? "Paste a Claude Code OAuth token from your own Anthropic account."
-            : "Paste an API key from your own OpenRouter account."}{" "}
-          It is encrypted before it is stored and is never shown again.
-        </p>
-        <Input
-          id={`credential-${providerId}`}
-          type="password"
-          value={keyDraft}
-          onChange={(event) => setKeyDraft(event.target.value)}
-          placeholder={isClaude ? "sk-ant-oat..." : "sk-or-..."}
-          spellCheck={false}
-          autoComplete="off"
-          className="font-mono bg-background border-4 border-border rounded-none focus-visible:ring-0 focus-visible:border-primary text-xs"
-          data-testid={`input-credential-${providerId}`}
-        />
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <Button
-          onClick={() => {
-            const pasted = keyDraft.trim();
-            // Cleared as it leaves the browser, success or not — a key has
-            // no business sitting in a text box.
-            setKeyDraft("");
-            save.mutate({ provider: providerId, data: { credential: pasted } });
-          }}
-          disabled={pending || keyDraft.trim().length < 8}
-          data-testid={`button-save-credential-${providerId}`}
-        >
-          {save.isPending ? "SAVING..." : provider.configured ? "REPLACE KEY" : "SAVE KEY"}
-        </Button>
-        {provider.configured ? (
-          <Button
-            variant="outline"
-            onClick={() => remove.mutate({ provider: providerId })}
-            disabled={pending}
-            data-testid={`button-remove-credential-${providerId}`}
-          >
-            {remove.isPending ? "REMOVING..." : "REMOVE KEY"}
-          </Button>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
 /** Codex-only rows: what the credential actually bills, and what we cannot know. */
 function CodexStatusRows({ provider }: { provider: ProviderStatus }) {
   const apiBilled = provider.authMode === "api_key";
   return (
     <>
       <div className="flex justify-between items-center">
-        <span className="text-xs font-bold uppercase text-muted-foreground">Billing Source</span>
+        <span className="text-xs font-bold uppercase text-muted-foreground">
+          Billing Source
+        </span>
         <span
           className={`text-xs font-bold uppercase ${apiBilled ? "text-destructive" : "text-muted-foreground"}`}
           data-testid="text-codex-billing-source"
@@ -613,7 +546,9 @@ function CodexStatusRows({ provider }: { provider: ProviderStatus }) {
         </span>
       </div>
       <div className="flex justify-between items-center">
-        <span className="text-xs font-bold uppercase text-muted-foreground">Remaining Allowance</span>
+        <span className="text-xs font-bold uppercase text-muted-foreground">
+          Remaining Allowance
+        </span>
         <span className="text-xs font-bold uppercase text-muted-foreground">
           {provider.allowanceBalanceKnown ? "See status" : "Not reported"}
         </span>
@@ -637,8 +572,8 @@ function CodexStatusRows({ provider }: { provider: ProviderStatus }) {
       {apiBilled ? (
         <div className="p-2 text-xs font-mono bg-destructive/10 border-l-4 border-destructive text-destructive">
           The stored credential authenticates with an API key, so runs are
-          billed by OpenAI rather than covered by your ChatGPT plan. Run
-          `codex login` and choose the ChatGPT sign-in to switch.
+          billed by OpenAI rather than covered by your ChatGPT plan. Run `codex
+          login` and choose the ChatGPT sign-in to switch.
         </div>
       ) : null}
     </>
@@ -653,14 +588,18 @@ export default function ProvidersPage() {
       <div className="p-4 sm:p-6 lg:p-8 max-w-5xl mx-auto space-y-6 sm:space-y-8">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b-4 border-border pb-6">
           <div>
-            <h1 className="font-display text-lg sm:text-2xl text-foreground uppercase mb-2">Network Infrastructure</h1>
-            <p className="text-muted-foreground text-sm">LLM Provider connection status and configuration.</p>
+            <h1 className="font-display text-lg sm:text-2xl text-foreground uppercase mb-2">
+              Network Infrastructure
+            </h1>
+            <p className="text-muted-foreground text-sm">
+              LLM Provider connection status and configuration.
+            </p>
           </div>
         </div>
 
         {isLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {[1, 2].map(i => (
+            {[1, 2].map((i) => (
               <PixelCard key={i} className="animate-pulse h-48 bg-muted/50">
                 <div className="w-full h-full"></div>
               </PixelCard>
@@ -669,81 +608,108 @@ export default function ProvidersPage() {
         ) : !providers || providers.length === 0 ? (
           <PixelCard className="text-center p-6 sm:p-12" variant="destructive">
             <Network className="w-12 h-12 text-destructive mx-auto mb-4" />
-            <h3 className="font-display text-lg uppercase mb-2">Network Disconnected</h3>
-            <p className="text-muted-foreground">Unable to fetch provider status from the mainframe.</p>
+            <h3 className="font-display text-lg uppercase mb-2">
+              Network Disconnected
+            </h3>
+            <p className="text-muted-foreground">
+              Unable to fetch provider status from the mainframe.
+            </p>
           </PixelCard>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {providers
               .filter((provider) => provider.enabled)
               .map((provider) => {
-              const isReady = provider.configured && provider.healthy;
-              const isCodex = provider.provider === "codex_chatgpt";
+                const isReady = provider.configured && provider.healthy;
+                const isCodex = provider.provider === "codex_chatgpt";
 
-              return (
-                <PixelCard
-                  key={provider.provider}
-                  variant={isReady ? "default" : "destructive"}
-                  className="flex flex-col h-full"
-                >
-                  <div className="flex justify-between items-start mb-6">
-                    <div className="flex items-center gap-3">
-                      <div className={`p-2 border-2 border-border pixel-shadow ${isReady ? 'bg-primary/20 text-primary' : 'bg-muted text-muted-foreground'}`}>
-                        <Server className="w-6 h-6" />
+                return (
+                  <PixelCard
+                    key={provider.provider}
+                    variant={isReady ? "default" : "destructive"}
+                    className="flex flex-col h-full"
+                  >
+                    <div className="flex justify-between items-start mb-6">
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={`p-2 border-2 border-border pixel-shadow ${isReady ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground"}`}
+                        >
+                          <Server className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <h3
+                            className="font-display text-lg uppercase"
+                            data-testid={`text-provider-${provider.provider}`}
+                          >
+                            {provider.label}
+                          </h3>
+                          <Badge variant="outline" className="mt-1">
+                            {provider.billing === "subscription"
+                              ? "SUBSCRIPTION"
+                              : "PAY PER TOKEN"}
+                          </Badge>
+                        </div>
                       </div>
-                      <div>
-                        <h3 className="font-display text-lg uppercase" data-testid={`text-provider-${provider.provider}`}>
-                          {provider.label}
-                        </h3>
-                        <Badge variant="outline" className="mt-1">
-                          {provider.billing === "subscription" ? "SUBSCRIPTION" : "PAY PER TOKEN"}
-                        </Badge>
-                      </div>
+                      <Badge variant={isReady ? "success" : "destructive"}>
+                        {isReady ? "ONLINE" : "OFFLINE"}
+                      </Badge>
                     </div>
-                    <Badge variant={isReady ? "success" : "destructive"}>
-                      {isReady ? "ONLINE" : "OFFLINE"}
-                    </Badge>
-                  </div>
 
-                  <div className="space-y-4 flex-1 bg-muted/30 p-4 border-2 border-border/50">
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs font-bold uppercase text-muted-foreground">Configuration</span>
-                      {provider.configured ? (
-                        <span className="flex items-center text-green-500 text-xs font-bold uppercase"><CheckCircle className="w-3 h-3 mr-1" /> Valid</span>
-                      ) : (
-                        <span className="flex items-center text-destructive text-xs font-bold uppercase">
-                          <AlertTriangle className="w-3 h-3 mr-1" />
-                          {isCodex ? "Not signed in" : "Missing API Key"}
+                    <div className="space-y-4 flex-1 bg-muted/30 p-4 border-2 border-border/50">
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs font-bold uppercase text-muted-foreground">
+                          Configuration
                         </span>
+                        {provider.configured ? (
+                          <span className="flex items-center text-green-500 text-xs font-bold uppercase">
+                            <CheckCircle className="w-3 h-3 mr-1" /> Valid
+                          </span>
+                        ) : (
+                          <span className="flex items-center text-destructive text-xs font-bold uppercase">
+                            <AlertTriangle className="w-3 h-3 mr-1" />
+                            {isCodex ? "Not signed in" : "Missing API Key"}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs font-bold uppercase text-muted-foreground">
+                          Endpoint Health
+                        </span>
+                        {provider.healthy ? (
+                          <span className="flex items-center text-green-500 text-xs font-bold uppercase">
+                            <CheckCircle className="w-3 h-3 mr-1" /> Reachable
+                          </span>
+                        ) : (
+                          <span className="flex items-center text-destructive text-xs font-bold uppercase">
+                            <AlertTriangle className="w-3 h-3 mr-1" />{" "}
+                            Unreachable
+                          </span>
+                        )}
+                      </div>
+
+                      {isCodex ? <CodexStatusRows provider={provider} /> : null}
+
+                      {provider.message && (
+                        <div
+                          className={`mt-4 p-2 text-xs font-mono ${isReady ? "bg-muted/50 border-l-4 border-border text-muted-foreground" : "bg-destructive/10 border-l-4 border-destructive text-destructive"}`}
+                        >
+                          {provider.message}
+                        </div>
                       )}
                     </div>
 
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs font-bold uppercase text-muted-foreground">Endpoint Health</span>
-                      {provider.healthy ? (
-                        <span className="flex items-center text-green-500 text-xs font-bold uppercase"><CheckCircle className="w-3 h-3 mr-1" /> Reachable</span>
-                      ) : (
-                        <span className="flex items-center text-destructive text-xs font-bold uppercase"><AlertTriangle className="w-3 h-3 mr-1" /> Unreachable</span>
-                      )}
-                    </div>
+                    {isCodex ? <CodexActions provider={provider} /> : null}
 
-                    {isCodex ? <CodexStatusRows provider={provider} /> : null}
-
-                    {provider.message && (
-                      <div className={`mt-4 p-2 text-xs font-mono ${isReady ? 'bg-muted/50 border-l-4 border-border text-muted-foreground' : 'bg-destructive/10 border-l-4 border-destructive text-destructive'}`}>
-                        {provider.message}
+                    {!provider.configured && !isCodex && (
+                      <div className="mt-4 text-[10px] text-muted-foreground uppercase text-center border-t-2 border-border/30 pt-4">
+                        Add the required environment variables in the Replit
+                        Secrets tool to enable this provider.
                       </div>
                     )}
-                  </div>
-
-                  {isCodex ? (
-                    <CodexActions provider={provider} />
-                  ) : (
-                    <ProviderKeyActions provider={provider} />
-                  )}
-                </PixelCard>
-              )
-            })}
+                  </PixelCard>
+                );
+              })}
           </div>
         )}
 

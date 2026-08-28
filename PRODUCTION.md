@@ -1,4 +1,4 @@
-# Production Deployment Guide — HomardClaw
+# Production Deployment Guide — Crustabox
 
 How to publish this project safely, what it needs at runtime, and how to
 verify a deployment.

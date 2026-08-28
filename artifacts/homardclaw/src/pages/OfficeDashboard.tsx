@@ -419,8 +419,8 @@ export default function OfficeDashboard() {
     if (!overview) return;
     const nextState = !overview.emergencyStop;
     const prompt = nextState
-      ? "INITIATE EMERGENCY STOP? This will halt ALL active agents and tasks immediately."
-      : "LIFT EMERGENCY STOP? Agents will resume normal operations.";
+      ? "INITIATE EMERGENCY STOP? This will halt ALL active Crustabots and tasks immediately."
+      : "LIFT EMERGENCY STOP? Crustabots will resume normal operations.";
     if (window.confirm(prompt))
       setEmergencyStop.mutate({ data: { active: nextState } });
   };
@@ -566,15 +566,15 @@ export default function OfficeDashboard() {
           <div className={`iso-office__status ${stopped ? "is-halted" : ""}`}>
             <i className="signal" />{" "}
             {stopped
-              ? "office paused — all agents held"
+              ? "office paused — all Crustabots held"
               : "systems warm & working"}
           </div>
         </header>
 
         {stopped && (
           <div className="iso-office__halt" role="status">
-            <AlertTriangle size={14} /> Emergency stop holds every agent until
-            you resume office operations.
+            <AlertTriangle size={14} /> Emergency stop holds every Crustabot
+            until you resume office operations.
           </div>
         )}
 
@@ -582,19 +582,19 @@ export default function OfficeDashboard() {
           <section
             ref={roomRef}
             className={`room-wrap ${stopped ? "is-paused" : ""}${ambientActive ? "" : " is-ambient-paused"}`}
-            aria-label="Live underwater submarine office with four computers, an open deck, and exterior stations for sandboxed agents"
+            aria-label="Live underwater submarine office with four computers, an open deck, and exterior stations for sandboxed Crustabots"
           >
             <div className="room-caption">
               LIVE VIEW / YELLOW SUBMARINE{stopped ? " / PAUSED" : ""}
             </div>
             {overflowCount > 0 && (
               <div className="room-overflow" role="status" aria-live="polite">
-                +{overflowCount} agent{overflowCount !== 1 ? "s" : ""} in roster
-                beyond the visible stations ·{" "}
+                +{overflowCount} Crustabot{overflowCount !== 1 ? "s" : ""} in
+                roster beyond the visible stations ·{" "}
                 <Link
                   href="/agents"
                   onClick={(event) =>
-                    openOfficeWindow(event, "/agents", "Agent roster")
+                    openOfficeWindow(event, "/agents", "Crustabot roster")
                   }
                 >
                   view all
@@ -661,10 +661,12 @@ export default function OfficeDashboard() {
                     disabled={setEmergencyStop.isPending}
                     aria-label={
                       stopped
-                        ? "Resume all agents"
-                        : "Emergency stop: urgently pause all agents"
+                        ? "Resume all Crustabots"
+                        : "Emergency stop: urgently pause all Crustabots"
                     }
-                    data-label={stopped ? "Resume agents" : "Emergency stop"}
+                    data-label={
+                      stopped ? "Resume Crustabots" : "Emergency stop"
+                    }
                   />
 
                   {/* Existing lobster sprites; click an agent to open its Talk view. */}
@@ -763,10 +765,10 @@ export default function OfficeDashboard() {
                 <Link
                   href="/agents"
                   onClick={(event) =>
-                    openOfficeWindow(event, "/agents", "Agent roster")
+                    openOfficeWindow(event, "/agents", "Crustabot roster")
                   }
                 >
-                  <b>{String(overview.agents).padStart(2, "0")}</b>agents
+                  <b>{String(overview.agents).padStart(2, "0")}</b>Crustabots
                 </Link>
                 <Link
                   href="/tasks"
@@ -791,8 +793,9 @@ export default function OfficeDashboard() {
             <section className="quiet-card">
               <h2>Systems</h2>
               <div className="system-row">
-                <i className={`signal ${stopped ? "is-halted" : ""}`} /> Agent
-                runtime <span>{stopped ? "paused" : runtimeLabel}</span>
+                <i className={`signal ${stopped ? "is-halted" : ""}`} />{" "}
+                Crustabot runtime{" "}
+                <span>{stopped ? "paused" : runtimeLabel}</span>
               </div>
               <div className="system-row">
                 <i className={`signal ${queueStalled ? "is-halted" : ""}`} />{" "}
@@ -860,7 +863,7 @@ export default function OfficeDashboard() {
               ) : justDecided ? (
                 <div className="approved">
                   {justDecided.data.decision === "approved"
-                    ? "CLEARED — the agent has the go-ahead."
+                    ? "CLEARED — the Crustabot has the go-ahead."
                     : "HELD — the request was declined."}
                 </div>
               ) : (
@@ -949,8 +952,8 @@ const SCENE_HOTSPOTS: SceneHotspot[] = [
   // stops-short-of-the-chair clearance the flat layout had.
   {
     href: "/agents",
-    label: "Agents",
-    ariaLabel: "First wall computer — open Agents",
+    label: "Crustabots",
+    ariaLabel: "First wall computer — open Crustabots",
     left: "42.4%",
     top: "33.8%",
     width: "5.4%",
@@ -988,11 +991,20 @@ const SCENE_HOTSPOTS: SceneHotspot[] = [
   {
     href: "/memory",
     label: "Memory",
-    ariaLabel: "Memory terminal — open Memory",
-    left: "84.7%",
-    top: "49.5%",
-    width: "8%",
-    height: "12%",
+    ariaLabel: "Small upper computer — open Memory",
+    left: "82.2%",
+    top: "44.6%",
+    width: "6.8%",
+    height: "10.5%",
+  },
+  {
+    href: "/documentation",
+    label: "Documentation",
+    ariaLabel: "Small library — open Documentation",
+    left: "86.7%",
+    top: "48%",
+    width: "5.5%",
+    height: "11.5%",
   },
   {
     href: "/island",

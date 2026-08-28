@@ -53,7 +53,10 @@ export default function ReportsPage() {
                 <div className="text-[10px] uppercase text-muted-foreground mb-1">
                   Last 24h spend
                 </div>
-                <div className="font-display text-lg text-foreground" data-testid="text-today-cost">
+                <div
+                  className="font-display text-lg text-foreground"
+                  data-testid="text-today-cost"
+                >
                   {formatCents(report.totals.todayCostCents)}
                 </div>
               </PixelCard>
@@ -91,19 +94,56 @@ export default function ReportsPage() {
               <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 text-center">
                 {(
                   [
-                    ["completed", report.outcomes.completed, "text-primary", CheckCircle2],
-                    ["failed", report.outcomes.failed, "text-destructive", XCircle],
-                    ["blocked", report.outcomes.blocked, "text-destructive", OctagonAlert],
-                    ["cancelled", report.outcomes.cancelled, "text-muted-foreground", XCircle],
-                    ["queued", report.outcomes.queued, "text-muted-foreground", Hourglass],
-                    ["running", report.outcomes.running, "text-accent", Hourglass],
-                    ["awaiting approval", report.outcomes.waitingApproval, "text-accent", Hourglass],
+                    [
+                      "completed",
+                      report.outcomes.completed,
+                      "text-primary",
+                      CheckCircle2,
+                    ],
+                    [
+                      "failed",
+                      report.outcomes.failed,
+                      "text-destructive",
+                      XCircle,
+                    ],
+                    [
+                      "blocked",
+                      report.outcomes.blocked,
+                      "text-destructive",
+                      OctagonAlert,
+                    ],
+                    [
+                      "cancelled",
+                      report.outcomes.cancelled,
+                      "text-muted-foreground",
+                      XCircle,
+                    ],
+                    [
+                      "queued",
+                      report.outcomes.queued,
+                      "text-muted-foreground",
+                      Hourglass,
+                    ],
+                    [
+                      "running",
+                      report.outcomes.running,
+                      "text-accent",
+                      Hourglass,
+                    ],
+                    [
+                      "awaiting approval",
+                      report.outcomes.waitingApproval,
+                      "text-accent",
+                      Hourglass,
+                    ],
                   ] as const
                 ).map(([label, count, tone, Icon]) => (
                   <div key={label} className="border-2 border-border p-2">
                     <Icon className={`w-4 h-4 mx-auto mb-1 ${tone}`} />
                     <div className="font-display text-base">{count}</div>
-                    <div className="text-[9px] uppercase text-muted-foreground">{label}</div>
+                    <div className="text-[9px] uppercase text-muted-foreground">
+                      {label}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -111,15 +151,17 @@ export default function ReportsPage() {
 
             <PixelCard className="p-4 sm:p-6 overflow-x-auto">
               <h2 className="font-display text-sm uppercase mb-4 flex items-center gap-2">
-                <Coins className="w-4 h-4" /> By agent (30 days)
+                <Coins className="w-4 h-4" /> By Crustabot (30 days)
               </h2>
               {report.agents.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No active agents.</p>
+                <p className="text-sm text-muted-foreground">
+                  No active Crustabots.
+                </p>
               ) : (
                 <table className="w-full text-sm min-w-[540px]">
                   <thead>
                     <tr className="text-left text-[10px] uppercase text-muted-foreground border-b-2 border-border">
-                      <th className="py-2 pr-2">Agent</th>
+                      <th className="py-2 pr-2">Crustabot</th>
                       <th className="py-2 pr-2">Status</th>
                       <th className="py-2 pr-2 text-right">Done</th>
                       <th className="py-2 pr-2 text-right">Failed</th>
@@ -140,12 +182,19 @@ export default function ReportsPage() {
                             {agent.status}
                           </Badge>
                         </td>
-                        <td className="py-2 pr-2 text-right">{agent.tasksCompleted}</td>
-                        <td className="py-2 pr-2 text-right">{agent.tasksFailed}</td>
                         <td className="py-2 pr-2 text-right">
-                          {formatTokens(agent.inputTokens)} / {formatTokens(agent.outputTokens)}
+                          {agent.tasksCompleted}
                         </td>
-                        <td className="py-2 text-right">{formatCents(agent.costCents)}</td>
+                        <td className="py-2 pr-2 text-right">
+                          {agent.tasksFailed}
+                        </td>
+                        <td className="py-2 pr-2 text-right">
+                          {formatTokens(agent.inputTokens)} /{" "}
+                          {formatTokens(agent.outputTokens)}
+                        </td>
+                        <td className="py-2 text-right">
+                          {formatCents(agent.costCents)}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -154,7 +203,9 @@ export default function ReportsPage() {
             </PixelCard>
 
             <PixelCard className="p-4 sm:p-6 overflow-x-auto">
-              <h2 className="font-display text-sm uppercase mb-4">By provider (30 days)</h2>
+              <h2 className="font-display text-sm uppercase mb-4">
+                By provider (30 days)
+              </h2>
               {report.providers.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No tasks yet.</p>
               ) : (
@@ -169,14 +220,23 @@ export default function ReportsPage() {
                   </thead>
                   <tbody>
                     {report.providers.map((provider) => (
-                      <tr key={provider.provider} className="border-b border-border/40">
-                        <td className="py-2 pr-2 font-bold uppercase">{provider.provider}</td>
-                        <td className="py-2 pr-2 text-right">{provider.tasks}</td>
+                      <tr
+                        key={provider.provider}
+                        className="border-b border-border/40"
+                      >
+                        <td className="py-2 pr-2 font-bold uppercase">
+                          {provider.provider}
+                        </td>
+                        <td className="py-2 pr-2 text-right">
+                          {provider.tasks}
+                        </td>
                         <td className="py-2 pr-2 text-right">
                           {formatTokens(provider.inputTokens)} /{" "}
                           {formatTokens(provider.outputTokens)}
                         </td>
-                        <td className="py-2 text-right">{formatCents(provider.costCents)}</td>
+                        <td className="py-2 text-right">
+                          {formatCents(provider.costCents)}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -186,7 +246,8 @@ export default function ReportsPage() {
 
             <PixelCard className="p-4 sm:p-6">
               <h2 className="font-display text-sm uppercase mb-4 flex items-center gap-2">
-                <OctagonAlert className="w-4 h-4 text-destructive" /> Needs attention
+                <OctagonAlert className="w-4 h-4 text-destructive" /> Needs
+                attention
               </h2>
               {report.blockers.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
@@ -201,21 +262,27 @@ export default function ReportsPage() {
                       data-testid={`card-blocker-${blocker.taskId}`}
                     >
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-bold text-xs uppercase">{blocker.agentName}</span>
+                        <span className="font-bold text-xs uppercase">
+                          {blocker.agentName}
+                        </span>
                         {blocker.errorKind && (
                           <Badge className="bg-destructive/20 text-destructive uppercase text-[9px]">
                             {blocker.errorKind}
                           </Badge>
                         )}
                         <span className="text-[10px] text-muted-foreground ml-auto">
-                          {formatDistanceToNow(new Date(blocker.createdAt), { addSuffix: true })}
+                          {formatDistanceToNow(new Date(blocker.createdAt), {
+                            addSuffix: true,
+                          })}
                         </span>
                       </div>
                       <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
                         {blocker.objective}
                       </p>
                       {blocker.errorMessage && (
-                        <p className="text-[11px] text-destructive mt-1">{blocker.errorMessage}</p>
+                        <p className="text-[11px] text-destructive mt-1">
+                          {blocker.errorMessage}
+                        </p>
                       )}
                       <Link
                         href="/tasks"

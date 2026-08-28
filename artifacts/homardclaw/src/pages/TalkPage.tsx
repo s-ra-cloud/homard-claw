@@ -106,7 +106,7 @@ export default function TalkPage() {
       <div className="flex h-full min-h-0 flex-col lg:flex-row">
         {/* Contacts — the phone's home screen, a column on desktop. */}
         <section
-          aria-label="Agent contacts"
+          aria-label="Crustabot contacts"
           className={`min-h-0 flex-1 lg:flex-none lg:w-80 xl:w-96 lg:border-r-4 lg:border-border ${
             inCall ? "hidden lg:block" : "block"
           }`}

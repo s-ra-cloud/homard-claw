@@ -3,7 +3,7 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: HomardClaw private agent office API
+  description: Crustabox private Crustabot office API
 servers:
   - url: /api
     description: Base API path
@@ -687,6 +687,60 @@ paths:
                 $ref: "#/components/schemas/ClearTalkHistoryResult"
         "404":
           description: Agent not found
+  /documentation:
+    get:
+      operationId: getDocumentation
+      tags: [office]
+      summary: Read the Crustabox product documentation and current guide settings
+      responses:
+        "200":
+          description: Documentation sections and the selected guide Crustabot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Documentation"
+  /documentation/settings:
+    put:
+      operationId: updateDocumentationSettings
+      tags: [office]
+      summary: Choose which Crustabot answers documentation questions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocumentationSettingsInput"
+      responses:
+        "200":
+          description: Updated documentation and guide settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Documentation"
+        "404":
+          description: Crustabot not found or unavailable
+  /documentation/chat:
+    post:
+      operationId: chatWithDocumentation
+      tags: [office]
+      summary: Ask the selected guide Crustabot a question about Crustabox
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocumentationChatInput"
+      responses:
+        "200":
+          description: Documentation-grounded answer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentationChatResponse"
+        "409":
+          description: No available guide Crustabot
+        "503":
+          description: The guide's response provider is unavailable
   /providers:
     get:
       operationId: getProviders
@@ -2384,6 +2438,55 @@ components:
         voice:
           type: [string, "null"]
           description: OpenAI voice id the agent speaks with; null = text only
+    DocumentationSection:
+      type: object
+      required: [id, title, summary, items]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        summary: { type: string }
+        items:
+          type: array
+          items: { type: string }
+    Documentation:
+      type: object
+      required: [productName, assistantName, assistantAgentId, sections]
+      properties:
+        productName: { type: string }
+        assistantName: { type: [string, "null"] }
+        assistantAgentId: { type: [string, "null"] }
+        sections:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocumentationSection"
+    DocumentationSettingsInput:
+      type: object
+      required: [agentId]
+      properties:
+        agentId: { type: string, minLength: 1 }
+    DocumentationChatTurn:
+      type: object
+      required: [role, text]
+      properties:
+        role: { type: string, enum: [user, assistant] }
+        text: { type: string, maxLength: 8000 }
+    DocumentationChatInput:
+      type: object
+      required: [text]
+      properties:
+        text: { type: string, minLength: 1, maxLength: 4000 }
+        history:
+          type: array
+          maxItems: 12
+          items:
+            $ref: "#/components/schemas/DocumentationChatTurn"
+    DocumentationChatResponse:
+      type: object
+      required: [reply, assistantName, assistantAgentId]
+      properties:
+        reply: { type: string }
+        assistantName: { type: string }
+        assistantAgentId: { type: string }
     VoiceConverseInput:
       type: object
       required: [audio]

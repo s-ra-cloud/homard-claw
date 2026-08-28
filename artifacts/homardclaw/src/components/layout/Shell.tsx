@@ -19,6 +19,7 @@ import {
   BarChart3,
   Maximize2,
   Plug,
+  BookOpen,
 } from "lucide-react";
 import { useListNotifications } from "@workspace/api-client-react";
 import { useLiveUpdates } from "@/lib/useLiveUpdates";
@@ -28,13 +29,14 @@ import "./office-window.css";
 
 const navItems = [
   { href: "/office", label: "Office", icon: Home },
-  { href: "/agents", label: "Agents", icon: Users },
+  { href: "/agents", label: "Crustabots", icon: Users },
   { href: "/talk", label: "Talk", icon: Phone },
   { href: "/teams", label: "Teams", icon: Network },
   { href: "/tasks", label: "Tasks", icon: Activity },
   { href: "/schedules", label: "Schedules", icon: CalendarClock },
   { href: "/inbox", label: "Inbox", icon: Bell },
   { href: "/memory", label: "Memory", icon: Brain },
+  { href: "/documentation", label: "Documentation", icon: BookOpen },
   { href: "/approvals", label: "Approvals", icon: CheckSquare },
   { href: "/reports", label: "Reports", icon: BarChart3 },
   { href: "/providers", label: "Providers", icon: Settings },
@@ -186,10 +188,10 @@ function StandardShell({
         <div className="p-4 sm:p-6 border-b-4 border-border bg-muted/30">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-primary pixel-shadow flex items-center justify-center shrink-0">
-              <span className="font-display text-white text-xs">HC</span>
+              <span className="font-display text-white text-xs">CB</span>
             </div>
             <h1 className="font-display text-sm text-primary uppercase tracking-tighter">
-              HomardClaw
+              Crustabox
             </h1>
             <button
               type="button"
@@ -309,10 +311,10 @@ function StandardShell({
               <Menu className="w-5 h-5" />
             </button>
             <div className="w-8 h-8 bg-primary pixel-shadow flex items-center justify-center shrink-0">
-              <span className="font-display text-white text-xs">HC</span>
+              <span className="font-display text-white text-xs">CB</span>
             </div>
             <span className="font-display text-xs text-primary uppercase tracking-tighter truncate">
-              {currentPage?.label ?? "HomardClaw"}
+              {currentPage?.label ?? "Crustabox"}
             </span>
           </header>
         )}

@@ -113,11 +113,11 @@ export default function NotificationsPage() {
           <aside className="hidden md:flex w-56 lg:w-64 shrink-0 flex-col bg-foreground text-background border-r-4 border-border">
             <div className="p-5 border-b-2 border-background/20">
               <div className="font-display text-sm uppercase tracking-wide">
-                HomardClaw HQ
+                Crustabox HQ
               </div>
               <div className="flex items-center gap-2 mt-2 text-[11px] text-background/60">
                 <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-                {activeAgents.length} agents in the office
+                {activeAgents.length} Crustabots in the office
               </div>
             </div>
             <nav className="p-3 space-y-1 text-sm">
@@ -133,7 +133,7 @@ export default function NotificationsPage() {
                 )}
               </div>
               <div className="flex items-center gap-2 px-3 py-2 text-background/50">
-                <Users className="w-4 h-4" /> all-agents
+                <Users className="w-4 h-4" /> all-Crustabots
               </div>
             </nav>
             <div className="mt-auto p-4 border-t-2 border-background/20">
@@ -170,7 +170,7 @@ export default function NotificationsPage() {
                   </span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-1.5 truncate">
-                  Agent wins, blockers, and questions — as they happen.
+                  Crustabot wins, blockers, and questions — as they happen.
                 </p>
               </div>
               <Button
@@ -192,7 +192,7 @@ export default function NotificationsPage() {
                   <div className="flex items-center gap-3 px-4 sm:px-6 py-3">
                     <div className="h-px bg-border flex-1" />
                     <span className="text-[10px] uppercase font-bold text-muted-foreground border-2 border-border bg-card px-3 py-1">
-                      Agent conversations
+                      Crustabot conversations
                     </span>
                     <div className="h-px bg-border flex-1" />
                   </div>
@@ -290,8 +290,8 @@ export default function NotificationsPage() {
                       The channel is quiet
                     </h2>
                     <p className="text-sm text-muted-foreground mt-2 max-w-sm">
-                      When an agent finishes work, hits a blocker, or needs your
-                      approval, their update will appear here.
+                      When a Crustabot finishes work, hits a blocker, or needs
+                      your approval, their update will appear here.
                     </p>
                   </div>
                 </div>
@@ -353,7 +353,7 @@ export default function NotificationsPage() {
                               @{agentHandle(name)}
                             </span>
                             <span className="text-[10px] uppercase font-bold text-muted-foreground">
-                              {agent?.title ?? "office bot"}
+                              {agent?.title ?? "office Crustabot"}
                             </span>
                             <time
                               className="text-[10px] text-muted-foreground"

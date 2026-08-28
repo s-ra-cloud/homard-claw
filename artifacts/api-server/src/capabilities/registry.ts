@@ -49,7 +49,7 @@ function builtinPackage(
     displayName,
     version: "1.0.0",
     description,
-    publisher: "HomardClaw (built-in)",
+    publisher: "Crustabox (built-in)",
     connection: id,
     skills,
     tools: APP_OPERATIONS.filter((op) => op.app === id).map(builtinTool),
@@ -120,7 +120,7 @@ const WEB_RESEARCH_PACKAGE: CapabilityManifest = {
   version: "2.0.0",
   description:
     "Read-only web search and public HTTPS page extraction through vetted native handlers.",
-  publisher: "HomardClaw (vetted registry)",
+  publisher: "Crustabox (vetted registry)",
   connection: "none",
   skills: [
     {

@@ -49,7 +49,7 @@ export function ContactList({
               <Phone className="w-4 h-4" aria-hidden="true" /> Contacts
             </h2>
             <p className="text-[10px] text-muted-foreground mt-1 font-mono uppercase">
-              Tap an agent to call — speak or type
+              Tap a Crustabot to call — speak or type
             </p>
           </div>
           {headerAction && <div className="ml-auto">{headerAction}</div>}
@@ -82,7 +82,9 @@ export function ContactList({
         )}
       </div>
 
-      {notice && <div className="shrink-0 border-b-4 border-border">{notice}</div>}
+      {notice && (
+        <div className="shrink-0 border-b-4 border-border">{notice}</div>
+      )}
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         {isLoading ? (
@@ -104,7 +106,7 @@ export function ContactList({
             </div>
             <p className="text-xs font-mono uppercase text-muted-foreground">
               {agents.length === 0
-                ? "No agents to call yet — recruit one from the roster"
+                ? "No Crustabots to call yet — recruit one from the roster"
                 : "No contact matches that search"}
             </p>
           </div>
@@ -128,7 +130,9 @@ export function ContactList({
                   >
                     <span
                       className={`shrink-0 flex items-center justify-center w-12 h-12 border-2 ${
-                        isSelected ? "border-primary-foreground/40" : "border-border"
+                        isSelected
+                          ? "border-primary-foreground/40"
+                          : "border-border"
                       } bg-background/40 overflow-hidden`}
                     >
                       <MarlowLobster
@@ -144,7 +148,9 @@ export function ContactList({
                       </span>
                       <span
                         className={`block text-[10px] font-mono uppercase truncate ${
-                          isSelected ? "text-primary-foreground/80" : "text-muted-foreground"
+                          isSelected
+                            ? "text-primary-foreground/80"
+                            : "text-muted-foreground"
                         }`}
                       >
                         {agent.title}
@@ -159,7 +165,9 @@ export function ContactList({
                       />
                       <span
                         className={
-                          isSelected ? "text-primary-foreground/80" : "text-muted-foreground"
+                          isSelected
+                            ? "text-primary-foreground/80"
+                            : "text-muted-foreground"
                         }
                       >
                         {presence.label}

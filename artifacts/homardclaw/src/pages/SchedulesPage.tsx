@@ -58,7 +58,11 @@ function statusBadge(status: string | null | undefined) {
       : status === "failed" || status === "blocked"
         ? "bg-destructive/20 text-destructive"
         : "bg-muted text-muted-foreground";
-  return <Badge className={`${tone} uppercase text-[10px]`}>last run: {status}</Badge>;
+  return (
+    <Badge className={`${tone} uppercase text-[10px]`}>
+      last run: {status}
+    </Badge>
+  );
 }
 
 export default function SchedulesPage() {
@@ -140,10 +144,14 @@ export default function SchedulesPage() {
   });
 
   const submit = () => {
-    if (!form.name.trim() || !form.agentId || form.objective.trim().length < 3) {
+    if (
+      !form.name.trim() ||
+      !form.agentId ||
+      form.objective.trim().length < 3
+    ) {
       toast({
         title: "Missing details",
-        description: "A schedule needs a name, an agent, and an objective.",
+        description: "A schedule needs a name, a Crustabot, and an objective.",
         variant: "destructive",
       });
       return;
@@ -200,8 +208,8 @@ export default function SchedulesPage() {
               Duty Roster
             </h1>
             <p className="text-muted-foreground text-sm">
-              Put agents on a clock: one-time and recurring work, fired on schedule
-              even after a restart.
+              Put agents on a clock: one-time and recurring work, fired on
+              schedule even after a restart.
             </p>
           </div>
           <Button
@@ -231,15 +239,17 @@ export default function SchedulesPage() {
               </div>
               <div>
                 <label className="text-xs font-bold uppercase text-muted-foreground block mb-1">
-                  Agent
+                  Crustabot
                 </label>
                 <select
                   className={inputCls}
                   value={form.agentId}
-                  onChange={(e) => setForm({ ...form, agentId: e.target.value })}
+                  onChange={(e) =>
+                    setForm({ ...form, agentId: e.target.value })
+                  }
                   data-testid="select-schedule-agent"
                 >
-                  <option value="">Choose an agent…</option>
+                  <option value="">Choose a Crustabot…</option>
                   {activeAgents.map((agent) => (
                     <option key={agent.id} value={agent.id}>
                       {agent.name} — {agent.title}
@@ -256,7 +266,9 @@ export default function SchedulesPage() {
                 className={`${inputCls} min-h-[80px]`}
                 value={form.objective}
                 maxLength={5000}
-                onChange={(e) => setForm({ ...form, objective: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, objective: e.target.value })
+                }
                 placeholder="Summarize overnight developments and flag anything urgent."
                 data-testid="input-schedule-objective"
               />
@@ -269,7 +281,9 @@ export default function SchedulesPage() {
                 <select
                   className={inputCls}
                   value={form.cadence}
-                  onChange={(e) => setForm({ ...form, cadence: e.target.value as Cadence })}
+                  onChange={(e) =>
+                    setForm({ ...form, cadence: e.target.value as Cadence })
+                  }
                   data-testid="select-schedule-cadence"
                 >
                   {CADENCES.map((c) => (
@@ -288,7 +302,9 @@ export default function SchedulesPage() {
                     type="datetime-local"
                     className={inputCls}
                     value={form.runAt}
-                    onChange={(e) => setForm({ ...form, runAt: e.target.value })}
+                    onChange={(e) =>
+                      setForm({ ...form, runAt: e.target.value })
+                    }
                     data-testid="input-schedule-runat"
                   />
                 </div>
@@ -301,7 +317,9 @@ export default function SchedulesPage() {
                     type="time"
                     className={inputCls}
                     value={form.timeOfDay}
-                    onChange={(e) => setForm({ ...form, timeOfDay: e.target.value })}
+                    onChange={(e) =>
+                      setForm({ ...form, timeOfDay: e.target.value })
+                    }
                     data-testid="input-schedule-time"
                   />
                 </div>
@@ -312,7 +330,9 @@ export default function SchedulesPage() {
                 </label>
                 <Input
                   value={form.timezone}
-                  onChange={(e) => setForm({ ...form, timezone: e.target.value })}
+                  onChange={(e) =>
+                    setForm({ ...form, timezone: e.target.value })
+                  }
                   placeholder="Europe/Paris"
                   data-testid="input-schedule-timezone"
                 />
@@ -365,7 +385,10 @@ export default function SchedulesPage() {
                   onChange={(e) =>
                     setForm({
                       ...form,
-                      dayOfMonth: Math.min(31, Math.max(1, Number(e.target.value) || 1)),
+                      dayOfMonth: Math.min(
+                        31,
+                        Math.max(1, Number(e.target.value) || 1),
+                      ),
                     })
                   }
                   data-testid="input-schedule-daymonth"
@@ -384,7 +407,10 @@ export default function SchedulesPage() {
                   className={inputCls}
                   value={form.priority}
                   onChange={(e) =>
-                    setForm({ ...form, priority: e.target.value as "low" | "normal" | "high" })
+                    setForm({
+                      ...form,
+                      priority: e.target.value as "low" | "normal" | "high",
+                    })
                   }
                 >
                   <option value="low">Low</option>
@@ -400,7 +426,9 @@ export default function SchedulesPage() {
                   type="number"
                   min={1}
                   value={form.budgetCents}
-                  onChange={(e) => setForm({ ...form, budgetCents: e.target.value })}
+                  onChange={(e) =>
+                    setForm({ ...form, budgetCents: e.target.value })
+                  }
                   placeholder="No limit"
                   data-testid="input-schedule-budget"
                 />
@@ -448,13 +476,15 @@ export default function SchedulesPage() {
         )}
 
         {isLoading ? (
-          <PixelCard className="p-6 text-sm text-muted-foreground">Loading schedules…</PixelCard>
+          <PixelCard className="p-6 text-sm text-muted-foreground">
+            Loading schedules…
+          </PixelCard>
         ) : !schedules || schedules.length === 0 ? (
           <PixelCard className="p-8 text-center space-y-2">
             <CalendarClock className="w-8 h-8 mx-auto text-muted-foreground" />
             <p className="text-sm text-muted-foreground">
-              No schedules yet. Put an agent on the roster and their work will run
-              itself.
+              No schedules yet. Put a Crustabot on the roster and their work
+              will run itself.
             </p>
           </PixelCard>
         ) : (
@@ -468,7 +498,9 @@ export default function SchedulesPage() {
                 <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                   <div className="min-w-0 space-y-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-bold text-sm uppercase">{schedule.name}</span>
+                      <span className="font-bold text-sm uppercase">
+                        {schedule.name}
+                      </span>
                       <Badge className="bg-muted text-muted-foreground uppercase text-[10px]">
                         {schedule.agentName}
                       </Badge>
@@ -489,12 +521,18 @@ export default function SchedulesPage() {
                       </span>
                       {schedule.enabled && schedule.nextRunAt && (
                         <span>
-                          next {formatDistanceToNow(new Date(schedule.nextRunAt), { addSuffix: true })}
+                          next{" "}
+                          {formatDistanceToNow(new Date(schedule.nextRunAt), {
+                            addSuffix: true,
+                          })}
                         </span>
                       )}
                       {schedule.lastRunAt && (
                         <span>
-                          last {formatDistanceToNow(new Date(schedule.lastRunAt), { addSuffix: true })}
+                          last{" "}
+                          {formatDistanceToNow(new Date(schedule.lastRunAt), {
+                            addSuffix: true,
+                          })}
                         </span>
                       )}
                     </div>
@@ -522,7 +560,9 @@ export default function SchedulesPage() {
                       className="uppercase text-[10px] font-bold text-destructive border-destructive"
                       disabled={deleteSchedule.isPending}
                       onClick={() => {
-                        if (window.confirm(`Delete schedule "${schedule.name}"?`)) {
+                        if (
+                          window.confirm(`Delete schedule "${schedule.name}"?`)
+                        ) {
                           deleteSchedule.mutate({ scheduleId: schedule.id });
                         }
                       }}
@@ -532,12 +572,14 @@ export default function SchedulesPage() {
                     </Button>
                   </div>
                 </div>
-                {!schedule.enabled && schedule.cadence === "once" && schedule.lastRunAt && (
-                  <p className="mt-2 text-[11px] text-muted-foreground flex items-center gap-1">
-                    <AlertTriangle className="w-3 h-3" />
-                    One-time schedules turn off after firing.
-                  </p>
-                )}
+                {!schedule.enabled &&
+                  schedule.cadence === "once" &&
+                  schedule.lastRunAt && (
+                    <p className="mt-2 text-[11px] text-muted-foreground flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3" />
+                      One-time schedules turn off after firing.
+                    </p>
+                  )}
               </PixelCard>
             ))}
           </div>

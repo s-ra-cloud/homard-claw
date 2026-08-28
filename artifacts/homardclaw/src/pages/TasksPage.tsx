@@ -30,7 +30,23 @@ import { AppActionList } from "@/components/app-action-list";
 import { PixelCard } from "@/components/ui/pixel-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Activity, Play, Clock, AlertTriangle, CheckCircle, Calculator, Ban, RotateCcw, ScrollText, XCircle, Network, AppWindow, Paperclip, FileText, X } from "lucide-react";
+import {
+  Activity,
+  Play,
+  Clock,
+  AlertTriangle,
+  CheckCircle,
+  Calculator,
+  Ban,
+  RotateCcw,
+  ScrollText,
+  XCircle,
+  Network,
+  AppWindow,
+  Paperclip,
+  FileText,
+  X,
+} from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
@@ -49,11 +65,17 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { formatDistanceToNow } from "date-fns";
-import { ATTACHMENT_ACCEPT, MAX_ATTACHMENTS, attachmentLabel, readAttachment } from "@/lib/attachments";
+import {
+  ATTACHMENT_ACCEPT,
+  MAX_ATTACHMENTS,
+  attachmentLabel,
+  readAttachment,
+} from "@/lib/attachments";
 
 const selectTriggerClass =
   "bg-background border-4 border-border rounded-none focus:ring-0 focus:border-primary font-mono text-sm uppercase";
-const selectContentClass = "border-4 border-border rounded-none bg-card max-h-72";
+const selectContentClass =
+  "border-4 border-border rounded-none bg-card max-h-72";
 const selectItemClass =
   "font-mono text-xs uppercase focus:bg-primary focus:text-primary-foreground";
 
@@ -132,20 +154,36 @@ function EstimatePanel({
         <>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono text-xs">
             <div>
-              <div className="text-[9px] text-muted-foreground uppercase font-bold">Provider</div>
-              <div className="uppercase">{estimate.provider.replace("_", " ")}</div>
+              <div className="text-[9px] text-muted-foreground uppercase font-bold">
+                Provider
+              </div>
+              <div className="uppercase">
+                {estimate.provider.replace("_", " ")}
+              </div>
             </div>
             <div className="col-span-1 sm:col-span-1 min-w-0">
-              <div className="text-[9px] text-muted-foreground uppercase font-bold">Model</div>
-              <div className="truncate" title={estimate.model}>{estimate.model}</div>
+              <div className="text-[9px] text-muted-foreground uppercase font-bold">
+                Model
+              </div>
+              <div className="truncate" title={estimate.model}>
+                {estimate.model}
+              </div>
             </div>
             <div>
-              <div className="text-[9px] text-muted-foreground uppercase font-bold">Est. Tokens</div>
+              <div className="text-[9px] text-muted-foreground uppercase font-bold">
+                Est. Tokens
+              </div>
               <div>~{formatTokens(estimate.estimatedTokens)}</div>
             </div>
             <div>
-              <div className="text-[9px] text-muted-foreground uppercase font-bold">Est. Cost</div>
-              <div>{estimate.costKnown ? `~${formatCents(estimate.estimatedCostCents)}` : "Unknown"}</div>
+              <div className="text-[9px] text-muted-foreground uppercase font-bold">
+                Est. Cost
+              </div>
+              <div>
+                {estimate.costKnown
+                  ? `~${formatCents(estimate.estimatedCostCents)}`
+                  : "Unknown"}
+              </div>
             </div>
           </div>
           {estimate.note && (
@@ -174,14 +212,17 @@ function ModelOverrideSelect({
   if (!hasCatalog) {
     return (
       <div className="text-[10px] font-mono text-muted-foreground uppercase border-l-4 border-border pl-2">
-        {catalog?.message ?? "Model catalog unavailable — routing default will be used."}
+        {catalog?.message ??
+          "Model catalog unavailable — routing default will be used."}
       </div>
     );
   }
   return (
     <Select
       value={value || MODEL_DEFAULT_SENTINEL}
-      onValueChange={(val) => onChange(val === MODEL_DEFAULT_SENTINEL ? "" : val)}
+      onValueChange={(val) =>
+        onChange(val === MODEL_DEFAULT_SENTINEL ? "" : val)
+      }
     >
       <SelectTrigger className={selectTriggerClass}>
         <SelectValue placeholder="Routing default" />
@@ -191,7 +232,11 @@ function ModelOverrideSelect({
           Routing Default
         </SelectItem>
         {catalog!.models.map((model) => (
-          <SelectItem key={model.id} value={model.id} className={selectItemClass}>
+          <SelectItem
+            key={model.id}
+            value={model.id}
+            className={selectItemClass}
+          >
             {model.name}
           </SelectItem>
         ))}
@@ -217,11 +262,16 @@ function TaskLogList({ logs }: { logs: TaskLog[] }) {
   return (
     <div className="space-y-1 max-h-56 overflow-y-auto bg-background border-2 border-border/50 p-3">
       {logs.map((log) => (
-        <div key={log.id} className="font-mono text-[11px] leading-relaxed flex gap-2">
+        <div
+          key={log.id}
+          className="font-mono text-[11px] leading-relaxed flex gap-2"
+        >
           <span className="text-muted-foreground shrink-0">
             {new Date(log.createdAt).toLocaleTimeString()}
           </span>
-          <span className={LOG_LEVEL_CLASS[log.level] ?? "text-muted-foreground"}>
+          <span
+            className={LOG_LEVEL_CLASS[log.level] ?? "text-muted-foreground"}
+          >
             {log.message}
           </span>
         </div>
@@ -276,7 +326,9 @@ function DelegationSection({ task }: { task: Task }) {
       onSuccess: () => {
         setObjective("");
         setTeammateId("");
-        void queryClient.invalidateQueries({ queryKey: [`/api/tasks/${task.id}/tree`] });
+        void queryClient.invalidateQueries({
+          queryKey: [`/api/tasks/${task.id}/tree`],
+        });
         void queryClient.invalidateQueries({
           queryKey: [`/api/messages?taskId=${task.id}`],
         });
@@ -287,7 +339,9 @@ function DelegationSection({ task }: { task: Task }) {
         toast({
           title: "Could not delegate",
           description:
-            error instanceof Error ? error.message : "The office refused that hand-off.",
+            error instanceof Error
+              ? error.message
+              : "The office refused that hand-off.",
           variant: "destructive",
         });
       },
@@ -309,7 +363,9 @@ function DelegationSection({ task }: { task: Task }) {
       {task.delegatedByAgentName && (
         <p className="font-mono text-xs text-muted-foreground">
           Handed over by{" "}
-          <span className="text-accent font-bold">{task.delegatedByAgentName}</span>
+          <span className="text-accent font-bold">
+            {task.delegatedByAgentName}
+          </span>
           {task.teamName ? ` · ${task.teamName}` : ""}
         </p>
       )}
@@ -331,7 +387,9 @@ function DelegationSection({ task }: { task: Task }) {
                 <div className="truncate">{node.objective}</div>
                 <div className="text-[10px] uppercase text-muted-foreground">
                   {node.agentName}
-                  {node.delegatedByAgentName ? ` ← ${node.delegatedByAgentName}` : ""}
+                  {node.delegatedByAgentName
+                    ? ` ← ${node.delegatedByAgentName}`
+                    : ""}
                   {node.actualCostCents != null
                     ? ` · ${formatCents(node.actualCostCents)}`
                     : ""}
@@ -378,7 +436,10 @@ function DelegationSection({ task }: { task: Task }) {
             Hand a slice to a teammate
           </div>
           <Select value={teammateId} onValueChange={setTeammateId}>
-            <SelectTrigger className={selectTriggerClass} data-testid="select-teammate">
+            <SelectTrigger
+              className={selectTriggerClass}
+              data-testid="select-teammate"
+            >
               <SelectValue placeholder="Choose a teammate" />
             </SelectTrigger>
             <SelectContent className={selectContentClass}>
@@ -403,7 +464,9 @@ function DelegationSection({ task }: { task: Task }) {
           />
           <Button
             type="submit"
-            disabled={delegate.isPending || !teammateId || objective.trim().length < 3}
+            disabled={
+              delegate.isPending || !teammateId || objective.trim().length < 3
+            }
             className="rounded-none font-bold uppercase"
             data-testid="button-delegate"
           >
@@ -429,7 +492,8 @@ function TaskDetailDialog({
     query: {
       queryKey: [`/api/tasks/${taskId}`],
       refetchInterval: (query) => {
-        const status = (query.state.data as { task?: Task } | undefined)?.task?.status;
+        const status = (query.state.data as { task?: Task } | undefined)?.task
+          ?.status;
         return status === "running" || status === "queued" ? 2000 : false;
       },
     },
@@ -458,11 +522,15 @@ function TaskDetailDialog({
                 </Badge>
               )}
               {task.reasoningEffort && (
-                <Badge variant="outline">{task.reasoningEffort} reasoning</Badge>
+                <Badge variant="outline">
+                  {task.reasoningEffort} reasoning
+                </Badge>
               )}
               <TaskPhaseBadge task={task} />
               {task.budgetCents != null && (
-                <Badge variant="outline">Budget {formatCents(task.budgetCents)}</Badge>
+                <Badge variant="outline">
+                  Budget {formatCents(task.budgetCents)}
+                </Badge>
               )}
               {task.attempts > 0 && (
                 <Badge variant="outline">Attempt {task.attempts}</Badge>
@@ -534,11 +602,16 @@ function TaskDetailDialog({
                 </div>
                 <div className="space-y-2">
                   {task.files.map((file) => (
-                    <details key={file.name} className="border-2 border-border/50">
+                    <details
+                      key={file.name}
+                      className="border-2 border-border/50"
+                    >
                       <summary className="font-mono text-xs px-3 py-2 cursor-pointer uppercase">
                         {file.name}
                       </summary>
-                      <pre className="font-mono text-xs p-3 whitespace-pre-wrap max-h-48 overflow-y-auto border-t-2 border-border/50">{file.content}</pre>
+                      <pre className="font-mono text-xs p-3 whitespace-pre-wrap max-h-48 overflow-y-auto border-t-2 border-border/50">
+                        {file.content}
+                      </pre>
                     </details>
                   ))}
                 </div>
@@ -571,7 +644,10 @@ function TaskDetailDialog({
 
             <div className="pt-2 border-t-4 border-border flex justify-between items-center gap-3">
               <div className="text-[10px] font-mono text-muted-foreground uppercase">
-                Created {formatDistanceToNow(new Date(task.createdAt), { addSuffix: true })}
+                Created{" "}
+                {formatDistanceToNow(new Date(task.createdAt), {
+                  addSuffix: true,
+                })}
               </div>
               <TaskActions task={task} onReplicate={onReplicate} />
             </div>
@@ -599,12 +675,20 @@ function TaskActions({
   };
   const onError = (error: unknown) => {
     const message =
-      (error as { response?: { data?: { error?: string } } })?.response?.data?.error ??
-      "The action could not be completed.";
-    toast({ title: "Task action failed", description: message, variant: "destructive" });
+      (error as { response?: { data?: { error?: string } } })?.response?.data
+        ?.error ?? "The action could not be completed.";
+    toast({
+      title: "Task action failed",
+      description: message,
+      variant: "destructive",
+    });
   };
-  const cancelTask = useCancelTask({ mutation: { onSuccess: invalidate, onError } });
-  const retryTask = useRetryTask({ mutation: { onSuccess: invalidate, onError } });
+  const cancelTask = useCancelTask({
+    mutation: { onSuccess: invalidate, onError },
+  });
+  const retryTask = useRetryTask({
+    mutation: { onSuccess: invalidate, onError },
+  });
   return (
     <div className="flex gap-2">
       {CANCELLABLE.includes(task.status) && (
@@ -644,7 +728,6 @@ function TaskActions({
     </div>
   );
 }
-
 
 /** Owner-facing provider names; never show the persisted id. */
 const PROVIDER_LABELS: Record<string, string> = {
@@ -717,14 +800,18 @@ function TaskFallbackPanel({ task }: { task: Task }) {
     },
   });
 
-  const stopped = task.errorKind === "allowance" || task.errorKind === "rate_limited";
+  const stopped =
+    task.errorKind === "allowance" || task.errorKind === "rate_limited";
   if (!stopped || !RETRYABLE.includes(task.status)) return null;
 
   const send = (action: TaskFallbackInputAction) =>
     decide.mutate({ taskId: task.id, data: { action } });
 
   return (
-    <div className="border-4 border-warning/60 bg-warning/10 p-3 space-y-3" data-testid="panel-task-fallback">
+    <div
+      className="border-4 border-warning/60 bg-warning/10 p-3 space-y-3"
+      data-testid="panel-task-fallback"
+    >
       <div className="text-[10px] font-bold uppercase">
         {task.errorKind === "allowance"
           ? `${providerLabel(task.provider)} has no allowance left for now.`
@@ -777,7 +864,11 @@ function TaskFallbackPanel({ task }: { task: Task }) {
  */
 function TaskUsageDetail({ task }: { task: Task }) {
   const rows: { label: string; value: string }[] = [];
-  const push = (label: string, value: number | null | undefined, suffix = "") => {
+  const push = (
+    label: string,
+    value: number | null | undefined,
+    suffix = "",
+  ) => {
     if (value == null) return;
     rows.push({ label, value: `${formatTokens(value)}${suffix}` });
   };
@@ -787,10 +878,16 @@ function TaskUsageDetail({ task }: { task: Task }) {
   push("Output tokens", task.actualOutputTokens);
   push("Reasoning tokens", task.reasoningOutputTokens);
   if (task.queuedMs != null) {
-    rows.push({ label: "Queued for", value: `${(task.queuedMs / 1000).toFixed(1)}s` });
+    rows.push({
+      label: "Queued for",
+      value: `${(task.queuedMs / 1000).toFixed(1)}s`,
+    });
   }
   if (task.runMs != null) {
-    rows.push({ label: "Ran for", value: `${(task.runMs / 1000).toFixed(1)}s` });
+    rows.push({
+      label: "Ran for",
+      value: `${(task.runMs / 1000).toFixed(1)}s`,
+    });
   }
   rows.push({
     label: "Cost",
@@ -819,9 +916,16 @@ function TaskUsageDetail({ task }: { task: Task }) {
       </div>
       <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 bg-muted/30 border-2 border-border/50 p-3">
         {rows.map((row) => (
-          <div key={row.label} className="flex justify-between gap-2 text-[11px] font-mono">
-            <dt className="uppercase font-bold text-muted-foreground shrink-0">{row.label}</dt>
-            <dd className="truncate text-right" title={row.value}>{row.value}</dd>
+          <div
+            key={row.label}
+            className="flex justify-between gap-2 text-[11px] font-mono"
+          >
+            <dt className="uppercase font-bold text-muted-foreground shrink-0">
+              {row.label}
+            </dt>
+            <dd className="truncate text-right" title={row.value}>
+              {row.value}
+            </dd>
           </div>
         ))}
       </dl>
@@ -831,14 +935,26 @@ function TaskUsageDetail({ task }: { task: Task }) {
 
 function TaskStatusBadge({ status }: { status: TaskStatus }) {
   switch (status) {
-    case 'queued': return <Badge variant="outline">Queued</Badge>;
-    case 'running': return <Badge variant="success" className="animate-pulse">Running</Badge>;
-    case 'waiting_approval': return <Badge variant="warning">Awaiting Approval</Badge>;
-    case 'blocked': return <Badge variant="warning">Blocked</Badge>;
-    case 'completed': return <Badge variant="accent">Complete</Badge>;
-    case 'failed': return <Badge variant="destructive">Failed</Badge>;
-    case 'cancelled': return <Badge variant="default">Cancelled</Badge>;
-    default: return <Badge variant="default">{status}</Badge>;
+    case "queued":
+      return <Badge variant="outline">Queued</Badge>;
+    case "running":
+      return (
+        <Badge variant="success" className="animate-pulse">
+          Running
+        </Badge>
+      );
+    case "waiting_approval":
+      return <Badge variant="warning">Awaiting Approval</Badge>;
+    case "blocked":
+      return <Badge variant="warning">Blocked</Badge>;
+    case "completed":
+      return <Badge variant="accent">Complete</Badge>;
+    case "failed":
+      return <Badge variant="destructive">Failed</Badge>;
+    case "cancelled":
+      return <Badge variant="default">Cancelled</Badge>;
+    default:
+      return <Badge variant="default">{status}</Badge>;
   }
 }
 
@@ -846,25 +962,39 @@ function TaskCostLine({ task }: { task: Task }) {
   const parts: React.ReactNode[] = [];
   if (task.model) {
     parts.push(
-      <div key="model" className="text-[10px] bg-muted px-2 py-1 uppercase font-bold text-muted-foreground border-2 border-border/50 max-w-[16rem] truncate" title={task.model}>
+      <div
+        key="model"
+        className="text-[10px] bg-muted px-2 py-1 uppercase font-bold text-muted-foreground border-2 border-border/50 max-w-[16rem] truncate"
+        title={task.model}
+      >
         {task.model}
       </div>,
     );
   }
   if (task.estimatedTokens != null) {
     parts.push(
-      <div key="est" className="text-[10px] bg-muted px-2 py-1 uppercase font-bold text-muted-foreground border-2 border-border/50">
+      <div
+        key="est"
+        className="text-[10px] bg-muted px-2 py-1 uppercase font-bold text-muted-foreground border-2 border-border/50"
+      >
         Est: ~{formatTokens(task.estimatedTokens)} tok
-        {task.estimatedCostCents != null ? ` / ~${formatCents(task.estimatedCostCents)}` : ""}
+        {task.estimatedCostCents != null
+          ? ` / ~${formatCents(task.estimatedCostCents)}`
+          : ""}
       </div>,
     );
   }
   if (task.actualInputTokens != null && task.actualOutputTokens != null) {
     const used = task.actualInputTokens + task.actualOutputTokens;
     parts.push(
-      <div key="actual" className="text-[10px] bg-accent/10 px-2 py-1 uppercase font-bold text-accent border-2 border-border/50">
+      <div
+        key="actual"
+        className="text-[10px] bg-accent/10 px-2 py-1 uppercase font-bold text-accent border-2 border-border/50"
+      >
         Used: {formatTokens(used)} tok
-        {task.actualCostCents != null ? ` / ${formatCents(task.actualCostCents)}` : ""}
+        {task.actualCostCents != null
+          ? ` / ${formatCents(task.actualCostCents)}`
+          : ""}
       </div>,
     );
   }
@@ -908,7 +1038,8 @@ export default function TasksPage() {
   // Override -> agent preference -> workspace default, mirroring the server.
   const effectiveProvider: TaskInputProviderOverride =
     (newTask.providerOverride ||
-      (selectedAgent?.provider as TaskInputProviderOverride | null | undefined)) ??
+      (selectedAgent?.provider as
+        TaskInputProviderOverride | null | undefined)) ??
     providerSettings?.defaultProvider ??
     TaskInputProviderOverride.claude_max;
 
@@ -929,8 +1060,8 @@ export default function TasksPage() {
           reasoningOverride: "",
           continueConversation: false,
         });
-      }
-    }
+      },
+    },
   });
 
   // Codex is the only provider with a per-task reasoning dial and a
@@ -946,12 +1077,17 @@ export default function TasksPage() {
     newTask.budgetDollars.trim() !== "" &&
     (!Number.isFinite(budgetCents) || (budgetCents ?? 0) <= 0);
 
-  const addTaskAttachments = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const addTaskAttachments = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
     const selected = Array.from(event.target.files ?? []);
     event.target.value = "";
     const available = MAX_ATTACHMENTS - taskAttachments.length;
     if (selected.length > available) {
-      toast({ title: `You can attach up to ${MAX_ATTACHMENTS} files`, variant: "destructive" });
+      toast({
+        title: `You can attach up to ${MAX_ATTACHMENTS} files`,
+        variant: "destructive",
+      });
     }
     for (const file of selected.slice(0, available)) {
       try {
@@ -960,7 +1096,10 @@ export default function TasksPage() {
       } catch (error) {
         toast({
           title: "Attachment rejected",
-          description: error instanceof Error ? error.message : "The file could not be read.",
+          description:
+            error instanceof Error
+              ? error.message
+              : "The file could not be read.",
           variant: "destructive",
         });
       }
@@ -977,18 +1116,25 @@ export default function TasksPage() {
         objective: newTask.objective,
         priority: newTask.priority,
         ...(budgetCents != null && !budgetInvalid ? { budgetCents } : {}),
-        ...(newTask.providerOverride ? { providerOverride: newTask.providerOverride } : {}),
-        ...(newTask.modelOverride ? { modelOverride: newTask.modelOverride } : {}),
+        ...(newTask.providerOverride
+          ? { providerOverride: newTask.providerOverride }
+          : {}),
+        ...(newTask.modelOverride
+          ? { modelOverride: newTask.modelOverride }
+          : {}),
         // Codex-only controls: sent only when they can actually apply, so a
         // stale value left behind by a provider switch is never dispatched.
         ...(codexSelected && newTask.reasoningOverride
-          ? { reasoningOverride: newTask.reasoningOverride as TaskInputReasoningOverride }
+          ? {
+              reasoningOverride:
+                newTask.reasoningOverride as TaskInputReasoningOverride,
+            }
           : {}),
         ...(codexSelected && newTask.continueConversation
           ? { continueConversation: true }
           : {}),
         ...(taskAttachments.length ? { attachments: taskAttachments } : {}),
-      }
+      },
     });
   };
 
@@ -998,7 +1144,8 @@ export default function TasksPage() {
       agentId: task.agentId,
       objective: task.objective,
       priority: task.priority as TaskInputPriority,
-      budgetDollars: task.budgetCents != null ? (task.budgetCents / 100).toFixed(2) : "",
+      budgetDollars:
+        task.budgetCents != null ? (task.budgetCents / 100).toFixed(2) : "",
       providerOverride: (task.provider ?? "") as TaskInputProviderOverride | "",
       modelOverride: task.model ?? "",
       reasoningOverride: task.reasoningEffort ?? "",
@@ -1010,14 +1157,22 @@ export default function TasksPage() {
 
   const getStatusIcon = (status: TaskStatus) => {
     switch (status) {
-      case 'queued': return <Clock className="w-5 h-5 text-muted-foreground" />;
-      case 'running': return <Activity className="w-5 h-5 text-green-500 animate-pulse" />;
-      case 'waiting_approval': return <AlertTriangle className="w-5 h-5 text-yellow-500" />;
-      case 'blocked': return <AlertTriangle className="w-5 h-5 text-yellow-500" />;
-      case 'completed': return <CheckCircle className="w-5 h-5 text-accent" />;
-      case 'failed': return <AlertTriangle className="w-5 h-5 text-destructive" />;
-      case 'cancelled': return <XCircle className="w-5 h-5 text-muted-foreground" />;
-      default: return <Activity className="w-5 h-5 text-muted-foreground" />;
+      case "queued":
+        return <Clock className="w-5 h-5 text-muted-foreground" />;
+      case "running":
+        return <Activity className="w-5 h-5 text-green-500 animate-pulse" />;
+      case "waiting_approval":
+        return <AlertTriangle className="w-5 h-5 text-yellow-500" />;
+      case "blocked":
+        return <AlertTriangle className="w-5 h-5 text-yellow-500" />;
+      case "completed":
+        return <CheckCircle className="w-5 h-5 text-accent" />;
+      case "failed":
+        return <AlertTriangle className="w-5 h-5 text-destructive" />;
+      case "cancelled":
+        return <XCircle className="w-5 h-5 text-muted-foreground" />;
+      default:
+        return <Activity className="w-5 h-5 text-muted-foreground" />;
     }
   };
 
@@ -1026,8 +1181,12 @@ export default function TasksPage() {
       <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6 sm:space-y-8">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b-4 border-border pb-6">
           <div>
-            <h1 className="font-display text-lg sm:text-2xl text-foreground uppercase mb-2">Task Queue</h1>
-            <p className="text-muted-foreground text-sm">Monitor and dispatch jobs to the workforce.</p>
+            <h1 className="font-display text-lg sm:text-2xl text-foreground uppercase mb-2">
+              Task Queue
+            </h1>
+            <p className="text-muted-foreground text-sm">
+              Monitor and dispatch jobs to the workforce.
+            </p>
           </div>
 
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -1039,34 +1198,53 @@ export default function TasksPage() {
             </DialogTrigger>
             <DialogContent className="border-4 border-border bg-card p-0 rounded-none max-w-xl max-h-[90vh] overflow-y-auto">
               <div className="border-b-4 border-border p-4 bg-muted/30">
-                <DialogTitle className="font-display uppercase text-lg">New Task Directive</DialogTitle>
+                <DialogTitle className="font-display uppercase text-lg">
+                  New Task Directive
+                </DialogTitle>
               </div>
               <form onSubmit={handleCreateTask} className="p-6 space-y-6">
-
                 <div className="space-y-2">
-                  <label className="uppercase font-bold text-xs">Assign to Agent</label>
+                  <label className="uppercase font-bold text-xs">
+                    Assign to Crustabot
+                  </label>
                   <Select
                     value={newTask.agentId}
-                    onValueChange={(val) => setNewTask({...newTask, agentId: val, modelOverride: ""})}
+                    onValueChange={(val) =>
+                      setNewTask({
+                        ...newTask,
+                        agentId: val,
+                        modelOverride: "",
+                      })
+                    }
                   >
                     <SelectTrigger className={selectTriggerClass}>
-                      <SelectValue placeholder="Select an available agent..." />
+                      <SelectValue placeholder="Select an available Crustabot..." />
                     </SelectTrigger>
                     <SelectContent className={selectContentClass}>
-                      {agents?.filter(a => a.status !== 'error' && !a.archived).map(agent => (
-                        <SelectItem key={agent.id} value={agent.id} className={selectItemClass}>
-                          {agent.name} [{agent.status}]
-                        </SelectItem>
-                      ))}
+                      {agents
+                        ?.filter((a) => a.status !== "error" && !a.archived)
+                        .map((agent) => (
+                          <SelectItem
+                            key={agent.id}
+                            value={agent.id}
+                            className={selectItemClass}
+                          >
+                            {agent.name} [{agent.status}]
+                          </SelectItem>
+                        ))}
                     </SelectContent>
                   </Select>
                 </div>
 
                 <div className="space-y-2">
-                  <label className="uppercase font-bold text-xs">Objective</label>
+                  <label className="uppercase font-bold text-xs">
+                    Objective
+                  </label>
                   <Textarea
                     value={newTask.objective}
-                    onChange={(e) => setNewTask({...newTask, objective: e.target.value})}
+                    onChange={(e) =>
+                      setNewTask({ ...newTask, objective: e.target.value })
+                    }
                     placeholder="E.g. Analyze the latest sales report and extract key metrics..."
                     rows={4}
                     className="font-mono text-sm bg-background border-4 border-border rounded-none focus-visible:ring-0 focus-visible:border-primary resize-none"
@@ -1098,10 +1276,25 @@ export default function TasksPage() {
                   {taskAttachments.length > 0 && (
                     <div className="flex gap-2 flex-wrap">
                       {taskAttachments.map((attachment, index) => (
-                        <span key={`${attachment.name}-${index}`} className="inline-flex items-center gap-1.5 border-2 border-border bg-muted px-2 py-1 text-[10px] font-mono">
+                        <span
+                          key={`${attachment.name}-${index}`}
+                          className="inline-flex items-center gap-1.5 border-2 border-border bg-muted px-2 py-1 text-[10px] font-mono"
+                        >
                           <FileText className="w-3 h-3 text-accent" />
-                          <span className="max-w-40 truncate">{attachmentLabel(attachment)}</span>
-                          <button type="button" aria-label={`Remove ${attachment.name}`} onClick={() => setTaskAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))}>
+                          <span className="max-w-40 truncate">
+                            {attachmentLabel(attachment)}
+                          </span>
+                          <button
+                            type="button"
+                            aria-label={`Remove ${attachment.name}`}
+                            onClick={() =>
+                              setTaskAttachments((current) =>
+                                current.filter(
+                                  (_, itemIndex) => itemIndex !== index,
+                                ),
+                              )
+                            }
+                          >
                             <X className="w-3 h-3" />
                           </button>
                         </span>
@@ -1112,18 +1305,40 @@ export default function TasksPage() {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <label className="uppercase font-bold text-xs">Priority</label>
+                    <label className="uppercase font-bold text-xs">
+                      Priority
+                    </label>
                     <Select
                       value={newTask.priority}
-                      onValueChange={(val) => setNewTask({...newTask, priority: val as TaskInputPriority})}
+                      onValueChange={(val) =>
+                        setNewTask({
+                          ...newTask,
+                          priority: val as TaskInputPriority,
+                        })
+                      }
                     >
                       <SelectTrigger className={selectTriggerClass}>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent className={selectContentClass}>
-                        <SelectItem value={TaskInputPriority.high} className={selectItemClass}>High</SelectItem>
-                        <SelectItem value={TaskInputPriority.normal} className={selectItemClass}>Normal</SelectItem>
-                        <SelectItem value={TaskInputPriority.low} className={selectItemClass}>Low</SelectItem>
+                        <SelectItem
+                          value={TaskInputPriority.high}
+                          className={selectItemClass}
+                        >
+                          High
+                        </SelectItem>
+                        <SelectItem
+                          value={TaskInputPriority.normal}
+                          className={selectItemClass}
+                        >
+                          Normal
+                        </SelectItem>
+                        <SelectItem
+                          value={TaskInputPriority.low}
+                          className={selectItemClass}
+                        >
+                          Low
+                        </SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -1131,14 +1346,21 @@ export default function TasksPage() {
                   <div className="space-y-2">
                     <label className="uppercase font-bold text-xs flex justify-between">
                       <span>Budget (USD)</span>
-                      <span className="text-muted-foreground font-normal">(Optional)</span>
+                      <span className="text-muted-foreground font-normal">
+                        (Optional)
+                      </span>
                     </label>
                     <Input
                       type="number"
                       min="0.01"
                       step="0.01"
                       value={newTask.budgetDollars}
-                      onChange={(e) => setNewTask({...newTask, budgetDollars: e.target.value})}
+                      onChange={(e) =>
+                        setNewTask({
+                          ...newTask,
+                          budgetDollars: e.target.value,
+                        })
+                      }
                       placeholder="No spending cap"
                       className="bg-background border-4 border-border rounded-none focus-visible:ring-0 focus-visible:border-primary font-mono text-sm"
                     />
@@ -1154,24 +1376,50 @@ export default function TasksPage() {
                   <div className="space-y-2">
                     <label className="uppercase font-bold text-xs flex justify-between">
                       <span>Provider Override</span>
-                      <span className="text-muted-foreground font-normal">(Optional)</span>
+                      <span className="text-muted-foreground font-normal">
+                        (Optional)
+                      </span>
                     </label>
                     <Select
                       value={newTask.providerOverride || "none"}
-                      onValueChange={(val) => setNewTask({...newTask, providerOverride: val === "none" ? "" : val as TaskInputProviderOverride, modelOverride: ""})}
+                      onValueChange={(val) =>
+                        setNewTask({
+                          ...newTask,
+                          providerOverride:
+                            val === "none"
+                              ? ""
+                              : (val as TaskInputProviderOverride),
+                          modelOverride: "",
+                        })
+                      }
                     >
                       <SelectTrigger className={selectTriggerClass}>
-                        <SelectValue placeholder="Use agent default" />
+                        <SelectValue placeholder="Use Crustabot default" />
                       </SelectTrigger>
                       <SelectContent className={selectContentClass}>
-                        <SelectItem value="none" className={selectItemClass}>Agent Default</SelectItem>
-                        <SelectItem value={TaskInputProviderOverride.claude_max} className={selectItemClass}>Claude Code</SelectItem>
+                        <SelectItem value="none" className={selectItemClass}>
+                          Crustabot Default
+                        </SelectItem>
+                        <SelectItem
+                          value={TaskInputProviderOverride.claude_max}
+                          className={selectItemClass}
+                        >
+                          Claude Code
+                        </SelectItem>
                         {codexStatus?.enabled ? (
-                          <SelectItem value={TaskInputProviderOverride.codex_chatgpt} className={selectItemClass}>
+                          <SelectItem
+                            value={TaskInputProviderOverride.codex_chatgpt}
+                            className={selectItemClass}
+                          >
                             Codex via ChatGPT Plus
                           </SelectItem>
                         ) : null}
-                        <SelectItem value={TaskInputProviderOverride.openrouter} className={selectItemClass}>OpenRouter</SelectItem>
+                        <SelectItem
+                          value={TaskInputProviderOverride.openrouter}
+                          className={selectItemClass}
+                        >
+                          OpenRouter
+                        </SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -1179,12 +1427,16 @@ export default function TasksPage() {
                   <div className="space-y-2">
                     <label className="uppercase font-bold text-xs flex justify-between">
                       <span>Model Override</span>
-                      <span className="text-muted-foreground font-normal">(Optional)</span>
+                      <span className="text-muted-foreground font-normal">
+                        (Optional)
+                      </span>
                     </label>
                     <ModelOverrideSelect
                       provider={effectiveProvider}
                       value={newTask.modelOverride}
-                      onChange={(val) => setNewTask({ ...newTask, modelOverride: val })}
+                      onChange={(val) =>
+                        setNewTask({ ...newTask, modelOverride: val })
+                      }
                     />
                   </div>
                 </div>
@@ -1194,14 +1446,19 @@ export default function TasksPage() {
                     <div className="space-y-2">
                       <label className="uppercase font-bold text-xs flex justify-between">
                         <span>Reasoning Effort</span>
-                        <span className="text-muted-foreground font-normal">(Optional)</span>
+                        <span className="text-muted-foreground font-normal">
+                          (Optional)
+                        </span>
                       </label>
                       <Select
-                        value={newTask.reasoningOverride || MODEL_DEFAULT_SENTINEL}
+                        value={
+                          newTask.reasoningOverride || MODEL_DEFAULT_SENTINEL
+                        }
                         onValueChange={(val) =>
                           setNewTask({
                             ...newTask,
-                            reasoningOverride: val === MODEL_DEFAULT_SENTINEL ? "" : val,
+                            reasoningOverride:
+                              val === MODEL_DEFAULT_SENTINEL ? "" : val,
                           })
                         }
                       >
@@ -1209,14 +1466,21 @@ export default function TasksPage() {
                           className={selectTriggerClass}
                           data-testid="select-task-reasoning"
                         >
-                          <SelectValue placeholder="Agent default" />
+                          <SelectValue placeholder="Crustabot default" />
                         </SelectTrigger>
                         <SelectContent className={selectContentClass}>
-                          <SelectItem value={MODEL_DEFAULT_SENTINEL} className={selectItemClass}>
-                            Agent Default
+                          <SelectItem
+                            value={MODEL_DEFAULT_SENTINEL}
+                            className={selectItemClass}
+                          >
+                            Crustabot Default
                           </SelectItem>
                           {(codexStatus?.reasoningLevels ?? []).map((level) => (
-                            <SelectItem key={level} value={level} className={selectItemClass}>
+                            <SelectItem
+                              key={level}
+                              value={level}
+                              className={selectItemClass}
+                            >
                               {level}
                             </SelectItem>
                           ))}
@@ -1228,19 +1492,24 @@ export default function TasksPage() {
                     </div>
 
                     <div className="space-y-2">
-                      <label className="uppercase font-bold text-xs">Conversation</label>
+                      <label className="uppercase font-bold text-xs">
+                        Conversation
+                      </label>
                       <label className="flex items-start gap-2 cursor-pointer border-4 border-border bg-background p-3">
                         <input
                           type="checkbox"
                           checked={newTask.continueConversation}
                           onChange={(e) =>
-                            setNewTask({ ...newTask, continueConversation: e.target.checked })
+                            setNewTask({
+                              ...newTask,
+                              continueConversation: e.target.checked,
+                            })
                           }
                           className="mt-0.5 accent-primary"
                           data-testid="checkbox-continue-conversation"
                         />
                         <span className="text-[10px] uppercase font-bold leading-tight">
-                          Continue this agent's last Codex thread
+                          Continue this Crustabot&apos;s last Codex thread
                         </span>
                       </label>
                       <p className="text-[10px] text-muted-foreground uppercase font-bold">
@@ -1258,11 +1527,22 @@ export default function TasksPage() {
                 />
 
                 <div className="pt-4 border-t-4 border-border flex justify-end gap-4">
-                  <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>CANCEL</Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsDialogOpen(false)}
+                  >
+                    CANCEL
+                  </Button>
                   <Button
                     type="submit"
                     variant="primary"
-                    disabled={createTask.isPending || !newTask.agentId || !newTask.objective || budgetInvalid}
+                    disabled={
+                      createTask.isPending ||
+                      !newTask.agentId ||
+                      !newTask.objective ||
+                      budgetInvalid
+                    }
                   >
                     {createTask.isPending ? "DISPATCHING..." : "DISPATCH"}
                   </Button>
@@ -1274,7 +1554,7 @@ export default function TasksPage() {
 
         {tasksLoading ? (
           <div className="space-y-4">
-            {[1, 2, 3].map(i => (
+            {[1, 2, 3].map((i) => (
               <PixelCard key={i} className="animate-pulse h-24 bg-muted/50">
                 <div className="w-full h-full"></div>
               </PixelCard>
@@ -1286,34 +1566,53 @@ export default function TasksPage() {
               <Activity className="w-16 h-16 text-muted-foreground" />
             </div>
             <h3 className="font-display text-lg uppercase mb-2">Queue Empty</h3>
-            <p className="text-muted-foreground mb-6">No tasks are currently running or queued.</p>
-            <Button variant="primary" onClick={() => setIsDialogOpen(true)}>Dispatch First Task</Button>
+            <p className="text-muted-foreground mb-6">
+              No tasks are currently running or queued.
+            </p>
+            <Button variant="primary" onClick={() => setIsDialogOpen(true)}>
+              Dispatch First Task
+            </Button>
           </PixelCard>
         ) : (
           <div className="space-y-4">
             {tasks.map((task) => (
               <PixelCard
                 key={task.id}
-                variant={task.status === 'failed' ? 'destructive' : task.status === 'running' ? 'primary' : 'default'}
+                variant={
+                  task.status === "failed"
+                    ? "destructive"
+                    : task.status === "running"
+                      ? "primary"
+                      : "default"
+                }
                 className="flex flex-col md:flex-row gap-6 p-6"
               >
                 <div className="flex flex-col items-center justify-center shrink-0 border-r-4 border-border/50 pr-6 mr-2 hidden md:flex">
                   <div className="bg-muted p-3 border-2 border-border/50 pixel-shadow mb-2">
                     {getStatusIcon(task.status)}
                   </div>
-                  <div className="text-[10px] font-mono text-muted-foreground uppercase">{task.id.slice(0, 8)}</div>
+                  <div className="text-[10px] font-mono text-muted-foreground uppercase">
+                    {task.id.slice(0, 8)}
+                  </div>
                 </div>
 
                 <div className="flex-1 space-y-4">
                   <div className="flex justify-between items-start">
                     <div>
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="text-xs font-bold text-accent uppercase tracking-wider">Assigned: {task.agentName}</span>
+                        <span className="text-xs font-bold text-accent uppercase tracking-wider">
+                          Assigned: {task.agentName}
+                        </span>
                         <span className="text-muted-foreground text-[10px]">
-                          • {formatDistanceToNow(new Date(task.createdAt), { addSuffix: true })}
+                          •{" "}
+                          {formatDistanceToNow(new Date(task.createdAt), {
+                            addSuffix: true,
+                          })}
                         </span>
                       </div>
-                      <p className="font-mono text-sm line-clamp-2">{task.objective}</p>
+                      <p className="font-mono text-sm line-clamp-2">
+                        {task.objective}
+                      </p>
                     </div>
                     <div className="shrink-0 ml-4 hidden sm:block">
                       <TaskStatusBadge status={task.status} />

@@ -177,7 +177,7 @@ function MemoryEditorDialog({
               onChange={(e) => setContent(e.target.value)}
               maxLength={4000}
               rows={5}
-              placeholder="A fact, decision, or context the agents should remember..."
+              placeholder="A fact, decision, or context the Crustabots should remember..."
               className={inputClass}
               data-testid="input-memory-content"
             />
@@ -219,7 +219,7 @@ function MemoryEditorDialog({
                     value={SHARED_SENTINEL}
                     className={selectItemClass}
                   >
-                    Shared (all agents)
+                    Shared (all Crustabots)
                   </SelectItem>
                   {agents.map((agent) => (
                     <SelectItem
@@ -313,7 +313,7 @@ function MemoriesTab({ agents }: { agents: { id: string; name: string }[] }) {
     const scoped =
       agentFilter !== ALL_SENTINEL && agentFilter !== SHARED_SENTINEL;
     const message = scoped
-      ? "Clear ALL memories for this agent? This cannot be undone."
+      ? "Clear ALL memories for this Crustabot? This cannot be undone."
       : "Clear ALL memories in the office? This cannot be undone.";
     if (!window.confirm(message)) return;
     try {
@@ -340,7 +340,7 @@ function MemoriesTab({ agents }: { agents: { id: string; name: string }[] }) {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `homardclaw-memories-${new Date().toISOString().slice(0, 10)}.json`;
+      link.download = `crustabox-memories-${new Date().toISOString().slice(0, 10)}.json`;
       link.click();
       URL.revokeObjectURL(url);
       toast({ title: `Exported ${result.total} memories` });
@@ -418,7 +418,7 @@ function MemoriesTab({ agents }: { agents: { id: string; name: string }[] }) {
         >
           <Trash2 className="w-4 h-4 mr-1" /> Clear
           {agentFilter !== ALL_SENTINEL && agentFilter !== SHARED_SENTINEL
-            ? " Agent"
+            ? " Crustabot"
             : " All"}
         </Button>
       </div>
@@ -436,8 +436,8 @@ function MemoriesTab({ agents }: { agents: { id: string; name: string }[] }) {
           <Brain className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
           <div className="font-bold uppercase text-sm">No memories yet</div>
           <div className="text-xs text-muted-foreground mt-1">
-            Agents remember task outcomes automatically; you can add facts and
-            decisions here.
+            Crustabots remember task outcomes automatically; you can add facts
+            and decisions here.
           </div>
         </PixelCard>
       ) : (
@@ -585,7 +585,7 @@ function KnowledgeTab({ agents }: { agents: { id: string; name: string }[] }) {
   };
 
   const remove = async (file: KnowledgeFile) => {
-    if (!window.confirm(`Delete "${file.name}" and its agent assignments?`))
+    if (!window.confirm(`Delete "${file.name}" and its Crustabot assignments?`))
       return;
     try {
       await deleteFile.mutateAsync({ fileId: file.id });
@@ -653,7 +653,7 @@ function KnowledgeTab({ agents }: { agents: { id: string; name: string }[] }) {
           <FileText className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
           <div className="font-bold uppercase text-sm">No knowledge files</div>
           <div className="text-xs text-muted-foreground mt-1">
-            Upload documents, then assign them to the agents allowed to use
+            Upload documents, then assign them to the Crustabots allowed to use
             them.
           </div>
         </PixelCard>
@@ -689,11 +689,11 @@ function KnowledgeTab({ agents }: { agents: { id: string; name: string }[] }) {
               )}
               <div className="mt-3">
                 <div className="text-[10px] font-bold uppercase text-muted-foreground mb-1">
-                  Authorized Agents
+                  Authorized Crustabots
                 </div>
                 {agents.length === 0 ? (
                   <div className="text-[10px] font-mono text-muted-foreground uppercase">
-                    No agents to assign.
+                    No Crustabots to assign.
                   </div>
                 ) : (
                   <div className="flex flex-wrap gap-2">
@@ -835,7 +835,7 @@ function SkillEditorDialog({
               maxLength={2000}
               rows={8}
               className={inputClass}
-              placeholder="Guidance the agent should follow when a trigger matches..."
+              placeholder="Guidance the Crustabot should follow when a trigger matches..."
               data-testid="input-skill-instructions"
             />
             <p className="mt-1 text-[10px] font-mono text-muted-foreground text-right">
@@ -1056,7 +1056,7 @@ export default function MemoryPage() {
             <Brain className="w-6 h-6" /> Memory
           </h1>
           <p className="text-xs text-muted-foreground uppercase mt-1">
-            What your agents remember and which documents they may use
+            What your Crustabots remember and which documents they may use
           </p>
         </div>
 

@@ -25,14 +25,22 @@ import {
 
 function taskStatusBadge(status: string) {
   switch (status) {
-    case "queued": return <Badge variant="outline">Queued</Badge>;
-    case "running": return <Badge variant="success">Running</Badge>;
-    case "waiting_approval": return <Badge variant="warning">Waiting Approval</Badge>;
-    case "blocked": return <Badge variant="warning">Blocked</Badge>;
-    case "completed": return <Badge variant="accent">Complete</Badge>;
-    case "failed": return <Badge variant="destructive">Failed</Badge>;
-    case "cancelled": return <Badge variant="default">Cancelled</Badge>;
-    default: return <Badge variant="default">{status}</Badge>;
+    case "queued":
+      return <Badge variant="outline">Queued</Badge>;
+    case "running":
+      return <Badge variant="success">Running</Badge>;
+    case "waiting_approval":
+      return <Badge variant="warning">Waiting Approval</Badge>;
+    case "blocked":
+      return <Badge variant="warning">Blocked</Badge>;
+    case "completed":
+      return <Badge variant="accent">Complete</Badge>;
+    case "failed":
+      return <Badge variant="destructive">Failed</Badge>;
+    case "cancelled":
+      return <Badge variant="default">Cancelled</Badge>;
+    default:
+      return <Badge variant="default">{status}</Badge>;
   }
 }
 
@@ -43,7 +51,11 @@ export default function EditAgentPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const { data: detail, isLoading, error } = useGetAgent(agentId, {
+  const {
+    data: detail,
+    isLoading,
+    error,
+  } = useGetAgent(agentId, {
     query: { queryKey: [`/api/agents/${agentId}`], enabled: Boolean(agentId) },
   });
   const agent = detail?.agent;
@@ -100,7 +112,10 @@ export default function EditAgentPage() {
         queryClient.invalidateQueries({ queryKey: [`/api/agents/${agentId}`] });
         queryClient.invalidateQueries({ queryKey: ["/api/office/overview"] });
         queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
-        toast({ title: "Profile updated", description: "The agent's file has been amended." });
+        toast({
+          title: "Profile updated",
+          description: "The Crustabot's file has been amended.",
+        });
         setLocation("/agents");
       },
       onError: (mutationError) => {
@@ -109,7 +124,7 @@ export default function EditAgentPage() {
           title: "Update failed",
           description:
             mutationError.status === 409
-              ? "That change conflicts with another agent (name already in use) or the agent is retired."
+              ? "That change conflicts with another Crustabot (name already in use) or the Crustabot is retired."
               : mutationError.message,
         });
       },
@@ -136,7 +151,10 @@ export default function EditAgentPage() {
               Parameters<typeof updateAgent.mutate>[0]["data"]["codexReasoning"]
             >)
           : null,
-        voiceStyle: data.voiceStyle && data.voiceStyle !== "none" ? data.voiceStyle : null,
+        voiceStyle:
+          data.voiceStyle && data.voiceStyle !== "none"
+            ? data.voiceStyle
+            : null,
         securityPreset: data.securityPreset,
         autonomy: data.autonomy,
         permissionOverrides: permissionOverridesPayload(data),
@@ -156,14 +174,20 @@ export default function EditAgentPage() {
     <Shell>
       <div className="p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto space-y-6 sm:space-y-8">
         <div className="flex items-center gap-4 border-b-4 border-border pb-6">
-          <Button variant="ghost" size="icon" onClick={() => setLocation("/agents")}>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setLocation("/agents")}
+          >
             <ArrowLeft className="w-5 h-5" />
           </Button>
           <div>
             <h1 className="font-display text-lg sm:text-2xl text-foreground uppercase mb-1">
-              Edit Agent{agent ? `: ${agent.name}` : ""}
+              Edit Crustabot{agent ? `: ${agent.name}` : ""}
             </h1>
-            <p className="text-muted-foreground text-sm">Amend this worker's personnel file.</p>
+            <p className="text-muted-foreground text-sm">
+              Amend this worker's personnel file.
+            </p>
           </div>
         </div>
 
@@ -173,25 +197,40 @@ export default function EditAgentPage() {
           </PixelCard>
         ) : error || !agent ? (
           <PixelCard className="text-center p-6 sm:p-12">
-            <h3 className="font-display text-lg uppercase mb-2">Agent Not Found</h3>
+            <h3 className="font-display text-lg uppercase mb-2">
+              Crustabot Not Found
+            </h3>
             <p className="text-muted-foreground mb-6">
               This personnel file does not exist or could not be loaded.
             </p>
-            <Button variant="primary" onClick={() => setLocation("/agents")}>Back to Roster</Button>
+            <Button variant="primary" onClick={() => setLocation("/agents")}>
+              Back to Roster
+            </Button>
           </PixelCard>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
             <div className="lg:col-span-2 space-y-6">
               <PixelCard title="Configuration">
                 <Form {...form}>
-                  <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+                  <form
+                    onSubmit={form.handleSubmit(onSubmit)}
+                    className="space-y-6"
+                  >
                     <AgentFormFields form={form} />
 
                     <div className="pt-4 border-t-4 border-border flex justify-end gap-3">
-                      <Button type="button" variant="outline" onClick={() => setLocation("/agents")}>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setLocation("/agents")}
+                      >
                         Cancel
                       </Button>
-                      <Button type="submit" variant="primary" disabled={updateAgent.isPending}>
+                      <Button
+                        type="submit"
+                        variant="primary"
+                        disabled={updateAgent.isPending}
+                      >
                         {updateAgent.isPending ? "SAVING..." : "SAVE CHANGES"}
                       </Button>
                     </div>
@@ -200,13 +239,16 @@ export default function EditAgentPage() {
               </PixelCard>
 
               <PixelCard title="Recent Connected-App Actions">
-                <AppActionList actions={detail.recentActions} showTaskObjective />
+                <AppActionList
+                  actions={detail.recentActions}
+                  showTaskObjective
+                />
               </PixelCard>
 
               <PixelCard title="Task History">
                 {detail.tasks.length === 0 ? (
                   <p className="text-muted-foreground text-sm p-2">
-                    No tasks on record. This agent has a clean slate.
+                    No tasks on record. This Crustabot has a clean slate.
                   </p>
                 ) : (
                   <div className="space-y-2">
@@ -223,7 +265,9 @@ export default function EditAgentPage() {
                             {new Date(task.createdAt).toLocaleString()}
                           </div>
                         </div>
-                        <div className="shrink-0">{taskStatusBadge(task.status)}</div>
+                        <div className="shrink-0">
+                          {taskStatusBadge(task.status)}
+                        </div>
                       </div>
                     ))}
                   </div>

@@ -37,7 +37,7 @@ type TelegramUpdate = {
 
 const router: IRouter = Router();
 const GENERIC_UNBOUND_REPLY =
-  "This chat is not connected. Open HomardClaw and create a new Telegram link code.";
+  "This chat is not connected. Open Crustabox and create a new Telegram link code.";
 
 let rejectedWebhookSecrets = 0;
 
@@ -75,7 +75,7 @@ async function handleMessage(message: TelegramMessage): Promise<void> {
     await sendTelegramText(
       chatId,
       proof
-        ? "Telegram is connected to HomardClaw. Messages here now go to your selected agent."
+        ? "Telegram is connected to Crustabox. Messages here now go to your selected Crustabot."
         : GENERIC_UNBOUND_REPLY,
     );
     return;

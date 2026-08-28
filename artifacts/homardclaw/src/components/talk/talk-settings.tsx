@@ -82,7 +82,7 @@ export function TalkSettings({
             >
               Save transcripts
               <span className="block normal-case text-muted-foreground/80">
-                Off by default; saved chats appear under agent messages
+                Off by default; saved chats appear under Crustabot messages
               </span>
             </label>
             <Switch

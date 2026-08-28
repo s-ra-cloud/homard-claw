@@ -6,6 +6,7 @@ import { Shell } from "@/components/layout/Shell";
 import { MarlowLobster } from "@/components/ui/marlow-lobster";
 import { useImmersiveMode } from "@/hooks/useImmersiveMode";
 import { useIsDesktop, useIsMobile } from "@/hooks/use-mobile";
+import { partitionRetiredAgents } from "./retirement-locations";
 import "./island.css";
 
 const beachArt = `${import.meta.env.BASE_URL}images/island-beach.jpg`;
@@ -79,6 +80,8 @@ export default function IslandPage() {
   const [salute, setSalute] = useState<{ id: string; text: string } | null>(
     null,
   );
+  const { beachAgents, hotelAgents } = partitionRetiredAgents(retired ?? []);
+  const visibleBeachAgents = beachAgents.slice(0, BEACH_SPOTS.length);
 
   useEffect(() => {
     let visible = document.visibilityState === "visible";
@@ -128,7 +131,7 @@ export default function IslandPage() {
           </div>
           <div className="island__status">
             {retired
-              ? `${retired.length} retired agent${retired.length === 1 ? "" : "s"} enjoying the sun`
+              ? `${beachAgents.length} on the beach · ${hotelAgents.length} in the hotel`
               : "\u00a0"}
           </div>
         </header>
@@ -164,6 +167,13 @@ export default function IslandPage() {
                 <IslandAmbient />
 
                 <div className="island__actors">
+                  <Link
+                    href="/island/hotel"
+                    className="island__hotel-hotspot"
+                    data-label="Enter retirement hotel"
+                    aria-label="Turquoise hotel door — enter the retirement hotel"
+                  />
+
                   {!isPhone && (
                     <Link
                       href="/office"
@@ -173,43 +183,44 @@ export default function IslandPage() {
                     />
                   )}
 
-                  {(retired ?? [])
-                    .slice(0, BEACH_SPOTS.length)
-                    .map((agent, i) => {
-                      const spot = BEACH_SPOTS[i];
-                      const saluting = salute?.id === agent.id;
-                      return (
-                        <button
-                          key={agent.id}
-                          className={`island__lobster ${saluting ? "is-saluting" : ""}`}
-                          style={{ left: `${spot.left}%`, top: `${spot.top}%` }}
-                          onClick={() => handleSalute(agent.id, i)}
-                          title={`Salute ${agent.name}`}
-                          aria-label={`Salute ${agent.name}, retired ${agent.title}`}
-                        >
-                          {saluting && (
-                            <span className="island__bubble">
-                              {salute.text}
-                            </span>
-                          )}
-                          <MarlowLobster
-                            size={56}
-                            pose="beach"
-                            status="idle"
-                            seed={agent.id}
-                            shellColor={agent.avatar.shellColor}
-                          />
-                          <span className="island__nametag">{agent.name}</span>
-                        </button>
-                      );
-                    })}
+                  {visibleBeachAgents.map((agent, i) => {
+                    const spot = BEACH_SPOTS[i];
+                    const saluting = salute?.id === agent.id;
+                    return (
+                      <button
+                        key={agent.id}
+                        className={`island__lobster ${saluting ? "is-saluting" : ""}`}
+                        style={{ left: `${spot.left}%`, top: `${spot.top}%` }}
+                        onClick={() => handleSalute(agent.id, i)}
+                        title={`Salute ${agent.name}`}
+                        aria-label={`Salute ${agent.name}, retired ${agent.title}`}
+                      >
+                        {saluting && (
+                          <span className="island__bubble">{salute.text}</span>
+                        )}
+                        <MarlowLobster
+                          size={56}
+                          pose="beach"
+                          status="idle"
+                          seed={agent.id}
+                          shellColor={agent.avatar.shellColor}
+                        />
+                        <span className="island__nametag">{agent.name}</span>
+                      </button>
+                    );
+                  })}
 
-                  {retired && retired.length === 0 && (
+                  {retired && visibleBeachAgents.length === 0 && (
                     <div className="island__empty">
-                      <h2>The beach is empty (for now)</h2>
+                      <h2>
+                        {retired.length === 0
+                          ? "The beach is empty (for now)"
+                          : "Everyone is relaxing inside"}
+                      </h2>
                       <p>
-                        No agent has retired yet. When one hangs up their claws,
-                        they'll be here — drink in claw.
+                        {retired.length === 0
+                          ? "No Crustabot has retired yet. When one hangs up their claws, they'll be here — drink in claw."
+                          : "Use the turquoise hotel door to join them in the lounge."}
                       </p>
                     </div>
                   )}

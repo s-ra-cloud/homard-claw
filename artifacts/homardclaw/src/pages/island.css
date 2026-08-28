@@ -191,15 +191,11 @@
   }
 }
 
-/* ── Clickable submarine return ── */
-.island__submarine-hotspot {
+/* ── Point-and-click travel hotspots ── */
+.island__submarine-hotspot,
+.island__hotel-hotspot {
   position: absolute;
   z-index: 12;
-  left: 85.6%;
-  top: 21.7%;
-  width: 13.6%;
-  height: 13.5%;
-  transform: translate(-50%, -50%);
   border: 0;
   background: transparent;
   color: inherit;
@@ -207,15 +203,36 @@
   cursor: pointer;
 }
 
+.island__submarine-hotspot {
+  left: 85.6%;
+  top: 21.7%;
+  width: 13.6%;
+  height: 13.5%;
+  transform: translate(-50%, -50%);
+}
+
+/* Ground-floor turquoise door in the hotel artwork. */
+.island__hotel-hotspot {
+  left: 31.4%;
+  top: 25.3%;
+  width: 5.1%;
+  height: 12.5%;
+  border-radius: 45% 45% 4px 4px;
+}
+
 .island__submarine-hotspot:hover,
-.island__submarine-hotspot:focus-visible {
+.island__submarine-hotspot:focus-visible,
+.island__hotel-hotspot:hover,
+.island__hotel-hotspot:focus-visible {
   border: 2px dashed rgba(255, 247, 223, 0.92);
   background: rgba(255, 230, 135, 0.08);
   outline: none;
 }
 
 .island__submarine-hotspot[data-label]:hover::after,
-.island__submarine-hotspot[data-label]:focus-visible::after {
+.island__submarine-hotspot[data-label]:focus-visible::after,
+.island__hotel-hotspot[data-label]:hover::after,
+.island__hotel-hotspot[data-label]:focus-visible::after {
   content: attr(data-label);
   position: absolute;
   bottom: calc(100% + 5px);
@@ -231,6 +248,12 @@
     monospace;
   text-transform: uppercase;
   white-space: nowrap;
+}
+
+.island__hotel-hotspot[data-label]:hover::after,
+.island__hotel-hotspot[data-label]:focus-visible::after {
+  bottom: auto;
+  top: calc(100% + 5px);
 }
 
 /* ── Island ambience ── */

@@ -127,8 +127,8 @@ function ConnectActions({ app }: { app: ConnectedApp }) {
       title: `${app.displayName} disconnected`,
       description:
         app.app === "github"
-          ? "The credential was removed. Agents can no longer act on this account — including actions you had already approved."
-          : "The Google credential was removed — Gmail and Google Drive access both ended. Agents can no longer act on this account, including actions you had already approved.",
+          ? "The credential was removed. Crustabots can no longer act on this account — including actions you had already approved."
+          : "The Google credential was removed — Gmail and Google Drive access both ended. Crustabots can no longer act on this account, including actions you had already approved.",
     });
   };
   const onDisconnectError = (error: Error) => {
@@ -165,8 +165,8 @@ function ConnectActions({ app }: { app: ConnectedApp }) {
   };
   const confirmText =
     app.app === "github"
-      ? "Disconnect GitHub? Agents immediately lose access to this account, including actions you already approved."
-      : `Disconnect this Google account? Gmail AND Google Drive access both end immediately — agents lose access to the account, including actions you already approved.`;
+      ? "Disconnect GitHub? Crustabots immediately lose access to this account, including actions you already approved."
+      : `Disconnect this Google account? Gmail AND Google Drive access both end immediately — Crustabots lose access to the account, including actions you already approved.`;
   return (
     <div className="flex gap-2 flex-wrap">
       <Button
@@ -250,8 +250,8 @@ function AppCard({ app }: { app: ConnectedApp }) {
             </p>
             <p className="text-[10px] text-muted-foreground uppercase font-bold mt-1">
               {app.grantedAgents === 0
-                ? "No agents have access"
-                : `${app.grantedAgents} agent${app.grantedAgents === 1 ? "" : "s"} with access`}
+                ? "No Crustabots have access"
+                : `${app.grantedAgents} Crustabot${app.grantedAgents === 1 ? "" : "s"} with access`}
             </p>
             {app.statusDetail ? (
               <p className="text-[10px] text-muted-foreground font-mono mt-1 break-words">
@@ -366,18 +366,18 @@ function TelegramCard() {
               </Badge>
             </div>
             <p className="text-[10px] text-muted-foreground uppercase font-bold">
-              Talk to one selected agent and receive task and approval alerts on
-              your phone.
+              Talk to one selected Crustabot and receive task and approval
+              alerts on your phone.
             </p>
             {status.linked ? (
               <p className="text-xs font-mono">
-                Default Talk agent:{" "}
-                <strong>{status.agentName ?? "Selected agent"}</strong>
+                Default Talk Crustabot:{" "}
+                <strong>{status.agentName ?? "Selected Crustabot"}</strong>
               </p>
             ) : (
               <div className="space-y-2">
                 <label className="block text-[10px] uppercase font-bold text-muted-foreground">
-                  Default Talk agent
+                  Default Talk Crustabot
                 </label>
                 <select
                   value={agentId}
@@ -403,7 +403,7 @@ function TelegramCard() {
                           Open @{status.botUsername}
                         </a>
                       ) : (
-                        "Open your HomardClaw bot"
+                        "Open your Crustabox bot"
                       )}{" "}
                       and send this exact command before{" "}
                       {new Date(linkCode.expiresAt).toLocaleTimeString()}:
@@ -430,7 +430,7 @@ function TelegramCard() {
               onClick={() => {
                 if (
                   window.confirm(
-                    "Disconnect this Telegram chat from HomardClaw?",
+                    "Disconnect this Telegram chat from Crustabox?",
                   )
                 ) {
                   removeLink.mutate();
@@ -542,8 +542,8 @@ function CapabilityCard({ pkg }: { pkg: CapabilityPackage }) {
               {pkg.installed
                 ? `v${pkg.installedVersion ?? pkg.registryVersion} · ${pkg.publisher} · ${
                     pkg.grantedAgents === 0
-                      ? "no agents have access"
-                      : `${pkg.grantedAgents} agent${pkg.grantedAgents === 1 ? "" : "s"} with access`
+                      ? "no Crustabots have access"
+                      : `${pkg.grantedAgents} Crustabot${pkg.grantedAgents === 1 ? "" : "s"} with access`
                   }`
                 : `v${pkg.registryVersion} · ${pkg.publisher}`}
             </p>
@@ -656,7 +656,7 @@ function CapabilityCard({ pkg }: { pkg: CapabilityPackage }) {
                   onClick={() => {
                     if (
                       window.confirm(
-                        "Uninstall this package? Agents immediately lose its tools; per-agent grants become inert until it is reinstalled.",
+                        "Uninstall this package? Crustabots immediately lose its tools; per-Crustabot grants become inert until it is reinstalled.",
                       )
                     ) {
                       uninstall.mutate({ packageId: pkg.packageId });
@@ -724,7 +724,7 @@ export default function ConnectedAppsPage() {
             </h1>
             <p className="text-muted-foreground text-sm">
               Your own external accounts, connected privately to your workspace,
-              that your agents can be granted access to.
+              that your Crustabots can be granted access to.
             </p>
           </div>
           <Button
@@ -745,12 +745,13 @@ export default function ConnectedAppsPage() {
             <ShieldCheck className="w-5 h-5 text-accent shrink-0 mt-0.5" />
             <div className="text-xs text-muted-foreground space-y-1">
               <p>
-                Connecting an account and granting an agent access are two
+                Connecting an account and granting a Crustabot access are two
                 different things. You connect{" "}
                 <span className="font-bold">your own account</span> right here —
                 it belongs to your workspace alone, other users can never see or
-                use it, and agents never see credentials. Then, on each agent's
-                personnel file, you choose what that agent may do with it:{" "}
+                use it, and Crustabots never see credentials. Then, on each
+                Crustabot&apos;s personnel file, you choose what that Crustabot
+                may do with it:{" "}
                 <span className="font-bold uppercase">read</span> (search and
                 read), <span className="font-bold uppercase">draft</span>{" "}
                 (prepare drafts nobody outside sees), or{" "}
@@ -758,7 +759,7 @@ export default function ConnectedAppsPage() {
                 write still waits for your approval before it happens.
               </p>
               <p>
-                Disabling an app here blocks it for every agent at once,
+                Disabling an app here blocks it for every Crustabot at once,
                 whatever their individual grants say. Disconnecting an account
                 removes the credential immediately — even already-approved
                 actions can no longer run against it. Gmail and Google Drive
@@ -793,8 +794,8 @@ export default function ConnectedAppsPage() {
             Capabilities
           </h2>
           <p className="text-muted-foreground text-sm">
-            Vetted capability packages add skills and tools your agents can be
-            granted — installed and updated here, never by changing the app.
+            Vetted capability packages add skills and tools your Crustabots can
+            be granted — installed and updated here, never by changing the app.
             Updates that expand permissions wait for your review; nothing new
             activates silently.
           </p>

@@ -29,7 +29,7 @@ import { formatDistanceToNow } from "date-fns";
 export default function ApprovalsPage() {
   const { data: approvals, isLoading } = useListApprovals();
   const queryClient = useQueryClient();
-  
+
   const decideApproval = useDecideApproval({
     mutation: {
       onSuccess: () => {
@@ -37,37 +37,49 @@ export default function ApprovalsPage() {
         queryClient.invalidateQueries({ queryKey: ["/api/office/overview"] });
         queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
         queryClient.invalidateQueries({ queryKey: ["/api/audit"] });
-      }
-    }
+      },
+    },
   });
 
-  const handleDecision = (approvalId: string, decision: ApprovalDecisionDecision) => {
+  const handleDecision = (
+    approvalId: string,
+    decision: ApprovalDecisionDecision,
+  ) => {
     decideApproval.mutate({
       approvalId,
-      data: { decision }
+      data: { decision },
     });
   };
 
-  const pendingApprovals = approvals?.filter(a => a.status === 'pending') || [];
-  const historyApprovals = approvals?.filter(a => a.status !== 'pending') || [];
+  const pendingApprovals =
+    approvals?.filter((a) => a.status === "pending") || [];
+  const historyApprovals =
+    approvals?.filter((a) => a.status !== "pending") || [];
 
   return (
     <Shell>
       <div className="p-4 sm:p-6 lg:p-8 max-w-5xl mx-auto space-y-6 sm:space-y-8">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b-4 border-border pb-6">
           <div>
-            <h1 className="font-display text-lg sm:text-2xl text-foreground uppercase mb-2">Authorization Desk</h1>
-            <p className="text-muted-foreground text-sm">Review restricted actions requested by agents.</p>
+            <h1 className="font-display text-lg sm:text-2xl text-foreground uppercase mb-2">
+              Authorization Desk
+            </h1>
+            <p className="text-muted-foreground text-sm">
+              Review restricted actions requested by Crustabots.
+            </p>
           </div>
-          
-          <Badge variant={pendingApprovals.length > 0 ? "accent" : "outline"} className="px-3 py-1 text-sm">
+
+          <Badge
+            variant={pendingApprovals.length > 0 ? "accent" : "outline"}
+            className="px-3 py-1 text-sm"
+          >
             {pendingApprovals.length} Pending
           </Badge>
         </div>
 
         {isLoading ? (
           <div className="space-y-4">
-            {[1, 2].map(i => (
+            {[1, 2].map((i) => (
               <PixelCard key={i} className="animate-pulse h-32 bg-muted/50">
                 <div className="w-full h-full"></div>
               </PixelCard>
@@ -81,17 +93,19 @@ export default function ApprovalsPage() {
                 <AlertOctagon className="w-5 h-5" />
                 Requires Action
               </h2>
-              
+
               {pendingApprovals.length === 0 ? (
                 <PixelCard className="text-center p-8 border-dashed">
                   <Shield className="w-12 h-12 text-muted-foreground mx-auto mb-4 opacity-50" />
-                  <p className="text-muted-foreground uppercase font-bold text-sm">All clear. No pending requests.</p>
+                  <p className="text-muted-foreground uppercase font-bold text-sm">
+                    All clear. No pending requests.
+                  </p>
                 </PixelCard>
               ) : (
                 <div className="space-y-4">
                   {pendingApprovals.map((approval) => (
-                    <PixelCard 
-                      key={approval.id} 
+                    <PixelCard
+                      key={approval.id}
                       variant="accent"
                       className="border-accent/50"
                     >
@@ -99,13 +113,23 @@ export default function ApprovalsPage() {
                         <div className="flex-1 space-y-4">
                           <div>
                             <div className="flex items-center gap-2 mb-2">
-                              <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Requested By:</span>
-                              <Badge variant="outline">{approval.agentName}</Badge>
+                              <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                                Requested By:
+                              </span>
+                              <Badge variant="outline">
+                                {approval.agentName}
+                              </Badge>
                               <span className="text-muted-foreground text-[10px] ml-auto">
-                                Expires {formatDistanceToNow(new Date(approval.expiresAt), { addSuffix: true })}
+                                Expires{" "}
+                                {formatDistanceToNow(
+                                  new Date(approval.expiresAt),
+                                  { addSuffix: true },
+                                )}
                               </span>
                             </div>
-                            <h3 className="font-bold text-lg mb-2">{approval.action}</h3>
+                            <h3 className="font-bold text-lg mb-2">
+                              {approval.action}
+                            </h3>
                             {approval.details && (
                               <div className="bg-muted p-3 border-2 border-border font-mono text-sm">
                                 {approval.details}
@@ -113,7 +137,9 @@ export default function ApprovalsPage() {
                             )}
                             {approval.taskId && (
                               <div className="mt-2 text-xs font-mono">
-                                <span className="uppercase font-bold text-muted-foreground">Task: </span>
+                                <span className="uppercase font-bold text-muted-foreground">
+                                  Task:{" "}
+                                </span>
                                 <Link
                                   href={`/tasks/${approval.taskId}`}
                                   className="underline decoration-2 underline-offset-2 hover:text-accent"
@@ -128,21 +154,31 @@ export default function ApprovalsPage() {
                             )}
                           </div>
                         </div>
-                        
+
                         <div className="flex flex-row md:flex-col gap-3 justify-end shrink-0 border-t-4 md:border-t-0 md:border-l-4 border-border/30 pt-4 md:pt-0 md:pl-6">
-                          <Button 
-                            variant="primary" 
+                          <Button
+                            variant="primary"
                             className="flex-1 md:flex-none"
-                            onClick={() => handleDecision(approval.id, ApprovalDecisionDecision.approved)}
+                            onClick={() =>
+                              handleDecision(
+                                approval.id,
+                                ApprovalDecisionDecision.approved,
+                              )
+                            }
                             disabled={decideApproval.isPending}
                           >
                             <Check className="w-4 h-4 mr-2" />
                             Approve
                           </Button>
-                          <Button 
+                          <Button
                             variant="outline"
                             className="flex-1 md:flex-none border-destructive text-destructive hover:bg-destructive hover:text-white"
-                            onClick={() => handleDecision(approval.id, ApprovalDecisionDecision.rejected)}
+                            onClick={() =>
+                              handleDecision(
+                                approval.id,
+                                ApprovalDecisionDecision.rejected,
+                              )
+                            }
                             disabled={decideApproval.isPending}
                           >
                             <X className="w-4 h-4 mr-2" />
@@ -163,21 +199,33 @@ export default function ApprovalsPage() {
                   <Clock className="w-4 h-4" />
                   Decision History
                 </h2>
-                
+
                 <div className="space-y-3">
                   {historyApprovals.slice(0, 10).map((approval) => (
-                    <div key={approval.id} className="bg-card border-2 border-border p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div
+                      key={approval.id}
+                      className="bg-card border-2 border-border p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                    >
                       <div>
                         <div className="flex items-center gap-2 mb-1">
-                          <Badge variant={
-                            approval.status === 'approved' ? 'success' : 
-                            approval.status === 'rejected' ? 'destructive' : 'default'
-                          }>
+                          <Badge
+                            variant={
+                              approval.status === "approved"
+                                ? "success"
+                                : approval.status === "rejected"
+                                  ? "destructive"
+                                  : "default"
+                            }
+                          >
                             {approval.status}
                           </Badge>
-                          <span className="text-xs font-bold uppercase text-muted-foreground">{approval.agentName}</span>
+                          <span className="text-xs font-bold uppercase text-muted-foreground">
+                            {approval.agentName}
+                          </span>
                         </div>
-                        <div className="font-mono text-sm">{approval.action}</div>
+                        <div className="font-mono text-sm">
+                          {approval.action}
+                        </div>
                         {approval.taskId && (
                           <Link
                             href={`/tasks/${approval.taskId}`}
@@ -188,9 +236,14 @@ export default function ApprovalsPage() {
                         )}
                       </div>
                       <div className="text-[10px] text-muted-foreground uppercase text-right">
-                        <div>{new Date(approval.createdAt).toLocaleString()}</div>
+                        <div>
+                          {new Date(approval.createdAt).toLocaleString()}
+                        </div>
                         {approval.decidedAt && (
-                          <div>Decided {new Date(approval.decidedAt).toLocaleString()}</div>
+                          <div>
+                            Decided{" "}
+                            {new Date(approval.decidedAt).toLocaleString()}
+                          </div>
                         )}
                       </div>
                     </div>
@@ -259,10 +312,14 @@ function AuditLogSection() {
       </form>
 
       {isLoading ? (
-        <div className="text-muted-foreground text-xs uppercase font-bold">Loading…</div>
+        <div className="text-muted-foreground text-xs uppercase font-bold">
+          Loading…
+        </div>
       ) : !audit || audit.events.length === 0 ? (
         <div className="bg-card border-2 border-dashed border-border p-6 text-center text-muted-foreground text-xs uppercase font-bold">
-          {submitted ? `No records match "${submitted}".` : "No audit records yet."}
+          {submitted
+            ? `No records match "${submitted}".`
+            : "No audit records yet."}
         </div>
       ) : (
         <div className="space-y-2">
@@ -276,7 +333,9 @@ function AuditLogSection() {
             >
               <div className="min-w-0">
                 <div className="flex items-center gap-2 mb-1">
-                  <Badge variant="outline" className="text-[9px]">{event.kind}</Badge>
+                  <Badge variant="outline" className="text-[9px]">
+                    {event.kind}
+                  </Badge>
                   {event.chained === false && (
                     <span
                       className="text-[9px] uppercase font-bold text-muted-foreground"
@@ -286,7 +345,9 @@ function AuditLogSection() {
                     </span>
                   )}
                 </div>
-                <div className="font-mono text-xs break-words">{event.summary}</div>
+                <div className="font-mono text-xs break-words">
+                  {event.summary}
+                </div>
               </div>
               <div className="text-[10px] text-muted-foreground uppercase text-right shrink-0">
                 {new Date(event.createdAt).toLocaleString()}

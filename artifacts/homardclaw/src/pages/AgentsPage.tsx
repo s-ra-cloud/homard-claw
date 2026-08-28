@@ -33,19 +33,20 @@ export default function AgentsPage() {
     queryClient.invalidateQueries({ queryKey: ["/api/office/overview"] });
   };
 
-  const onMutationError = (title: string) => (error: { status?: number; message: string }) => {
-    toast({
-      variant: "destructive",
-      title,
-      description: error.message,
-    });
-  };
+  const onMutationError =
+    (title: string) => (error: { status?: number; message: string }) => {
+      toast({
+        variant: "destructive",
+        title,
+        description: error.message,
+      });
+    };
 
   const pauseAgent = usePauseAgent({
     mutation: {
       onSuccess: invalidateRoster,
-      onError: onMutationError("Could not update agent"),
-    }
+      onError: onMutationError("Could not update Crustabot"),
+    },
   });
 
   const retireAgent = useRetireAgent({
@@ -55,13 +56,13 @@ export default function AgentsPage() {
         queryClient.invalidateQueries({ queryKey: ["/api/island/agents"] });
         queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
       },
-      onError: onMutationError("Could not retire agent"),
-    }
+      onError: onMutationError("Could not retire Crustabot"),
+    },
   });
 
   const handleRetire = (agentId: string, name: string) => {
     const confirmed = window.confirm(
-      `RETIRE ${name.toUpperCase()}? This is PERMANENT.\n\n${name} will be removed from active work forever and move to the Island. Any queued work will be blocked until reassigned. This cannot be undone.`
+      `RETIRE ${name.toUpperCase()}? This is PERMANENT.\n\n${name} will be removed from active work forever and move to the Island. Any queued work will be blocked until reassigned. This cannot be undone.`,
     );
     if (confirmed) {
       retireAgent.mutate({ agentId });
@@ -69,22 +70,33 @@ export default function AgentsPage() {
   };
 
   const handleTogglePause = (agentId: string, currentStatus: string) => {
-    const isPaused = currentStatus === 'paused';
+    const isPaused = currentStatus === "paused";
     pauseAgent.mutate({
       agentId,
-      data: { paused: !isPaused }
+      data: { paused: !isPaused },
     });
   };
 
   const getStatusBadge = (status: string) => {
     switch (status) {
-      case 'idle': return <Badge variant="outline">Idle</Badge>;
-      case 'working': return <Badge variant="success" className="animate-pulse">Working</Badge>;
-      case 'researching': return <Badge variant="accent">Researching</Badge>;
-      case 'waiting': return <Badge variant="warning">Waiting Approval</Badge>;
-      case 'paused': return <Badge variant="destructive">Paused</Badge>;
-      case 'error': return <Badge variant="destructive">Error</Badge>;
-      default: return <Badge variant="default">{status}</Badge>;
+      case "idle":
+        return <Badge variant="outline">Idle</Badge>;
+      case "working":
+        return (
+          <Badge variant="success" className="animate-pulse">
+            Working
+          </Badge>
+        );
+      case "researching":
+        return <Badge variant="accent">Researching</Badge>;
+      case "waiting":
+        return <Badge variant="warning">Waiting Approval</Badge>;
+      case "paused":
+        return <Badge variant="destructive">Paused</Badge>;
+      case "error":
+        return <Badge variant="destructive">Error</Badge>;
+      default:
+        return <Badge variant="default">{status}</Badge>;
     }
   };
 
@@ -95,20 +107,24 @@ export default function AgentsPage() {
       <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6 sm:space-y-8">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b-4 border-border pb-6">
           <div>
-            <h1 className="font-display text-lg sm:text-2xl text-foreground uppercase mb-2">Agent Roster</h1>
-            <p className="text-muted-foreground text-sm">Manage your autonomous workforce.</p>
+            <h1 className="font-display text-lg sm:text-2xl text-foreground uppercase mb-2">
+              Crustabot Roster
+            </h1>
+            <p className="text-muted-foreground text-sm">
+              Manage your configurable Crustabot crew.
+            </p>
           </div>
           <Link href="/agents/new">
             <Button variant="primary">
               <Plus className="w-4 h-4 mr-2" />
-              Recruit Agent
+              Recruit Crustabot
             </Button>
           </Link>
         </div>
 
         {isLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-            {[1, 2, 3].map(i => (
+            {[1, 2, 3].map((i) => (
               <PixelCard key={i} className="animate-pulse h-64 bg-muted/50">
                 <div className="w-full h-full"></div>
               </PixelCard>
@@ -119,10 +135,15 @@ export default function AgentsPage() {
             <div className="flex justify-center mb-6 opacity-50">
               <MarlowLobster size={112} status="idle" preset="marlow" />
             </div>
-            <h3 className="font-display text-lg uppercase mb-2">No Agents Recruited</h3>
-            <p className="text-muted-foreground mb-6">The office is empty. Recruit an agent to begin processing tasks.</p>
+            <h3 className="font-display text-lg uppercase mb-2">
+              No Crustabots Recruited
+            </h3>
+            <p className="text-muted-foreground mb-6">
+              The office is empty. Recruit a Crustabot to begin processing
+              tasks.
+            </p>
             <Link href="/agents/new">
-              <Button variant="primary">Recruit First Agent</Button>
+              <Button variant="primary">Recruit First Crustabot</Button>
             </Link>
           </PixelCard>
         ) : (
@@ -130,7 +151,13 @@ export default function AgentsPage() {
             {activeAgents.map((agent) => (
               <PixelCard
                 key={agent.id}
-                variant={agent.status === 'working' ? 'primary' : agent.status === 'paused' ? 'destructive' : 'default'}
+                variant={
+                  agent.status === "working"
+                    ? "primary"
+                    : agent.status === "paused"
+                      ? "destructive"
+                      : "default"
+                }
                 className="flex flex-col h-full"
               >
                 <div className="flex justify-between items-start mb-4">
@@ -144,13 +171,15 @@ export default function AgentsPage() {
                       />
                     </div>
                     <div>
-                      <h3 className="font-bold text-lg leading-none mb-1">{agent.name}</h3>
-                      <div className="text-xs text-muted-foreground uppercase">{agent.title}</div>
+                      <h3 className="font-bold text-lg leading-none mb-1">
+                        {agent.name}
+                      </h3>
+                      <div className="text-xs text-muted-foreground uppercase">
+                        {agent.title}
+                      </div>
                     </div>
                   </div>
-                  <div>
-                    {getStatusBadge(agent.status)}
-                  </div>
+                  <div>{getStatusBadge(agent.status)}</div>
                 </div>
 
                 <div className="flex-1 space-y-4">
@@ -190,15 +219,26 @@ export default function AgentsPage() {
                         <Pencil className="w-3 h-3 mr-1" /> Edit
                       </Button>
                       <Button
-                        variant={agent.status === 'paused' ? 'primary' : 'outline'}
+                        variant={
+                          agent.status === "paused" ? "primary" : "outline"
+                        }
                         size="sm"
-                        onClick={() => handleTogglePause(agent.id, agent.status)}
-                        disabled={pauseAgent.isPending && pauseAgent.variables?.agentId === agent.id}
+                        onClick={() =>
+                          handleTogglePause(agent.id, agent.status)
+                        }
+                        disabled={
+                          pauseAgent.isPending &&
+                          pauseAgent.variables?.agentId === agent.id
+                        }
                       >
-                        {agent.status === 'paused' ? (
-                          <><Play className="w-3 h-3 mr-1" /> Resume</>
+                        {agent.status === "paused" ? (
+                          <>
+                            <Play className="w-3 h-3 mr-1" /> Resume
+                          </>
                         ) : (
-                          <><Pause className="w-3 h-3 mr-1" /> Pause</>
+                          <>
+                            <Pause className="w-3 h-3 mr-1" /> Pause
+                          </>
                         )}
                       </Button>
                       <Button
@@ -206,7 +246,10 @@ export default function AgentsPage() {
                         size="sm"
                         title={`Retire ${agent.name} permanently to the Island`}
                         onClick={() => handleRetire(agent.id, agent.name)}
-                        disabled={retireAgent.isPending && retireAgent.variables?.agentId === agent.id}
+                        disabled={
+                          retireAgent.isPending &&
+                          retireAgent.variables?.agentId === agent.id
+                        }
                       >
                         <Palmtree className="w-3 h-3 mr-1" /> Retire
                       </Button>

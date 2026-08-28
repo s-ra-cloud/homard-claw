@@ -28,7 +28,8 @@ import { Crown, Plus, Trash2, UserMinus, UserPlus, Users } from "lucide-react";
 
 const selectTriggerClass =
   "bg-background border-4 border-border rounded-none focus:ring-0 focus:border-primary font-mono text-sm uppercase";
-const selectContentClass = "border-4 border-border rounded-none bg-card max-h-72";
+const selectContentClass =
+  "border-4 border-border rounded-none bg-card max-h-72";
 const selectItemClass =
   "font-mono text-xs uppercase focus:bg-primary focus:text-primary-foreground";
 
@@ -151,14 +152,20 @@ function TeamCard({
         setPendingMember("");
         refresh();
       },
-      onError: onError("Could not add that agent"),
+      onError: onError("Could not add that Crustabot"),
     },
   });
   const removeMember = useRemoveTeamMember({
-    mutation: { onSuccess: refresh, onError: onError("Could not remove that agent") },
+    mutation: {
+      onSuccess: refresh,
+      onError: onError("Could not remove that Crustabot"),
+    },
   });
   const updateTeam = useUpdateTeam({
-    mutation: { onSuccess: refresh, onError: onError("Could not update the team") },
+    mutation: {
+      onSuccess: refresh,
+      onError: onError("Could not update the team"),
+    },
   });
   const deleteTeam = useDeleteTeam({
     mutation: {
@@ -177,7 +184,9 @@ function TeamCard({
     <PixelCard className="p-4 space-y-4" data-testid={`card-team-${team.id}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="font-display uppercase text-base truncate">{team.name}</h3>
+          <h3 className="font-display uppercase text-base truncate">
+            {team.name}
+          </h3>
           {team.mission && (
             <p className="font-mono text-xs text-muted-foreground mt-1">
               {team.mission}
@@ -206,7 +215,10 @@ function TeamCard({
             updateTeam.mutate({ teamId: team.id, data: { leadAgentId: value } })
           }
         >
-          <SelectTrigger className={selectTriggerClass} data-testid={`select-lead-${team.id}`}>
+          <SelectTrigger
+            className={selectTriggerClass}
+            data-testid={`select-lead-${team.id}`}
+          >
             <SelectValue placeholder="No lead yet" />
           </SelectTrigger>
           <SelectContent className={selectContentClass}>
@@ -256,7 +268,10 @@ function TeamCard({
                   size="sm"
                   className="rounded-none"
                   onClick={() =>
-                    removeMember.mutate({ teamId: team.id, agentId: member.agentId })
+                    removeMember.mutate({
+                      teamId: team.id,
+                      agentId: member.agentId,
+                    })
                   }
                   title="Remove from team"
                   data-testid={`button-remove-${member.agentId}`}
@@ -272,12 +287,19 @@ function TeamCard({
       {candidates.length > 0 && (
         <div className="flex gap-2">
           <Select value={pendingMember} onValueChange={setPendingMember}>
-            <SelectTrigger className={selectTriggerClass} data-testid={`select-add-${team.id}`}>
-              <SelectValue placeholder="Add an agent" />
+            <SelectTrigger
+              className={selectTriggerClass}
+              data-testid={`select-add-${team.id}`}
+            >
+              <SelectValue placeholder="Add a Crustabot" />
             </SelectTrigger>
             <SelectContent className={selectContentClass}>
               {candidates.map((agent) => (
-                <SelectItem key={agent.id} value={agent.id} className={selectItemClass}>
+                <SelectItem
+                  key={agent.id}
+                  value={agent.id}
+                  className={selectItemClass}
+                >
                   {agent.name}
                 </SelectItem>
               ))}
@@ -286,7 +308,10 @@ function TeamCard({
           <Button
             disabled={!pendingMember || addMember.isPending}
             onClick={() =>
-              addMember.mutate({ teamId: team.id, data: { agentId: pendingMember } })
+              addMember.mutate({
+                teamId: team.id,
+                data: { agentId: pendingMember },
+              })
             }
             className="rounded-none font-bold uppercase shrink-0"
             data-testid={`button-add-member-${team.id}`}
@@ -303,7 +328,9 @@ export default function TeamsPage() {
   const { data: teams, isLoading } = useListTeams({
     query: { queryKey: TEAMS_KEY },
   });
-  const { data: agents } = useListAgents({ query: { queryKey: ["/api/agents"] } });
+  const { data: agents } = useListAgents({
+    query: { queryKey: ["/api/agents"] },
+  });
   const roster = (agents ?? [])
     .filter((agent) => !agent.archived)
     .map((agent) => ({ id: agent.id, name: agent.name, title: agent.title }));
@@ -332,8 +359,8 @@ export default function TeamsPage() {
         ) : (teams ?? []).length === 0 ? (
           <PixelCard className="p-6">
             <p className="font-mono text-sm text-muted-foreground">
-              No teams yet. Create one, add a few lobsters, and name a lead — then
-              the lead can split its tasks across the team.
+              No teams yet. Create one, add a few lobsters, and name a lead —
+              then the lead can split its tasks across the team.
             </p>
           </PixelCard>
         ) : (

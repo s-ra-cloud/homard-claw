@@ -1,7 +1,11 @@
 import React from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useCreateAgent, AgentProvider, AgentSecurityPreset } from "@workspace/api-client-react";
+import {
+  useCreateAgent,
+  AgentProvider,
+  AgentSecurityPreset,
+} from "@workspace/api-client-react";
 import { Shell } from "@/components/layout/Shell";
 import { PixelCard } from "@/components/ui/pixel-card";
 import { Button } from "@/components/ui/button";
@@ -68,11 +72,11 @@ export default function NewAgentPage() {
           title: "Recruitment failed",
           description:
             error.status === 409
-              ? "An agent with that name already exists. Pick another designation."
+              ? "A Crustabot with that name already exists. Pick another designation."
               : error.message,
         });
       },
-    }
+    },
   });
 
   const onSubmit = (data: AgentFormValues) => {
@@ -81,21 +85,33 @@ export default function NewAgentPage() {
         name: data.name,
         title: data.title,
         mission: data.mission,
-        ...(data.specialization.trim() ? { specialization: data.specialization.trim() } : {}),
-        ...(data.personality.trim() ? { personality: data.personality.trim() } : {}),
+        ...(data.specialization.trim()
+          ? { specialization: data.specialization.trim() }
+          : {}),
+        ...(data.personality.trim()
+          ? { personality: data.personality.trim() }
+          : {}),
         ...(data.goals.trim() ? { goals: data.goals.trim() } : {}),
-        ...(data.instructions.trim() ? { instructions: data.instructions.trim() } : {}),
+        ...(data.instructions.trim()
+          ? { instructions: data.instructions.trim() }
+          : {}),
         provider: data.provider === "workspace_default" ? null : data.provider,
         ...(data.model.trim() ? { model: data.model.trim() } : {}),
-        ...(data.codexModel.trim() ? { codexModel: data.codexModel.trim() } : {}),
+        ...(data.codexModel.trim()
+          ? { codexModel: data.codexModel.trim() }
+          : {}),
         ...(data.codexReasoning.trim()
           ? {
               codexReasoning: data.codexReasoning.trim() as NonNullable<
-                Parameters<typeof createAgent.mutate>[0]["data"]["codexReasoning"]
+                Parameters<
+                  typeof createAgent.mutate
+                >[0]["data"]["codexReasoning"]
               >,
             }
           : {}),
-        ...(data.voiceStyle && data.voiceStyle !== "none" ? { voiceStyle: data.voiceStyle } : {}),
+        ...(data.voiceStyle && data.voiceStyle !== "none"
+          ? { voiceStyle: data.voiceStyle }
+          : {}),
         securityPreset: data.securityPreset,
         autonomy: data.autonomy,
         ...(permissionOverridesPayload(data)
@@ -108,9 +124,9 @@ export default function NewAgentPage() {
         avatar: {
           shellColor: data.shellColor,
           deskStyle: "standard",
-          accessory: "none"
-        }
-      }
+          accessory: "none",
+        },
+      },
     });
   };
 
@@ -118,12 +134,20 @@ export default function NewAgentPage() {
     <Shell>
       <div className="p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto space-y-6 sm:space-y-8">
         <div className="flex items-center gap-4 border-b-4 border-border pb-6">
-          <Button variant="ghost" size="icon" onClick={() => setLocation("/agents")}>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setLocation("/agents")}
+          >
             <ArrowLeft className="w-5 h-5" />
           </Button>
           <div>
-            <h1 className="font-display text-lg sm:text-2xl text-foreground uppercase mb-1">Recruit Agent</h1>
-            <p className="text-muted-foreground text-sm">Configure a new autonomous worker for the office.</p>
+            <h1 className="font-display text-lg sm:text-2xl text-foreground uppercase mb-1">
+              Recruit Crustabot
+            </h1>
+            <p className="text-muted-foreground text-sm">
+              Configure a new autonomous worker for the office.
+            </p>
           </div>
         </div>
 
@@ -131,12 +155,21 @@ export default function NewAgentPage() {
           <div className="lg:col-span-2">
             <PixelCard title="Configuration">
               <Form {...form}>
-                <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+                <form
+                  onSubmit={form.handleSubmit(onSubmit)}
+                  className="space-y-6"
+                >
                   <AgentFormFields form={form} />
 
                   <div className="pt-4 border-t-4 border-border flex justify-end">
-                    <Button type="submit" variant="primary" disabled={createAgent.isPending}>
-                      {createAgent.isPending ? "INITIALIZING..." : "INITIALIZE AGENT"}
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      disabled={createAgent.isPending}
+                    >
+                      {createAgent.isPending
+                        ? "INITIALIZING..."
+                        : "INITIALIZE CRUSTABOT"}
                     </Button>
                   </div>
                 </form>

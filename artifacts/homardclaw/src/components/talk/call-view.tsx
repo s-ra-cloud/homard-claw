@@ -602,7 +602,9 @@ export function CallView({
         .catch((err) => {
           if (epochRef.current !== epoch) return;
           setTurnFailed(turnKey, true);
-          setFlowError(errorText(err, "The agent could not answer just now."));
+          setFlowError(
+            errorText(err, "The Crustabot could not answer just now."),
+          );
           setPhase("idle");
         });
     },

@@ -64,7 +64,7 @@ The plaintext working copy is created just for a run, refreshed contents are
 folded back into the same account's encrypted row, and the file is removed.
 
 **Manual login (one time, not automatable).** There is no supported
-programmatic ChatGPT sign-in, and HomardClaw deliberately implements none.
+programmatic ChatGPT sign-in, and Crustabox deliberately implements none.
 
 1. On a machine with a browser: `npx @openai/codex login` (or `codex login`).
 2. Copy the resulting `~/.codex/auth.json`.
@@ -76,7 +76,7 @@ programmatic ChatGPT sign-in, and HomardClaw deliberately implements none.
    and never calls OpenAI, so it cannot spend allowance.
 
 Re-run steps 1–3 whenever the status reports authentication expired. Only
-Codex's own SDK refresh path may rewrite `auth.json`; HomardClaw never does.
+Codex's own SDK refresh path may rewrite `auth.json`; Crustabox never does.
 
 ## Stack
 
@@ -119,8 +119,8 @@ _Populate as you build — explicit user instructions worth remembering across s
 ### Codex limitations worth knowing
 
 - **Durability:** on non-persistent storage the refreshed credential is lost. The provider fails closed rather than half-working.
-- **Security:** the Codex CLI is launched from an explicit env allowlist with every OpenAI/Codex/Anthropic/OpenRouter/Clerk/DB variable removed, so an agent's prompt or tools can never read a HomardClaw secret. Adding a secret to the server does not leak it into Codex.
-- **Isolation:** each agent/conversation gets its own working directory and its own SDK thread id. HomardClaw stays authoritative for identity, memory, permissions, files, and task history — Codex only sees the turn it is given.
+- **Security:** the Codex CLI is launched from an explicit env allowlist with every OpenAI/Codex/Anthropic/OpenRouter/Clerk/DB variable removed, so an agent's prompt or tools can never read a Crustabox secret. Adding a secret to the server does not leak it into Codex.
+- **Isolation:** each agent/conversation gets its own working directory and its own SDK thread id. Crustabox stays authoritative for identity, memory, permissions, files, and task history — Codex only sees the turn it is given.
 - **Allowance:** no API exposes how much ChatGPT Codex allowance is left, so none is displayed. Point at the official ChatGPT usage dashboard instead.
 - **Verification:** everything is covered by mocked-SDK tests (`artifacts/api-server/src/routes/office.codex.test.ts`). A real ChatGPT login has **not** been exercised — that step needs the owner's own credential and must be done manually after deployment.
 
