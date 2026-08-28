@@ -23,6 +23,7 @@ import {
   type TelegramLinkCode,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { navigateToExternal } from "@/lib/office-window";
 import { Shell } from "@/components/layout/Shell";
 import { PixelCard } from "@/components/ui/pixel-card";
 import { Badge } from "@/components/ui/badge";
@@ -119,7 +120,9 @@ function ConnectActions({ app }: { app: ConnectedApp }) {
     });
   };
   const onStartSuccess = (data: { authUrl: string }) => {
-    window.location.assign(data.authUrl);
+    // GitHub and Google refuse to load inside the office parchment iframe,
+    // so OAuth must leave the embedded office window for the top-level page.
+    navigateToExternal(data.authUrl);
   };
   const onDisconnected = () => {
     queryClient.invalidateQueries({ queryKey: getListConnectedAppsQueryKey() });
