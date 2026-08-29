@@ -25,6 +25,7 @@ import { useIsDesktop } from "@/hooks/use-mobile";
 import { useRoomHotspotReveal } from "@/hooks/useRoomHotspotReveal";
 import { OFFICE_WINDOW_NAME, officeWindowHref } from "@/lib/office-window";
 import { chooseOfficeRolePlacements } from "./office-role-placements";
+import { SCENE_HOTSPOTS } from "./office-scene-hotspots";
 import "./office-dashboard.css";
 
 /** The full 1586 × 992 submarine illustration is the scene coordinate plane. */
@@ -140,29 +141,6 @@ function poseForAgent(
   // assigns its activity; picking here instead would reshuffle every render.
   if (status === "idle" && activity) return activity;
   return "seated";
-}
-
-/**
- * Scene shortcut hotspots layered over the office artwork.
- * Agent seats are handled separately as focusable Link wrappers;
- * these cover the submarine's wall controls, screens, racks and porthole.
- */
-interface SceneHotspot {
-  href: string;
-  label: string; // shown as tooltip on hover/focus
-  ariaLabel: string; // accessible name for screen readers
-  /**
-   * Centre position as a percentage of the room-scene container. `.scene-hotspot`
-   * applies `transform: translate(-50%, -50%)`, so these are the centre of the hit
-   * rectangle, NOT its top-left corner: the covered band is left ± width/2 and
-   * top ± height/2.
-   */
-  left: string;
-  top: string;
-  /** Hit-area dimensions as percentages. */
-  width: string;
-  height: string;
-  extraClass?: string;
 }
 
 interface OpenOfficeWindow {
@@ -965,123 +943,6 @@ export default function OfficeDashboard() {
     </Shell>
   );
 }
-
-const SCENE_HOTSPOTS: SceneHotspot[] = [
-  {
-    href: "/tasks",
-    label: "Tasks",
-    ariaLabel: "Task whiteboard — open Tasks",
-    left: "18.5%",
-    top: "35.2%",
-    width: "11.5%",
-    height: "14%",
-  },
-  {
-    href: "/schedules",
-    label: "Schedules",
-    ariaLabel: "Wall calendar — open Schedules",
-    left: "26.7%",
-    top: "34.8%",
-    width: "5.8%",
-    height: "12%",
-  },
-  {
-    href: "/inbox",
-    label: "Inbox",
-    ariaLabel: "Control-room communications stick — open Inbox",
-    left: "20.2%",
-    top: "44.5%",
-    width: "3.8%",
-    height: "6.5%",
-  },
-  {
-    href: "/reports",
-    label: "Reports",
-    ariaLabel: "Navigation reports console — open Reports",
-    left: "25.8%",
-    top: "44.6%",
-    width: "10%",
-    height: "9%",
-  },
-  {
-    href: "/approvals",
-    label: "Approvals",
-    ariaLabel: "Command console — open Approvals",
-    left: "19.6%",
-    top: "49.5%",
-    width: "4.2%",
-    height: "4.5%",
-    extraClass: "scene-hotspot--approval",
-  },
-  // Crustabot and Team navigation lives on two unused instrument banks in the
-  // port control console. The four wall computers are now workstations only.
-  {
-    href: "/agents",
-    label: "Crustabots",
-    ariaLabel: "Left server instrument bank — open Crustabots",
-    left: "12.8%",
-    top: "47.7%",
-    width: "5.2%",
-    height: "8.4%",
-    extraClass: "scene-hotspot--console",
-  },
-  {
-    href: "/teams",
-    label: "Teams",
-    ariaLabel: "Centre server instrument bank — open Teams",
-    left: "16.7%",
-    top: "45.8%",
-    width: "3.6%",
-    height: "6.5%",
-    extraClass: "scene-hotspot--console",
-  },
-  {
-    href: "/connected-apps",
-    label: "Apps",
-    ariaLabel: "Purple apps rack — open Connected Apps",
-    left: "74.5%",
-    top: "40.8%",
-    width: "13.5%",
-    height: "16%",
-  },
-  {
-    href: "/providers",
-    label: "Providers",
-    ariaLabel: "Blue data centre — open Providers",
-    left: "77.7%",
-    top: "61.5%",
-    width: "16.5%",
-    height: "18%",
-  },
-  {
-    href: "/memory",
-    label: "Memory",
-    ariaLabel: "Small upper computer — open Memory",
-    left: "82.2%",
-    top: "44.6%",
-    width: "6.8%",
-    height: "10.5%",
-    extraClass: "scene-hotspot--terminal",
-  },
-  {
-    href: "/documentation",
-    label: "Documentation",
-    ariaLabel: "Small library — open Documentation",
-    left: "86.7%",
-    top: "48%",
-    width: "5.5%",
-    height: "11.5%",
-  },
-  {
-    href: "/island",
-    label: "Retirement Island",
-    ariaLabel: "Porthole — open Retirement Island",
-    left: "88.5%",
-    top: "39.5%",
-    width: "6.5%",
-    height: "11%",
-  },
-];
 
 /** Sprite box a pose needs to show the character at CHARACTER_PCT. */
 function spritePct(pose: LobsterPose) {
