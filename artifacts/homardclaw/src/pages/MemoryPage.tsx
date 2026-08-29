@@ -14,10 +14,13 @@ import {
   useCreateWorkspaceSkill,
   useUpdateWorkspaceSkill,
   useDeleteWorkspaceSkill,
+  useGetMemorySettings,
+  useUpdateMemorySettings,
   exportMemories,
   getListMemoriesQueryKey,
   getListKnowledgeFilesQueryKey,
   getListWorkspaceSkillsQueryKey,
+  getGetMemorySettingsQueryKey,
   MemoryInputKind,
   type Memory,
   type KnowledgeFile,
@@ -59,6 +62,7 @@ import {
   Plus,
   Users,
   Sparkles,
+  Wrench,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
@@ -73,6 +77,7 @@ const inputClass =
 
 const ALL_SENTINEL = "__all__";
 const SHARED_SENTINEL = "shared";
+const UNASSIGNED_SENTINEL = "__unassigned__";
 
 const KIND_STYLES: Record<string, string> = {
   fact: "bg-accent/20 text-accent border-accent",
@@ -1040,6 +1045,10 @@ export default function MemoryPage() {
     "memories",
   );
   const { data: agents } = useListAgents();
+  const { data: memorySettings } = useGetMemorySettings();
+  const updateMemorySettings = useUpdateMemorySettings();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
   const activeAgents = useMemo(
     () =>
       (agents ?? [])
@@ -1047,6 +1056,38 @@ export default function MemoryPage() {
         .map((a) => ({ id: a.id, name: a.name })),
     [agents],
   );
+  const compressionAgents = useMemo(
+    () =>
+      (agents ?? []).filter(
+        (agent) =>
+          !agent.archived &&
+          agent.status !== "paused" &&
+          !agent.sensitiveDataSandbox,
+      ),
+    [agents],
+  );
+
+  const assignCompressionAgent = async (value: string) => {
+    try {
+      const updated = await updateMemorySettings.mutateAsync({
+        data: {
+          compressionAgentId: value === UNASSIGNED_SENTINEL ? null : value,
+        },
+      });
+      queryClient.setQueryData(getGetMemorySettingsQueryKey(), updated);
+      toast({
+        title: updated.compressionAgentName
+          ? `${updated.compressionAgentName} assigned to memory compression`
+          : "Memory compression role cleared",
+      });
+    } catch (error) {
+      toast({
+        title: "Could not update memory compression",
+        description: apiErrorMessage(error, "Try again."),
+        variant: "destructive",
+      });
+    }
+  };
 
   return (
     <Shell>
@@ -1059,6 +1100,53 @@ export default function MemoryPage() {
             What your Crustabots remember and which documents they may use
           </p>
         </div>
+
+        <PixelCard className="p-4 sm:p-5">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+            <div className="flex min-w-0 flex-1 items-start gap-3">
+              <Wrench className="mt-0.5 h-5 w-5 shrink-0 text-accent" />
+              <div>
+                <h2 className="text-sm font-bold uppercase">
+                  Memory compression Crustabot
+                </h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Assign an active, non-sandboxed Crustabot to steward automatic
+                  memory housekeeping. In the office it will maintain the cables
+                  at the memory terminal.
+                </p>
+              </div>
+            </div>
+            <Select
+              value={memorySettings?.compressionAgentId ?? UNASSIGNED_SENTINEL}
+              onValueChange={assignCompressionAgent}
+              disabled={updateMemorySettings.isPending}
+            >
+              <SelectTrigger
+                className={`${selectTriggerClass} sm:w-64`}
+                data-testid="select-memory-compression-agent"
+              >
+                <SelectValue placeholder="Not assigned" />
+              </SelectTrigger>
+              <SelectContent className={selectContentClass}>
+                <SelectItem
+                  value={UNASSIGNED_SENTINEL}
+                  className={selectItemClass}
+                >
+                  Not assigned
+                </SelectItem>
+                {compressionAgents.map((agent) => (
+                  <SelectItem
+                    key={agent.id}
+                    value={agent.id}
+                    className={selectItemClass}
+                  >
+                    {agent.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </PixelCard>
 
         <div className="flex gap-2">
           {(["memories", "knowledge", "skills"] as const).map((key) => (

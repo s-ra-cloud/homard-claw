@@ -129,6 +129,8 @@ export * from './memoryInput';
 export * from './memoryInputKind';
 export * from './memoryKind';
 export * from './memoryList';
+export * from './memorySettings';
+export * from './memorySettingsInput';
 export * from './memoryUpdate';
 export * from './memoryUpdateKind';
 export * from './notification';

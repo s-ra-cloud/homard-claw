@@ -1070,6 +1070,39 @@ paths:
                 $ref: "#/components/schemas/TaskEstimate"
         "404":
           description: Agent not found
+  /memory/settings:
+    get:
+      operationId: getMemorySettings
+      tags: [office]
+      summary: Read the memory-compression Crustabot selection
+      responses:
+        "200":
+          description: Memory compression settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemorySettings"
+    put:
+      operationId: updateMemorySettings
+      tags: [office]
+      summary: Select or clear the memory-compression Crustabot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemorySettingsInput"
+      responses:
+        "200":
+          description: Updated memory compression settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemorySettings"
+        "404":
+          description: Crustabot not found
+        "409":
+          description: Crustabot is paused or sandboxed
   /memories:
     get:
       operationId: listMemories
@@ -3508,6 +3541,17 @@ components:
         valid: { type: boolean }
         checked: { type: number }
         firstInvalidId: { type: [string, "null"] }
+    MemorySettings:
+      type: object
+      required: [compressionAgentId, compressionAgentName]
+      properties:
+        compressionAgentId: { type: [string, "null"] }
+        compressionAgentName: { type: [string, "null"] }
+    MemorySettingsInput:
+      type: object
+      required: [compressionAgentId]
+      properties:
+        compressionAgentId: { type: [string, "null"] }
     Memory:
       type: object
       required:

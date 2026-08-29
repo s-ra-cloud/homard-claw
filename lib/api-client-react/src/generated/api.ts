@@ -81,6 +81,8 @@ import type {
   Memory,
   MemoryInput,
   MemoryList,
+  MemorySettings,
+  MemorySettingsInput,
   MemoryUpdate,
   NotificationList,
   OfficeOverview,
@@ -4567,6 +4569,154 @@ export const useEstimateTask = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getEstimateTaskMutationOptions(options));
+    }
+
+export const getGetMemorySettingsUrl = () => {
+
+
+
+
+  return `/api/memory/settings`
+}
+
+/**
+ * @summary Read the memory-compression Crustabot selection
+ */
+export const getMemorySettings = async ( options?: Parameters<typeof customFetch>[1]): Promise<MemorySettings> => {
+
+  return customFetch<MemorySettings>(getGetMemorySettingsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMemorySettingsQueryKey = () => {
+    return [
+    `/api/memory/settings`
+    ] as const;
+    }
+
+
+export const getGetMemorySettingsQueryOptions = <TData = Awaited<ReturnType<typeof getMemorySettings>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMemorySettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMemorySettingsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMemorySettings>>> = ({ signal }) => getMemorySettings({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMemorySettings>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMemorySettingsQueryResult = NonNullable<Awaited<ReturnType<typeof getMemorySettings>>>
+export type GetMemorySettingsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Read the memory-compression Crustabot selection
+ */
+
+export function useGetMemorySettings<TData = Awaited<ReturnType<typeof getMemorySettings>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMemorySettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMemorySettingsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateMemorySettingsUrl = () => {
+
+
+
+
+  return `/api/memory/settings`
+}
+
+/**
+ * @summary Select or clear the memory-compression Crustabot
+ */
+export const updateMemorySettings = async (memorySettingsInput: MemorySettingsInput, options?: Parameters<typeof customFetch>[1]): Promise<MemorySettings> => {
+
+  return customFetch<MemorySettings>(getUpdateMemorySettingsUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(memorySettingsInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateMemorySettingsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateMemorySettings>>, TError,{data: BodyType<MemorySettingsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateMemorySettings>>, TError,{data: BodyType<MemorySettingsInput>}, TContext> => {
+
+const mutationKey = ['updateMemorySettings'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateMemorySettings>>, {data: BodyType<MemorySettingsInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateMemorySettings(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateMemorySettingsMutationResult = NonNullable<Awaited<ReturnType<typeof updateMemorySettings>>>
+    export type UpdateMemorySettingsMutationBody = BodyType<MemorySettingsInput>
+    export type UpdateMemorySettingsMutationError = ErrorType<void>
+
+    /**
+ * @summary Select or clear the memory-compression Crustabot
+ */
+export const useUpdateMemorySettings = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateMemorySettings>>, TError,{data: BodyType<MemorySettingsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateMemorySettings>>,
+        TError,
+        {data: BodyType<MemorySettingsInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateMemorySettingsMutationOptions(options));
     }
 
 export const getListMemoriesUrl = (params?: ListMemoriesParams,) => {

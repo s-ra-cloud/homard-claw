@@ -2149,6 +2149,18 @@ export interface AuditVerification {
   firstInvalidId: string | null;
 }
 
+export interface MemorySettings {
+  /** @nullable */
+  compressionAgentId: string | null;
+  /** @nullable */
+  compressionAgentName: string | null;
+}
+
+export interface MemorySettingsInput {
+  /** @nullable */
+  compressionAgentId: string | null;
+}
+
 export type MemoryKind = typeof MemoryKind[keyof typeof MemoryKind];
 
 

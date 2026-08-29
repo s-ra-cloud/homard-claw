@@ -11,6 +11,7 @@ import {
   systemStateTable,
   tasksTable,
   taskLogsTable,
+  workspaceSettingsTable,
 } from "@workspace/db";
 import { and, eq, inArray, like, sql } from "drizzle-orm";
 
@@ -132,6 +133,14 @@ beforeEach(async () => {
 
 afterAll(async () => {
   vi.unstubAllEnvs();
+  await db
+    .delete(workspaceSettingsTable)
+    .where(
+      and(
+        eq(workspaceSettingsTable.workspaceId, wsId),
+        eq(workspaceSettingsTable.key, "memory_compression_agent_id"),
+      ),
+    );
   // Restore the workspace's credential rows exactly as we found them.
   await db
     .delete(providerCredentialsTable)
@@ -168,6 +177,51 @@ afterAll(async () => {
 });
 
 describe("memory routes", () => {
+  it("assigns, validates, reads, and clears the memory-compression Crustabot", async () => {
+    const agent = await createAgent(`${RUN_TAG} Compression Steward`);
+    await db
+      .update(agentsTable)
+      .set({ paused: false })
+      .where(eq(agentsTable.id, agent.id));
+
+    const assigned = await request(app)
+      .put("/api/memory/settings")
+      .send({ compressionAgentId: agent.id });
+    expect(assigned.status).toBe(200);
+    expect(assigned.body).toEqual({
+      compressionAgentId: agent.id,
+      compressionAgentName: agent.name,
+    });
+
+    const current = await request(app).get("/api/memory/settings");
+    expect(current.status).toBe(200);
+    expect(current.body.compressionAgentId).toBe(agent.id);
+
+    await db
+      .update(agentsTable)
+      .set({ sensitiveDataSandbox: true })
+      .where(eq(agentsTable.id, agent.id));
+    expect((await request(app).get("/api/memory/settings")).body).toEqual({
+      compressionAgentId: null,
+      compressionAgentName: null,
+    });
+
+    const rejected = await request(app)
+      .put("/api/memory/settings")
+      .send({ compressionAgentId: agent.id });
+    expect(rejected.status).toBe(409);
+
+    await db
+      .update(agentsTable)
+      .set({ sensitiveDataSandbox: false })
+      .where(eq(agentsTable.id, agent.id));
+    const cleared = await request(app)
+      .put("/api/memory/settings")
+      .send({ compressionAgentId: null });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.compressionAgentId).toBeNull();
+  });
+
   it("isolates memories and knowledge between user workspaces", async () => {
     const owned = await request(app)
       .post("/api/memories")

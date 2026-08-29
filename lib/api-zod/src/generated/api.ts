@@ -2638,6 +2638,28 @@ export const EstimateTaskResponse = zod.object({
 
 
 /**
+ * @summary Read the memory-compression Crustabot selection
+ */
+export const GetMemorySettingsResponse = zod.object({
+  "compressionAgentId": zod.string().nullable(),
+  "compressionAgentName": zod.string().nullable()
+})
+
+
+/**
+ * @summary Select or clear the memory-compression Crustabot
+ */
+export const UpdateMemorySettingsBody = zod.object({
+  "compressionAgentId": zod.string().nullable()
+})
+
+export const UpdateMemorySettingsResponse = zod.object({
+  "compressionAgentId": zod.string().nullable(),
+  "compressionAgentName": zod.string().nullable()
+})
+
+
+/**
  * @summary List or search memories, optionally scoped to one agent
  */
 export const listMemoriesQueryQMax = 500;

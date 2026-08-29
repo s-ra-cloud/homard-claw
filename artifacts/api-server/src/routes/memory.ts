@@ -6,6 +6,7 @@ import {
   DeleteKnowledgeFileParams,
   DeleteMemoryParams,
   ExportMemoriesResponse,
+  GetMemorySettingsResponse,
   ListKnowledgeFilesResponse,
   ListMemoriesQueryParams,
   ListMemoriesResponse,
@@ -13,6 +14,8 @@ import {
   SetKnowledgeAssignmentsParams,
   SetKnowledgeAssignmentsResponse,
   UpdateMemoryBody,
+  UpdateMemorySettingsBody,
+  UpdateMemorySettingsResponse,
   UpdateMemoryParams,
   UpdateMemoryResponse,
   UploadKnowledgeFileBody,
@@ -24,6 +27,7 @@ import {
   db,
   knowledgeFilesTable,
   memoriesTable,
+  workspaceSettingsTable,
 } from "@workspace/db";
 import { recordAudit } from "../audit";
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
@@ -41,6 +45,133 @@ import {
  * every route here is already owner-only.
  */
 const router: IRouter = Router();
+const MEMORY_COMPRESSION_AGENT_KEY = "memory_compression_agent_id";
+
+async function configuredMemoryCompressionAgent(workspaceId: string) {
+  const [setting] = await db
+    .select({ agentId: workspaceSettingsTable.value })
+    .from(workspaceSettingsTable)
+    .where(
+      and(
+        eq(workspaceSettingsTable.workspaceId, workspaceId),
+        eq(workspaceSettingsTable.key, MEMORY_COMPRESSION_AGENT_KEY),
+      ),
+    )
+    .limit(1);
+  if (!setting?.agentId) return null;
+  const [agent] = await db
+    .select({ id: agentsTable.id, name: agentsTable.name })
+    .from(agentsTable)
+    .where(
+      and(
+        eq(agentsTable.workspaceId, workspaceId),
+        eq(agentsTable.id, setting.agentId),
+        eq(agentsTable.paused, false),
+        eq(agentsTable.archived, false),
+        eq(agentsTable.retired, false),
+        eq(agentsTable.sensitiveDataSandbox, false),
+      ),
+    )
+    .limit(1);
+  return agent ?? null;
+}
+
+function memorySettingsPayload(agent: { id: string; name: string } | null) {
+  return {
+    compressionAgentId: agent?.id ?? null,
+    compressionAgentName: agent?.name ?? null,
+  };
+}
+
+router.get("/memory/settings", async (req, res): Promise<void> => {
+  const agent = await configuredMemoryCompressionAgent(req.workspaceId!);
+  res.json(GetMemorySettingsResponse.parse(memorySettingsPayload(agent)));
+});
+
+router.put("/memory/settings", async (req, res): Promise<void> => {
+  const body = UpdateMemorySettingsBody.safeParse(req.body);
+  if (!body.success) {
+    res.status(400).json({ error: "Choose a memory-compression Crustabot." });
+    return;
+  }
+
+  const requestedId = body.data.compressionAgentId;
+  let agent: { id: string; name: string } | null = null;
+  if (requestedId) {
+    const [available] = await db
+      .select({
+        id: agentsTable.id,
+        name: agentsTable.name,
+        paused: agentsTable.paused,
+        sandboxed: agentsTable.sensitiveDataSandbox,
+      })
+      .from(agentsTable)
+      .where(
+        and(
+          eq(agentsTable.workspaceId, req.workspaceId!),
+          eq(agentsTable.id, requestedId),
+          eq(agentsTable.archived, false),
+          eq(agentsTable.retired, false),
+        ),
+      )
+      .limit(1);
+    if (!available) {
+      res.status(404).json({ error: "That Crustabot is not available." });
+      return;
+    }
+    if (available.paused) {
+      res.status(409).json({
+        error: "Resume that Crustabot before assigning memory compression.",
+      });
+      return;
+    }
+    if (available.sandboxed) {
+      res.status(409).json({
+        error: "A sandboxed Crustabot cannot maintain shared office memories.",
+      });
+      return;
+    }
+    agent = available;
+  }
+
+  await db.transaction(async (tx) => {
+    if (agent) {
+      await tx
+        .insert(workspaceSettingsTable)
+        .values({
+          workspaceId: req.workspaceId!,
+          key: MEMORY_COMPRESSION_AGENT_KEY,
+          value: agent.id,
+        })
+        .onConflictDoUpdate({
+          target: [
+            workspaceSettingsTable.workspaceId,
+            workspaceSettingsTable.key,
+          ],
+          set: { value: agent.id },
+        });
+    } else {
+      await tx
+        .delete(workspaceSettingsTable)
+        .where(
+          and(
+            eq(workspaceSettingsTable.workspaceId, req.workspaceId!),
+            eq(workspaceSettingsTable.key, MEMORY_COMPRESSION_AGENT_KEY),
+          ),
+        );
+    }
+    await recordAudit(
+      req.workspaceId!,
+      "memory.compression_settings",
+      agent
+        ? `${agent.name} became the memory-compression Crustabot.`
+        : "The memory-compression role was cleared.",
+      tx,
+    );
+  });
+
+  res.json(UpdateMemorySettingsResponse.parse(memorySettingsPayload(agent)));
+});
 
 function toMemoryJson(
   memory: typeof memoriesTable.$inferSelect,

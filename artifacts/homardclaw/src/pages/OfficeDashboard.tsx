@@ -8,6 +8,9 @@ import {
   useDecideApproval,
   useSetEmergencyStop,
   useGetRuntimeHealth,
+  useGetApprovalSettings,
+  useGetDocumentation,
+  useGetMemorySettings,
   ApprovalDecisionDecision,
 } from "@workspace/api-client-react";
 import { Shell } from "@/components/layout/Shell";
@@ -19,7 +22,9 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { useImmersiveMode } from "@/hooks/useImmersiveMode";
 import { useIsDesktop } from "@/hooks/use-mobile";
+import { useRoomHotspotReveal } from "@/hooks/useRoomHotspotReveal";
 import { OFFICE_WINDOW_NAME, officeWindowHref } from "@/lib/office-window";
+import { chooseOfficeRolePlacements } from "./office-role-placements";
 import "./office-dashboard.css";
 
 /** The full 1586 × 992 submarine illustration is the scene coordinate plane. */
@@ -319,6 +324,7 @@ export default function OfficeDashboard() {
   const [openWindow, setOpenWindow] = React.useState<OpenOfficeWindow | null>(
     null,
   );
+  const [roleLoadSeed] = React.useState(() => String(Math.random()));
 
   const { data: overview, isLoading, isError } = useGetOfficeOverview();
   const {
@@ -327,11 +333,18 @@ export default function OfficeDashboard() {
     isError: agentsError,
   } = useListAgents();
   const { data: approvals } = useListApprovals();
+  const { data: approvalSettings, isLoading: approvalSettingsLoading } =
+    useGetApprovalSettings();
+  const { data: documentation, isLoading: documentationLoading } =
+    useGetDocumentation();
+  const { data: memorySettings, isLoading: memorySettingsLoading } =
+    useGetMemorySettings();
   // Polls so a stalled queue or a lost worker lease surfaces on its own.
   const { data: runtimeHealth } = useGetRuntimeHealth({
     query: { queryKey: ["/api/runtime/health"], refetchInterval: 10000 },
   });
   const queryClient = useQueryClient();
+  const revealHotspots = useRoomHotspotReveal(Boolean(openWindow));
 
   React.useEffect(() => {
     let visible = document.visibilityState === "visible";
@@ -454,7 +467,13 @@ export default function OfficeDashboard() {
     window.requestAnimationFrame(() => lastWindowTriggerRef.current?.focus());
   }, []);
 
-  if (isLoading || agentsLoading) {
+  if (
+    isLoading ||
+    agentsLoading ||
+    approvalSettingsLoading ||
+    documentationLoading ||
+    memorySettingsLoading
+  ) {
     return (
       <Shell>
         <section className="iso-office iso-office--state" aria-live="polite">
@@ -519,23 +538,56 @@ export default function OfficeDashboard() {
   const activeAgents = (agents ?? []).filter((a) => !a.archived);
   const sandboxedAgents = activeAgents.filter((a) => a.sensitiveDataSandbox);
   const officeAgents = activeAgents.filter((a) => !a.sensitiveDataSandbox);
+  const rolePlacements = chooseOfficeRolePlacements(
+    {
+      documentationAgentId: documentation?.assistantAgentId,
+      approvalAgentId: approvalSettings?.reviewerAgentId,
+      memoryAgentId: memorySettings?.compressionAgentId,
+    },
+    new Set(officeAgents.map((agent) => agent.id)),
+    roleLoadSeed,
+  );
+  const roleAgentIds = new Set(
+    rolePlacements.map((placement) => placement.agentId),
+  );
+  const unassignedOfficeAgents = officeAgents.filter(
+    (agent) => !roleAgentIds.has(agent.id),
+  );
   const exteriorAgents = sandboxedAgents.slice(0, EXTERIOR_SEATS.length);
-  const deskAgents = officeAgents.slice(0, DESK_SEATS.length);
-  const floorAgents = officeAgents.slice(DESK_SEATS.length, MAX_VISIBLE);
+  const deskAgents = unassignedOfficeAgents.slice(0, DESK_SEATS.length);
+  const floorAgents = unassignedOfficeAgents.slice(
+    DESK_SEATS.length,
+    MAX_VISIBLE,
+  );
   const overflowCount =
-    Math.max(0, officeAgents.length - MAX_VISIBLE) +
+    Math.max(0, unassignedOfficeAgents.length - MAX_VISIBLE) +
     Math.max(0, sandboxedAgents.length - EXTERIOR_SEATS.length);
+  const roleAgents = rolePlacements.flatMap((placement) => {
+    const agent = officeAgents.find(
+      (candidate) => candidate.id === placement.agentId,
+    );
+    return agent ? [{ agent, placement }] : [];
+  });
 
   // Every visible agent, sprite size included, so the name tags can be drawn as
   // one layer on top of every lobster instead of inside their own sprite's
   // stacking context, where a nearer neighbour would cover them.
   const placedAgents = [
+    ...roleAgents.map(({ agent, placement }) => ({
+      agent,
+      seat: placement.seat,
+      pose: placement.seat.pose,
+      displayStatus:
+        agent.status === "paused" ? "paused" : placement.seat.status,
+      zIndex: floorZIndex(placement.seat.top) + 3,
+    })),
     ...floorAgents.map((agent, index) => {
       const seat = FLOOR_SEATS[index];
       return {
         agent,
         seat,
         pose: "floor-working" as LobsterPose,
+        displayStatus: agent.status,
         zIndex: floorZIndex(seat.top),
       };
     }),
@@ -545,6 +597,7 @@ export default function OfficeDashboard() {
       pose: stopped
         ? ("seated" as LobsterPose)
         : poseForAgent(agent.status, idleActivities[agent.id]),
+      displayStatus: agent.status,
       zIndex: DESK_Z_INDEX,
     })),
     // Sandboxed agents work from their own cushion, exactly like the ones
@@ -553,6 +606,7 @@ export default function OfficeDashboard() {
       agent,
       seat: EXTERIOR_SEATS[index],
       pose: "floor-working" as LobsterPose,
+      displayStatus: agent.status,
       zIndex: floorZIndex(EXTERIOR_SEATS[index].top),
     })),
   ];
@@ -589,7 +643,12 @@ export default function OfficeDashboard() {
             aria-label="Live underwater submarine office with four computers, an open deck, and exterior stations for sandboxed Crustabots"
           >
             <div className="room-caption">
-              LIVE VIEW / YELLOW SUBMARINE{stopped ? " / PAUSED" : ""}
+              <span>
+                LIVE VIEW / YELLOW SUBMARINE{stopped ? " / PAUSED" : ""}
+              </span>
+              <span className="room-caption__discovery">
+                HOLD <kbd>SPACE</kbd> TO REVEAL CONTROLS
+              </span>
             </div>
             {overflowCount > 0 && (
               <div className="room-overflow" role="status" aria-live="polite">
@@ -620,7 +679,9 @@ export default function OfficeDashboard() {
                   alt="Isometric 16-bit yellow submarine office with four computers, an open wooden deck, wall control stations, exterior platforms, fish and bubbles"
                 />
                 <OceanAmbient />
-                <div className="room-scene">
+                <div
+                  className={`room-scene${revealHotspots ? " is-discovering" : ""}`}
+                >
                   {/* A monitor wakes only when the agent seated below it works. */}
                   {deskAgents.map((agent, index) =>
                     !stopped && AT_DESK_STATUSES.has(agent.status) ? (
@@ -645,6 +706,7 @@ export default function OfficeDashboard() {
                           : ""
                       }`}
                       data-label={spot.label}
+                      data-room-hotspot
                       aria-label={spot.ariaLabel}
                       onClick={(event) =>
                         openOfficeWindow(event, spot.href, spot.label)
@@ -671,57 +733,62 @@ export default function OfficeDashboard() {
                     data-label={
                       stopped ? "Resume Crustabots" : "Emergency stop"
                     }
+                    data-room-hotspot
                   />
 
                   {/* Existing lobster sprites; click an agent to open its Talk view. */}
-                  {placedAgents.map(({ agent, seat, pose, zIndex }) => (
-                    <div
-                      key={agent.id}
-                      className="room-agent"
-                      style={{
-                        left: `${seat.left}%`,
-                        top: `${seat.top}%`,
-                        // Share of the room, per pose, so every lobster is the
-                        // same character size whatever furniture it comes with.
-                        width: `${spritePct(pose)}%`,
-                        zIndex,
-                      }}
-                      onMouseEnter={() => setNamedAgentId(agent.id)}
-                      onMouseLeave={() =>
-                        setNamedAgentId((current) =>
-                          current === agent.id ? null : current,
-                        )
-                      }
-                    >
-                      <Link
-                        href={`/talk/${agent.id}`}
-                        className="room-agent__link"
-                        aria-label={`Talk to ${agent.name} at the ${seat.label}`}
-                        /* Keyboard users get the same tag the pointer does. */
-                        onFocus={() => setNamedAgentId(agent.id)}
-                        onBlur={() =>
+                  {placedAgents.map(
+                    ({ agent, seat, pose, displayStatus, zIndex }) => (
+                      <div
+                        key={agent.id}
+                        className="room-agent"
+                        style={{
+                          left: `${seat.left}%`,
+                          top: `${seat.top}%`,
+                          // Share of the room, per pose, so every lobster is the
+                          // same character size whatever furniture it comes with.
+                          width: `${spritePct(pose)}%`,
+                          zIndex,
+                        }}
+                        onMouseEnter={() => setNamedAgentId(agent.id)}
+                        onMouseLeave={() =>
                           setNamedAgentId((current) =>
                             current === agent.id ? null : current,
                           )
                         }
-                        onClick={(event) =>
-                          openOfficeWindow(
-                            event,
-                            `/talk/${agent.id}`,
-                            `Talk with ${agent.name}`,
-                          )
-                        }
                       >
-                        <MarlowLobster
-                          pose={pose}
-                          status={stopped ? "paused" : agent.status}
-                          seed={agent.id}
-                          shellColor={agent.avatar.shellColor}
-                          title={`${agent.name} at the ${seat.label}`}
-                        />
-                      </Link>
-                    </div>
-                  ))}
+                        <Link
+                          href={`/talk/${agent.id}`}
+                          className="room-agent__link"
+                          data-room-hotspot
+                          data-label={`Talk with ${agent.name}`}
+                          aria-label={`Talk to ${agent.name} at the ${seat.label}`}
+                          /* Keyboard users get the same tag the pointer does. */
+                          onFocus={() => setNamedAgentId(agent.id)}
+                          onBlur={() =>
+                            setNamedAgentId((current) =>
+                              current === agent.id ? null : current,
+                            )
+                          }
+                          onClick={(event) =>
+                            openOfficeWindow(
+                              event,
+                              `/talk/${agent.id}`,
+                              `Talk with ${agent.name}`,
+                            )
+                          }
+                        >
+                          <MarlowLobster
+                            pose={pose}
+                            status={stopped ? "paused" : displayStatus}
+                            seed={agent.id}
+                            shellColor={agent.avatar.shellColor}
+                            title={`${agent.name} at the ${seat.label}`}
+                          />
+                        </Link>
+                      </div>
+                    ),
+                  )}
 
                   {/* ── Name tags: their own layer above every sprite, so none
                        can be hidden, and only the pointed-at one is shown.
@@ -921,11 +988,11 @@ const SCENE_HOTSPOTS: SceneHotspot[] = [
   {
     href: "/inbox",
     label: "Inbox",
-    ariaLabel: "Communications console — open Inbox",
-    left: "14.7%",
-    top: "50.4%",
-    width: "13%",
-    height: "13.5%",
+    ariaLabel: "Control-room communications stick — open Inbox",
+    left: "20.2%",
+    top: "44.5%",
+    width: "3.8%",
+    height: "6.5%",
   },
   {
     href: "/reports",
@@ -940,39 +1007,33 @@ const SCENE_HOTSPOTS: SceneHotspot[] = [
     href: "/approvals",
     label: "Approvals",
     ariaLabel: "Command console — open Approvals",
-    left: "20.7%",
-    top: "49.1%",
-    width: "7%",
-    height: "8%",
+    left: "19.6%",
+    top: "49.5%",
+    width: "4.2%",
+    height: "4.5%",
     extraClass: "scene-hotspot--approval",
   },
-  // The two wall computers that double as navigation sit directly behind the
-  // first two desk agents. These hit areas are trimmed to the monitor screens
-  // themselves (measured at 32.2-36.3% and 33.0-37.0%) and lifted above the
-  // agents, so a seated lobster cannot swallow the click. The desk seats
-  // follow the shelves' diagonal, so each chair top sits at a different
-  // height (sprite boxes reach up to ~33.0% and ~33.8%): each hotspot's
-  // bottom edge is pulled up by its seat's shelf step, keeping the same
-  // stops-short-of-the-chair clearance the flat layout had.
+  // Crustabot and Team navigation lives on two unused instrument banks in the
+  // port control console. The four wall computers are now workstations only.
   {
     href: "/agents",
     label: "Crustabots",
-    ariaLabel: "First wall computer — open Crustabots",
-    left: "42.4%",
-    top: "33.8%",
-    width: "5.4%",
-    height: "3.6%",
-    extraClass: "scene-hotspot--monitor",
+    ariaLabel: "Left server instrument bank — open Crustabots",
+    left: "12.8%",
+    top: "47.7%",
+    width: "5.2%",
+    height: "8.4%",
+    extraClass: "scene-hotspot--console",
   },
   {
     href: "/teams",
     label: "Teams",
-    ariaLabel: "Second wall computer — open Teams",
-    left: "48.4%",
-    top: "34.2%",
-    width: "5.4%",
-    height: "4.4%",
-    extraClass: "scene-hotspot--monitor",
+    ariaLabel: "Centre server instrument bank — open Teams",
+    left: "16.7%",
+    top: "45.8%",
+    width: "3.6%",
+    height: "6.5%",
+    extraClass: "scene-hotspot--console",
   },
   {
     href: "/connected-apps",
@@ -1000,6 +1061,7 @@ const SCENE_HOTSPOTS: SceneHotspot[] = [
     top: "44.6%",
     width: "6.8%",
     height: "10.5%",
+    extraClass: "scene-hotspot--terminal",
   },
   {
     href: "/documentation",
