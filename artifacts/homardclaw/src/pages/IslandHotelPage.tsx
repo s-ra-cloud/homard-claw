@@ -6,100 +6,16 @@ import { Shell } from "@/components/layout/Shell";
 import {
   MarlowLobster,
   POSE_CHARACTER_SCALE,
-  type LobsterPose,
 } from "@/components/ui/marlow-lobster";
 import { useImmersiveMode } from "@/hooks/useImmersiveMode";
 import { useIsDesktop } from "@/hooks/use-mobile";
+import { useRoomHotspotReveal } from "@/hooks/useRoomHotspotReveal";
+import { HOTEL_SPOTS } from "./hotel-spots";
 import { partitionRetiredAgents } from "./retirement-locations";
 import "./island.css";
 import "./island-hotel.css";
 
 const hotelArt = `${import.meta.env.BASE_URL}images/island-hotel-interior.png`;
-
-type HotelSpot = {
-  left: number;
-  top: number;
-  pose: LobsterPose;
-  activity: string;
-  reaction: string;
-};
-
-/**
- * Ten activity anchors measured against the 1586 × 992 hotel artwork.
- * The back row lines up with the amenities; the front row uses the open floor.
- */
-const HOTEL_SPOTS: HotelSpot[] = [
-  {
-    left: 22,
-    top: 43,
-    pose: "idle-reading",
-    activity: "reading by the library",
-    reaction: "Just one more chapter...",
-  },
-  {
-    left: 38,
-    top: 42,
-    pose: "idle-music",
-    activity: "enjoying the jukebox",
-    reaction: "This one is a classic!",
-  },
-  {
-    left: 52,
-    top: 42,
-    pose: "idle-coffee",
-    activity: "sampling the juice bar",
-    reaction: "Retirement tastes tropical.",
-  },
-  {
-    left: 68,
-    top: 43,
-    pose: "standing",
-    activity: "playing the arcade",
-    reaction: "New high score!",
-  },
-  {
-    left: 82,
-    top: 44,
-    pose: "beach",
-    activity: "relaxing by the aquarium",
-    reaction: "The fish are excellent company.",
-  },
-  {
-    left: 29,
-    top: 60,
-    pose: "idle-stretch",
-    activity: "stretching on the dance floor",
-    reaction: "Still got it!",
-  },
-  {
-    left: 42,
-    top: 61,
-    pose: "idle-reading",
-    activity: "solving a holiday puzzle",
-    reaction: "No deadlines, only plot twists.",
-  },
-  {
-    left: 55,
-    top: 62,
-    pose: "idle-music",
-    activity: "listening to island radio",
-    reaction: "Perfect vacation rhythm.",
-  },
-  {
-    left: 68,
-    top: 61,
-    pose: "idle-coffee",
-    activity: "having a quiet drink",
-    reaction: "Cheers from the hotel!",
-  },
-  {
-    left: 80,
-    top: 61,
-    pose: "beach",
-    activity: "resting beside the spa",
-    reaction: "Do not disturb. Professionally retired.",
-  },
-];
 
 /** Small CSS overlays bring the baked hotel amenities to life. */
 function HotelAmbient() {
@@ -137,6 +53,7 @@ export default function IslandHotelPage() {
   } | null>(null);
   const { data: retired, isLoading, isError } = useListRetiredAgents();
   const { hotelAgents } = partitionRetiredAgents(retired ?? []);
+  const revealHotspots = useRoomHotspotReveal();
 
   useEffect(() => {
     let visible = document.visibilityState === "visible";
@@ -180,7 +97,7 @@ export default function IslandHotelPage() {
       >
         <header className="island__bar">
           <div className="island__brand">
-            <Hotel size={14} /> <b>HOMARD</b>CLAW / retirement hotel
+            <Hotel size={14} /> <b>CRUSTA</b>BOX / retirement hotel
           </div>
           <div className="island__status">
             {retired
@@ -202,7 +119,12 @@ export default function IslandHotelPage() {
           </div>
         ) : (
           <main className="island__scene-wrap">
-            <div className="island__caption">LIVE VIEW / RETIREMENT HOTEL</div>
+            <div className="island__caption island-hotel__caption">
+              <span>LIVE VIEW / RETIREMENT HOTEL</span>
+              <span className="island-hotel__caption-hint">
+                HOLD <kbd>SPACE</kbd> TO REVEAL CONTROLS
+              </span>
+            </div>
             <div
               ref={sceneRef}
               className={`island__scene${ambientActive ? "" : " is-ambient-paused"}`}
@@ -219,11 +141,14 @@ export default function IslandHotelPage() {
                 />
                 <HotelAmbient />
 
-                <div className="island__actors">
+                <div
+                  className={`island__actors${revealHotspots ? " is-discovering" : ""}`}
+                >
                   <Link
                     href="/island"
                     className="island-hotel__return-hotspot"
                     data-label="Return to the beach"
+                    data-room-hotspot
                     aria-label="Turquoise hotel door — return to Retirement Island"
                   />
 
@@ -231,12 +156,12 @@ export default function IslandHotelPage() {
                     const spot = HOTEL_SPOTS[index];
                     const reacting = reaction?.id === agent.id;
                     const spriteSize = Math.round(
-                      52 * POSE_CHARACTER_SCALE[spot.pose],
+                      58 * POSE_CHARACTER_SCALE[spot.pose] * spot.scale,
                     );
                     return (
                       <button
                         key={agent.id}
-                        className={`island__lobster island-hotel__guest${reacting ? " is-reacting" : ""}`}
+                        className={`island__lobster island-hotel__guest island-hotel__guest--${spot.amenity}${reacting ? " is-reacting" : ""}`}
                         style={{
                           left: `${spot.left}%`,
                           top: `${spot.top}%`,
@@ -246,6 +171,8 @@ export default function IslandHotelPage() {
                           setReaction({ id: agent.id, text: spot.reaction })
                         }
                         title={`${agent.name} is ${spot.activity}`}
+                        data-label={`Greet ${agent.name} — ${spot.activity}`}
+                        data-room-hotspot
                         aria-label={`${agent.name}, retired ${agent.title}, is ${spot.activity}`}
                       >
                         {reacting && (

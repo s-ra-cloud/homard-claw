@@ -15,11 +15,17 @@
  * - lobster-chair-reading-source.png   -> lobsters-idle-reading
  * - lobster-chair-stretch-source.png   -> lobsters-idle-stretch
  * - lobster-beach-towel-source.png     -> lobsters-beach
+ * - lobster-memory-cables-source.png   -> lobsters-memory-cables (source hue 0)
  *
  * LOBSTER_SOURCE=../../../attached_assets/generated_images/<source>.png \
+ * LOBSTER_SOURCE_HUE=0 \
  * LOBSTER_OUT_DIR=../public/images/<out-dir> \
  * LOBSTER_WRITE_MANIFEST=0 LOBSTER_MATCH_MANIFEST=1 node \
  * artifacts/homardclaw/scripts/build-lobster-sprites.mjs
+ *
+ * `LOBSTER_SOURCE_HUE` is optional. It is useful when a pose contains several
+ * large coloured props (for example, data cables) that would otherwise
+ * outweigh the shell while the script detects the source pigment.
  *
  * Animation frames for the composite (furniture-bearing) poses:
  *
@@ -36,14 +42,21 @@ import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SOURCE = process.env.LOBSTER_SOURCE
   ? resolve(HERE, process.env.LOBSTER_SOURCE)
-  : resolve(HERE, "../../../attached_assets/generated_images/lobster-sprite-b.png");
+  : resolve(
+      HERE,
+      "../../../attached_assets/generated_images/lobster-sprite-b.png",
+    );
 const OUT_DIR = process.env.LOBSTER_OUT_DIR
   ? resolve(HERE, process.env.LOBSTER_OUT_DIR)
   : resolve(HERE, "../public/images/lobsters");
 const FRAMES = process.env.LOBSTER_FRAMES;
 const WRITE_MANIFEST = process.env.LOBSTER_WRITE_MANIFEST !== "0";
 const MATCH_MANIFEST = process.env.LOBSTER_MATCH_MANIFEST === "1";
-const MANIFEST_PATH = resolve(HERE, "../src/components/ui/lobster-presets.json");
+const SOURCE_HUE = process.env.LOBSTER_SOURCE_HUE;
+const MANIFEST_PATH = resolve(
+  HERE,
+  "../src/components/ui/lobster-presets.json",
+);
 const GRID = 128; // final sprite resolution
 
 /* ----------------------------------------------------------- png decode */
@@ -99,15 +112,23 @@ function decodePng(buf) {
 
   for (let y = 0; y < height; y++) {
     const filter = raw[y * (stride + 1)];
-    const line = Buffer.from(raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1)));
+    const line = Buffer.from(
+      raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1)),
+    );
     for (let i = 0; i < stride; i++) {
       const a = i >= channels ? line[i - channels] : 0;
       const b = prev[i];
       const c = i >= channels ? prev[i - channels] : 0;
       switch (filter) {
-        case 1: line[i] = (line[i] + a) & 0xff; break;
-        case 2: line[i] = (line[i] + b) & 0xff; break;
-        case 3: line[i] = (line[i] + ((a + b) >> 1)) & 0xff; break;
+        case 1:
+          line[i] = (line[i] + a) & 0xff;
+          break;
+        case 2:
+          line[i] = (line[i] + b) & 0xff;
+          break;
+        case 3:
+          line[i] = (line[i] + ((a + b) >> 1)) & 0xff;
+          break;
         case 4: {
           const p = a + b - c;
           const pa = Math.abs(p - a);
@@ -117,7 +138,8 @@ function decodePng(buf) {
           line[i] = (line[i] + pr) & 0xff;
           break;
         }
-        default: break;
+        default:
+          break;
       }
     }
     for (let x = 0; x < width; x++) {
@@ -165,7 +187,9 @@ function encodePng({ width, height, data }) {
 /* ------------------------------------------------------------- colour */
 
 function rgbToHsl(r, g, b) {
-  r /= 255; g /= 255; b /= 255;
+  r /= 255;
+  g /= 255;
+  b /= 255;
   const max = Math.max(r, g, b);
   const min = Math.min(r, g, b);
   const l = (max + min) / 2;
@@ -180,7 +204,7 @@ function rgbToHsl(r, g, b) {
 }
 
 function hslToRgb(h, s, l) {
-  h = ((h % 360) + 360) % 360 / 360;
+  h = (((h % 360) + 360) % 360) / 360;
   if (s === 0) {
     const v = Math.round(l * 255);
     return [v, v, v];
@@ -222,7 +246,10 @@ function keyOutBackground(img) {
     const d = i * 4;
     if (data[d + 3] < 8) return true;
     return (
-      Math.abs(data[d] - bg[0]) + Math.abs(data[d + 1] - bg[1]) + Math.abs(data[d + 2] - bg[2]) < 60
+      Math.abs(data[d] - bg[0]) +
+        Math.abs(data[d + 1] - bg[1]) +
+        Math.abs(data[d + 2] - bg[2]) <
+      60
     );
   };
   while (stack.length) {
@@ -241,7 +268,10 @@ function keyOutBackground(img) {
 
 function boundingBox(img) {
   const { width, height, data } = img;
-  let minX = width, minY = height, maxX = -1, maxY = -1;
+  let minX = width,
+    minY = height,
+    maxX = -1,
+    maxY = -1;
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       if (data[(y * width + x) * 4 + 3] > 40) {
@@ -268,7 +298,11 @@ function downsample(img, box, grid) {
 
   for (let gy = 0; gy < grid; gy++) {
     for (let gx = 0; gx < grid; gx++) {
-      let r = 0, g = 0, b = 0, a = 0, n = 0;
+      let r = 0,
+        g = 0,
+        b = 0,
+        a = 0,
+        n = 0;
       const x0 = Math.floor(offX + gx * cell);
       const y0 = Math.floor(offY + gy * cell);
       const x1 = Math.max(x0 + 1, Math.floor(offX + (gx + 1) * cell));
@@ -313,7 +347,8 @@ function baseHue(img) {
 
 function recolor(img, from, target) {
   const out = Buffer.from(img.data);
-  if (target.hue === null && target.sat === 1 && target.light === 1) return { ...img, data: out };
+  if (target.hue === null && target.sat === 1 && target.light === 1)
+    return { ...img, data: out };
   const delta = target.hue === null ? 0 : target.hue - from;
   for (let i = 0; i < img.width * img.height; i++) {
     const d = i * 4;
@@ -334,7 +369,10 @@ function recolor(img, from, target) {
 
 /** Average shell colour, so the UI swatch always matches the sprite. */
 function shellHex(img) {
-  let r = 0, g = 0, b = 0, n = 0;
+  let r = 0,
+    g = 0,
+    b = 0,
+    n = 0;
   for (let i = 0; i < img.width * img.height; i++) {
     const d = i * 4;
     if (img.data[d + 3] < 128) continue;
@@ -345,7 +383,10 @@ function shellHex(img) {
     b += img.data[d + 2];
     n++;
   }
-  const hex = (v) => Math.round(v / n).toString(16).padStart(2, "0");
+  const hex = (v) =>
+    Math.round(v / n)
+      .toString(16)
+      .padStart(2, "0");
   return `#${hex(r)}${hex(g)}${hex(b)}`;
 }
 
@@ -390,16 +431,86 @@ function matchShellColor(img, targetHex) {
 
 /** `hue: null` keeps the source pigment untouched. */
 const VARIANTS = [
-  { id: "marlow",  name: "Marlow",  hue: null, sat: 1.0,  light: 1.0,  blurb: "House crimson, straight off the office floor" },
-  { id: "coral",   name: "Coral",   hue: 14,   sat: 0.82, light: 1.14, blurb: "Sunbleached reef" },
-  { id: "pincher", name: "Pincher", hue: 344,  sat: 1.0,  light: 0.78, blurb: "Deep claret" },
-  { id: "bisque",  name: "Bisque",  hue: 34,   sat: 0.6,  light: 1.22, blurb: "Butter shell" },
-  { id: "shelly",  name: "Shelly",  hue: 207,  sat: 0.72, light: 1.0,  blurb: "Deep current blue" },
-  { id: "nori",    name: "Nori",    hue: 148,  sat: 0.6,  light: 0.95, blurb: "Kelp green" },
-  { id: "sable",   name: "Sable",   hue: 268,  sat: 0.55, light: 1.0,  blurb: "Twilight urchin" },
-  { id: "tidal",   name: "Tidal",   hue: 194,  sat: 0.42, light: 0.98, blurb: "Harbour steel" },
-  { id: "saffron", name: "Saffron", hue: 39,   sat: 0.95, light: 1.12, blurb: "Lantern amber" },
-  { id: "ember",   name: "Ember",   hue: 18,   sat: 0.88, light: 0.72, blurb: "Banked coals" },
+  {
+    id: "marlow",
+    name: "Marlow",
+    hue: null,
+    sat: 1.0,
+    light: 1.0,
+    blurb: "House crimson, straight off the office floor",
+  },
+  {
+    id: "coral",
+    name: "Coral",
+    hue: 14,
+    sat: 0.82,
+    light: 1.14,
+    blurb: "Sunbleached reef",
+  },
+  {
+    id: "pincher",
+    name: "Pincher",
+    hue: 344,
+    sat: 1.0,
+    light: 0.78,
+    blurb: "Deep claret",
+  },
+  {
+    id: "bisque",
+    name: "Bisque",
+    hue: 34,
+    sat: 0.6,
+    light: 1.22,
+    blurb: "Butter shell",
+  },
+  {
+    id: "shelly",
+    name: "Shelly",
+    hue: 207,
+    sat: 0.72,
+    light: 1.0,
+    blurb: "Deep current blue",
+  },
+  {
+    id: "nori",
+    name: "Nori",
+    hue: 148,
+    sat: 0.6,
+    light: 0.95,
+    blurb: "Kelp green",
+  },
+  {
+    id: "sable",
+    name: "Sable",
+    hue: 268,
+    sat: 0.55,
+    light: 1.0,
+    blurb: "Twilight urchin",
+  },
+  {
+    id: "tidal",
+    name: "Tidal",
+    hue: 194,
+    sat: 0.42,
+    light: 0.98,
+    blurb: "Harbour steel",
+  },
+  {
+    id: "saffron",
+    name: "Saffron",
+    hue: 39,
+    sat: 0.95,
+    light: 1.12,
+    blurb: "Lantern amber",
+  },
+  {
+    id: "ember",
+    name: "Ember",
+    hue: 18,
+    sat: 0.88,
+    light: 0.72,
+    blurb: "Banked coals",
+  },
 ];
 
 /* -------------------------------------------------------------- frames */
@@ -430,18 +541,27 @@ const VARIANTS = [
  */
 const FRAME_POSES = {
   "lobsters-sitting": {
-    eyes: [[52, 14, 58, 21], [69, 14, 75, 21]],
+    eyes: [
+      [52, 14, 58, 21],
+      [69, 14, 75, 21],
+    ],
     head: { rect: [30, 0, 100, 32], nod: 3, turn: 3 },
   },
   "lobsters-working": {
-    eyes: [[54, 4, 59, 12], [67, 4, 73, 12]],
+    eyes: [
+      [54, 4, 59, 12],
+      [67, 4, 73, 12],
+    ],
     claws: [{ rect: [70, 40, 106, 68], drop: 2 }],
     head: { rect: [40, 0, 104, 24], nod: 3 },
   },
   // Frame order: rest, blink, sip (left arm raises cup toward mouth).
   // The cup's neutral pixels do not move; only the warm arm pixels shift up.
   "lobsters-idle-coffee": {
-    eyes: [[51, 24, 57, 33], [67, 23, 74, 33]],
+    eyes: [
+      [51, 24, 57, 33],
+      [67, 23, 74, 33],
+    ],
     claws: [{ rect: [17, 36, 57, 65], drop: -4 }],
     head: { rect: [36, 0, 100, 40], nod: 3, turn: 3 },
   },
@@ -455,7 +575,10 @@ const FRAME_POSES = {
   // Frame order: rest, blink, right-arm-lift (right claw rises slightly as if
   // reaching to turn a page, while the book and left arm stay planted).
   "lobsters-idle-reading": {
-    eyes: [[52, 27, 60, 35], [67, 27, 75, 35]],
+    eyes: [
+      [52, 27, 60, 35],
+      [67, 27, 75, 35],
+    ],
     claws: [{ rect: [84, 44, 100, 72], drop: -3 }],
     head: { rect: [40, 0, 92, 42], nod: 3 },
   },
@@ -470,7 +593,10 @@ const FRAME_POSES = {
     head: { rect: [46, 0, 86, 52], nod: 3 },
   },
   "lobsters-floor-working": {
-    eyes: [[36, 40, 49, 59], [50, 42, 65, 61]],
+    eyes: [
+      [36, 40, 49, 59],
+      [50, 42, 65, 61],
+    ],
     claws: [
       { rect: [45, 88, 72, 114], drop: 2 },
       { rect: [20, 66, 44, 92], drop: 1 },
@@ -478,7 +604,10 @@ const FRAME_POSES = {
     head: { rect: [18, 0, 90, 66], nod: 3 },
   },
   "lobsters-beach": {
-    eyes: [[47, 22, 57, 32], [59, 21, 69, 31]],
+    eyes: [
+      [47, 22, 57, 32],
+      [59, 21, 69, 31],
+    ],
     head: { rect: [30, 0, 92, 40], nod: 3, turn: 3 },
   },
 };
@@ -530,13 +659,21 @@ function eyeRegion(img, [x0, y0, x1, y1]) {
 /** Average shell colour hugging an eye — the pigment its lid is painted in. */
 function lidColor(img, eye) {
   const inside = new Set(eye.fill.map(([x, y]) => `${x},${y}`));
-  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  let x0 = Infinity,
+    y0 = Infinity,
+    x1 = -Infinity,
+    y1 = -Infinity;
   for (const [x, y] of eye.fill) {
-    x0 = Math.min(x0, x); x1 = Math.max(x1, x);
-    y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+    x0 = Math.min(x0, x);
+    x1 = Math.max(x1, x);
+    y0 = Math.min(y0, y);
+    y1 = Math.max(y1, y);
   }
   for (let pad = 2; pad <= 6; pad++) {
-    let r = 0, g = 0, b = 0, n = 0;
+    let r = 0,
+      g = 0,
+      b = 0,
+      n = 0;
     for (let y = y0 - pad; y <= y1 + pad; y++) {
       for (let x = x0 - pad; x <= x1 + pad; x++) {
         if (x < 0 || y < 0 || x >= img.width || y >= img.height) continue;
@@ -544,11 +681,14 @@ function lidColor(img, eye) {
         const [, s, l] = hslAt(img, x, y);
         if (s < 0.3 || l < 0.15 || l > 0.85) continue;
         const d = at(img, x, y);
-        r += img.data[d]; g += img.data[d + 1]; b += img.data[d + 2];
+        r += img.data[d];
+        g += img.data[d + 1];
+        b += img.data[d + 2];
         n++;
       }
     }
-    if (n >= 6) return [Math.round(r / n), Math.round(g / n), Math.round(b / n)];
+    if (n >= 6)
+      return [Math.round(r / n), Math.round(g / n), Math.round(b / n)];
   }
   return null;
 }
@@ -560,7 +700,11 @@ function shade([r, g, b], factor) {
 
 /** Paints calibrated eyeballs shut, leaving every other pixel untouched. */
 function blinkFrame(img, eyes) {
-  const out = { width: img.width, height: img.height, data: Buffer.from(img.data) };
+  const out = {
+    width: img.width,
+    height: img.height,
+    data: Buffer.from(img.data),
+  };
   for (const eye of eyes) {
     const lid = lidColor(img, eye);
     if (!lid) continue;
@@ -608,7 +752,11 @@ function clawRegion(img, [x0, y0, x1, y1]) {
  * the claw grows — furniture above it is never read, only briefly covered.
  */
 function pressFrame(img, claws) {
-  const out = { width: img.width, height: img.height, data: Buffer.from(img.data) };
+  const out = {
+    width: img.width,
+    height: img.height,
+    data: Buffer.from(img.data),
+  };
   for (const { columns, drop } of claws) {
     const step = Math.sign(drop);
     for (const [x, rows] of columns) {
@@ -620,7 +768,8 @@ function pressFrame(img, claws) {
       for (const y of stops) {
         if (y < 0 || y >= img.height) continue;
         const src = y - drop;
-        const from = step > 0 ? (src < lead ? lead : src) : src > lead ? lead : src;
+        const from =
+          step > 0 ? (src < lead ? lead : src) : src > lead ? lead : src;
         if (from !== lead && !masked.has(from)) continue;
         const s = at(img, x, from);
         const d = at(out, x, y);
@@ -664,7 +813,11 @@ function headColumns(img, [x0, y0, x1, y1]) {
  * Furniture columns the head never occupied are left byte-identical.
  */
 function headFrame(img, columns, dx, dy) {
-  const out = { width: img.width, height: img.height, data: Buffer.from(img.data) };
+  const out = {
+    width: img.width,
+    height: img.height,
+    data: Buffer.from(img.data),
+  };
   const copy = (x, y, sx, sy) => {
     if (x < 0 || y < 0 || x >= img.width || y >= img.height) return;
     const d = at(out, x, y);
@@ -698,7 +851,12 @@ function frameStrip(frames) {
   const data = Buffer.alloc(width * size * 4);
   frames.forEach((frame, i) => {
     for (let y = 0; y < size; y++) {
-      frame.data.copy(data, (y * width + i * size) * 4, y * size * 4, (y + 1) * size * 4);
+      frame.data.copy(
+        data,
+        (y * width + i * size) * 4,
+        y * size * 4,
+        (y + 1) * size * 4,
+      );
     }
   });
   return { width, height: size, data };
@@ -715,10 +873,18 @@ function assertWithin(rest, frame, name, boxes) {
     for (let x = 0; x < rest.width; x++) {
       const d = at(rest, x, y);
       let changed = false;
-      for (let k = 0; k < 4; k++) changed ||= rest.data[d + k] !== frame.data[d + k];
+      for (let k = 0; k < 4; k++)
+        changed ||= rest.data[d + k] !== frame.data[d + k];
       if (!changed) continue;
-      if (boxes.some(([x0, y0, x1, y1]) => x >= x0 && x <= x1 && y >= y0 && y <= y1)) continue;
-      throw new Error(`${name} frame repaints ${x},${y} outside its calibrated region`);
+      if (
+        boxes.some(
+          ([x0, y0, x1, y1]) => x >= x0 && x <= x1 && y >= y0 && y <= y1,
+        )
+      )
+        continue;
+      throw new Error(
+        `${name} frame repaints ${x},${y} outside its calibrated region`,
+      );
     }
   }
 }
@@ -769,14 +935,21 @@ function buildFrames(folder) {
         grow(head.rect, 0, head.nod),
       ]);
       if (head.turn) {
-        add(headFrame(sprite, head.columns, head.turn, Math.sign(head.nod)), "turn", [
-          grow(head.rect, head.turn, Math.sign(head.nod)),
-        ]);
+        add(
+          headFrame(sprite, head.columns, head.turn, Math.sign(head.nod)),
+          "turn",
+          [grow(head.rect, head.turn, Math.sign(head.nod))],
+        );
       }
     }
-    writeFileSync(resolve(dir, `${id}-frames.png`), encodePng(frameStrip(frames)));
+    writeFileSync(
+      resolve(dir, `${id}-frames.png`),
+      encodePng(frameStrip(frames)),
+    );
   }
-  console.log(`${folder}: ${VARIANTS.length} strips of ${layout.length} frames`);
+  console.log(
+    `${folder}: ${VARIANTS.length} strips of ${layout.length} frames`,
+  );
   return layout;
 }
 
@@ -786,7 +959,9 @@ if (FRAMES) {
   // The app reads this layout back, so a pose can never disagree with its strip
   // about which column holds the blink, the stir or the head. Rebuilding a
   // single folder merges into the manifest rather than leaving it stale.
-  const layouts = existsSync(manifest) ? JSON.parse(readFileSync(manifest, "utf8")) : {};
+  const layouts = existsSync(manifest)
+    ? JSON.parse(readFileSync(manifest, "utf8"))
+    : {};
   for (const folder of folders) layouts[folder] = buildFrames(folder);
   for (const folder of Object.keys(layouts)) {
     if (!FRAME_POSES[folder]) delete layouts[folder];
@@ -800,7 +975,10 @@ if (FRAMES) {
 const source = decodePng(readFileSync(SOURCE));
 keyOutBackground(source);
 const sprite = downsample(source, boundingBox(source), GRID);
-const from = baseHue(sprite);
+const from = SOURCE_HUE === undefined ? baseHue(sprite) : Number(SOURCE_HUE);
+if (!Number.isFinite(from)) {
+  throw new Error("LOBSTER_SOURCE_HUE must be a finite hue in degrees");
+}
 mkdirSync(OUT_DIR, { recursive: true });
 const canonicalColors = MATCH_MANIFEST
   ? new Map(
@@ -847,5 +1025,7 @@ if (WRITE_MANIFEST) {
   );
 }
 
-console.log(`base hue ${from.toFixed(1)}deg -> ${manifest.length} sprites in ${OUT_DIR}`);
+console.log(
+  `base hue ${from.toFixed(1)}deg -> ${manifest.length} sprites in ${OUT_DIR}`,
+);
 console.log(manifest.map((m) => `${m.id} ${m.shellColor}`).join("\n"));

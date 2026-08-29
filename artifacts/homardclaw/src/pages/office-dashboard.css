@@ -115,6 +115,20 @@
     monospace;
   letter-spacing: 0.8px;
   text-shadow: 2px 2px var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.room-caption__discovery {
+  color: #ffe27e;
+  font-size: 8px;
+}
+.room-caption__discovery kbd {
+  padding: 1px 4px;
+  border: 1px solid currentColor;
+  background: rgb(43 39 51 / 74%);
+  font: inherit;
+  text-shadow: none;
 }
 .room-overflow {
   margin-bottom: 6px;
@@ -361,6 +375,7 @@
 
 /* Agent link wrapper: covers the sprite, keyboard/click navigates to Talk. */
 .room-agent__link {
+  position: relative;
   display: block;
   text-decoration: none;
   color: inherit;
@@ -390,6 +405,10 @@
    box eats the click. Their hit area is trimmed to the screen for the same
    reason: only the lobster's antennae reach that high. */
 .scene-hotspot--monitor {
+  z-index: 14;
+}
+
+.scene-hotspot--terminal {
   z-index: 14;
 }
 
@@ -616,6 +635,46 @@
   white-space: nowrap;
 }
 
+/* ── Space-bar point-and-click discovery ──
+   Every actual action marks itself with `data-room-hotspot`. While Space is
+   held, the room reveals all of them at once with the same readable label. */
+.room-scene.is-discovering [data-room-hotspot] {
+  outline: 2px dashed #fff0a8;
+  outline-offset: 2px;
+  background-color: rgb(87 225 213 / 15%);
+  filter: drop-shadow(0 0 4px rgb(255 232 139 / 82%));
+}
+
+.room-scene.is-discovering [data-room-hotspot][data-label]::after {
+  content: attr(data-label);
+  position: absolute;
+  z-index: 80;
+  left: 50%;
+  bottom: calc(100% + 5px);
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 180px;
+  padding: 3px 7px;
+  border: 2px solid var(--ink);
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 2px 2px 0 rgb(43 39 51 / 55%);
+  font:
+    700 8px "Space Mono",
+    monospace;
+  line-height: 1.2;
+  text-align: center;
+  text-shadow: none;
+  text-transform: uppercase;
+  white-space: normal;
+  pointer-events: none;
+}
+
+.room-scene.is-discovering .room-agent__link[data-label]::after {
+  top: calc(100% + 3px);
+  bottom: auto;
+}
+
 /* ── Desktop point-and-click parchment window ── */
 .office-game-window {
   position: fixed;
@@ -829,7 +888,7 @@
 /* ── Approvals computer — pending indicator ── */
 
 /* Pixel-style ping badge in corner of the hotspot */
-.scene-hotspot--approval::after {
+.room-scene:not(.is-discovering) .scene-hotspot--approval::after {
   /* Override the tooltip ::after when not hovered/focused — hide the badge by default */
   content: none;
 }
@@ -1202,6 +1261,9 @@
     top: 8px;
     left: 10px;
     font-size: 8px;
+  }
+  .room-caption__discovery {
+    display: none;
   }
   /* Sprites keep their share of the room on phones — only the tag type shrinks. */
   .room-agent__name {

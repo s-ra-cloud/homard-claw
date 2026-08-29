@@ -6,6 +6,7 @@ export const CRUSTABOX_DOCUMENTATION = [
       "Crustabox is a private AI office presented as a point-and-click submarine on desktop and a conventional workspace on mobile.",
     items: [
       "Click office objects to open Tasks, Schedules, Inbox, Approvals, Reports, Providers, Apps, Memory, Documentation, and the retirement locations.",
+      "On desktop, hold Space inside the submarine or hotel to outline every clickable object and show its action label.",
       "The red emergency control pauses every active Crustabot and prevents new conversations until it is released.",
       "A working Crustabot animates its assigned computer. Sandboxed Crustabots remain isolated from other Crustabots and connected apps.",
     ],
@@ -64,6 +65,7 @@ export const CRUSTABOX_DOCUMENTATION = [
     items: [
       "Create, search, pin, disable, edit, reassign, export, or clear memories from the Memory screen.",
       "Upload knowledge documents and explicitly choose which Crustabots may use each file.",
+      "Choose an active non-sandboxed memory-compression Crustabot to steward automatic memory housekeeping; it appears maintaining the memory terminal cables in the office.",
       "The small library in the submarine opens Documentation. Documentation explains Crustabox itself and is separate from workspace Memory.",
     ],
   },
@@ -85,7 +87,7 @@ export const CRUSTABOX_DOCUMENTATION = [
       "Retirement is permanent. Retired Crustabots leave active work and relax across the beach and hotel without appearing in both places.",
     items: [
       "Click the island hotel door to enter its lounge and the interior turquoise door to return to the beach.",
-      "Up to ten hotel guests use animated reading, music, coffee, arcade, stretching, aquarium, and spa poses.",
+      "Up to ten hotel guests use appliance-specific animated reading, dancing, drinks, arcade, aquarium, resting, clapping, and spa poses.",
       "The submarine offshore returns to the office on desktop.",
     ],
   },
