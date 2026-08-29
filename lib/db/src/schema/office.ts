@@ -23,6 +23,33 @@ export type AvatarConfig = {
   expression?: string;
 };
 
+export type MemoryCompressionSourceSnapshot = {
+  id: string;
+  kind: string;
+  content: string;
+  pinned: boolean;
+  disabled: boolean;
+  sourceTaskId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type MemoryCompressionProposal = {
+  kind:
+    | "fact"
+    | "decision"
+    | "context"
+    | "relationship"
+    | "procedure"
+    | "lesson"
+    | "open_loop";
+  content: string;
+  sourceMemoryIds: string[];
+  confidence: "high" | "medium";
+  supported: boolean;
+  verificationNote: string;
+};
+
 /**
  * Budgets and limits governing what an agent may do. All costs are in
  * cents; null means "no limit" for caps and "any" for providers.
@@ -701,6 +728,65 @@ export const memoriesTable = pgTable(
     index("memories_content_fts").using(
       "gin",
       sql`to_tsvector('english', ${table.content})`,
+    ),
+  ],
+);
+
+/**
+ * Auditable, reversible previews produced by the workspace's assigned memory
+ * steward. Source rows are snapshotted before a model sees them, and an apply
+ * operation refuses to proceed if any source changed in the meantime.
+ */
+export const memoryCompressionRunsTable = pgTable(
+  "memory_compression_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspacesTable.id, { onDelete: "cascade" }),
+    compressionAgentId: uuid("compression_agent_id").references(
+      () => agentsTable.id,
+      { onDelete: "set null" },
+    ),
+    compressionAgentName: text("compression_agent_name").notNull(),
+    targetAgentId: uuid("target_agent_id").references(() => agentsTable.id, {
+      onDelete: "set null",
+    }),
+    targetAgentName: text("target_agent_name").notNull(),
+    status: text("status").notNull().default("preview"),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    promptVersion: text("prompt_version").notNull(),
+    sourceDigest: text("source_digest").notNull(),
+    sourceSnapshot: jsonb("source_snapshot")
+      .$type<MemoryCompressionSourceSnapshot[]>()
+      .notNull(),
+    proposal: jsonb("proposal")
+      .$type<MemoryCompressionProposal[]>()
+      .notNull(),
+    warnings: jsonb("warnings").$type<string[]>().notNull().default([]),
+    applyAllowed: boolean("apply_allowed").notNull().default(false),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    sourceChars: integer("source_chars").notNull(),
+    proposalChars: integer("proposal_chars").notNull(),
+    generatedMemoryIds: jsonb("generated_memory_ids")
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    appliedAt: timestamp("applied_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("memory_compression_runs_workspace_created_idx").on(
+      table.workspaceId,
+      table.createdAt,
+    ),
+    index("memory_compression_runs_target_created_idx").on(
+      table.targetAgentId,
+      table.createdAt,
     ),
   ],
 );

@@ -10,6 +10,10 @@ import {
   ListKnowledgeFilesResponse,
   ListMemoriesQueryParams,
   ListMemoriesResponse,
+  ApplyMemoryCompressionPreviewParams,
+  ApplyMemoryCompressionPreviewResponse,
+  PreviewMemoryCompressionBody,
+  PreviewMemoryCompressionResponse,
   SetKnowledgeAssignmentsBody,
   SetKnowledgeAssignmentsParams,
   SetKnowledgeAssignmentsResponse,
@@ -39,6 +43,11 @@ import {
   MAX_KNOWLEDGE_TOTAL_BYTES,
   MemoryQuotaError,
 } from "../memory-context";
+import {
+  applyMemoryCompressionPreview,
+  createMemoryCompressionPreview,
+  MemoryCompressionError,
+} from "../memory-compression";
 
 /**
  * Memory and knowledge management. Mounted inside the office router, so
@@ -172,6 +181,56 @@ router.put("/memory/settings", async (req, res): Promise<void> => {
 
   res.json(UpdateMemorySettingsResponse.parse(memorySettingsPayload(agent)));
 });
+
+router.post(
+  "/memory/compression/previews",
+  async (req, res): Promise<void> => {
+    const body = PreviewMemoryCompressionBody.safeParse(req.body);
+    if (!body.success) {
+      res
+        .status(400)
+        .json({ error: "Choose the Crustabot memory bank to compress." });
+      return;
+    }
+    try {
+      const preview = await createMemoryCompressionPreview({
+        workspaceId: req.workspaceId!,
+        targetAgentId: body.data.targetAgentId,
+      });
+      res.json(PreviewMemoryCompressionResponse.parse(preview));
+    } catch (error) {
+      if (error instanceof MemoryCompressionError) {
+        res.status(error.statusCode).json({ error: error.message });
+        return;
+      }
+      throw error;
+    }
+  },
+);
+
+router.post(
+  "/memory/compression/previews/:runId/apply",
+  async (req, res): Promise<void> => {
+    const params = ApplyMemoryCompressionPreviewParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: "Invalid compression preview." });
+      return;
+    }
+    try {
+      const applied = await applyMemoryCompressionPreview({
+        workspaceId: req.workspaceId!,
+        runId: params.data.runId,
+      });
+      res.json(ApplyMemoryCompressionPreviewResponse.parse(applied));
+    } catch (error) {
+      if (error instanceof MemoryCompressionError) {
+        res.status(error.statusCode).json({ error: error.message });
+        return;
+      }
+      throw error;
+    }
+  },
+);
 
 function toMemoryJson(
   memory: typeof memoriesTable.$inferSelect,

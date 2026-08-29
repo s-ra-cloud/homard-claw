@@ -15,4 +15,7 @@ export const MemoryInputKind = {
   context: 'context',
   task_outcome: 'task_outcome',
   relationship: 'relationship',
+  procedure: 'procedure',
+  lesson: 'lesson',
+  open_loop: 'open_loop',
 } as const;

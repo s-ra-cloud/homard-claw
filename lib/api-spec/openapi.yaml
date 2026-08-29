@@ -1103,6 +1103,49 @@ paths:
           description: Crustabot not found
         "409":
           description: Crustabot is paused or sandboxed
+  /memory/compression/previews:
+    post:
+      operationId: previewMemoryCompression
+      tags: [office]
+      summary: Preview a verified consolidation of one Crustabot's older automatic memories
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemoryCompressionPreviewInput"
+      responses:
+        "200":
+          description: A non-destructive, model-generated and model-verified preview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryCompressionPreview"
+        "404":
+          description: Target Crustabot not found
+        "409":
+          description: Compression is unavailable, unsafe, or has insufficient source memories
+  /memory/compression/previews/{runId}/apply:
+    post:
+      operationId: applyMemoryCompressionPreview
+      tags: [office]
+      summary: Apply a still-current, verifier-approved memory consolidation preview
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Applied consolidation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryCompressionApplyResult"
+        "404":
+          description: Compression preview not found
+        "409":
+          description: Preview is unsafe, already applied, or stale
   /memories:
     get:
       operationId: listMemories
@@ -3094,7 +3137,8 @@ components:
         # generation and orphaned running work was requeued.
         outcome:
           type: string
-          enum: [already_active, healthy_elsewhere, stalled_elsewhere, recovered]
+          enum:
+            [already_active, healthy_elsewhere, stalled_elsewhere, recovered]
         ownershipChanged: { type: boolean }
         # Orphaned tasks OF THE CALLING WORKSPACE requeued by this pass.
         # The pass itself is global (one worker serves every workspace),
@@ -3552,6 +3596,118 @@ components:
       required: [compressionAgentId]
       properties:
         compressionAgentId: { type: [string, "null"] }
+    MemoryCompressionPreviewInput:
+      type: object
+      required: [targetAgentId]
+      properties:
+        targetAgentId: { type: string }
+    MemoryCompressionAgentRef:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: [string, "null"] }
+        name: { type: string }
+    MemoryCompressionSource:
+      type: object
+      required: [id, label, kind, content, createdAt]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        kind: { type: string }
+        content: { type: string }
+        createdAt: { type: string, format: date-time }
+    MemoryCompressionProposal:
+      type: object
+      required:
+        [
+          kind,
+          content,
+          sourceMemoryIds,
+          confidence,
+          supported,
+          verificationNote,
+        ]
+      properties:
+        kind:
+          {
+            type: string,
+            enum:
+              [
+                fact,
+                decision,
+                context,
+                relationship,
+                procedure,
+                lesson,
+                open_loop,
+              ],
+          }
+        content: { type: string }
+        sourceMemoryIds:
+          type: array
+          items: { type: string }
+        confidence: { type: string, enum: [high, medium] }
+        supported: { type: boolean }
+        verificationNote: { type: string }
+    MemoryCompressionPreview:
+      type: object
+      required:
+        [
+          id,
+          status,
+          compressionAgent,
+          targetAgent,
+          provider,
+          model,
+          sourceMemories,
+          proposedMemories,
+          warnings,
+          applyAllowed,
+          sourceChars,
+          proposalChars,
+          reductionPercent,
+          inputTokens,
+          outputTokens,
+          createdAt,
+        ]
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [preview] }
+        compressionAgent:
+          $ref: "#/components/schemas/MemoryCompressionAgentRef"
+        targetAgent:
+          $ref: "#/components/schemas/MemoryCompressionAgentRef"
+        provider: { type: string }
+        model: { type: string }
+        sourceMemories:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemoryCompressionSource"
+        proposedMemories:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemoryCompressionProposal"
+        warnings:
+          type: array
+          items: { type: string }
+        applyAllowed: { type: boolean }
+        sourceChars: { type: number }
+        proposalChars: { type: number }
+        reductionPercent: { type: number }
+        inputTokens: { type: number }
+        outputTokens: { type: number }
+        createdAt: { type: string, format: date-time }
+    MemoryCompressionApplyResult:
+      type: object
+      required: [id, status, generatedMemoryIds, archivedSourceCount, appliedAt]
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [applied] }
+        generatedMemoryIds:
+          type: array
+          items: { type: string }
+        archivedSourceCount: { type: number }
+        appliedAt: { type: string, format: date-time }
     Memory:
       type: object
       required:
@@ -3574,7 +3730,17 @@ components:
         kind:
           {
             type: string,
-            enum: [fact, decision, context, task_outcome, relationship],
+            enum:
+              [
+                fact,
+                decision,
+                context,
+                task_outcome,
+                relationship,
+                procedure,
+                lesson,
+                open_loop,
+              ],
           }
         content: { type: string }
         pinned: { type: boolean }
@@ -3590,7 +3756,17 @@ components:
         kind:
           {
             type: string,
-            enum: [fact, decision, context, task_outcome, relationship],
+            enum:
+              [
+                fact,
+                decision,
+                context,
+                task_outcome,
+                relationship,
+                procedure,
+                lesson,
+                open_loop,
+              ],
           }
         content: { type: string, minLength: 3, maxLength: 4000 }
         pinned: { type: boolean }
@@ -3601,7 +3777,17 @@ components:
         kind:
           {
             type: string,
-            enum: [fact, decision, context, task_outcome, relationship],
+            enum:
+              [
+                fact,
+                decision,
+                context,
+                task_outcome,
+                relationship,
+                procedure,
+                lesson,
+                open_loop,
+              ],
           }
         content: { type: string, minLength: 3, maxLength: 4000 }
         pinned: { type: boolean }

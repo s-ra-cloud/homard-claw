@@ -66,6 +66,8 @@ export const CRUSTABOX_DOCUMENTATION = [
       "Create, search, pin, disable, edit, reassign, export, or clear memories from the Memory screen.",
       "Upload knowledge documents and explicitly choose which Crustabots may use each file.",
       "Choose an active non-sandboxed memory-compression Crustabot to steward automatic memory housekeeping; it appears maintaining the memory terminal cables in the office.",
+      "For compression, choose one Crustabot memory bank at a time. The steward uses its own configured provider and model to propose a smaller durable set, then performs a separate verification pass.",
+      "Compression is preview-first: pinned memories and the three newest automatic task memories are protected, warnings and original sources remain visible, and nothing changes until you apply a verifier-approved preview. A stale preview cannot be applied after a source changes.",
       "The small library in the submarine opens Documentation. Documentation explains Crustabox itself and is separate from workspace Memory.",
     ],
   },

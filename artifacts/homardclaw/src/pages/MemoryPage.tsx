@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   useListMemories,
   useCreateMemory,
@@ -16,6 +16,8 @@ import {
   useDeleteWorkspaceSkill,
   useGetMemorySettings,
   useUpdateMemorySettings,
+  usePreviewMemoryCompression,
+  useApplyMemoryCompressionPreview,
   exportMemories,
   getListMemoriesQueryKey,
   getListKnowledgeFilesQueryKey,
@@ -23,6 +25,7 @@ import {
   getGetMemorySettingsQueryKey,
   MemoryInputKind,
   type Memory,
+  type MemoryCompressionPreview,
   type KnowledgeFile,
   type WorkspaceSkill,
 } from "@workspace/api-client-react";
@@ -63,6 +66,9 @@ import {
   Users,
   Sparkles,
   Wrench,
+  AlertTriangle,
+  CheckCircle2,
+  Archive,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
@@ -85,6 +91,9 @@ const KIND_STYLES: Record<string, string> = {
   context: "bg-secondary/40 text-secondary-foreground border-border",
   task_outcome: "bg-muted text-muted-foreground border-border",
   relationship: "bg-destructive/10 text-destructive border-destructive/60",
+  procedure: "bg-accent/10 text-accent border-accent/70",
+  lesson: "bg-primary/10 text-primary border-primary/70",
+  open_loop: "bg-destructive/10 text-destructive border-destructive/60",
 };
 
 const MEMORY_KINDS = Object.values(MemoryInputKind);
@@ -1040,6 +1049,267 @@ function SkillsTab() {
   );
 }
 
+function MemoryCompressionPanel({
+  agents,
+  compressionAgentId,
+  compressionAgentName,
+}: {
+  agents: { id: string; name: string }[];
+  compressionAgentId: string | null | undefined;
+  compressionAgentName: string | null | undefined;
+}) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const previewCompression = usePreviewMemoryCompression();
+  const applyCompression = useApplyMemoryCompressionPreview();
+  const [targetAgentId, setTargetAgentId] = useState(agents[0]?.id ?? "");
+  const [preview, setPreview] = useState<MemoryCompressionPreview | null>(null);
+
+  useEffect(() => {
+    if (!agents.some((agent) => agent.id === targetAgentId)) {
+      setTargetAgentId(agents[0]?.id ?? "");
+      setPreview(null);
+    }
+  }, [agents, targetAgentId]);
+
+  const createPreview = async () => {
+    if (!targetAgentId) return;
+    try {
+      const next = await previewCompression.mutateAsync({
+        data: { targetAgentId },
+      });
+      setPreview(next);
+      toast({
+        title: next.applyAllowed
+          ? "Verified memory preview ready"
+          : "Preview needs review",
+        description: `${next.sourceMemories.length} older memories → ${next.proposedMemories.length} proposed memories`,
+      });
+    } catch (error) {
+      toast({
+        title: "Could not prepare memory preview",
+        description: apiErrorMessage(error, "Try again."),
+        variant: "destructive",
+      });
+    }
+  };
+
+  const applyPreview = async () => {
+    if (!preview?.applyAllowed) return;
+    if (
+      !window.confirm(
+        `Apply this verified preview to ${preview.targetAgent.name}'s memory? The original snapshot remains in the compression audit record.`,
+      )
+    ) {
+      return;
+    }
+    try {
+      const result = await applyCompression.mutateAsync({ runId: preview.id });
+      await queryClient.invalidateQueries({
+        queryKey: getListMemoriesQueryKey(),
+      });
+      setPreview(null);
+      toast({
+        title: "Memory consolidation applied",
+        description: `${result.generatedMemoryIds.length} durable memories kept; ${result.archivedSourceCount} source memories archived.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Could not apply memory preview",
+        description: apiErrorMessage(
+          error,
+          "Create a fresh preview and try again.",
+        ),
+        variant: "destructive",
+      });
+    }
+  };
+
+  return (
+    <PixelCard className="p-4 sm:p-5" data-testid="panel-memory-compression">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+        <div className="min-w-0 flex-1">
+          <h2 className="flex items-center gap-2 text-sm font-bold uppercase">
+            <Archive className="h-4 w-4 text-accent" /> Compress one memory bank
+          </h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {compressionAgentName
+              ? `${compressionAgentName} uses its own model to propose and verify a smaller set of durable memories.`
+              : "Assign a memory-compression Crustabot above before preparing a preview."}
+          </p>
+          <p className="mt-1 text-[10px] font-mono uppercase text-muted-foreground">
+            Pinned memories and the 3 newest automatic task memories are never
+            included. Nothing changes until you apply a verified preview.
+          </p>
+        </div>
+        <div className="flex flex-col gap-2 sm:w-72">
+          <label className="text-[10px] font-bold uppercase text-muted-foreground">
+            Crustabot memory to compress
+          </label>
+          <Select
+            value={targetAgentId}
+            onValueChange={(value) => {
+              setTargetAgentId(value);
+              setPreview(null);
+            }}
+          >
+            <SelectTrigger
+              className={selectTriggerClass}
+              data-testid="select-memory-compression-target"
+            >
+              <SelectValue placeholder="Choose a Crustabot" />
+            </SelectTrigger>
+            <SelectContent className={selectContentClass}>
+              {agents.map((agent) => (
+                <SelectItem
+                  key={agent.id}
+                  value={agent.id}
+                  className={selectItemClass}
+                >
+                  {agent.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            onClick={createPreview}
+            disabled={
+              !compressionAgentId ||
+              !targetAgentId ||
+              previewCompression.isPending ||
+              applyCompression.isPending
+            }
+            className="rounded-none bg-primary font-bold uppercase text-primary-foreground pixel-shadow"
+            data-testid="button-preview-memory-compression"
+          >
+            {previewCompression.isPending
+              ? "Analyzing..."
+              : "Preview compression"}
+          </Button>
+        </div>
+      </div>
+
+      {agents.length === 0 && (
+        <p className="mt-4 border-2 border-border bg-muted p-3 text-xs text-muted-foreground">
+          No non-sandboxed Crustabot memory bank is available.
+        </p>
+      )}
+
+      {preview && (
+        <div className="mt-5 space-y-4 border-t-4 border-border pt-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge className="rounded-none border-2 border-accent bg-accent/10 text-accent">
+              {preview.provider} · {preview.model}
+            </Badge>
+            <Badge className="rounded-none border-2 border-border bg-muted text-muted-foreground">
+              {preview.sourceMemories.length} sources →{" "}
+              {preview.proposedMemories.length}
+            </Badge>
+            <Badge className="rounded-none border-2 border-border bg-muted text-muted-foreground">
+              {preview.reductionPercent}% smaller
+            </Badge>
+            <Badge
+              className={`rounded-none border-2 ${
+                preview.applyAllowed
+                  ? "border-accent bg-accent/10 text-accent"
+                  : "border-destructive bg-destructive/10 text-destructive"
+              }`}
+            >
+              {preview.applyAllowed ? "Verifier approved" : "Apply blocked"}
+            </Badge>
+          </div>
+
+          {preview.warnings.length > 0 && (
+            <div className="border-2 border-destructive/60 bg-destructive/5 p-3">
+              <div className="flex items-center gap-2 text-xs font-bold uppercase text-destructive">
+                <AlertTriangle className="h-4 w-4" /> Review warnings
+              </div>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-xs font-mono">
+                {preview.warnings.map((warning, index) => (
+                  <li key={`${index}-${warning}`}>{warning}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <h3 className="text-xs font-bold uppercase">
+              Proposed durable memories
+            </h3>
+            {preview.proposedMemories.map((memory, index) => (
+              <div
+                key={`${index}-${memory.content}`}
+                className="border-2 border-border bg-background p-3"
+                data-testid={`compression-proposal-${index}`}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  {memory.supported ? (
+                    <CheckCircle2 className="h-4 w-4 text-accent" />
+                  ) : (
+                    <AlertTriangle className="h-4 w-4 text-destructive" />
+                  )}
+                  <Badge
+                    className={`rounded-none border-2 text-[9px] uppercase font-bold ${KIND_STYLES[memory.kind] ?? KIND_STYLES.fact}`}
+                  >
+                    {memory.kind.replace("_", " ")}
+                  </Badge>
+                  <span className="text-[10px] font-mono uppercase text-muted-foreground">
+                    {memory.confidence} confidence ·{" "}
+                    {memory.sourceMemoryIds.length} source
+                    {memory.sourceMemoryIds.length === 1 ? "" : "s"}
+                  </span>
+                </div>
+                <p className="mt-2 whitespace-pre-wrap break-words text-sm font-mono">
+                  {memory.content}
+                </p>
+                <p className="mt-2 text-[10px] font-mono text-muted-foreground">
+                  Verifier: {memory.verificationNote}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          <details className="border-2 border-border bg-muted/30 p-3">
+            <summary className="cursor-pointer text-xs font-bold uppercase">
+              Inspect {preview.sourceMemories.length} original source memories
+            </summary>
+            <div className="mt-3 space-y-2">
+              {preview.sourceMemories.map((source) => (
+                <div key={source.id} className="border-l-4 border-border pl-3">
+                  <div className="text-[10px] font-bold uppercase text-muted-foreground">
+                    {source.label} · {source.kind.replace("_", " ")} ·{" "}
+                    {new Date(source.createdAt).toLocaleString()}
+                  </div>
+                  <p className="mt-1 whitespace-pre-wrap break-words text-xs font-mono">
+                    {source.content}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </details>
+
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-[10px] font-mono uppercase text-muted-foreground">
+              Model usage: {preview.inputTokens.toLocaleString()} input ·{" "}
+              {preview.outputTokens.toLocaleString()} output tokens
+            </p>
+            <Button
+              onClick={applyPreview}
+              disabled={!preview.applyAllowed || applyCompression.isPending}
+              className="rounded-none bg-accent font-bold uppercase text-accent-foreground pixel-shadow"
+              data-testid="button-apply-memory-compression"
+            >
+              {applyCompression.isPending
+                ? "Applying..."
+                : "Apply verified preview"}
+            </Button>
+          </div>
+        </div>
+      )}
+    </PixelCard>
+  );
+}
+
 export default function MemoryPage() {
   const [tab, setTab] = useState<"memories" | "knowledge" | "skills">(
     "memories",
@@ -1064,6 +1334,13 @@ export default function MemoryPage() {
           agent.status !== "paused" &&
           !agent.sensitiveDataSandbox,
       ),
+    [agents],
+  );
+  const compressionTargets = useMemo(
+    () =>
+      (agents ?? [])
+        .filter((agent) => !agent.archived && !agent.sensitiveDataSandbox)
+        .map((agent) => ({ id: agent.id, name: agent.name })),
     [agents],
   );
 
@@ -1147,6 +1424,12 @@ export default function MemoryPage() {
             </Select>
           </div>
         </PixelCard>
+
+        <MemoryCompressionPanel
+          agents={compressionTargets}
+          compressionAgentId={memorySettings?.compressionAgentId}
+          compressionAgentName={memorySettings?.compressionAgentName}
+        />
 
         <div className="flex gap-2">
           {(["memories", "knowledge", "skills"] as const).map((key) => (
