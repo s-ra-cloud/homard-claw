@@ -2161,6 +2161,95 @@ export interface MemorySettingsInput {
   compressionAgentId: string | null;
 }
 
+export interface MemoryCompressionPreviewInput {
+  targetAgentId: string;
+}
+
+export interface MemoryCompressionAgentRef {
+  /** @nullable */
+  id: string | null;
+  name: string;
+}
+
+export interface MemoryCompressionSource {
+  id: string;
+  label: string;
+  kind: string;
+  content: string;
+  createdAt: string;
+}
+
+export type MemoryCompressionProposalKind = typeof MemoryCompressionProposalKind[keyof typeof MemoryCompressionProposalKind];
+
+
+export const MemoryCompressionProposalKind = {
+  fact: 'fact',
+  decision: 'decision',
+  context: 'context',
+  relationship: 'relationship',
+  procedure: 'procedure',
+  lesson: 'lesson',
+  open_loop: 'open_loop',
+} as const;
+
+export type MemoryCompressionProposalConfidence = typeof MemoryCompressionProposalConfidence[keyof typeof MemoryCompressionProposalConfidence];
+
+
+export const MemoryCompressionProposalConfidence = {
+  high: 'high',
+  medium: 'medium',
+} as const;
+
+export interface MemoryCompressionProposal {
+  kind: MemoryCompressionProposalKind;
+  content: string;
+  sourceMemoryIds: string[];
+  confidence: MemoryCompressionProposalConfidence;
+  supported: boolean;
+  verificationNote: string;
+}
+
+export type MemoryCompressionPreviewStatus = typeof MemoryCompressionPreviewStatus[keyof typeof MemoryCompressionPreviewStatus];
+
+
+export const MemoryCompressionPreviewStatus = {
+  preview: 'preview',
+} as const;
+
+export interface MemoryCompressionPreview {
+  id: string;
+  status: MemoryCompressionPreviewStatus;
+  compressionAgent: MemoryCompressionAgentRef;
+  targetAgent: MemoryCompressionAgentRef;
+  provider: string;
+  model: string;
+  sourceMemories: MemoryCompressionSource[];
+  proposedMemories: MemoryCompressionProposal[];
+  warnings: string[];
+  applyAllowed: boolean;
+  sourceChars: number;
+  proposalChars: number;
+  reductionPercent: number;
+  inputTokens: number;
+  outputTokens: number;
+  createdAt: string;
+}
+
+export type MemoryCompressionApplyResultStatus = typeof MemoryCompressionApplyResultStatus[keyof typeof MemoryCompressionApplyResultStatus];
+
+
+export const MemoryCompressionApplyResultStatus = {
+  applied: 'applied',
+} as const;
+
+export interface MemoryCompressionApplyResult {
+  id: string;
+  status: MemoryCompressionApplyResultStatus;
+  generatedMemoryIds: string[];
+  archivedSourceCount: number;
+  appliedAt: string;
+}
+
 export type MemoryKind = typeof MemoryKind[keyof typeof MemoryKind];
 
 
@@ -2170,6 +2259,9 @@ export const MemoryKind = {
   context: 'context',
   task_outcome: 'task_outcome',
   relationship: 'relationship',
+  procedure: 'procedure',
+  lesson: 'lesson',
+  open_loop: 'open_loop',
 } as const;
 
 export interface Memory {
@@ -2197,6 +2289,9 @@ export const MemoryInputKind = {
   context: 'context',
   task_outcome: 'task_outcome',
   relationship: 'relationship',
+  procedure: 'procedure',
+  lesson: 'lesson',
+  open_loop: 'open_loop',
 } as const;
 
 export interface MemoryInput {
@@ -2220,6 +2315,9 @@ export const MemoryUpdateKind = {
   context: 'context',
   task_outcome: 'task_outcome',
   relationship: 'relationship',
+  procedure: 'procedure',
+  lesson: 'lesson',
+  open_loop: 'open_loop',
 } as const;
 
 export interface MemoryUpdate {

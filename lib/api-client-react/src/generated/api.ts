@@ -79,6 +79,9 @@ import type {
   MarkNotificationsRead200,
   MarkNotificationsReadInput,
   Memory,
+  MemoryCompressionApplyResult,
+  MemoryCompressionPreview,
+  MemoryCompressionPreviewInput,
   MemoryInput,
   MemoryList,
   MemorySettings,
@@ -4717,6 +4720,148 @@ export const useUpdateMemorySettings = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getUpdateMemorySettingsMutationOptions(options));
+    }
+
+export const getPreviewMemoryCompressionUrl = () => {
+
+
+
+
+  return `/api/memory/compression/previews`
+}
+
+/**
+ * @summary Preview a verified consolidation of one Crustabot's older automatic memories
+ */
+export const previewMemoryCompression = async (memoryCompressionPreviewInput: MemoryCompressionPreviewInput, options?: Parameters<typeof customFetch>[1]): Promise<MemoryCompressionPreview> => {
+
+  return customFetch<MemoryCompressionPreview>(getPreviewMemoryCompressionUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(memoryCompressionPreviewInput)
+  }
+);}
+
+
+
+
+
+export const getPreviewMemoryCompressionMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewMemoryCompression>>, TError,{data: BodyType<MemoryCompressionPreviewInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof previewMemoryCompression>>, TError,{data: BodyType<MemoryCompressionPreviewInput>}, TContext> => {
+
+const mutationKey = ['previewMemoryCompression'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof previewMemoryCompression>>, {data: BodyType<MemoryCompressionPreviewInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  previewMemoryCompression(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PreviewMemoryCompressionMutationResult = NonNullable<Awaited<ReturnType<typeof previewMemoryCompression>>>
+    export type PreviewMemoryCompressionMutationBody = BodyType<MemoryCompressionPreviewInput>
+    export type PreviewMemoryCompressionMutationError = ErrorType<void>
+
+    /**
+ * @summary Preview a verified consolidation of one Crustabot's older automatic memories
+ */
+export const usePreviewMemoryCompression = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewMemoryCompression>>, TError,{data: BodyType<MemoryCompressionPreviewInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof previewMemoryCompression>>,
+        TError,
+        {data: BodyType<MemoryCompressionPreviewInput>},
+        TContext
+      > => {
+      return useMutation(getPreviewMemoryCompressionMutationOptions(options));
+    }
+
+export const getApplyMemoryCompressionPreviewUrl = (runId: string,) => {
+
+
+
+
+  return `/api/memory/compression/previews/${runId}/apply`
+}
+
+/**
+ * @summary Apply a still-current, verifier-approved memory consolidation preview
+ */
+export const applyMemoryCompressionPreview = async (runId: string, options?: Parameters<typeof customFetch>[1]): Promise<MemoryCompressionApplyResult> => {
+
+  return customFetch<MemoryCompressionApplyResult>(getApplyMemoryCompressionPreviewUrl(runId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getApplyMemoryCompressionPreviewMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyMemoryCompressionPreview>>, TError,{runId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof applyMemoryCompressionPreview>>, TError,{runId: string}, TContext> => {
+
+const mutationKey = ['applyMemoryCompressionPreview'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof applyMemoryCompressionPreview>>, {runId: string}> = (props) => {
+          const {runId} = props ?? {};
+
+          return  applyMemoryCompressionPreview(runId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApplyMemoryCompressionPreviewMutationResult = NonNullable<Awaited<ReturnType<typeof applyMemoryCompressionPreview>>>
+
+    export type ApplyMemoryCompressionPreviewMutationError = ErrorType<void>
+
+    /**
+ * @summary Apply a still-current, verifier-approved memory consolidation preview
+ */
+export const useApplyMemoryCompressionPreview = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyMemoryCompressionPreview>>, TError,{runId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof applyMemoryCompressionPreview>>,
+        TError,
+        {runId: string},
+        TContext
+      > => {
+      return useMutation(getApplyMemoryCompressionPreviewMutationOptions(options));
     }
 
 export const getListMemoriesUrl = (params?: ListMemoriesParams,) => {

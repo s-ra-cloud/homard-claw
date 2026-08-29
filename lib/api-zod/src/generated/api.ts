@@ -2660,6 +2660,68 @@ export const UpdateMemorySettingsResponse = zod.object({
 
 
 /**
+ * @summary Preview a verified consolidation of one Crustabot's older automatic memories
+ */
+export const PreviewMemoryCompressionBody = zod.object({
+  "targetAgentId": zod.string()
+})
+
+export const PreviewMemoryCompressionResponse = zod.object({
+  "id": zod.string(),
+  "status": zod.enum(['preview']),
+  "compressionAgent": zod.object({
+  "id": zod.string().nullable(),
+  "name": zod.string()
+}),
+  "targetAgent": zod.object({
+  "id": zod.string().nullable(),
+  "name": zod.string()
+}),
+  "provider": zod.string(),
+  "model": zod.string(),
+  "sourceMemories": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "kind": zod.string(),
+  "content": zod.string(),
+  "createdAt": zod.coerce.date()
+})),
+  "proposedMemories": zod.array(zod.object({
+  "kind": zod.enum(['fact', 'decision', 'context', 'relationship', 'procedure', 'lesson', 'open_loop']),
+  "content": zod.string(),
+  "sourceMemoryIds": zod.array(zod.string()),
+  "confidence": zod.enum(['high', 'medium']),
+  "supported": zod.boolean(),
+  "verificationNote": zod.string()
+})),
+  "warnings": zod.array(zod.string()),
+  "applyAllowed": zod.boolean(),
+  "sourceChars": zod.number(),
+  "proposalChars": zod.number(),
+  "reductionPercent": zod.number(),
+  "inputTokens": zod.number(),
+  "outputTokens": zod.number(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Apply a still-current, verifier-approved memory consolidation preview
+ */
+export const ApplyMemoryCompressionPreviewParams = zod.object({
+  "runId": zod.coerce.string()
+})
+
+export const ApplyMemoryCompressionPreviewResponse = zod.object({
+  "id": zod.string(),
+  "status": zod.enum(['applied']),
+  "generatedMemoryIds": zod.array(zod.string()),
+  "archivedSourceCount": zod.number(),
+  "appliedAt": zod.coerce.date()
+})
+
+
+/**
  * @summary List or search memories, optionally scoped to one agent
  */
 export const listMemoriesQueryQMax = 500;
@@ -2676,7 +2738,7 @@ export const ListMemoriesResponse = zod.object({
   "id": zod.string(),
   "agentId": zod.string().nullable(),
   "agentName": zod.string().nullable(),
-  "kind": zod.enum(['fact', 'decision', 'context', 'task_outcome', 'relationship']),
+  "kind": zod.enum(['fact', 'decision', 'context', 'task_outcome', 'relationship', 'procedure', 'lesson', 'open_loop']),
   "content": zod.string(),
   "pinned": zod.boolean(),
   "disabled": zod.boolean(),
@@ -2698,7 +2760,7 @@ export const createMemoryBodyContentMax = 4000;
 
 export const CreateMemoryBody = zod.object({
   "agentId": zod.string().nullish(),
-  "kind": zod.enum(['fact', 'decision', 'context', 'task_outcome', 'relationship']).optional(),
+  "kind": zod.enum(['fact', 'decision', 'context', 'task_outcome', 'relationship', 'procedure', 'lesson', 'open_loop']).optional(),
   "content": zod.string().min(createMemoryBodyContentMin).max(createMemoryBodyContentMax),
   "pinned": zod.boolean().optional()
 })
@@ -2707,7 +2769,7 @@ export const CreateMemoryResponse = zod.object({
   "id": zod.string(),
   "agentId": zod.string().nullable(),
   "agentName": zod.string().nullable(),
-  "kind": zod.enum(['fact', 'decision', 'context', 'task_outcome', 'relationship']),
+  "kind": zod.enum(['fact', 'decision', 'context', 'task_outcome', 'relationship', 'procedure', 'lesson', 'open_loop']),
   "content": zod.string(),
   "pinned": zod.boolean(),
   "disabled": zod.boolean(),
@@ -2737,7 +2799,7 @@ export const ExportMemoriesResponse = zod.object({
   "id": zod.string(),
   "agentId": zod.string().nullable(),
   "agentName": zod.string().nullable(),
-  "kind": zod.enum(['fact', 'decision', 'context', 'task_outcome', 'relationship']),
+  "kind": zod.enum(['fact', 'decision', 'context', 'task_outcome', 'relationship', 'procedure', 'lesson', 'open_loop']),
   "content": zod.string(),
   "pinned": zod.boolean(),
   "disabled": zod.boolean(),
@@ -2763,7 +2825,7 @@ export const updateMemoryBodyContentMax = 4000;
 
 export const UpdateMemoryBody = zod.object({
   "agentId": zod.string().nullish(),
-  "kind": zod.enum(['fact', 'decision', 'context', 'task_outcome', 'relationship']).optional(),
+  "kind": zod.enum(['fact', 'decision', 'context', 'task_outcome', 'relationship', 'procedure', 'lesson', 'open_loop']).optional(),
   "content": zod.string().min(updateMemoryBodyContentMin).max(updateMemoryBodyContentMax).optional(),
   "pinned": zod.boolean().optional(),
   "disabled": zod.boolean().optional()
@@ -2773,7 +2835,7 @@ export const UpdateMemoryResponse = zod.object({
   "id": zod.string(),
   "agentId": zod.string().nullable(),
   "agentName": zod.string().nullable(),
-  "kind": zod.enum(['fact', 'decision', 'context', 'task_outcome', 'relationship']),
+  "kind": zod.enum(['fact', 'decision', 'context', 'task_outcome', 'relationship', 'procedure', 'lesson', 'open_loop']),
   "content": zod.string(),
   "pinned": zod.boolean(),
   "disabled": zod.boolean(),
