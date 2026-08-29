@@ -12,23 +12,31 @@ export type OfficeRoleSeat = {
 
 export const OFFICE_ROLE_SEATS: Record<OfficeRole, OfficeRoleSeat> = {
   documentation: {
-    left: 28.2,
-    top: 56.2,
-    label: "documentation reading station",
+    // Clear blue floor in front of the provider racks. Keeping the whole
+    // sprite below the cabinet fronts makes the reader look seated on the
+    // floor rather than pinned to a wall or piece of furniture.
+    left: 74.8,
+    top: 68.2,
+    label: "documentation reading spot in front of Providers",
     pose: "hotel-reading",
     status: "idle",
   },
   approval: {
-    left: 20.1,
-    top: 57.3,
-    label: "approval monitoring station",
+    // The working composite is drawn from behind with one claw on the keys.
+    // This anchor tucks its chair into the port console so the reviewer is
+    // visibly facing and typing on the controls instead of floating below it.
+    left: 19,
+    top: 53.2,
+    label: "approval console typing station",
     pose: "working",
     status: "working",
   },
   memory: {
-    left: 82.1,
-    top: 54.8,
-    label: "memory cable station",
+    // Directly below the small cyan Memory computer, on the clear blue floor
+    // in front of (not on top of) the server cabinets.
+    left: 82.2,
+    top: 68.2,
+    label: "memory cable station in front of the Memory computer",
     pose: "memory-cables",
     status: "working",
   },
