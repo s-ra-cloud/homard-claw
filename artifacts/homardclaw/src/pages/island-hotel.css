@@ -179,7 +179,7 @@
   color: var(--ink);
   box-shadow: 2px 2px 0 rgba(43, 39, 51, 0.5);
   font:
-    700 9px "Space Mono",
+    700 13px "Space Mono",
     monospace;
   text-transform: uppercase;
   white-space: nowrap;
@@ -190,8 +190,8 @@
 }
 
 .island-hotel__guest .island__nametag {
-  max-width: 92px;
-  font-size: 8px;
+  max-width: 112px;
+  font-size: 12px;
 }
 
 /*
@@ -263,7 +263,7 @@
   color: var(--ink);
   box-shadow: 2px 2px 0 rgb(43 39 51 / 55%);
   font:
-    700 8px "Space Mono",
+    700 12px "Space Mono",
     monospace;
   line-height: 1.2;
   text-align: center;
