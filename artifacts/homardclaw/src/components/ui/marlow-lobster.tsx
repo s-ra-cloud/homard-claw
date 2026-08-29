@@ -195,7 +195,9 @@ export const POSE_CHARACTER_SCALE: Record<LobsterPose, number> = {
   "hotel-spa": 1.08,
   "hotel-clapping": 1.08,
   "hotel-resting": 1.08,
-  "memory-cables": 1.02,
+  // The new repair frames contain only the technician and a compact cable,
+  // so this matches its body size to the other floor-duty Crustabots.
+  "memory-cables": 1.18,
 };
 const POSE_FOLDERS: Record<LobsterPose, string> = {
   standing: "lobsters",

@@ -7,19 +7,20 @@ import {
 describe("office role placements", () => {
   it("keeps each assigned role on its intended furniture-free floor anchor", () => {
     expect(OFFICE_ROLE_SEATS.approval).toMatchObject({
-      left: 19,
-      top: 53.2,
+      left: 17.2,
+      top: 49.4,
       pose: "working",
       status: "working",
+      mirrorX: true,
     });
     expect(OFFICE_ROLE_SEATS.documentation).toMatchObject({
       left: 74.8,
-      top: 68.2,
+      top: 69.4,
       pose: "hotel-reading",
     });
     expect(OFFICE_ROLE_SEATS.memory).toMatchObject({
       left: 82.2,
-      top: 68.2,
+      top: 69.2,
       pose: "memory-cables",
     });
   });

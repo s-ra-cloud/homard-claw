@@ -16,10 +16,20 @@
  * - lobster-chair-stretch-source.png   -> lobsters-idle-stretch
  * - lobster-beach-towel-source.png     -> lobsters-beach
  * - lobster-memory-cables-source.png   -> lobsters-memory-cables (source hue 0)
+ * - lobster-memory-repair-frames-source.png -> lobsters-memory-cables
  *
  * LOBSTER_SOURCE=../../../attached_assets/generated_images/<source>.png \
  * LOBSTER_SOURCE_HUE=0 \
  * LOBSTER_OUT_DIR=../public/images/<out-dir> \
+ * LOBSTER_WRITE_MANIFEST=0 LOBSTER_MATCH_MANIFEST=1 node \
+ * artifacts/homardclaw/scripts/build-lobster-sprites.mjs
+ *
+ * A generated horizontal repair sheet becomes one genuinely transparent,
+ * recoloured four-frame strip per preset (and a still first-frame fallback):
+ *
+ * LOBSTER_SOURCE=../../../attached_assets/generated_images/lobster-memory-repair-frames-source.png \
+ * LOBSTER_SOURCE_HUE=0 LOBSTER_SHEET_FRAMES=4 \
+ * LOBSTER_OUT_DIR=../public/images/lobsters-memory-cables \
  * LOBSTER_WRITE_MANIFEST=0 LOBSTER_MATCH_MANIFEST=1 node \
  * artifacts/homardclaw/scripts/build-lobster-sprites.mjs
  *
@@ -53,6 +63,10 @@ const FRAMES = process.env.LOBSTER_FRAMES;
 const WRITE_MANIFEST = process.env.LOBSTER_WRITE_MANIFEST !== "0";
 const MATCH_MANIFEST = process.env.LOBSTER_MATCH_MANIFEST === "1";
 const SOURCE_HUE = process.env.LOBSTER_SOURCE_HUE;
+const SHEET_FRAMES = Number.parseInt(
+  process.env.LOBSTER_SHEET_FRAMES ?? "0",
+  10,
+);
 const MANIFEST_PATH = resolve(
   HERE,
   "../src/components/ui/lobster-presets.json",
@@ -283,6 +297,21 @@ function boundingBox(img) {
     }
   }
   return { minX, minY, maxX, maxY };
+}
+
+function cropImage(img, x0, y0, x1, y1) {
+  const width = x1 - x0;
+  const height = y1 - y0;
+  const data = Buffer.alloc(width * height * 4);
+  for (let y = 0; y < height; y++) {
+    img.data.copy(
+      data,
+      y * width * 4,
+      ((y + y0) * img.width + x0) * 4,
+      ((y + y0) * img.width + x1) * 4,
+    );
+  }
+  return { width, height, data };
 }
 
 /** Box-samples the source into a square grid, then hardens alpha to keep edges crisp. */
@@ -611,6 +640,11 @@ const FRAME_POSES = {
     head: { rect: [30, 0, 92, 40], nod: 3, turn: 3 },
   },
 };
+
+// These layouts come from authored/generated multi-drawing sheets rather than
+// from the small deterministic repaint recipes above. Rebuilding the ordinary
+// pose strips must not silently delete their manifest entries.
+const PREBUILT_FRAME_FOLDERS = new Set(["lobsters-memory-cables"]);
 
 const at = (img, x, y) => (y * img.width + x) * 4;
 const isOpaque = (img, x, y) => img.data[at(img, x, y) + 3] >= 128;
@@ -964,13 +998,69 @@ if (FRAMES) {
     : {};
   for (const folder of folders) layouts[folder] = buildFrames(folder);
   for (const folder of Object.keys(layouts)) {
-    if (!FRAME_POSES[folder]) delete layouts[folder];
+    if (!FRAME_POSES[folder] && !PREBUILT_FRAME_FOLDERS.has(folder)) {
+      delete layouts[folder];
+    }
   }
   writeFileSync(manifest, `${JSON.stringify(layouts, null, 2)}\n`);
   process.exit(0);
 }
 
 /* ------------------------------------------------------------ pipeline */
+
+if (SHEET_FRAMES > 0) {
+  if (!Number.isInteger(SHEET_FRAMES) || SHEET_FRAMES < 2) {
+    throw new Error("LOBSTER_SHEET_FRAMES must be an integer of at least 2");
+  }
+  const sheet = decodePng(readFileSync(SOURCE));
+  const sprites = Array.from({ length: SHEET_FRAMES }, (_, index) => {
+    const x0 = Math.floor((index * sheet.width) / SHEET_FRAMES);
+    const x1 = Math.floor(((index + 1) * sheet.width) / SHEET_FRAMES);
+    const frame = cropImage(sheet, x0, 0, x1, sheet.height);
+    keyOutBackground(frame);
+    const box = boundingBox(frame);
+    if (box.maxX < box.minX || box.maxY < box.minY) {
+      throw new Error(`sheet frame ${index + 1} contains no visible pixels`);
+    }
+    return downsample(frame, box, GRID);
+  });
+  const from =
+    SOURCE_HUE === undefined ? baseHue(sprites[0]) : Number(SOURCE_HUE);
+  if (!Number.isFinite(from)) {
+    throw new Error("LOBSTER_SOURCE_HUE must be a finite hue in degrees");
+  }
+  const canonicalColors = new Map(
+    JSON.parse(readFileSync(MANIFEST_PATH, "utf8")).map((preset) => [
+      preset.id,
+      preset.shellColor,
+    ]),
+  );
+  mkdirSync(OUT_DIR, { recursive: true });
+  for (const variant of VARIANTS) {
+    const target = canonicalColors.get(variant.id);
+    const frames = sprites.map((sprite) => {
+      let image = recolor(sprite, from, variant);
+      if (MATCH_MANIFEST && target) image = matchShellColor(image, target);
+      return image;
+    });
+    writeFileSync(resolve(OUT_DIR, `${variant.id}.png`), encodePng(frames[0]));
+    writeFileSync(
+      resolve(OUT_DIR, `${variant.id}-frames.png`),
+      encodePng(frameStrip(frames)),
+    );
+  }
+  const frameManifest = resolve(
+    HERE,
+    "../src/components/ui/lobster-frames.json",
+  );
+  const layouts = JSON.parse(readFileSync(frameManifest, "utf8"));
+  layouts["lobsters-memory-cables"] = ["rest", "stir", "nod", "turn"];
+  writeFileSync(frameManifest, `${JSON.stringify(layouts, null, 2)}\n`);
+  console.log(
+    `${SHEET_FRAMES} repair frames -> ${VARIANTS.length} transparent strips in ${OUT_DIR}`,
+  );
+  process.exit(0);
+}
 
 const source = decodePng(readFileSync(SOURCE));
 keyOutBackground(source);

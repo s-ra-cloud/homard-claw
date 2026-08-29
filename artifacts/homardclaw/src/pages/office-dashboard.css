@@ -338,6 +338,22 @@
   height: auto;
   --marlow-shadow: drop-shadow(2px 3px 0 rgba(43, 39, 51, 0.5));
 }
+.room-agent .marlow-lobster.is-mirrored {
+  transform: scaleX(-1);
+}
+.room-agent__floor-shadow {
+  position: absolute;
+  z-index: 0;
+  left: 17%;
+  bottom: 2%;
+  width: 66%;
+  height: 9%;
+  border-radius: 50%;
+  background: rgba(7, 27, 42, 0.42);
+  box-shadow: 0 2px 0 rgba(26, 74, 91, 0.32);
+  transform: skewX(-18deg);
+  pointer-events: none;
+}
 /* Name tags are their own layer above every sprite, positioned per seat, so a
    nearer lobster can never cover a further one's tag. Long names are clipped
    to a fixed share of the room, which keeps neighbouring tags from colliding.
@@ -376,6 +392,7 @@
 /* Agent link wrapper: covers the sprite, keyboard/click navigates to Talk. */
 .room-agent__link {
   position: relative;
+  z-index: 1;
   display: block;
   text-decoration: none;
   color: inherit;

@@ -29,13 +29,6 @@
   animation: marlow-shake 0.5s steps(2, end) infinite;
 }
 
-/* The cable kit is part of the transparent character sprite, so this short
- * stepped tug is safe: no room furniture lifts off the floor with it. */
-.marlow-lobster--motion.marlow-lobster--pose-memory-cables.marlow-lobster--working,
-.marlow-lobster--motion.marlow-lobster--pose-memory-cables.marlow-lobster--researching {
-  animation: marlow-cable-check 1.8s steps(4, end) infinite;
-}
-
 .marlow-lobster--waiting {
   --marlow-tint: saturate(0.85);
 }
@@ -70,15 +63,6 @@
     transform: translateX(2%);
   }
 }
-@keyframes marlow-cable-check {
-  32% {
-    transform: translate(-1px, 1px) rotate(-1deg);
-  }
-  58% {
-    transform: translate(1px, 0) rotate(1deg);
-  }
-}
-
 /*
  * Frame strips: one sprite-sized frame per column — rest first, then the
  * blink, the claw press, the head dip and the head turn, in whatever subset
@@ -122,6 +106,38 @@
 .marlow-lobster--frames.marlow-lobster--waiting {
   animation-name: marlow-frames-alive;
   animation-duration: calc(4.2s * var(--marlow-tempo, 1));
+}
+
+/* Memory repair is a true four-drawing sequence: inspect, reach, connect,
+ * spark. Unlike the former whole-sprite wobble, the feet stay planted while
+ * the eyes, claws, connector and cable visibly change between frames. */
+.marlow-lobster--frames.marlow-lobster--pose-memory-cables.marlow-lobster--working,
+.marlow-lobster--frames.marlow-lobster--pose-memory-cables.marlow-lobster--researching {
+  animation-name: marlow-memory-repair;
+  animation-duration: calc(2.8s * var(--marlow-tempo, 1));
+}
+
+@keyframes marlow-memory-repair {
+  0%,
+  18% {
+    background-position-x: 0%;
+  }
+  22%,
+  40% {
+    background-position-x: var(--marlow-stir, 0%);
+  }
+  44%,
+  64% {
+    background-position-x: var(--marlow-nod, 0%);
+  }
+  68%,
+  82% {
+    background-position-x: var(--marlow-turn, 0%);
+  }
+  86%,
+  100% {
+    background-position-x: 0%;
+  }
 }
 /*
  * Poses whose only extra frame is a claw beat (eyes shut for the music, head

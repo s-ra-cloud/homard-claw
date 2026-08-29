@@ -554,6 +554,8 @@ export default function OfficeDashboard() {
     ...roleAgents.map(({ agent, placement }) => ({
       agent,
       seat: placement.seat,
+      dutyRole: placement.role,
+      mirrorX: placement.seat.mirrorX ?? false,
       pose: placement.seat.pose,
       displayStatus:
         agent.status === "paused" ? "paused" : placement.seat.status,
@@ -564,6 +566,8 @@ export default function OfficeDashboard() {
       return {
         agent,
         seat,
+        dutyRole: undefined,
+        mirrorX: false,
         pose: "floor-working" as LobsterPose,
         displayStatus: agent.status,
         zIndex: floorZIndex(seat.top),
@@ -572,6 +576,8 @@ export default function OfficeDashboard() {
     ...deskAgents.map((agent, index) => ({
       agent,
       seat: DESK_SEATS[index],
+      dutyRole: undefined,
+      mirrorX: false,
       pose: stopped
         ? ("seated" as LobsterPose)
         : poseForAgent(agent.status, idleActivities[agent.id]),
@@ -583,6 +589,8 @@ export default function OfficeDashboard() {
     ...exteriorAgents.map((agent, index) => ({
       agent,
       seat: EXTERIOR_SEATS[index],
+      dutyRole: undefined,
+      mirrorX: false,
       pose: "floor-working" as LobsterPose,
       displayStatus: agent.status,
       zIndex: floorZIndex(EXTERIOR_SEATS[index].top),
@@ -716,10 +724,18 @@ export default function OfficeDashboard() {
 
                   {/* Existing lobster sprites; click an agent to open its Talk view. */}
                   {placedAgents.map(
-                    ({ agent, seat, pose, displayStatus, zIndex }) => (
+                    ({
+                      agent,
+                      seat,
+                      dutyRole,
+                      mirrorX,
+                      pose,
+                      displayStatus,
+                      zIndex,
+                    }) => (
                       <div
                         key={agent.id}
-                        className="room-agent"
+                        className={`room-agent${dutyRole ? ` room-agent--duty-${dutyRole}` : ""}`}
                         style={{
                           left: `${seat.left}%`,
                           top: `${seat.top}%`,
@@ -735,6 +751,13 @@ export default function OfficeDashboard() {
                           )
                         }
                       >
+                        {(dutyRole === "documentation" ||
+                          dutyRole === "memory") && (
+                          <span
+                            className="room-agent__floor-shadow"
+                            aria-hidden="true"
+                          />
+                        )}
                         <Link
                           href={`/talk/${agent.id}`}
                           className="room-agent__link"
@@ -762,6 +785,7 @@ export default function OfficeDashboard() {
                             seed={agent.id}
                             shellColor={agent.avatar.shellColor}
                             title={`${agent.name} at the ${seat.label}`}
+                            className={mirrorX ? "is-mirrored" : ""}
                           />
                         </Link>
                       </div>
