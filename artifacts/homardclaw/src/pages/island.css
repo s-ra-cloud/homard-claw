@@ -144,11 +144,20 @@
   background: var(--paper);
   box-shadow: 2px 2px 0 rgba(43, 39, 51, 0.5);
   font:
-    700 9px "Space Mono",
+    700 13px "Space Mono",
     monospace;
   text-overflow: ellipsis;
   text-transform: uppercase;
   white-space: nowrap;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+.island__lobster:hover .island__nametag,
+.island__lobster:focus-visible .island__nametag {
+  visibility: visible;
+  opacity: 1;
 }
 
 .island__bubble {
@@ -244,7 +253,7 @@
   color: var(--ink);
   box-shadow: 2px 2px 0 rgba(43, 39, 51, 0.5);
   font:
-    700 9px "Space Mono",
+    700 13px "Space Mono",
     monospace;
   text-transform: uppercase;
   white-space: nowrap;
@@ -654,10 +663,10 @@
   }
 
   .island__nametag {
-    max-width: 68px;
+    max-width: 88px;
     padding: 1px 3px;
     border-width: 1px;
-    font-size: 7px;
+    font-size: 11px;
   }
 
   .island__lobster .marlow-lobster {
