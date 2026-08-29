@@ -1,7 +1,29 @@
 import { describe, expect, it } from "vitest";
-import { chooseOfficeRolePlacements } from "./office-role-placements";
+import {
+  chooseOfficeRolePlacements,
+  OFFICE_ROLE_SEATS,
+} from "./office-role-placements";
 
 describe("office role placements", () => {
+  it("keeps each assigned role on its intended furniture-free floor anchor", () => {
+    expect(OFFICE_ROLE_SEATS.approval).toMatchObject({
+      left: 19,
+      top: 53.2,
+      pose: "working",
+      status: "working",
+    });
+    expect(OFFICE_ROLE_SEATS.documentation).toMatchObject({
+      left: 74.8,
+      top: 68.2,
+      pose: "hotel-reading",
+    });
+    expect(OFFICE_ROLE_SEATS.memory).toMatchObject({
+      left: 82.2,
+      top: 68.2,
+      pose: "memory-cables",
+    });
+  });
+
   it("places separately assigned Crustabots at their dedicated stations", () => {
     const placements = chooseOfficeRolePlacements(
       {
