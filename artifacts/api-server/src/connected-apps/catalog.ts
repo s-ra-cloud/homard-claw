@@ -279,6 +279,105 @@ export const APP_OPERATIONS: AppOperation[] = [
     target: (p) => `GitHub issues in ${p.owner}/${p.repo}`,
   },
   {
+    name: "github.list_branches",
+    app: "github",
+    level: "read",
+    description:
+      "List a repository's branches with their head commit SHAs and protection flags; params: owner, repo",
+    params: [str("owner", true, 200), str("repo", true, 200)],
+    target: (p) => `GitHub branches of ${p.owner}/${p.repo}`,
+  },
+  {
+    name: "github.list_directory",
+    app: "github",
+    level: "read",
+    description:
+      "List the files and subdirectories at one path of a repository; params: owner, repo, path (optional, empty = repository root), ref (optional branch/tag/SHA)",
+    params: [
+      str("owner", true, 200),
+      str("repo", true, 200),
+      str("path", false, 500),
+      str("ref", false, 200),
+    ],
+    target: (p) =>
+      `GitHub directory ${p.owner}/${p.repo}/${typeof p.path === "string" && p.path ? p.path : ""}${p.ref ? ` at ${p.ref}` : ""}`,
+  },
+  {
+    name: "github.get_pull_request",
+    app: "github",
+    level: "read",
+    description:
+      "Inspect one pull request: state, merge status, mergeability, head/base refs and SHAs; params: owner, repo, pullNumber",
+    params: [str("owner", true, 200), str("repo", true, 200), num("pullNumber")],
+    target: (p) => `GitHub pull request ${p.owner}/${p.repo}#${p.pullNumber}`,
+  },
+  {
+    name: "github.create_branch",
+    app: "github",
+    level: "write",
+    description:
+      "Create a new branch from an explicit existing ref; params: owner, repo, branch (new branch name), fromRef (source branch, tag, or commit SHA)",
+    params: [
+      str("owner", true, 200),
+      str("repo", true, 200),
+      str("branch", true, 200),
+      str("fromRef", true, 200),
+    ],
+    target: (p) =>
+      `Create GitHub branch "${p.branch}" from ${p.fromRef} in ${p.owner}/${p.repo}`,
+  },
+  {
+    name: "github.put_file",
+    app: "github",
+    level: "write",
+    description:
+      "Create or update ONE file on a branch as a commit; params: owner, repo, branch, path, content (full new file content), message (one-line commit message), expectedSha (current blob SHA from github.read_file — REQUIRED when updating an existing file; omit only when creating a new file). A stale or missing expectedSha fails instead of overwriting newer work.",
+    params: [
+      str("owner", true, 200),
+      str("repo", true, 200),
+      str("branch", true, 200),
+      str("path", true, 500),
+      str("content", true, 200000),
+      str("message", true, 500),
+      str("expectedSha", false, 100),
+    ],
+    target: (p) =>
+      `Commit to GitHub ${p.owner}/${p.repo} on branch "${p.branch}": ${p.expectedSha ? "update" : "create"} ${p.path} ("${p.message}")`,
+  },
+  {
+    name: "github.open_pull_request",
+    app: "github",
+    level: "write",
+    description:
+      "Open a pull request between two existing branches; params: owner, repo, title, head (branch with the changes), base (branch to merge into), body (optional description)",
+    params: [
+      str("owner", true, 200),
+      str("repo", true, 200),
+      str("title", true, 500),
+      str("head", true, 200),
+      str("base", true, 200),
+      str("body", false, 20000),
+    ],
+    target: (p) =>
+      `Open GitHub pull request in ${p.owner}/${p.repo}: "${p.head}" into "${p.base}" ("${p.title}")`,
+  },
+  {
+    name: "github.merge_pull_request",
+    app: "github",
+    level: "write",
+    description:
+      "Merge one explicit pull request; params: owner, repo, pullNumber, expectedHeadSha (the head commit SHA from github.get_pull_request — the merge fails if the branch moved), method (optional: merge|squash|rebase, default merge)",
+    params: [
+      str("owner", true, 200),
+      str("repo", true, 200),
+      num("pullNumber"),
+      str("expectedHeadSha", true, 100),
+      str("method", false, 20),
+    ],
+    target: (p) =>
+      `Merge GitHub pull request ${p.owner}/${p.repo}#${p.pullNumber} at head ${p.expectedHeadSha}${p.method ? ` (${p.method})` : ""}`,
+  },
+  {
     name: "github.create_issue",
     app: "github",
     level: "write",

@@ -813,6 +813,13 @@ function ConnectedAppsFields({
                           ?.blurb
                       }
                     </p>
+                    {app.app === "github" && level === "write" ? (
+                      <p className="text-[9px] text-muted-foreground mt-1">
+                        Write on GitHub includes code changes: branches,
+                        commits, pull requests, and merges. Each one is shown
+                        to you as a concrete approval before it runs.
+                      </p>
+                    ) : null}
                   </div>
                   <Select onValueChange={field.onChange} value={level}>
                     <FormControl>

@@ -319,6 +319,365 @@ describe("idempotency markers on write executors", () => {
   });
 });
 
+const SHA_A = "a".repeat(40);
+const SHA_B = "b".repeat(40);
+
+describe("github code workflow executors", () => {
+  const githubCalls = () =>
+    proxyState.calls.filter((c) => c.connector === "github");
+
+  it("lists branches with head SHAs and protection flags", async () => {
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path === "/repos/x/y/branches?per_page=100") {
+        return {
+          status: 200,
+          body: [
+            { name: "main", commit: { sha: SHA_A }, protected: true },
+            { name: "fix-1", commit: { sha: SHA_B } },
+          ],
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("github.list_branches")!,
+      { owner: "x", repo: "y" },
+      { actionId: null, workspaceId },
+    );
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      expect(outcome.summary).toContain(`main @ ${SHA_A} (protected)`);
+      expect(outcome.summary).toContain(`fix-1 @ ${SHA_B}`);
+    }
+  });
+
+  it("lists a directory with blob SHAs at an explicit ref, and refuses files", async () => {
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path === "/repos/x/y/contents/src?ref=fix-1") {
+        return {
+          status: 200,
+          body: [
+            { type: "dir", name: "lib" },
+            { type: "file", name: "app.ts", sha: SHA_A, size: 120 },
+          ],
+        };
+      }
+      if (call.method === "GET" && call.path === "/repos/x/y/contents/src/app.ts") {
+        return { status: 200, body: { type: "file", name: "app.ts" } };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const op = findOperation("github.list_directory")!;
+    const outcome = await executeOperation(
+      op,
+      { owner: "x", repo: "y", path: "src", ref: "fix-1" },
+      { actionId: null, workspaceId },
+    );
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      expect(outcome.summary).toContain("[dir] lib");
+      expect(outcome.summary).toContain(`app.ts (120 bytes, blob ${SHA_A})`);
+    }
+    const onFile = await executeOperation(
+      op,
+      { owner: "x", repo: "y", path: "src/app.ts" },
+      { actionId: null, workspaceId },
+    );
+    expect(onFile.ok).toBe(false);
+    if (!onFile.ok) expect(onFile.message).toContain("file, not a directory");
+  });
+
+  it("rejects traversal paths and malformed refs without touching GitHub", async () => {
+    const op = findOperation("github.list_directory")!;
+    for (const params of [
+      { owner: "x", repo: "y", path: "../secrets" },
+      { owner: "x", repo: "y", path: "/etc" },
+      { owner: "x", repo: "y", path: "a//b" },
+      { owner: "x", repo: "y", path: "ok", ref: "main@{1}" },
+      { owner: "x", repo: "y", path: "ok", ref: "-option" },
+    ]) {
+      const outcome = await executeOperation(op, params, {
+        actionId: null,
+        workspaceId,
+      });
+      expect(outcome.ok).toBe(false);
+    }
+    const put = findOperation("github.put_file")!;
+    const bad = await executeOperation(
+      put,
+      { owner: "x", repo: "y", branch: "refs/heads/x", path: "a.txt", content: "c", message: "m" },
+      { actionId: null, workspaceId },
+    );
+    expect(bad.ok).toBe(false);
+    expect(githubCalls()).toHaveLength(0);
+  });
+
+  it("describes a pull request's merge state for merge planning", async () => {
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path === "/repos/x/y/pulls/7") {
+        return {
+          status: 200,
+          body: {
+            number: 7,
+            title: "Fix crash",
+            state: "open",
+            merged: false,
+            mergeable: false,
+            mergeable_state: "dirty",
+            head: { ref: "fix-1", sha: SHA_A },
+            base: { ref: "main", sha: SHA_B },
+            html_url: "https://github.com/x/y/pull/7",
+          },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("github.get_pull_request")!,
+      { owner: "x", repo: "y", pullNumber: 7 },
+      { actionId: null, workspaceId },
+    );
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      expect(outcome.summary).toContain("NO (conflicts or blocked)");
+      expect(outcome.summary).toContain("state: dirty");
+      expect(outcome.summary).toContain(`head: fix-1 @ ${SHA_A}`);
+    }
+  });
+
+  it("creates a branch at the resolved SHA of an explicit source ref", async () => {
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path === "/repos/x/y/commits/main") {
+        return { status: 200, body: { sha: SHA_A } };
+      }
+      if (call.method === "POST" && call.path === "/repos/x/y/git/refs") {
+        expect(call.body).toEqual({ ref: "refs/heads/fix-1", sha: SHA_A });
+        return { status: 201, body: { ref: "refs/heads/fix-1" } };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("github.create_branch")!,
+      { owner: "x", repo: "y", branch: "fix-1", fromRef: "main" },
+      { actionId: "cccc", workspaceId },
+    );
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) expect(outcome.summary).toContain(`at ${SHA_A}`);
+  });
+
+  it("fails branch creation cleanly when the source ref does not exist", async () => {
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path === "/repos/x/y/commits/ghost") {
+        return { status: 404, body: { message: "Not Found" } };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("github.create_branch")!,
+      { owner: "x", repo: "y", branch: "fix-1", fromRef: "ghost" },
+      { actionId: "cccc", workspaceId },
+    );
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.message).toContain("No branch was created");
+    expect(githubCalls().some((c) => c.method === "POST")).toBe(false);
+  });
+
+  it("commits a file with base64 content, expected blob SHA, and the action marker", async () => {
+    proxyState.handler = (call) => {
+      if (call.method === "PUT" && call.path === "/repos/x/y/contents/src/app.ts") {
+        return {
+          status: 200,
+          body: { commit: { sha: SHA_B }, content: { sha: SHA_A } },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("github.put_file")!,
+      {
+        owner: "x",
+        repo: "y",
+        branch: "fix-1",
+        path: "src/app.ts",
+        content: "const a = 1;\n",
+        message: "Fix crash",
+        expectedSha: SHA_A,
+      },
+      { actionId: "dddd", workspaceId },
+    );
+    expect(outcome.ok).toBe(true);
+    const body = githubCalls()[0].body as {
+      message: string;
+      content: string;
+      branch: string;
+      sha?: string;
+    };
+    expect(body.branch).toBe("fix-1");
+    expect(body.sha).toBe(SHA_A);
+    expect(Buffer.from(body.content, "base64").toString("utf8")).toBe(
+      "const a = 1;\n",
+    );
+    expect(body.message).toBe("Fix crash\n\n<!-- homardclaw-action:dddd -->");
+    if (outcome.ok) expect(outcome.summary).toContain(`commit ${SHA_B}`);
+  });
+
+  it("fails a stale or conflicting file write without overwriting", async () => {
+    proxyState.handler = () => ({
+      status: 409,
+      body: { message: "src/app.ts does not match" },
+    });
+    const outcome = await executeOperation(
+      findOperation("github.put_file")!,
+      {
+        owner: "x",
+        repo: "y",
+        branch: "fix-1",
+        path: "src/app.ts",
+        content: "new",
+        message: "Update",
+        expectedSha: SHA_A,
+      },
+      { actionId: "dddd", workspaceId },
+    );
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.message).toContain("nothing was written");
+      expect(outcome.message).toContain("stale");
+    }
+    // A malformed expectedSha never reaches the provider at all.
+    proxyState.calls = [];
+    const badSha = await executeOperation(
+      findOperation("github.put_file")!,
+      { owner: "x", repo: "y", branch: "b", path: "a.txt", content: "c", message: "m", expectedSha: "abc" },
+      { actionId: null, workspaceId },
+    );
+    expect(badSha.ok).toBe(false);
+    expect(githubCalls()).toHaveLength(0);
+  });
+
+  it("opens a pull request carrying the hidden action marker", async () => {
+    proxyState.handler = (call) => {
+      if (call.method === "POST" && call.path === "/repos/x/y/pulls") {
+        return {
+          status: 201,
+          body: { number: 12, html_url: "https://github.com/x/y/pull/12", head: { sha: SHA_A } },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("github.open_pull_request")!,
+      { owner: "x", repo: "y", title: "Fix crash", head: "fix-1", base: "main", body: "Details" },
+      { actionId: "eeee", workspaceId },
+    );
+    expect(outcome.ok).toBe(true);
+    const body = githubCalls()[0].body as { title: string; head: string; base: string; body: string };
+    expect(body.head).toBe("fix-1");
+    expect(body.base).toBe("main");
+    expect(body.body).toBe("Details\n\n<!-- homardclaw-action:eeee -->");
+    if (outcome.ok) expect(outcome.summary).toContain("#12");
+  });
+
+  it("merges only at the reviewed head SHA and explains a moved branch", async () => {
+    proxyState.handler = (call) => {
+      if (call.method === "PUT" && call.path === "/repos/x/y/pulls/7/merge") {
+        const body = call.body as { sha: string };
+        if (body.sha === SHA_A) {
+          return { status: 200, body: { merged: true, sha: SHA_B } };
+        }
+        return { status: 409, body: { message: "Head branch was modified" } };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const op = findOperation("github.merge_pull_request")!;
+    const merged = await executeOperation(
+      op,
+      { owner: "x", repo: "y", pullNumber: 7, expectedHeadSha: SHA_A },
+      { actionId: "ffff", workspaceId },
+    );
+    expect(merged.ok).toBe(true);
+    if (merged.ok) expect(merged.summary).toContain(`merge commit ${SHA_B}`);
+    expect((githubCalls()[0].body as { merge_method: string }).merge_method).toBe("merge");
+
+    const moved = await executeOperation(
+      op,
+      { owner: "x", repo: "y", pullNumber: 7, expectedHeadSha: "c".repeat(40) },
+      { actionId: "ffff", workspaceId },
+    );
+    expect(moved.ok).toBe(false);
+    if (!moved.ok) {
+      expect(moved.message).toContain("head branch moved");
+      expect(moved.message).toContain("Nothing was merged");
+    }
+  });
+
+  it("surfaces branch protection and merge-conflict refusals honestly", async () => {
+    proxyState.handler = () => ({
+      status: 405,
+      body: { message: "Required status check is failing" },
+    });
+    const outcome = await executeOperation(
+      findOperation("github.merge_pull_request")!,
+      { owner: "x", repo: "y", pullNumber: 7, expectedHeadSha: SHA_A },
+      { actionId: null, workspaceId },
+    );
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.message).toContain("nothing was merged");
+      expect(outcome.message).toContain("Branch protection");
+    }
+    // Bounded method values only.
+    const badMethod = await executeOperation(
+      findOperation("github.merge_pull_request")!,
+      { owner: "x", repo: "y", pullNumber: 7, expectedHeadSha: SHA_A, method: "force" },
+      { actionId: null, workspaceId },
+    );
+    expect(badMethod.ok).toBe(false);
+    if (!badMethod.ok) expect(badMethod.message).toContain("merge, squash, rebase");
+  });
+
+  it("maps a revoked GitHub authorization to an auth outcome, not a fake success", async () => {
+    proxyState.handler = () => ({ status: 401, body: { message: "Bad credentials" } });
+    const outcome = await executeOperation(
+      findOperation("github.create_branch")!,
+      { owner: "x", repo: "y", branch: "fix-1", fromRef: "main" },
+      { actionId: null, workspaceId },
+    );
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.kind).toBe("auth");
+  });
+
+  it("refuses every code operation for a workspace with no GitHub connection", async () => {
+    const [stranger] = await db
+      .insert(workspacesTable)
+      .values({ clerkUserId: `recovery-test-nogh-${Date.now()}` })
+      .returning();
+    try {
+      const outcome = await executeOperation(
+        findOperation("github.put_file")!,
+        { owner: "x", repo: "y", branch: "b", path: "a.txt", content: "c", message: "m" },
+        { actionId: null, workspaceId: stranger.id },
+      );
+      expect(outcome.ok).toBe(false);
+      if (!outcome.ok) expect(outcome.kind).toBe("auth");
+      expect(githubCalls()).toHaveLength(0);
+    } finally {
+      await db.delete(workspacesTable).where(eq(workspacesTable.id, stranger.id));
+    }
+  });
+
+  it("refuses every code operation without a workspace owner", async () => {
+    const outcome = await executeOperation(
+      findOperation("github.merge_pull_request")!,
+      { owner: "x", repo: "y", pullNumber: 1, expectedHeadSha: SHA_A },
+      { actionId: null, workspaceId: null },
+    );
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.kind).toBe("auth");
+    expect(proxyState.calls).toHaveLength(0);
+  });
+});
+
 describe("drive reads by MIME type", () => {
   const readOp = () => findOperation("google_drive.read_file")!;
   const ctx = () => ({ actionId: null, workspaceId });
@@ -647,6 +1006,212 @@ describe("reconcileStaleExecutingActions", () => {
     const row = await reloadAction(action.id);
     expect(row.status).toBe("executed");
     expect(row.resultSummary).toContain("#8");
+  });
+
+  it("confirms a stranded branch creation by the ref's existence — never recreates", async () => {
+    const approvalId = await insertApproval();
+    const action = await insertExecutingAction({
+      operation: "github.create_branch",
+      app: "github",
+      params: { owner: "x", repo: "y", branch: "fix-1", fromRef: "main" },
+      approvalId,
+    });
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path === "/repos/x/y/git/ref/heads/fix-1") {
+        return { status: 200, body: { object: { sha: SHA_A } } };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    expect(resolved.resolution).toBe("confirmed");
+    const row = await reloadAction(action.id);
+    expect(row.status).toBe("executed");
+    expect(row.resultSummary).toContain(SHA_A);
+    expect(proxyState.calls.every((c) => c.method === "GET")).toBe(true);
+  });
+
+  it("re-queues a provably absent branch creation and re-runs it exactly once", async () => {
+    const approvalId = await insertApproval();
+    const action = await insertExecutingAction({
+      operation: "github.create_branch",
+      app: "github",
+      params: { owner: "x", repo: "y", branch: "fix-2", fromRef: "main" },
+      approvalId,
+    });
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path === "/repos/x/y/git/ref/heads/fix-2") {
+        return { status: 404, body: { message: "Not Found" } };
+      }
+      if (call.method === "GET" && call.path === "/repos/x/y/commits/main") {
+        return { status: 200, body: { sha: SHA_A } };
+      }
+      if (call.method === "POST" && call.path === "/repos/x/y/git/refs") {
+        return { status: 201, body: { ref: "refs/heads/fix-2" } };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    expect(resolved.resolution).toBe("requeued");
+    const claimed = await claimApprovedAction(action.id);
+    expect(claimed).not.toBeNull();
+    expect(await claimApprovedAction(action.id)).toBeNull(); // exactly-once fence
+    const { action: finalized } = await executeClaimedAction(claimed!, "Tester", workspaceId);
+    expect(finalized.status).toBe("executed");
+    expect(
+      proxyState.calls.filter((c) => c.method === "POST"),
+    ).toHaveLength(1);
+  });
+
+  it("confirms a stranded file commit by its commit-message marker", async () => {
+    const approvalId = await insertApproval();
+    const action = await insertExecutingAction({
+      operation: "github.put_file",
+      app: "github",
+      params: {
+        owner: "x",
+        repo: "y",
+        branch: "fix-1",
+        path: "src/app.ts",
+        content: "const a = 1;",
+        message: "Fix crash",
+        expectedSha: SHA_A,
+      },
+      approvalId,
+    });
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.startsWith("/repos/x/y/commits?")) {
+        expect(call.path).toContain("sha=fix-1");
+        expect(call.path).toContain("path=src%2Fapp.ts");
+        return {
+          status: 200,
+          body: [
+            { sha: SHA_B, commit: { message: "unrelated" } },
+            {
+              sha: SHA_A,
+              commit: {
+                message: `Fix crash\n\n<!-- homardclaw-action:${action.id} -->`,
+              },
+            },
+          ],
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    expect(resolved.resolution).toBe("confirmed");
+    const row = await reloadAction(action.id);
+    expect(row.status).toBe("executed");
+    expect(row.resultSummary).toContain(SHA_A);
+    expect(proxyState.calls.every((c) => c.method === "GET")).toBe(true);
+  });
+
+  it("treats an unreadable branch as unknown for a stranded commit — never guesses", async () => {
+    const approvalId = await insertApproval();
+    const action = await insertExecutingAction({
+      operation: "github.put_file",
+      app: "github",
+      params: {
+        owner: "x",
+        repo: "y",
+        branch: "gone",
+        path: "a.txt",
+        content: "c",
+        message: "m",
+      },
+      approvalId,
+    });
+    // 404: the branch may never have been created — or repo access may have
+    // been revoked after the commit landed. Both are ambiguous.
+    proxyState.handler = () => ({ status: 404, body: { message: "Not Found" } });
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    expect(resolved.resolution).toBe("unknown");
+    const row = await reloadAction(action.id);
+    expect(row.status).toBe("failed");
+    expect(row.errorMessage).toContain("outcome is unknown");
+    expect(proxyState.calls.filter((c) => c.method !== "GET")).toHaveLength(0);
+  });
+
+  it("confirms a stranded pull request by its hidden body marker", async () => {
+    const approvalId = await insertApproval();
+    const action = await insertExecutingAction({
+      operation: "github.open_pull_request",
+      app: "github",
+      params: { owner: "x", repo: "y", title: "Fix", head: "fix-1", base: "main" },
+      approvalId,
+    });
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.startsWith("/repos/x/y/pulls?state=all")) {
+        expect(decodeURIComponent(call.path)).toContain("head=x:fix-1");
+        return {
+          status: 200,
+          body: [
+            {
+              number: 12,
+              html_url: "u12",
+              body: `<!-- homardclaw-action:${action.id} -->`,
+            },
+          ],
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    expect(resolved.resolution).toBe("confirmed");
+    const row = await reloadAction(action.id);
+    expect(row.status).toBe("executed");
+    expect(row.resultSummary).toContain("#12");
+  });
+
+  it("confirms a stranded merge from the pull request's merged state", async () => {
+    const approvalId = await insertApproval();
+    const action = await insertExecutingAction({
+      operation: "github.merge_pull_request",
+      app: "github",
+      params: { owner: "x", repo: "y", pullNumber: 7, expectedHeadSha: SHA_A },
+      approvalId,
+    });
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path === "/repos/x/y/pulls/7") {
+        return {
+          status: 200,
+          body: { merged: true, merge_commit_sha: SHA_B, state: "closed" },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    expect(resolved.resolution).toBe("confirmed");
+    const row = await reloadAction(action.id);
+    expect(row.status).toBe("executed");
+    expect(row.resultSummary).toContain(SHA_B);
+    expect(proxyState.calls.every((c) => c.method === "GET")).toBe(true);
+  });
+
+  it("re-queues an unmerged stranded merge; the retry still gates on the head SHA", async () => {
+    const approvalId = await insertApproval();
+    const action = await insertExecutingAction({
+      operation: "github.merge_pull_request",
+      app: "github",
+      params: { owner: "x", repo: "y", pullNumber: 9, expectedHeadSha: SHA_A },
+      approvalId,
+    });
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path === "/repos/x/y/pulls/9") {
+        return { status: 200, body: { merged: false, state: "open" } };
+      }
+      if (call.method === "PUT" && call.path === "/repos/x/y/pulls/9/merge") {
+        expect((call.body as { sha: string }).sha).toBe(SHA_A);
+        return { status: 200, body: { merged: true, sha: SHA_B } };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    expect(resolved.resolution).toBe("requeued");
+    const claimed = await claimApprovedAction(action.id);
+    expect(claimed).not.toBeNull();
+    const { action: finalized } = await executeClaimedAction(claimed!, "Tester", workspaceId);
+    expect(finalized.status).toBe("executed");
+    expect(proxyState.calls.filter((c) => c.method === "PUT")).toHaveLength(1);
   });
 });
 

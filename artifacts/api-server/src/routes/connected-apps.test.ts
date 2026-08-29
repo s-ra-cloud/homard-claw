@@ -383,6 +383,111 @@ describe("authorization deny matrix", () => {
     });
     expect(verdict.kind).toBe("allow");
   });
+
+  it("classifies GitHub code discovery as read and every code mutation as write", () => {
+    const read = grants([["github", "read"]]);
+    for (const [op, params] of [
+      ["github.list_branches", { owner: "o", repo: "r" }],
+      ["github.list_directory", { owner: "o", repo: "r", path: "src" }],
+      ["github.get_pull_request", { owner: "o", repo: "r", pullNumber: 5 }],
+    ] as const) {
+      expect(authorizeAppAction(read, op, params).kind).toBe("allow");
+    }
+    const mutations: [string, Record<string, unknown>][] = [
+      ["github.create_branch", { owner: "o", repo: "r", branch: "b", fromRef: "main" }],
+      [
+        "github.put_file",
+        { owner: "o", repo: "r", branch: "b", path: "a.txt", content: "x", message: "m" },
+      ],
+      [
+        "github.open_pull_request",
+        { owner: "o", repo: "r", title: "t", head: "b", base: "main" },
+      ],
+      [
+        "github.merge_pull_request",
+        { owner: "o", repo: "r", pullNumber: 5, expectedHeadSha: "a".repeat(40) },
+      ],
+    ];
+    for (const [op, params] of mutations) {
+      // Read grant: denied outright.
+      expect(authorizeAppAction(read, op, params).kind).toBe("deny");
+      // Write grant: still parks for explicit owner approval.
+      expect(
+        authorizeAppAction(grants([["github", "write"]]), op, params).kind,
+      ).toBe("needs_approval");
+    }
+  });
+
+  it("names the exact mutation in each GitHub approval target", () => {
+    const putFile = findOperation("github.put_file")!;
+    expect(
+      putFile.target({
+        owner: "acme",
+        repo: "site",
+        branch: "fix-1",
+        path: "src/app.ts",
+        message: "Fix crash",
+        expectedSha: "a".repeat(40),
+      }),
+    ).toBe(
+      'Commit to GitHub acme/site on branch "fix-1": update src/app.ts ("Fix crash")',
+    );
+    const merge = findOperation("github.merge_pull_request")!;
+    expect(
+      merge.target({ owner: "acme", repo: "site", pullNumber: 7, expectedHeadSha: "abc123" }),
+    ).toContain("Merge GitHub pull request acme/site#7 at head abc123");
+    const branch = findOperation("github.create_branch")!;
+    expect(
+      branch.target({ owner: "acme", repo: "site", branch: "fix-1", fromRef: "main" }),
+    ).toBe('Create GitHub branch "fix-1" from main in acme/site');
+    const pr = findOperation("github.open_pull_request")!;
+    expect(
+      pr.target({ owner: "acme", repo: "site", title: "Fix", head: "fix-1", base: "main" }),
+    ).toBe('Open GitHub pull request in acme/site: "fix-1" into "main" ("Fix")');
+  });
+
+  it("bounds GitHub code params: no line breaks in refs/paths/messages, multiline file content ok", () => {
+    const putFile = findOperation("github.put_file")!;
+    const ok = validateParams(putFile, {
+      owner: "o",
+      repo: "r",
+      branch: "b",
+      path: "src/a.txt",
+      content: "line one\nline two\n",
+      message: "Add file",
+    });
+    expect(ok.ok).toBe(true);
+    for (const bad of [
+      { branch: "b\nmain" },
+      { path: "a\r\nb" },
+      { message: "hi\nthere" },
+    ]) {
+      const res = validateParams(putFile, {
+        owner: "o",
+        repo: "r",
+        branch: "b",
+        path: "a.txt",
+        content: "x",
+        message: "m",
+        ...bad,
+      });
+      expect(res.ok).toBe(false);
+    }
+    // Oversized file content is rejected before any executor runs.
+    const oversized = validateParams(putFile, {
+      owner: "o",
+      repo: "r",
+      branch: "b",
+      path: "a.txt",
+      content: "x".repeat(200001),
+      message: "m",
+    });
+    expect(oversized.ok).toBe(false);
+    // A merge without the reviewed head SHA never validates.
+    const merge = findOperation("github.merge_pull_request")!;
+    const missingSha = validateParams(merge, { owner: "o", repo: "r", pullNumber: 3 });
+    expect(missingSha.ok).toBe(false);
+  });
 });
 
 describe("prompt section", () => {
@@ -428,6 +533,46 @@ describe("prompt section", () => {
     expect(sandboxed).toContain("google_drive.read_sheet_range");
     expect(sandboxed).not.toContain("google_drive.write_sheet_range");
     expect(sandboxed).not.toContain("google_drive.append_sheet_rows");
+  });
+
+  it("gates the GitHub code operations by grant level and sandbox", () => {
+    const read = buildAppsPromptSection(
+      new Map<ConnectedAppId, AppAccessLevel>([["github", "read"]]),
+    );
+    for (const op of [
+      "github.list_branches",
+      "github.list_directory",
+      "github.get_pull_request",
+    ]) {
+      expect(read).toContain(op);
+    }
+    for (const op of [
+      "github.create_branch",
+      "github.put_file",
+      "github.open_pull_request",
+      "github.merge_pull_request",
+    ]) {
+      expect(read).not.toContain(op);
+    }
+    const write = buildAppsPromptSection(
+      new Map<ConnectedAppId, AppAccessLevel>([["github", "write"]]),
+    );
+    for (const op of [
+      "github.create_branch",
+      "github.put_file",
+      "github.open_pull_request",
+      "github.merge_pull_request",
+    ]) {
+      expect(write).toContain(op);
+    }
+    // A sandboxed agent sees discovery only — never a code mutation.
+    const sandboxed = buildAppsPromptSection(
+      new Map<ConnectedAppId, AppAccessLevel>([["github", "write"]]),
+      { sensitiveDataSandbox: true },
+    );
+    expect(sandboxed).toContain("github.list_branches");
+    expect(sandboxed).not.toContain("github.put_file");
+    expect(sandboxed).not.toContain("github.merge_pull_request");
   });
 
   it("accepts multiline JSON in the values param but not in single-line params", () => {

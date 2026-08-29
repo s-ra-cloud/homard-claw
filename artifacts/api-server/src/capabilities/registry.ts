@@ -111,7 +111,7 @@ const DRIVE_PACKAGE = builtinPackage(
 const GITHUB_PACKAGE = builtinPackage(
   "github",
   "GitHub",
-  "List repositories, read files and issues, open issues, and comment on the owner's GitHub account.",
+  "Browse repositories, branches, and files; work with issues; and make bounded code changes — branch, commit, pull request, and merge — on the owner's GitHub account, each mutation individually approved.",
   [
     {
       id: "github-issue-hygiene",
@@ -127,7 +127,26 @@ const GITHUB_PACKAGE = builtinPackage(
       instructions:
         "Read the relevant files or existing issues before opening or commenting on one. Keep issue titles specific and bodies short, with concrete reproduction or file references. Never paste large file contents into an issue.",
     },
+    {
+      id: "github-code-workflows",
+      title: "GitHub code changes",
+      triggers: [
+        "branch",
+        "commit",
+        "merge",
+        "pull request",
+        "pr",
+        "code change",
+        "file change",
+      ],
+      instructions:
+        "Never commit to a default or shared branch directly: create a work branch from an explicit source ref with github.create_branch, commit there, and open a pull request. Inspect before touching anything — github.list_branches for branch heads, github.list_directory for files and their blob SHAs, github.read_file for contents. When updating an existing file with github.put_file you MUST pass expectedSha (the file's current blob SHA from github.list_directory); a stale SHA fails instead of overwriting newer work, so re-read and retry. Before merging, check github.get_pull_request and pass its exact head SHA as expectedHeadSha to github.merge_pull_request — if the branch moved, inspect again. Every mutation needs owner approval and GitHub itself may still refuse (branch protection, required reviews, conflicts); report such refusals honestly, never claim code changed when a call failed.",
+    },
   ],
+  // 1.1.0 added the bounded code workflow: list branches/directories,
+  // inspect pull requests, create branches, commit single files with
+  // stale-revision protection, open pull requests, and merge them.
+  "1.1.0",
 );
 
 /**

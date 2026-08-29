@@ -167,7 +167,16 @@ const NO_WORKSPACE_OUTCOME: ExecutionOutcome = {
 
 type JsonResult =
   | { ok: true; data: unknown }
-  | { ok: false; outcome: ExecutionOutcome };
+  | {
+      ok: false;
+      outcome: ExecutionOutcome;
+      /**
+       * HTTP status of a provider refusal, when one was received. Lets
+       * executors and verifiers distinguish "provably absent" (404) or
+       * "stale/conflicting" (409/422) from transport-level uncertainty.
+       */
+      status?: number;
+    };
 
 /** Map a thrown credential-resolution error to an outcome. */
 function credentialFailure(
@@ -240,7 +249,11 @@ async function providerJson(input: {
   }
   const text = await response.text();
   if (!response.ok) {
-    return { ok: false, outcome: mapProxyFailure(response.status, text) };
+    return {
+      ok: false,
+      outcome: mapProxyFailure(response.status, text),
+      status: response.status,
+    };
   }
   if (!text) return { ok: true, data: null };
   try {
@@ -1125,6 +1138,397 @@ async function githubCommentOnIssue(
   };
 }
 
+/* ------------------- GitHub code workflows (bounded) ------------------- */
+
+/**
+ * Validate a git ref name (branch, tag, or commit SHA) destined for a fixed
+ * GitHub route. Rejects anything git itself forbids plus everything that
+ * could change the meaning of a URL or ref path ("..", "@{", leading "-").
+ * Returns the raw ref; callers encode per segment when building paths.
+ */
+function safeGitRef(value: unknown): string | null {
+  const ref = String(value ?? "");
+  if (
+    !ref ||
+    ref.length > 200 ||
+    /[\s~^:?*[\]\\]/.test(ref) ||
+    ref.includes("..") ||
+    ref.includes("@{") ||
+    ref.startsWith("-") ||
+    ref.startsWith("/") ||
+    ref.endsWith("/") ||
+    ref.endsWith(".") ||
+    ref.endsWith(".lock") ||
+    ref.startsWith("refs/")
+  ) {
+    return null;
+  }
+  return ref;
+}
+
+/** Encode a ref for use as URL path segments, keeping its "/" structure. */
+function encodeRefPath(ref: string): string {
+  return ref.split("/").map(encodeURIComponent).join("/");
+}
+
+/**
+ * Validate and encode a repository file path. Rejects absolute paths and
+ * any "", "." or ".." segment, so a validated path can only name a file
+ * inside the repository tree — never traverse the API route.
+ */
+function safeRepoFilePath(value: unknown): string | null {
+  const path = String(value ?? "");
+  if (!path || path.length > 500 || path.startsWith("/") || path.endsWith("/")) {
+    return null;
+  }
+  const segments = path.split("/");
+  if (segments.some((s) => s === "" || s === "." || s === "..")) return null;
+  return segments.map(encodeURIComponent).join("/");
+}
+
+/** A pull-request/issue number must be an explicit positive integer. */
+function positiveInt(value: unknown): number | null {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n <= 0 || n > Number.MAX_SAFE_INTEGER) {
+    return null;
+  }
+  return n;
+}
+
+/** A full git object SHA (40-hex SHA-1 or 64-hex SHA-256), nothing looser. */
+function isFullSha(value: string): boolean {
+  return /^[0-9a-f]{40}$/i.test(value) || /^[0-9a-f]{64}$/i.test(value);
+}
+
+function badParam(message: string): ExecutionOutcome {
+  return { ok: false, kind: "failed", message };
+}
+
+async function githubListBranches(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const result = await githubJson(
+    ctx.workspaceId,
+    `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/branches?per_page=100`,
+  );
+  if (!result.ok) return result.outcome;
+  const branches =
+    (result.data as
+      | { name: string; commit?: { sha?: string }; protected?: boolean }[]
+      | null) ?? [];
+  if (branches.length === 0) {
+    return { ok: true, summary: "The repository has no branches." };
+  }
+  return {
+    ok: true,
+    summary: truncate(
+      branches
+        .map(
+          (b) =>
+            `- ${b.name} @ ${b.commit?.sha ?? "?"}${b.protected ? " (protected)" : ""}`,
+        )
+        .join("\n"),
+    ),
+  };
+}
+
+async function githubListDirectory(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const rawPath = params.path ? String(params.path) : "";
+  let encodedPath = "";
+  if (rawPath) {
+    const encoded = safeRepoFilePath(rawPath);
+    if (encoded === null) {
+      return badParam(
+        "The path is not a valid repository path (no leading/trailing slash, no empty, '.' or '..' segments).",
+      );
+    }
+    encodedPath = encoded;
+  }
+  let query = "";
+  if (params.ref) {
+    const ref = safeGitRef(params.ref);
+    if (ref === null) return badParam("The ref is not a valid git ref name.");
+    query = `?ref=${encodeURIComponent(ref)}`;
+  }
+  const result = await githubJson(
+    ctx.workspaceId,
+    `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/contents/${encodedPath}${query}`,
+  );
+  if (!result.ok) return result.outcome;
+  const entries = result.data;
+  if (!Array.isArray(entries)) {
+    return badParam(
+      "The path is a file, not a directory. Use github.read_file to read it.",
+    );
+  }
+  if (entries.length === 0) return { ok: true, summary: "The directory is empty." };
+  const listing = (
+    entries as { type?: string; name?: string; sha?: string; size?: number }[]
+  )
+    .map((entry) =>
+      entry.type === "dir"
+        ? `- [dir] ${entry.name}`
+        : `- [${entry.type ?? "file"}] ${entry.name} (${entry.size ?? 0} bytes, blob ${entry.sha ?? "?"})`,
+    )
+    .join("\n");
+  return { ok: true, summary: truncate(listing) };
+}
+
+/** One-line, provider-grounded description of a PR's merge state. */
+function describePullRequest(pr: {
+  number?: number;
+  title?: string;
+  state?: string;
+  draft?: boolean;
+  merged?: boolean;
+  merge_commit_sha?: string | null;
+  mergeable?: boolean | null;
+  mergeable_state?: string;
+  head?: { ref?: string; sha?: string };
+  base?: { ref?: string; sha?: string };
+  html_url?: string;
+}): string {
+  const lines = [
+    `PR #${pr.number ?? "?"}: "${pr.title ?? ""}" [${pr.state ?? "?"}${pr.draft ? ", draft" : ""}]`,
+    `merged: ${pr.merged ? `yes (merge commit ${pr.merge_commit_sha ?? "?"})` : "no"}`,
+    `mergeable: ${pr.mergeable === null || pr.mergeable === undefined ? "unknown (GitHub is still computing)" : pr.mergeable ? "yes" : "NO (conflicts or blocked)"}${pr.mergeable_state ? ` (state: ${pr.mergeable_state})` : ""}`,
+    `head: ${pr.head?.ref ?? "?"} @ ${pr.head?.sha ?? "?"}`,
+    `base: ${pr.base?.ref ?? "?"} @ ${pr.base?.sha ?? "?"}`,
+    pr.html_url ?? "",
+  ];
+  return lines.filter(Boolean).join("\n");
+}
+
+async function githubGetPullRequest(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const pullNumber = positiveInt(params.pullNumber);
+  if (pullNumber === null) {
+    return badParam("pullNumber must be a positive integer.");
+  }
+  const result = await githubJson(
+    ctx.workspaceId,
+    `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/pulls/${pullNumber}`,
+  );
+  if (!result.ok) return result.outcome;
+  return {
+    ok: true,
+    summary: truncate(
+      describePullRequest(result.data as Parameters<typeof describePullRequest>[0]),
+    ),
+  };
+}
+
+async function githubCreateBranch(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const branch = safeGitRef(params.branch);
+  if (branch === null) {
+    return badParam("The new branch name is not a valid git ref name.");
+  }
+  const fromRef = safeGitRef(params.fromRef);
+  if (fromRef === null) {
+    return badParam("fromRef is not a valid branch, tag, or commit SHA.");
+  }
+  const repoPath = `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}`;
+  // Resolve the explicit source ref to an exact commit first: the branch is
+  // always created at a SHA the owner can audit, never at a moving target
+  // interpreted server-side.
+  const resolved = await githubJson(
+    ctx.workspaceId,
+    `${repoPath}/commits/${encodeRefPath(fromRef)}`,
+  );
+  if (!resolved.ok) {
+    if (resolved.status === 404 || resolved.status === 422) {
+      return badParam(
+        `The source ref "${fromRef}" was not found in ${params.owner}/${params.repo}. No branch was created.`,
+      );
+    }
+    return resolved.outcome;
+  }
+  const sha = (resolved.data as { sha?: string } | null)?.sha;
+  if (!sha) {
+    return badParam(
+      `GitHub did not return a commit for "${fromRef}". No branch was created.`,
+    );
+  }
+  const created = await githubJson(ctx.workspaceId, `${repoPath}/git/refs`, {
+    method: "POST",
+    body: { ref: `refs/heads/${branch}`, sha },
+  });
+  if (!created.ok) {
+    if (created.status === 422) {
+      return badParam(
+        `GitHub refused to create branch "${branch}" (it likely already exists). Nothing was changed. ${failureMessage(created.outcome)}`,
+      );
+    }
+    return created.outcome;
+  }
+  return {
+    ok: true,
+    summary: `Created branch "${branch}" at ${sha} (from ${fromRef}) in ${params.owner}/${params.repo}.`,
+  };
+}
+
+async function githubPutFile(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const branch = safeGitRef(params.branch);
+  if (branch === null) return badParam("The branch is not a valid git ref name.");
+  const encodedPath = safeRepoFilePath(params.path);
+  if (encodedPath === null) {
+    return badParam(
+      "The file path is not a valid repository path (no leading/trailing slash, no empty, '.' or '..' segments).",
+    );
+  }
+  const expectedSha = params.expectedSha ? String(params.expectedSha) : null;
+  if (expectedSha !== null && !isFullSha(expectedSha)) {
+    return badParam(
+      "expectedSha must be the file's full blob SHA (from github.list_directory).",
+    );
+  }
+  // The commit message carries the action marker: recovery can later list
+  // the branch's commits and prove whether exactly this commit landed.
+  const message = withGithubMarker(String(params.message), ctx.actionId);
+  const result = await githubJson(
+    ctx.workspaceId,
+    `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/contents/${encodedPath}`,
+    {
+      method: "PUT",
+      body: {
+        message,
+        content: Buffer.from(String(params.content), "utf8").toString("base64"),
+        branch,
+        ...(expectedSha ? { sha: expectedSha } : {}),
+      },
+    },
+  );
+  if (!result.ok) {
+    if (result.status === 409 || result.status === 422) {
+      return badParam(
+        `GitHub refused the commit to ${params.path} on "${branch}" — nothing was written. The file likely changed since it was read (stale expectedSha), expectedSha was omitted for a file that already exists, or the branch does not exist. Re-read the current file state and try again. ${failureMessage(result.outcome)}`,
+      );
+    }
+    return result.outcome;
+  }
+  const data = result.data as {
+    commit?: { sha?: string };
+    content?: { sha?: string };
+  } | null;
+  return {
+    ok: true,
+    summary: `Committed ${params.path} to ${params.owner}/${params.repo} on branch "${branch}" (commit ${data?.commit?.sha ?? "?"}, file blob ${data?.content?.sha ?? "?"}).`,
+  };
+}
+
+async function githubOpenPullRequest(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const head = safeGitRef(params.head);
+  if (head === null) return badParam("head is not a valid branch name.");
+  const base = safeGitRef(params.base);
+  if (base === null) return badParam("base is not a valid branch name.");
+  // The PR body carries the hidden action marker (same scheme as issues):
+  // it never renders, but recovery can find exactly this pull request.
+  const body = withGithubMarker(
+    params.body ? String(params.body) : "",
+    ctx.actionId,
+  );
+  const result = await githubJson(
+    ctx.workspaceId,
+    `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/pulls`,
+    {
+      method: "POST",
+      body: {
+        title: String(params.title),
+        head,
+        base,
+        ...(body ? { body } : {}),
+      },
+    },
+  );
+  if (!result.ok) {
+    if (result.status === 422) {
+      return badParam(
+        `GitHub refused to open the pull request "${head}" into "${base}" — nothing was opened. A pull request for these branches may already exist, the branches may have no differences, or one of them does not exist. ${failureMessage(result.outcome)}`,
+      );
+    }
+    return result.outcome;
+  }
+  const pr = result.data as {
+    number?: number;
+    html_url?: string;
+    head?: { sha?: string };
+  } | null;
+  return {
+    ok: true,
+    summary: `Opened pull request #${pr?.number ?? "?"} in ${params.owner}/${params.repo} ("${head}" into "${base}", head ${pr?.head?.sha ?? "?"}): ${pr?.html_url ?? ""}`,
+  };
+}
+
+const MERGE_METHODS = ["merge", "squash", "rebase"] as const;
+
+async function githubMergePullRequest(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const pullNumber = positiveInt(params.pullNumber);
+  if (pullNumber === null) {
+    return badParam("pullNumber must be a positive integer.");
+  }
+  const expectedHeadSha = String(params.expectedHeadSha ?? "");
+  if (!isFullSha(expectedHeadSha)) {
+    return badParam(
+      "expectedHeadSha must be the pull request's full head commit SHA (from github.get_pull_request).",
+    );
+  }
+  const method = params.method ? String(params.method) : "merge";
+  if (!(MERGE_METHODS as readonly string[]).includes(method)) {
+    return badParam("method must be one of: merge, squash, rebase.");
+  }
+  const result = await githubJson(
+    ctx.workspaceId,
+    `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/pulls/${pullNumber}/merge`,
+    {
+      method: "PUT",
+      // GitHub only merges when the head still equals this SHA (409
+      // otherwise), so the owner approves exactly the code that merges.
+      body: { sha: expectedHeadSha, merge_method: method },
+    },
+  );
+  if (!result.ok) {
+    if (result.status === 409) {
+      return badParam(
+        `The merge was refused because the head branch moved: pull request #${pullNumber} no longer points at ${expectedHeadSha}. Nothing was merged. Re-inspect it with github.get_pull_request and request the merge again with the current head SHA.`,
+      );
+    }
+    if (result.status === 405) {
+      return badParam(
+        `GitHub refused to merge pull request #${pullNumber} — nothing was merged. Branch protection, required reviews or checks, merge conflicts, a draft state, or a disallowed merge method can all cause this. ${failureMessage(result.outcome)}`,
+      );
+    }
+    return result.outcome;
+  }
+  const merge = result.data as { merged?: boolean; sha?: string } | null;
+  if (!merge?.merged) {
+    return badParam(
+      `GitHub did not confirm the merge of pull request #${pullNumber}. Inspect it with github.get_pull_request before retrying.`,
+    );
+  }
+  return {
+    ok: true,
+    summary: `Merged pull request ${params.owner}/${params.repo}#${pullNumber} (${method}; merge commit ${merge.sha ?? "?"}).`,
+  };
+}
+
 const EXECUTORS: Record<
   string,
   (
@@ -1149,8 +1553,15 @@ const EXECUTORS: Record<
   "github.list_repos": githubListRepos,
   "github.read_file": githubReadFile,
   "github.list_issues": githubListIssues,
+  "github.list_branches": githubListBranches,
+  "github.list_directory": githubListDirectory,
+  "github.get_pull_request": githubGetPullRequest,
   "github.create_issue": githubCreateIssue,
   "github.comment_on_issue": githubCommentOnIssue,
+  "github.create_branch": githubCreateBranch,
+  "github.put_file": githubPutFile,
+  "github.open_pull_request": githubOpenPullRequest,
+  "github.merge_pull_request": githubMergePullRequest,
 };
 
 /**
@@ -1291,6 +1702,138 @@ async function verifyGithubComment(
         "Too many comments on the issue to conclusively verify whether the interrupted comment landed.",
     };
   }
+  return { kind: "not_executed" };
+}
+
+async function verifyGithubCreateBranch(
+  params: Record<string, unknown>,
+  _actionId: string,
+  workspaceId: string | null,
+): Promise<VerificationResult> {
+  const branch = safeGitRef(params.branch);
+  if (branch === null) return { kind: "not_executed" };
+  const result = await githubJson(
+    workspaceId,
+    `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/git/ref/heads/${encodeRefPath(branch)}`,
+  );
+  if (result.ok) {
+    const sha = (result.data as { object?: { sha?: string } } | null)?.object
+      ?.sha;
+    return {
+      kind: "executed",
+      summary: `Branch "${branch}" exists in ${params.owner}/${params.repo} at ${sha ?? "?"} (confirmed after an interrupted run).`,
+    };
+  }
+  // GitHub's ref lookup is read-after-write consistent: a 404 proves the
+  // branch does not exist, so the interrupted creation never landed.
+  if (result.status === 404) return { kind: "not_executed" };
+  return { kind: "unknown", message: failureMessage(result.outcome) };
+}
+
+async function verifyGithubPutFile(
+  params: Record<string, unknown>,
+  actionId: string,
+  workspaceId: string | null,
+): Promise<VerificationResult> {
+  const branch = safeGitRef(params.branch);
+  if (branch === null) return { kind: "not_executed" };
+  const result = await githubJson(
+    workspaceId,
+    `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/commits?sha=${encodeURIComponent(branch)}&path=${encodeURIComponent(String(params.path))}&per_page=100`,
+  );
+  if (!result.ok) {
+    // A 404 here is ambiguous: the branch may never have been created — or
+    // repository access may have been revoked AFTER the commit landed
+    // (GitHub hides inaccessible private repos behind 404). Never treat it
+    // as proof of non-execution.
+    return { kind: "unknown", message: failureMessage(result.outcome) };
+  }
+  const commits =
+    (result.data as
+      | { sha: string; commit?: { message?: string } }[]
+      | null) ?? [];
+  const marker = githubMarker(actionId);
+  const match = commits.find((c) => c.commit?.message?.includes(marker));
+  if (match) {
+    return {
+      kind: "executed",
+      summary: `Committed ${params.path} to ${params.owner}/${params.repo} on branch "${branch}" (commit ${match.sha}). Confirmed by the commit's action marker after an interrupted run.`,
+    };
+  }
+  if (commits.length >= 100) {
+    return {
+      kind: "unknown",
+      message:
+        "Too many commits touch that file to conclusively verify whether the interrupted commit landed.",
+    };
+  }
+  return { kind: "not_executed" };
+}
+
+async function verifyGithubOpenPullRequest(
+  params: Record<string, unknown>,
+  actionId: string,
+  workspaceId: string | null,
+): Promise<VerificationResult> {
+  const head = safeGitRef(params.head);
+  if (head === null) return { kind: "not_executed" };
+  const result = await githubJson(
+    workspaceId,
+    `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/pulls?state=all&head=${encodeURIComponent(`${String(params.owner)}:${head}`)}&per_page=100`,
+  );
+  if (!result.ok) {
+    return { kind: "unknown", message: failureMessage(result.outcome) };
+  }
+  const pulls =
+    (result.data as
+      | { number: number; html_url?: string; body?: string | null }[]
+      | null) ?? [];
+  const marker = githubMarker(actionId);
+  const match = pulls.find((pr) => pr.body?.includes(marker));
+  if (match) {
+    return {
+      kind: "executed",
+      summary: `Opened pull request #${match.number} in ${params.owner}/${params.repo}: ${match.html_url ?? ""} (confirmed by its hidden action marker after an interrupted run)`,
+    };
+  }
+  if (pulls.length >= 100) {
+    return {
+      kind: "unknown",
+      message:
+        "Too many pull requests for that branch to conclusively verify whether the interrupted one was opened.",
+    };
+  }
+  return { kind: "not_executed" };
+}
+
+async function verifyGithubMergePullRequest(
+  params: Record<string, unknown>,
+  _actionId: string,
+  workspaceId: string | null,
+): Promise<VerificationResult> {
+  const pullNumber = positiveInt(params.pullNumber);
+  if (pullNumber === null) return { kind: "not_executed" };
+  const result = await githubJson(
+    workspaceId,
+    `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/pulls/${pullNumber}`,
+  );
+  if (!result.ok) {
+    return { kind: "unknown", message: failureMessage(result.outcome) };
+  }
+  const pr = result.data as {
+    merged?: boolean;
+    merge_commit_sha?: string | null;
+    state?: string;
+  } | null;
+  if (pr?.merged) {
+    return {
+      kind: "executed",
+      summary: `Pull request ${params.owner}/${params.repo}#${pullNumber} is merged (merge commit ${pr.merge_commit_sha ?? "?"}). Confirmed after an interrupted run.`,
+    };
+  }
+  // Not merged is definitive either way: an open PR can safely be retried
+  // (the expectedHeadSha still gates it), and a closed-unmerged PR makes a
+  // retry fail loudly instead of merging anything.
   return { kind: "not_executed" };
 }
 
@@ -1455,6 +1998,25 @@ const VERIFIERS: Record<
   "github.comment_on_issue": {
     consistency: "strong",
     verify: verifyGithubComment,
+  },
+  // The code-workflow mutations are verified against GitHub's core git
+  // data (refs, commit lists, pull-request state), which is read-after-
+  // write consistent — absence there is proof of absence.
+  "github.create_branch": {
+    consistency: "strong",
+    verify: verifyGithubCreateBranch,
+  },
+  "github.put_file": {
+    consistency: "strong",
+    verify: verifyGithubPutFile,
+  },
+  "github.open_pull_request": {
+    consistency: "strong",
+    verify: verifyGithubOpenPullRequest,
+  },
+  "github.merge_pull_request": {
+    consistency: "strong",
+    verify: verifyGithubMergePullRequest,
   },
   "google_drive.create_file": {
     consistency: "eventual",
