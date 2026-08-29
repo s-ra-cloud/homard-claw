@@ -8,6 +8,7 @@ export type OfficeRoleSeat = {
   label: string;
   pose: LobsterPose;
   status: "idle" | "working";
+  mirrorX?: boolean;
 };
 
 export const OFFICE_ROLE_SEATS: Record<OfficeRole, OfficeRoleSeat> = {
@@ -16,7 +17,7 @@ export const OFFICE_ROLE_SEATS: Record<OfficeRole, OfficeRoleSeat> = {
     // sprite below the cabinet fronts makes the reader look seated on the
     // floor rather than pinned to a wall or piece of furniture.
     left: 74.8,
-    top: 68.2,
+    top: 69.4,
     label: "documentation reading spot in front of Providers",
     pose: "hotel-reading",
     status: "idle",
@@ -25,17 +26,18 @@ export const OFFICE_ROLE_SEATS: Record<OfficeRole, OfficeRoleSeat> = {
     // The working composite is drawn from behind with one claw on the keys.
     // This anchor tucks its chair into the port console so the reviewer is
     // visibly facing and typing on the controls instead of floating below it.
-    left: 19,
-    top: 53.2,
+    left: 17.2,
+    top: 49.4,
     label: "approval console typing station",
     pose: "working",
     status: "working",
+    mirrorX: true,
   },
   memory: {
     // Directly below the small cyan Memory computer, on the clear blue floor
     // in front of (not on top of) the server cabinets.
     left: 82.2,
-    top: 68.2,
+    top: 69.2,
     label: "memory cable station in front of the Memory computer",
     pose: "memory-cables",
     status: "working",
