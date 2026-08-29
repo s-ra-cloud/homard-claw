@@ -1542,11 +1542,14 @@ export interface RuntimeInfo {
 
 export type RuntimeHealthReportQueue = {
   queued: number;
+  runnableQueued: number;
   running: number;
   waitingApproval: number;
   blocked: number;
   /** @nullable */
   oldestQueuedSeconds: number | null;
+  /** @nullable */
+  oldestRunnableSeconds: number | null;
 };
 
 export type RuntimeHealthReportWorkerState = typeof RuntimeHealthReportWorkerState[keyof typeof RuntimeHealthReportWorkerState];
@@ -1587,6 +1590,7 @@ export type RuntimeHealthReportWorker = {
   renewalFailures: number;
   ownershipLosses: number;
   takeovers: number;
+  processingStalled: boolean;
   ownership: RuntimeHealthReportWorkerOwnership;
 };
 
@@ -1603,6 +1607,7 @@ export type QueueRecoveryReportOutcome = typeof QueueRecoveryReportOutcome[keyof
 export const QueueRecoveryReportOutcome = {
   already_active: 'already_active',
   healthy_elsewhere: 'healthy_elsewhere',
+  stalled_elsewhere: 'stalled_elsewhere',
   recovered: 'recovered',
 } as const;
 
@@ -2613,3 +2618,4 @@ limit?: number;
 export type MarkNotificationsRead200 = {
   updated: number;
 };
+

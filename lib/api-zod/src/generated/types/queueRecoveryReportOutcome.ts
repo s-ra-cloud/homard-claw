@@ -12,5 +12,6 @@ export type QueueRecoveryReportOutcome = typeof QueueRecoveryReportOutcome[keyof
 export const QueueRecoveryReportOutcome = {
   already_active: 'already_active',
   healthy_elsewhere: 'healthy_elsewhere',
+  stalled_elsewhere: 'stalled_elsewhere',
   recovered: 'recovered',
 } as const;

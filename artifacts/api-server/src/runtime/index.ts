@@ -1,5 +1,10 @@
-import { db, tasksTable } from "@workspace/db";
-import { eq, inArray, sql } from "drizzle-orm";
+import {
+  agentsTable,
+  db,
+  tasksTable,
+  workspaceSettingsTable,
+} from "@workspace/db";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { callProvider, type ProviderCallRequest } from "../execution";
 import { availableProviderIds, isConfigured, providerLabel } from "../providers";
 
@@ -152,42 +157,93 @@ export async function listRuntimeHealth(
 
 export type QueueHealth = {
   queued: number;
+  /** Queued tasks the worker is eligible to claim right now. */
+  runnableQueued: number;
   running: number;
   waitingApproval: number;
   blocked: number;
   /** Age in seconds of the oldest task still waiting to start. */
   oldestQueuedSeconds: number | null;
+  /** Age in seconds of the oldest task eligible to start right now. */
+  oldestRunnableSeconds: number | null;
 };
 
+/** A runnable task should be claimed within a few 3-second worker polls. */
+export const QUEUE_PROCESSING_STALL_SECONDS = 45;
+
+/**
+ * A fresh lease is not enough to call the worker healthy: an old process can
+ * keep heartbeating while its tick is wedged or crashes before task claiming.
+ * With no running work, leaving an eligible task untouched for this long is
+ * direct evidence that the queue is not being processed.
+ */
+export function isQueueProcessingStalled(
+  queue: QueueHealth,
+  /** Global count is supplied without exposing it to a workspace response. */
+  globalRunning = queue.running,
+): boolean {
+  return (
+    globalRunning === 0 &&
+    queue.runnableQueued > 0 &&
+    (queue.oldestRunnableSeconds ?? 0) >= QUEUE_PROCESSING_STALL_SECONDS
+  );
+}
+
 /** Durable queue depth, straight from the tasks table. */
-export async function queueHealth(): Promise<QueueHealth> {
+export async function queueHealth(workspaceId?: string): Promise<QueueHealth> {
+  const runnable = sql`(
+    ${tasksTable.status} = 'queued'
+    and (${tasksTable.notBefore} is null or ${tasksTable.notBefore} <= now())
+    and ${agentsTable.paused} = false
+    and ${agentsTable.archived} = false
+    and ${agentsTable.retired} = false
+    and not exists (
+      select 1 from ${workspaceSettingsTable}
+      where ${workspaceSettingsTable.workspaceId} = ${tasksTable.workspaceId}
+        and ${workspaceSettingsTable.key} = 'emergency_stop'
+        and ${workspaceSettingsTable.value} = 'true'
+    )
+  )`;
   const [counts] = await db
     .select({
       queued: sql<number>`count(*) filter (where ${tasksTable.status} = 'queued')::int`,
+      runnableQueued: sql<number>`count(*) filter (where ${runnable})::int`,
       running: sql<number>`count(*) filter (where ${tasksTable.status} = 'running')::int`,
       waitingApproval: sql<number>`count(*) filter (where ${tasksTable.status} = 'waiting_approval')::int`,
       blocked: sql<number>`count(*) filter (where ${tasksTable.status} = 'blocked')::int`,
       oldestQueuedSeconds: sql<
         number | null
       >`extract(epoch from (now() - min(${tasksTable.createdAt}) filter (where ${tasksTable.status} = 'queued')))::float`,
+      oldestRunnableSeconds: sql<
+        number | null
+      >`extract(epoch from (now() - min(greatest(${tasksTable.createdAt}, coalesce(${tasksTable.notBefore}, ${tasksTable.createdAt}))) filter (where ${runnable})))::float`,
     })
     .from(tasksTable)
+    .innerJoin(agentsTable, eq(tasksTable.agentId, agentsTable.id))
     .where(
-      inArray(tasksTable.status, [
-        "queued",
-        "running",
-        "waiting_approval",
-        "blocked",
-      ]),
+      and(
+        inArray(tasksTable.status, [
+          "queued",
+          "running",
+          "waiting_approval",
+          "blocked",
+        ]),
+        ...(workspaceId ? [eq(tasksTable.workspaceId, workspaceId)] : []),
+      ),
     );
   return {
     queued: counts?.queued ?? 0,
+    runnableQueued: counts?.runnableQueued ?? 0,
     running: counts?.running ?? 0,
     waitingApproval: counts?.waitingApproval ?? 0,
     blocked: counts?.blocked ?? 0,
     oldestQueuedSeconds:
       counts?.oldestQueuedSeconds != null
         ? Math.round(counts.oldestQueuedSeconds)
+        : null,
+    oldestRunnableSeconds:
+      counts?.oldestRunnableSeconds != null
+        ? Math.round(counts.oldestRunnableSeconds)
         : null,
   };
 }

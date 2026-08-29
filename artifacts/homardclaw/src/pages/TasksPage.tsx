@@ -1132,10 +1132,10 @@ function TaskCostLine({ task }: { task: Task }) {
 
 /**
  * Queue-worker health strip with the owner's "Recover queue" escape hatch.
- * The server side is safe by construction — a worker with a fresh heartbeat
- * is never displaced — so the button can always be pressed: on a healthy
- * queue it reports a no-op, on a stalled one it takes over ownership and
- * requeues orphaned work.
+ * Health requires processing progress, not only a fresh heartbeat: an old
+ * Autoscale deployment can keep renewing its lease while its tick is wedged.
+ * That condition is reported as stalled, but a fresh holder is never forced
+ * out because its in-flight external actions may not have observed fencing.
  */
 function QueueHealthPanel() {
   // Polls so a dead worker heartbeat surfaces here without a reload.
@@ -1152,6 +1152,8 @@ function QueueHealthPanel() {
           title:
             report.outcome === "recovered"
               ? "Queue recovered"
+              : report.outcome === "stalled_elsewhere"
+                ? "Queue is stalled"
               : "Queue already healthy",
           description: report.message,
         });
@@ -1174,7 +1176,10 @@ function QueueHealthPanel() {
   const { worker, queue } = health;
   // No fresh ownership row anywhere: heartbeats stopped (crash, freeze) or
   // no worker ever started. Either way manual recovery is meaningful.
-  const stalled = worker.ownership.stale || worker.ownership.holder === null;
+  const stalled =
+    worker.processingStalled ||
+    worker.ownership.stale ||
+    worker.ownership.holder === null;
   const heartbeatAge = worker.ownership.heartbeatAgeSeconds;
   const statusLabel = stalled
     ? "Stalled"
@@ -1205,7 +1210,9 @@ function QueueHealthPanel() {
               : stalled
                 ? worker.ownership.holder === null
                   ? "No worker owns the queue right now."
-                  : `Last heartbeat ${heartbeatAge != null ? `${Math.round(heartbeatAge)}s ago` : "unknown"} — the owner looks dead.`
+                  : worker.processingStalled
+                    ? `Heartbeat is fresh, but ${queue.runnableQueued} runnable task${queue.runnableQueued === 1 ? "" : "s"} ${queue.runnableQueued === 1 ? "has" : "have"} not been claimed.`
+                    : `Last heartbeat ${heartbeatAge != null ? `${Math.round(heartbeatAge)}s ago` : "unknown"} — the owner looks dead.`
                 : `Heartbeat fresh${heartbeatAge != null ? ` (${Math.round(heartbeatAge)}s ago)` : ""} · ${queue.queued} queued / ${queue.running} running`}
           </div>
         </div>
@@ -1229,11 +1236,12 @@ function QueueHealthPanel() {
           </div>
           <div className="p-6 space-y-4">
             <p className="text-sm text-muted-foreground">
-              This checks the queue worker&apos;s heartbeat. If the worker is
-              healthy, nothing is touched. If it has gone silent, this server
-              takes over the queue and requeues any tasks the dead worker left
-              behind — they restart from scratch, and the old worker is fenced
-              off so nothing runs twice.
+              This checks both the queue worker&apos;s heartbeat and whether it
+              is claiming runnable work. If it has gone silent, this server
+              safely takes over and requeues abandoned tasks. A worker that is
+              still heartbeating but not processing is reported as stalled,
+              but never forcibly replaced because that could duplicate an
+              in-flight external action.
             </p>
             <div className="flex justify-end gap-4 pt-2 border-t-4 border-border">
               <Button

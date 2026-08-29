@@ -25,7 +25,9 @@ import {
   DEFAULT_RUNTIME,
   RuntimeUnavailableError,
   getRuntime,
+  isQueueProcessingStalled,
   isRuntimeId,
+  queueHealth,
 } from "./runtime";
 import {
   availableProviderIds,
@@ -2781,10 +2783,15 @@ export async function runOwnershipRecoveryOnce(): Promise<RequeuedTask[]> {
 export type QueueRecoveryResult = {
   /**
    * already_active: this instance already held a fresh lease — no reset.
-   * healthy_elsewhere: another instance holds a fresh lease — no reset.
-   * recovered: stale/missing ownership replaced under a new generation.
+   * healthy_elsewhere: another instance is fresh and processing work — no reset.
+   * stalled_elsewhere: another instance heartbeats but is not processing.
+   * recovered: stale/missing ownership was replaced under a new generation.
    */
-  outcome: "already_active" | "healthy_elsewhere" | "recovered";
+  outcome:
+    | "already_active"
+    | "healthy_elsewhere"
+    | "stalled_elsewhere"
+    | "recovered";
   ownershipChanged: boolean;
   recoveredTasks: number;
   generation: number | null;
@@ -2795,7 +2802,7 @@ export type QueueRecoveryResult = {
  * Decision skeleton behind the owner's "Recover queue" action, shared with
  * tests (which must bind it to their own ownership keys — the live row
  * belongs to the running server's worker). All safety comes from the same
- * primitives the polling loop uses: a fresh holder is reported, never
+ * primitives the polling loop uses: a fresh holder is reported and never
  * displaced; only a (re)acquisition under a NEW generation runs the orphan
  * recovery pass, so a healthy epoch's running tasks are never requeued.
  */
@@ -2833,15 +2840,16 @@ export async function performQueueRecovery(deps: {
 /**
  * Owner-triggered escape hatch: run one ownership/recovery pass right now
  * instead of waiting for polling. Reuses ensureWorkerOwnership, so every
- * fencing invariant holds — a fresh holder elsewhere is left alone, a stale
- * or missing row is taken over under a new generation (aborting any stale
- * local work), and orphan recovery is single-flight with the tick loop.
+ * fencing invariant holds — a fresh holder elsewhere is never displaced
+ * because a generation bump cannot prove its in-flight external calls have
+ * observed fencing. A stale/missing row is taken over normally, and orphan
+ * recovery is single-flight with the tick loop.
  */
 export async function recoverQueueNow(
   /** Scope the reported requeue count to this workspace's own tasks. */
   workspaceId?: string,
 ): Promise<QueueRecoveryResult> {
-  const result = await performQueueRecovery({
+  let result = await performQueueRecovery({
     previousGeneration: hasActiveOwnership()
       ? (ownership?.generation ?? null)
       : null,
@@ -2871,7 +2879,19 @@ export async function recoverQueueNow(
         : rows.length;
     },
   });
-  if (result.outcome !== "healthy_elsewhere") {
+  if (result.outcome === "healthy_elsewhere") {
+    const [queue, globalQueue] = await Promise.all([
+      queueHealth(workspaceId),
+      queueHealth(),
+    ]);
+    if (isQueueProcessingStalled(queue, globalQueue.running)) {
+      result = { ...result, outcome: "stalled_elsewhere" };
+    }
+  }
+  if (
+    result.outcome !== "healthy_elsewhere" &&
+    result.outcome !== "stalled_elsewhere"
+  ) {
     // Claim immediately instead of waiting out the poll interval, so the
     // owner sees queued work start moving right after the click.
     wakeWorker();

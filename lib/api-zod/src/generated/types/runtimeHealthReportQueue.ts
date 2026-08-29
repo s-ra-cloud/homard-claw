@@ -8,9 +8,12 @@
 
 export type RuntimeHealthReportQueue = {
   queued: number;
+  runnableQueued: number;
   running: number;
   waitingApproval: number;
   blocked: number;
   /** @nullable */
   oldestQueuedSeconds: number | null;
+  /** @nullable */
+  oldestRunnableSeconds: number | null;
 };

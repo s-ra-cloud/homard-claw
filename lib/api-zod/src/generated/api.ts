@@ -76,6 +76,7 @@ export const listAgentsResponsePermissionOverridesOneMaxDelegationDepthMin = 0;
 export const listAgentsResponsePermissionOverridesOneMaxSubtasksPerTaskMin = 0;
 
 
+
 export const ListAgentsResponseItem = zod.object({
   "id": zod.string(),
   "name": zod.string(),
@@ -180,6 +181,7 @@ export const createAgentBodyPermissionOverridesOneMaxDelegationDepthMin = 0;
 export const createAgentBodyPermissionOverridesOneMaxSubtasksPerTaskMin = 0;
 
 
+
 export const CreateAgentBody = zod.object({
   "name": zod.string().min(createAgentBodyNameMin).max(createAgentBodyNameMax),
   "title": zod.string().min(createAgentBodyTitleMin).max(createAgentBodyTitleMax),
@@ -255,6 +257,7 @@ export const createAgentResponsePermissionOverridesOneMaxAttemptsMin = 0;
 export const createAgentResponsePermissionOverridesOneMaxDelegationDepthMin = 0;
 
 export const createAgentResponsePermissionOverridesOneMaxSubtasksPerTaskMin = 0;
+
 
 
 export const CreateAgentResponse = zod.object({
@@ -357,6 +360,7 @@ export const getAgentResponseAgentPermissionOverridesOneMaxAttemptsMin = 0;
 export const getAgentResponseAgentPermissionOverridesOneMaxDelegationDepthMin = 0;
 
 export const getAgentResponseAgentPermissionOverridesOneMaxSubtasksPerTaskMin = 0;
+
 
 
 export const GetAgentResponse = zod.object({
@@ -548,6 +552,7 @@ export const updateAgentBodyPermissionOverridesOneMaxDelegationDepthMin = 0;
 export const updateAgentBodyPermissionOverridesOneMaxSubtasksPerTaskMin = 0;
 
 
+
 export const UpdateAgentBody = zod.object({
   "name": zod.string().min(updateAgentBodyNameMin).max(updateAgentBodyNameMax).optional(),
   "title": zod.string().min(updateAgentBodyTitleMin).max(updateAgentBodyTitleMax).optional(),
@@ -623,6 +628,7 @@ export const updateAgentResponsePermissionOverridesOneMaxAttemptsMin = 0;
 export const updateAgentResponsePermissionOverridesOneMaxDelegationDepthMin = 0;
 
 export const updateAgentResponsePermissionOverridesOneMaxSubtasksPerTaskMin = 0;
+
 
 
 export const UpdateAgentResponse = zod.object({
@@ -737,6 +743,7 @@ export const duplicateAgentResponsePermissionOverridesOneMaxDelegationDepthMin =
 export const duplicateAgentResponsePermissionOverridesOneMaxSubtasksPerTaskMin = 0;
 
 
+
 export const DuplicateAgentResponse = zod.object({
   "id": zod.string(),
   "name": zod.string(),
@@ -806,6 +813,7 @@ export const delegateFromTalkBodyObjectiveMin = 3;
 export const delegateFromTalkBodyObjectiveMax = 5000;
 
 export const delegateFromTalkBodyNoteMax = 2000;
+
 
 
 export const DelegateFromTalkBody = zod.object({
@@ -928,6 +936,7 @@ export const setAgentArchivedResponsePermissionOverridesOneMaxDelegationDepthMin
 export const setAgentArchivedResponsePermissionOverridesOneMaxSubtasksPerTaskMin = 0;
 
 
+
 export const SetAgentArchivedResponse = zod.object({
   "id": zod.string(),
   "name": zod.string(),
@@ -1032,6 +1041,7 @@ export const pauseAgentResponsePermissionOverridesOneMaxAttemptsMin = 0;
 export const pauseAgentResponsePermissionOverridesOneMaxDelegationDepthMin = 0;
 
 export const pauseAgentResponsePermissionOverridesOneMaxSubtasksPerTaskMin = 0;
+
 
 
 export const PauseAgentResponse = zod.object({
@@ -1229,6 +1239,7 @@ export const createTaskBodyAttachmentsItemMimeTypeMax = 100;
 export const createTaskBodyAttachmentsItemContentMax = 3000000;
 
 export const createTaskBodyAttachmentsMax = 4;
+
 
 
 export const CreateTaskBody = zod.object({
@@ -1448,10 +1459,12 @@ export const GetRuntimeHealthResponse = zod.object({
 })),
   "queue": zod.object({
   "queued": zod.number(),
+  "runnableQueued": zod.number(),
   "running": zod.number(),
   "waitingApproval": zod.number(),
   "blocked": zod.number(),
-  "oldestQueuedSeconds": zod.number().nullable()
+  "oldestQueuedSeconds": zod.number().nullable(),
+  "oldestRunnableSeconds": zod.number().nullable()
 }),
   "worker": zod.object({
   "state": zod.enum(['active', 'standby']),
@@ -1466,6 +1479,7 @@ export const GetRuntimeHealthResponse = zod.object({
   "renewalFailures": zod.number(),
   "ownershipLosses": zod.number(),
   "takeovers": zod.number(),
+  "processingStalled": zod.boolean(),
   "ownership": zod.object({
   "holder": zod.string().nullable(),
   "generation": zod.number().nullable(),
@@ -1482,7 +1496,7 @@ export const GetRuntimeHealthResponse = zod.object({
  * @summary Owner escape hatch for a stuck queue: take over stale worker ownership and requeue orphaned work. A healthy worker is never displaced; pressing this while the queue is fine is a safe no-op.
  */
 export const RecoverQueueResponse = zod.object({
-  "outcome": zod.enum(['already_active', 'healthy_elsewhere', 'recovered']),
+  "outcome": zod.enum(['already_active', 'healthy_elsewhere', 'stalled_elsewhere', 'recovered']),
   "ownershipChanged": zod.boolean(),
   "recoveredTasks": zod.number(),
   "generation": zod.number().nullable(),
@@ -1526,6 +1540,7 @@ export const createTeamBodyNameMax = 60;
 export const createTeamBodyMissionMax = 2000;
 
 
+
 export const CreateTeamBody = zod.object({
   "name": zod.string().min(createTeamBodyNameMin).max(createTeamBodyNameMax),
   "mission": zod.string().max(createTeamBodyMissionMax).optional(),
@@ -1566,6 +1581,7 @@ export const updateTeamBodyNameMin = 2;
 export const updateTeamBodyNameMax = 60;
 
 export const updateTeamBodyMissionMax = 2000;
+
 
 
 export const UpdateTeamBody = zod.object({
@@ -1683,6 +1699,7 @@ export const delegateTaskBodyBudgetCentsMin = 0.01;
 export const delegateTaskBodyBudgetCentsMax = 1000000;
 
 export const delegateTaskBodyNoteMax = 2000;
+
 
 
 export const DelegateTaskBody = zod.object({
@@ -1840,6 +1857,7 @@ export const setVoiceCredentialBodyCredentialMin = 8;
 export const setVoiceCredentialBodyCredentialMax = 4000;
 
 
+
 export const SetVoiceCredentialBody = zod.object({
   "credential": zod.string().min(setVoiceCredentialBodyCredentialMin).max(setVoiceCredentialBodyCredentialMax)
 }).describe('A provider API key or OAuth token belonging to this workspace\'s own account. It is encrypted before storage, never returned by any endpoint, and never exposed to an agent\'s tools or prompts.')
@@ -1901,6 +1919,7 @@ export const converseWithAgentBodyAttachmentsMax = 4;
 export const converseWithAgentBodyOwnerTimezoneMax = 80;
 
 
+
 export const ConverseWithAgentBody = zod.object({
   "text": zod.string().min(1).max(converseWithAgentBodyTextMax),
   "clientMessageId": zod.string().max(converseWithAgentBodyClientMessageIdMax).optional().describe('Client-generated id for this message. Resending with the same id returns the already-generated reply instead of creating a duplicate exchange.'),
@@ -1947,6 +1966,7 @@ export const voiceConverseWithAgentBodyHistoryItemTextMax = 8000;
 export const voiceConverseWithAgentBodyHistoryMax = 20;
 
 export const voiceConverseWithAgentBodyOwnerTimezoneMax = 80;
+
 
 
 export const VoiceConverseWithAgentBody = zod.object({
@@ -2013,6 +2033,7 @@ export const GetDocumentationResponse = zod.object({
  */
 
 
+
 export const UpdateDocumentationSettingsBody = zod.object({
   "agentId": zod.string().min(1)
 })
@@ -2038,6 +2059,7 @@ export const chatWithDocumentationBodyTextMax = 4000;
 export const chatWithDocumentationBodyHistoryItemTextMax = 8000;
 
 export const chatWithDocumentationBodyHistoryMax = 12;
+
 
 
 export const ChatWithDocumentationBody = zod.object({
@@ -2101,6 +2123,7 @@ export const updateProviderSettingsBodyCodexModelMax = 200;
 export const updateProviderSettingsBodyPaidFallbackLimitCentsMin = 0;
 
 
+
 export const UpdateProviderSettingsBody = zod.object({
   "defaultProvider": zod.enum(['claude_max', 'codex_chatgpt', 'openrouter']).optional(),
   "claudeModel": zod.string().max(updateProviderSettingsBodyClaudeModelMax).nullish(),
@@ -2157,6 +2180,7 @@ export const setProviderCredentialBodyCredentialMin = 8;
 export const setProviderCredentialBodyCredentialMax = 4000;
 
 
+
 export const SetProviderCredentialBody = zod.object({
   "credential": zod.string().min(setProviderCredentialBodyCredentialMin).max(setProviderCredentialBodyCredentialMax)
 }).describe('A provider API key or OAuth token belonging to this workspace\'s own account. It is encrypted before storage, never returned by any endpoint, and never exposed to an agent\'s tools or prompts.')
@@ -2203,6 +2227,7 @@ export const DeleteProviderCredentialResponse = zod.object({
  */
 export const connectCodexBodyAuthJsonMin = 2;
 export const connectCodexBodyAuthJsonMax = 20000;
+
 
 
 export const ConnectCodexBody = zod.object({
@@ -2591,6 +2616,7 @@ export const estimateTaskBodyObjectiveMax = 5000;
 export const estimateTaskBodyModelOverrideMax = 200;
 
 
+
 export const EstimateTaskBody = zod.object({
   "agentId": zod.string(),
   "objective": zod.string().min(estimateTaskBodyObjectiveMin).max(estimateTaskBodyObjectiveMax),
@@ -2615,6 +2641,7 @@ export const EstimateTaskResponse = zod.object({
  * @summary List or search memories, optionally scoped to one agent
  */
 export const listMemoriesQueryQMax = 500;
+
 
 
 export const ListMemoriesQueryParams = zod.object({
@@ -2644,6 +2671,7 @@ export const ListMemoriesResponse = zod.object({
  */
 export const createMemoryBodyContentMin = 3;
 export const createMemoryBodyContentMax = 4000;
+
 
 
 export const CreateMemoryBody = zod.object({
@@ -2710,6 +2738,7 @@ export const updateMemoryBodyContentMin = 3;
 export const updateMemoryBodyContentMax = 4000;
 
 
+
 export const UpdateMemoryBody = zod.object({
   "agentId": zod.string().nullish(),
   "kind": zod.enum(['fact', 'decision', 'context', 'task_outcome', 'relationship']).optional(),
@@ -2769,6 +2798,7 @@ export const createWorkspaceSkillBodyTriggersMax = 10;
 export const createWorkspaceSkillBodyInstructionsMax = 2000;
 
 
+
 export const CreateWorkspaceSkillBody = zod.object({
   "title": zod.string().min(1).max(createWorkspaceSkillBodyTitleMax),
   "triggers": zod.array(zod.string().min(1).max(createWorkspaceSkillBodyTriggersItemMax)).max(createWorkspaceSkillBodyTriggersMax),
@@ -2801,6 +2831,7 @@ export const updateWorkspaceSkillBodyTriggersItemMax = 40;
 export const updateWorkspaceSkillBodyTriggersMax = 10;
 
 export const updateWorkspaceSkillBodyInstructionsMax = 2000;
+
 
 
 export const UpdateWorkspaceSkillBody = zod.object({
@@ -2857,6 +2888,7 @@ export const uploadKnowledgeFileBodyMimeTypeMax = 100;
 export const uploadKnowledgeFileBodyDescriptionMax = 500;
 
 export const uploadKnowledgeFileBodyContentMax = 200000;
+
 
 
 export const UploadKnowledgeFileBody = zod.object({
@@ -2923,6 +2955,7 @@ export const recordTaskUsageBodyInputTokensMin = 0;
 export const recordTaskUsageBodyOutputTokensMin = 0;
 
 export const recordTaskUsageBodyCostCentsMin = 0;
+
 
 
 export const RecordTaskUsageBody = zod.object({
@@ -3054,6 +3087,7 @@ export const createScheduleBodyDaysOfWeekItemMax = 6;
 export const createScheduleBodyDayOfMonthMax = 31;
 
 
+
 export const CreateScheduleBody = zod.object({
   "name": zod.string().min(1).max(createScheduleBodyNameMax),
   "agentId": zod.string(),
@@ -3128,6 +3162,7 @@ export const updateScheduleBodyDaysOfWeekItemMax = 6;
 export const updateScheduleBodyDayOfMonthMax = 31;
 
 
+
 export const UpdateScheduleBody = zod.object({
   "name": zod.string().min(1).max(updateScheduleBodyNameMax).optional(),
   "objective": zod.string().min(updateScheduleBodyObjectiveMin).max(updateScheduleBodyObjectiveMax).optional(),
@@ -3197,6 +3232,7 @@ export const DeleteScheduleResponse = zod.void()
 export const listNotificationsQueryLimitMax = 200;
 
 
+
 export const ListNotificationsQueryParams = zod.object({
   "unreadOnly": zod.coerce.boolean().optional(),
   "limit": zod.coerce.number().min(1).max(listNotificationsQueryLimitMax).optional()
@@ -3221,6 +3257,7 @@ export const ListNotificationsResponse = zod.object({
  * @summary Mark notifications as read (all when no ids are given)
  */
 export const markNotificationsReadBodyIdsMax = 500;
+
 
 
 export const MarkNotificationsReadBody = zod.object({
@@ -3332,6 +3369,7 @@ export const listCustomApisResponseApisItemOperationsItemParamsItemNameMax = 40;
 export const listCustomApisResponseApisItemOperationsItemParamsItemDescriptionMax = 300;
 
 
+
 export const ListCustomApisResponse = zod.object({
   "apis": zod.array(zod.object({
   "id": zod.string(),
@@ -3397,6 +3435,7 @@ export const createCustomApiBodyOperationsItemParamsItemNameMax = 40;
 export const createCustomApiBodyOperationsItemParamsItemDescriptionMax = 300;
 
 
+
 export const CreateCustomApiBody = zod.object({
   "slug": zod.string().max(createCustomApiBodySlugMax),
   "displayName": zod.string().max(createCustomApiBodyDisplayNameMax),
@@ -3432,6 +3471,7 @@ export const createCustomApiResponseOperationsItemDescriptionMax = 300;
 export const createCustomApiResponseOperationsItemParamsItemNameMax = 40;
 
 export const createCustomApiResponseOperationsItemParamsItemDescriptionMax = 300;
+
 
 
 export const CreateCustomApiResponse = zod.object({
@@ -3477,6 +3517,7 @@ export const CreateCustomApiResponse = zod.object({
 export const parseCustomApiSpecBodyDocumentMax = 524288;
 
 
+
 export const ParseCustomApiSpecBody = zod.object({
   "document": zod.string().max(parseCustomApiSpecBodyDocumentMax).describe('OpenAPI 3.x document as JSON text.')
 })
@@ -3490,6 +3531,7 @@ export const parseCustomApiSpecResponseOperationsItemDescriptionMax = 300;
 export const parseCustomApiSpecResponseOperationsItemParamsItemNameMax = 40;
 
 export const parseCustomApiSpecResponseOperationsItemParamsItemDescriptionMax = 300;
+
 
 
 export const ParseCustomApiSpecResponse = zod.object({
@@ -3543,6 +3585,7 @@ export const updateCustomApiBodyOperationsItemParamsItemNameMax = 40;
 export const updateCustomApiBodyOperationsItemParamsItemDescriptionMax = 300;
 
 
+
 export const UpdateCustomApiBody = zod.object({
   "displayName": zod.string().max(updateCustomApiBodyDisplayNameMax).optional(),
   "description": zod.string().max(updateCustomApiBodyDescriptionMax).nullish(),
@@ -3578,6 +3621,7 @@ export const updateCustomApiResponseOperationsItemDescriptionMax = 300;
 export const updateCustomApiResponseOperationsItemParamsItemNameMax = 40;
 
 export const updateCustomApiResponseOperationsItemParamsItemDescriptionMax = 300;
+
 
 
 export const UpdateCustomApiResponse = zod.object({
@@ -3641,6 +3685,7 @@ export const RotateCustomApiCredentialParams = zod.object({
 export const rotateCustomApiCredentialBodyCredentialMax = 4096;
 
 
+
 export const RotateCustomApiCredentialBody = zod.object({
   "credential": zod.string().max(rotateCustomApiCredentialBodyCredentialMax)
 })
@@ -3654,6 +3699,7 @@ export const rotateCustomApiCredentialResponseOperationsItemDescriptionMax = 300
 export const rotateCustomApiCredentialResponseOperationsItemParamsItemNameMax = 40;
 
 export const rotateCustomApiCredentialResponseOperationsItemParamsItemDescriptionMax = 300;
+
 
 
 export const RotateCustomApiCredentialResponse = zod.object({
@@ -3868,4 +3914,5 @@ export const StartGithubOauthResponse = zod.object({
 export const DisconnectGithubAccountResponse = zod.object({
   "disconnected": zod.boolean()
 })
+
 

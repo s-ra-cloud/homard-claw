@@ -3,7 +3,7 @@ name: Queue-worker ownership lease
 description: How the task queue's singleton worker is elected, heartbeated, and fenced across takeovers
 ---
 
-The queue worker is a cluster singleton via an expiring, heartbeated `worker_ownership` row, not a session advisory lock. The holder renews on a timer; any standby instance atomically takes over an expired row.
+The queue worker is a cluster singleton via an expiring, heartbeated `worker_ownership` row, not a session advisory lock. The holder renews on a timer; any standby instance atomically takes over an expired row. A heartbeat proves only liveness, not tick progress.
 
 **Why:** an Autoscale instance can go idle/frozen without dropping its Postgres session, so a session lock wedged the queue until redeploy. A bounded lease self-heals.
 
@@ -12,6 +12,8 @@ The queue worker is a cluster singleton via an expiring, heartbeated `worker_own
 - Fencing is layered (keep all three when touching the worker loop): a rejected renewal aborts all local provider calls; claiming stops once the local copy of the expiry passes (works with the DB unreachable); and the per-attempt completion fence rejects stale results after the new owner requeues and reclaims work.
 - The renewal heartbeat runs on its own timer — the tick loop can be busy for minutes inside one provider call, so never rely on ticks to renew.
 - Clean shutdown deletes the row (instant handoff); a crash relies on TTL expiry (bounded handoff).
+- Never forcibly replace a fresh holder: generation fencing rejects stale DB completion, but it cannot prove an external action/provider call observed cancellation, so forced takeover can duplicate side effects. Report heartbeating-without-progress as stalled and restart it through deployment.
+- Production must use Reserved VM (always-running compute), not Autoscale. A rolling Autoscale release can leave an older instance heartbeating ownership after the new release starts; because background ticks are persistent work, republish on Reserved VM to retire that class of split-generation stall.
 - Tests must NEVER touch the production ownership key — the live dev server's worker owns it. Use run-unique keys, and drive the worker's exported ownership hooks directly instead of starting the polling loop (which would claim real queued tasks).
 
 ## Recovery-pass fencing (manual + automatic)

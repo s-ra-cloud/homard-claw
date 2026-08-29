@@ -24,5 +24,6 @@ export type RuntimeHealthReportWorker = {
   renewalFailures: number;
   ownershipLosses: number;
   takeovers: number;
+  processingStalled: boolean;
   ownership: RuntimeHealthReportWorkerOwnership;
 };

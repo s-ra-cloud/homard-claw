@@ -2975,13 +2975,23 @@ components:
         queue:
           type: object
           required:
-            [queued, running, waitingApproval, blocked, oldestQueuedSeconds]
+            [
+              queued,
+              runnableQueued,
+              running,
+              waitingApproval,
+              blocked,
+              oldestQueuedSeconds,
+              oldestRunnableSeconds,
+            ]
           properties:
             queued: { type: number }
+            runnableQueued: { type: number }
             running: { type: number }
             waitingApproval: { type: number }
             blocked: { type: number }
             oldestQueuedSeconds: { type: [number, "null"] }
+            oldestRunnableSeconds: { type: [number, "null"] }
         worker:
           type: object
           required:
@@ -2996,6 +3006,7 @@ components:
               renewalFailures,
               ownershipLosses,
               takeovers,
+              processingStalled,
               ownership,
             ]
           properties:
@@ -3014,6 +3025,9 @@ components:
             renewalFailures: { type: number }
             ownershipLosses: { type: number }
             takeovers: { type: number }
+            # True when a fresh holder leaves immediately runnable work
+            # untouched with no task running. A heartbeat alone is not health.
+            processingStalled: { type: boolean }
             # The durable ownership row. stale=true (or holder=null) means
             # heartbeats stopped and a takeover is imminent or in progress.
             ownership:
@@ -3041,11 +3055,13 @@ components:
       properties:
         # already_active: this instance already held a fresh lease — no reset.
         # healthy_elsewhere: another instance holds a fresh lease — no reset.
+        # stalled_elsewhere: another instance still heartbeats but has stopped
+        # claiming runnable tasks; it is reported but not forcibly displaced.
         # recovered: stale or missing ownership was replaced under a new
         # generation and orphaned running work was requeued.
         outcome:
           type: string
-          enum: [already_active, healthy_elsewhere, recovered]
+          enum: [already_active, healthy_elsewhere, stalled_elsewhere, recovered]
         ownershipChanged: { type: boolean }
         # Orphaned tasks OF THE CALLING WORKSPACE requeued by this pass.
         # The pass itself is global (one worker serves every workspace),

@@ -23,6 +23,7 @@ import {
   withOwnershipFence,
   WORKER_INSTANCE_ID,
 } from "./worker-ownership";
+import { isQueueProcessingStalled, type QueueHealth } from "./runtime";
 
 /**
  * The owner's "Recover queue" escape hatch. Every test binds the recovery
@@ -40,6 +41,67 @@ function testKey(name: string): string {
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function queueHealthFixture(
+  values: Partial<QueueHealth> = {},
+): QueueHealth {
+  return {
+    queued: 0,
+    runnableQueued: 0,
+    running: 0,
+    waitingApproval: 0,
+    blocked: 0,
+    oldestQueuedSeconds: null,
+    oldestRunnableSeconds: null,
+    ...values,
+  };
+}
+
+describe("queue processing health", () => {
+  it("does not confuse a fresh heartbeat with progress", () => {
+    expect(
+      isQueueProcessingStalled(
+        queueHealthFixture({
+          queued: 1,
+          runnableQueued: 1,
+          oldestQueuedSeconds: 120,
+          oldestRunnableSeconds: 120,
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isQueueProcessingStalled(
+        queueHealthFixture({
+          queued: 1,
+          runnableQueued: 1,
+          running: 1,
+          oldestRunnableSeconds: 120,
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      isQueueProcessingStalled(
+        queueHealthFixture({
+          queued: 1,
+          runnableQueued: 0,
+          oldestQueuedSeconds: 120,
+        }),
+      ),
+    ).toBe(false);
+    // This workspace may be waiting, but the single global worker is
+    // legitimately busy on another workspace — do not call it stalled.
+    expect(
+      isQueueProcessingStalled(
+        queueHealthFixture({
+          queued: 1,
+          runnableQueued: 1,
+          oldestRunnableSeconds: 120,
+        }),
+        1,
+      ),
+    ).toBe(false);
+  });
+});
 
 let wsId = "";
 let agentId = "";

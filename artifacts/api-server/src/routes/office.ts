@@ -124,7 +124,12 @@ import { recordAudit, verifyAuditChain } from "../audit";
 import { agentPromptContext, dispatchTask } from "../dispatch";
 import { publish } from "../events";
 import { effectivePermissions } from "../policy";
-import { DEFAULT_RUNTIME, listRuntimeHealth, queueHealth } from "../runtime";
+import {
+  DEFAULT_RUNTIME,
+  isQueueProcessingStalled,
+  listRuntimeHealth,
+  queueHealth,
+} from "../runtime";
 import { abortRunningTask, getWorkerStatus, recoverQueueNow } from "../worker";
 import {
   QUEUE_OWNERSHIP_KEY,
@@ -182,13 +187,19 @@ router.use(connectedAppsRouter);
 router.use(capabilitiesRouter);
 
 router.get("/runtime/health", async (req: Request, res: Response) => {
-  const [runtimes, queue, stop, owner] = await Promise.all([
+  const [runtimes, queue, globalQueue, stop, owner] = await Promise.all([
     listRuntimeHealth(req.workspaceId!),
+    queueHealth(req.workspaceId!),
+    // Used only to avoid calling this worker stalled while it is executing
+    // another workspace's task. Never expose these aggregate counts.
     queueHealth(),
     getWorkspaceSetting(req.workspaceId!, "emergency_stop"),
     getOwnershipSnapshot(QUEUE_OWNERSHIP_KEY),
   ]);
   const worker = getWorkerStatus();
+  const processingStalled =
+    !owner?.stale &&
+    isQueueProcessingStalled(queue, globalQueue.running);
   res.json(
     GetRuntimeHealthResponse.parse({
       activeRuntime: DEFAULT_RUNTIME,
@@ -211,6 +222,7 @@ router.get("/runtime/health", async (req: Request, res: Response) => {
         renewalFailures: worker.renewalFailures,
         ownershipLosses: worker.ownershipLosses,
         takeovers: worker.takeovers,
+         processingStalled,
         // The durable ownership row itself — whichever instance serves this
         // request. `stale: true` means heartbeats stopped (or no owner
         // exists) and the next healthy poller will take over.
@@ -242,7 +254,9 @@ router.get("/runtime/health", async (req: Request, res: Response) => {
 router.post("/runtime/recover-queue", async (req, res): Promise<void> => {
   const result = await recoverQueueNow(req.workspaceId!);
   const message =
-    result.outcome === "healthy_elsewhere"
+    result.outcome === "stalled_elsewhere"
+      ? "The worker is still heartbeating but has stopped claiming runnable tasks. It was not forcibly replaced because that could duplicate in-flight external actions. Republish this app on Reserved VM to restart it safely."
+      : result.outcome === "healthy_elsewhere"
       ? "The queue worker is healthy on another server instance; nothing was reset."
       : result.outcome === "already_active"
         ? "This server already runs the queue and its heartbeat is fresh; nothing was reset."
