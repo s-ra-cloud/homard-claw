@@ -531,6 +531,39 @@ router.delete(
   },
 );
 
+/** Deadlock (40P01) or serialization (40001) failure on the cause chain. */
+function isRetryableTxConflict(error: unknown): boolean {
+  let current: unknown = error;
+  for (
+    let depth = 0;
+    depth < 5 && typeof current === "object" && current !== null;
+    depth += 1
+  ) {
+    const code = (current as { code?: string }).code;
+    if (code === "40P01" || code === "40001") return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/**
+ * Run a transaction, retrying once when Postgres aborts it as a deadlock
+ * victim. The delegate flow locks the parent task and then the workspace
+ * row, while other dispatch paths take those locks in their own order, so
+ * under concurrency one side can be chosen as the victim — its transaction
+ * rolled back cleanly, making a single retry safe and effective.
+ */
+async function transactionWithDeadlockRetry<T>(
+  run: (tx: Parameters<Parameters<typeof db.transaction>[0]>[0]) => Promise<T>,
+): Promise<T> {
+  try {
+    return await db.transaction(run);
+  } catch (error) {
+    if (!isRetryableTxConflict(error)) throw error;
+    return db.transaction(run);
+  }
+}
+
 router.post("/tasks/:taskId/delegate", async (req: Request, res: Response) => {
   const { taskId } = DelegateTaskParams.parse(req.params);
   const body = DelegateTaskBody.parse(req.body);
@@ -540,7 +573,7 @@ router.post("/tasks/:taskId/delegate", async (req: Request, res: Response) => {
   // concurrent hand-offs could each see spare capacity and both insert,
   // overshooting the lead's sub-task limit; the lock also freezes team
   // membership and lineage for the duration of the decision.
-  const outcome = await db.transaction(async (tx) => {
+  const outcome = await transactionWithDeadlockRetry(async (tx) => {
     const [parent] = await tx
       .select({ task: tasksTable, agent: agentsTable })
       .from(tasksTable)

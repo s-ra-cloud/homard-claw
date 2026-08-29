@@ -2,6 +2,7 @@ import {
   executeOperation,
   type ExecutionOutcome,
 } from "../connected-apps/connections";
+import { executeCustomApiTool } from "../connected-apps/custom-api-executor";
 import { mcpCallTool, McpConfigError, resolveMcpEndpoint } from "./mcp";
 import type { ResolvedCapabilityTool } from "./service";
 import { executeNativeWebHandler } from "./web";
@@ -21,8 +22,23 @@ const DEFAULT_MCP_RESULT_CHARS = 4_000;
 export async function executeCapabilityTool(
   tool: ResolvedCapabilityTool,
   params: Record<string, unknown>,
-  context: { actionId: string; workspaceId: string | null },
+  context: {
+    actionId: string;
+    workspaceId: string | null;
+    /**
+     * For custom-API tools: the definition revision the request was
+     * recorded/approved under. The executor refuses on mismatch so an
+     * owner edit between approval and execution fails closed.
+     */
+    expectedRevision?: string | null;
+  },
 ): Promise<ExecutionOutcome> {
+  if (tool.def.executor.kind === "custom_api") {
+    return executeCustomApiTool(tool, params, {
+      workspaceId: context.workspaceId,
+      expectedRevision: context.expectedRevision ?? null,
+    });
+  }
   if (tool.def.executor.kind === "builtin") {
     if (!tool.builtinOp) {
       return {

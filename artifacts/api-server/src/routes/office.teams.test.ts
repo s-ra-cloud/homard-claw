@@ -340,7 +340,10 @@ describe("delegation authorization", () => {
         .post(`/api/agents/${lead.id}/delegate-from-talk`)
         .send({
           targetAgentId: worker.id,
-          objective: `${RUN_TAG} investigate the alert`,
+          // No RUN_TAG here on purpose: the tag's tokens appear in every
+          // seeded memory, so a tagged objective would rank the unrelated
+          // pinned memory as "relevant" purely through fixture boilerplate.
+          objective: "Check the alert logs and report back",
           note: "Please check the latest logs and report back.",
         });
       expect(res.status).toBe(201);

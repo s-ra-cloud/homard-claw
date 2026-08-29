@@ -1899,6 +1899,8 @@ export const converseWithAgentBodyAttachmentsItemContentMax = 3000000;
 export const converseWithAgentBodyAttachmentsMax = 4;
 
 export const converseWithAgentBodyOwnerTimezoneMax = 80;
+
+
 export const ConverseWithAgentBody = zod.object({
   "text": zod.string().min(1).max(converseWithAgentBodyTextMax),
   "clientMessageId": zod.string().max(converseWithAgentBodyClientMessageIdMax).optional().describe('Client-generated id for this message. Resending with the same id returns the already-generated reply instead of creating a duplicate exchange.'),
@@ -1945,6 +1947,8 @@ export const voiceConverseWithAgentBodyHistoryItemTextMax = 8000;
 export const voiceConverseWithAgentBodyHistoryMax = 20;
 
 export const voiceConverseWithAgentBodyOwnerTimezoneMax = 80;
+
+
 export const VoiceConverseWithAgentBody = zod.object({
   "audio": zod.string().describe('Base64-encoded audio recording (webm\/mp4\/wav\/ogg)'),
   "history": zod.array(zod.object({
@@ -3311,6 +3315,395 @@ export const UpdateConnectedAppResponse = zod.object({
   "statusDetail": zod.string().nullable(),
   "accountLabel": zod.string().nullable().describe('Human-readable identity of the connected account (email or login) when the platform exposes one. Never a credential.'),
   "grantedAgents": zod.number()
+})
+
+
+/**
+ * @summary Owner-whitelisted custom API connections (secrets never included)
+ */
+export const listCustomApisResponseApisItemOperationsItemIdMax = 60;
+
+export const listCustomApisResponseApisItemOperationsItemPathMax = 200;
+
+export const listCustomApisResponseApisItemOperationsItemDescriptionMax = 300;
+
+export const listCustomApisResponseApisItemOperationsItemParamsItemNameMax = 40;
+
+export const listCustomApisResponseApisItemOperationsItemParamsItemDescriptionMax = 300;
+
+
+export const ListCustomApisResponse = zod.object({
+  "apis": zod.array(zod.object({
+  "id": zod.string(),
+  "slug": zod.string(),
+  "packageId": zod.string(),
+  "displayName": zod.string(),
+  "description": zod.string(),
+  "baseUrl": zod.string(),
+  "authType": zod.enum(['none', 'api_key', 'bearer']),
+  "authHeaderName": zod.string().nullable(),
+  "hasCredential": zod.boolean(),
+  "operations": zod.array(zod.object({
+  "id": zod.string().max(listCustomApisResponseApisItemOperationsItemIdMax),
+  "method": zod.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']),
+  "path": zod.string().max(listCustomApisResponseApisItemOperationsItemPathMax),
+  "description": zod.string().max(listCustomApisResponseApisItemOperationsItemDescriptionMax),
+  "level": zod.enum(['read', 'draft', 'write']),
+  "params": zod.array(zod.object({
+  "name": zod.string().max(listCustomApisResponseApisItemOperationsItemParamsItemNameMax),
+  "in": zod.enum(['path', 'query', 'body']),
+  "kind": zod.enum(['string', 'number']),
+  "required": zod.boolean(),
+  "maxLength": zod.number().nullish(),
+  "multiline": zod.boolean().nullish(),
+  "description": zod.string().max(listCustomApisResponseApisItemOperationsItemParamsItemDescriptionMax).nullish()
+}).describe('One typed parameter of a whitelisted operation. Path parameters are always required single URL segments; only body parameters may be multiline.'))
+}).describe('One whitelisted endpoint. GET operations are always level \"read\"; any other method is \"draft\" or \"write\" — writes pass the approval desk before running.')),
+  "revision": zod.string(),
+  "enabled": zod.boolean(),
+  "validationStatus": zod.enum(['unchecked', 'ok', 'failed']),
+  "validationDetail": zod.string().nullable(),
+  "validatedAt": zod.coerce.date().nullable(),
+  "grantedAgents": zod.number(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}).describe('Displayable configuration of one owner-whitelisted API. The stored credential is never included in any response; hasCredential only reports whether one is saved.'))
+})
+
+
+/**
+ * @summary Whitelist a third-party REST API with an exact operation catalog
+ */
+export const createCustomApiBodySlugMax = 40;
+
+export const createCustomApiBodyDisplayNameMax = 80;
+
+export const createCustomApiBodyDescriptionMax = 300;
+
+export const createCustomApiBodyBaseUrlMax = 300;
+
+export const createCustomApiBodyAuthHeaderNameMax = 60;
+
+export const createCustomApiBodyCredentialMax = 4096;
+
+export const createCustomApiBodyOperationsItemIdMax = 60;
+
+export const createCustomApiBodyOperationsItemPathMax = 200;
+
+export const createCustomApiBodyOperationsItemDescriptionMax = 300;
+
+export const createCustomApiBodyOperationsItemParamsItemNameMax = 40;
+
+export const createCustomApiBodyOperationsItemParamsItemDescriptionMax = 300;
+
+
+export const CreateCustomApiBody = zod.object({
+  "slug": zod.string().max(createCustomApiBodySlugMax),
+  "displayName": zod.string().max(createCustomApiBodyDisplayNameMax),
+  "description": zod.string().max(createCustomApiBodyDescriptionMax).nullish(),
+  "baseUrl": zod.string().max(createCustomApiBodyBaseUrlMax),
+  "authType": zod.enum(['none', 'api_key', 'bearer']),
+  "authHeaderName": zod.string().max(createCustomApiBodyAuthHeaderNameMax).nullish(),
+  "credential": zod.string().max(createCustomApiBodyCredentialMax).nullish(),
+  "operations": zod.array(zod.object({
+  "id": zod.string().max(createCustomApiBodyOperationsItemIdMax),
+  "method": zod.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']),
+  "path": zod.string().max(createCustomApiBodyOperationsItemPathMax),
+  "description": zod.string().max(createCustomApiBodyOperationsItemDescriptionMax),
+  "level": zod.enum(['read', 'draft', 'write']),
+  "params": zod.array(zod.object({
+  "name": zod.string().max(createCustomApiBodyOperationsItemParamsItemNameMax),
+  "in": zod.enum(['path', 'query', 'body']),
+  "kind": zod.enum(['string', 'number']),
+  "required": zod.boolean(),
+  "maxLength": zod.number().nullish(),
+  "multiline": zod.boolean().nullish(),
+  "description": zod.string().max(createCustomApiBodyOperationsItemParamsItemDescriptionMax).nullish()
+}).describe('One typed parameter of a whitelisted operation. Path parameters are always required single URL segments; only body parameters may be multiline.'))
+}).describe('One whitelisted endpoint. GET operations are always level \"read\"; any other method is \"draft\" or \"write\" — writes pass the approval desk before running.'))
+})
+
+export const createCustomApiResponseOperationsItemIdMax = 60;
+
+export const createCustomApiResponseOperationsItemPathMax = 200;
+
+export const createCustomApiResponseOperationsItemDescriptionMax = 300;
+
+export const createCustomApiResponseOperationsItemParamsItemNameMax = 40;
+
+export const createCustomApiResponseOperationsItemParamsItemDescriptionMax = 300;
+
+
+export const CreateCustomApiResponse = zod.object({
+  "id": zod.string(),
+  "slug": zod.string(),
+  "packageId": zod.string(),
+  "displayName": zod.string(),
+  "description": zod.string(),
+  "baseUrl": zod.string(),
+  "authType": zod.enum(['none', 'api_key', 'bearer']),
+  "authHeaderName": zod.string().nullable(),
+  "hasCredential": zod.boolean(),
+  "operations": zod.array(zod.object({
+  "id": zod.string().max(createCustomApiResponseOperationsItemIdMax),
+  "method": zod.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']),
+  "path": zod.string().max(createCustomApiResponseOperationsItemPathMax),
+  "description": zod.string().max(createCustomApiResponseOperationsItemDescriptionMax),
+  "level": zod.enum(['read', 'draft', 'write']),
+  "params": zod.array(zod.object({
+  "name": zod.string().max(createCustomApiResponseOperationsItemParamsItemNameMax),
+  "in": zod.enum(['path', 'query', 'body']),
+  "kind": zod.enum(['string', 'number']),
+  "required": zod.boolean(),
+  "maxLength": zod.number().nullish(),
+  "multiline": zod.boolean().nullish(),
+  "description": zod.string().max(createCustomApiResponseOperationsItemParamsItemDescriptionMax).nullish()
+}).describe('One typed parameter of a whitelisted operation. Path parameters are always required single URL segments; only body parameters may be multiline.'))
+}).describe('One whitelisted endpoint. GET operations are always level \"read\"; any other method is \"draft\" or \"write\" — writes pass the approval desk before running.')),
+  "revision": zod.string(),
+  "enabled": zod.boolean(),
+  "validationStatus": zod.enum(['unchecked', 'ok', 'failed']),
+  "validationDetail": zod.string().nullable(),
+  "validatedAt": zod.coerce.date().nullable(),
+  "grantedAgents": zod.number(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}).describe('Displayable configuration of one owner-whitelisted API. The stored credential is never included in any response; hasCredential only reports whether one is saved.')
+
+
+/**
+ * @summary Parse an OpenAPI 3 JSON document into draft operations for review
+ */
+export const parseCustomApiSpecBodyDocumentMax = 524288;
+
+
+export const ParseCustomApiSpecBody = zod.object({
+  "document": zod.string().max(parseCustomApiSpecBodyDocumentMax).describe('OpenAPI 3.x document as JSON text.')
+})
+
+export const parseCustomApiSpecResponseOperationsItemIdMax = 60;
+
+export const parseCustomApiSpecResponseOperationsItemPathMax = 200;
+
+export const parseCustomApiSpecResponseOperationsItemDescriptionMax = 300;
+
+export const parseCustomApiSpecResponseOperationsItemParamsItemNameMax = 40;
+
+export const parseCustomApiSpecResponseOperationsItemParamsItemDescriptionMax = 300;
+
+
+export const ParseCustomApiSpecResponse = zod.object({
+  "operations": zod.array(zod.object({
+  "id": zod.string().max(parseCustomApiSpecResponseOperationsItemIdMax),
+  "method": zod.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']),
+  "path": zod.string().max(parseCustomApiSpecResponseOperationsItemPathMax),
+  "description": zod.string().max(parseCustomApiSpecResponseOperationsItemDescriptionMax),
+  "level": zod.enum(['read', 'draft', 'write']),
+  "params": zod.array(zod.object({
+  "name": zod.string().max(parseCustomApiSpecResponseOperationsItemParamsItemNameMax),
+  "in": zod.enum(['path', 'query', 'body']),
+  "kind": zod.enum(['string', 'number']),
+  "required": zod.boolean(),
+  "maxLength": zod.number().nullish(),
+  "multiline": zod.boolean().nullish(),
+  "description": zod.string().max(parseCustomApiSpecResponseOperationsItemParamsItemDescriptionMax).nullish()
+}).describe('One typed parameter of a whitelisted operation. Path parameters are always required single URL segments; only body parameters may be multiline.'))
+}).describe('One whitelisted endpoint. GET operations are always level \"read\"; any other method is \"draft\" or \"write\" — writes pass the approval desk before running.')),
+  "warnings": zod.array(zod.string()),
+  "suggestedBaseUrl": zod.string().nullable(),
+  "suggestedName": zod.string().nullable()
+})
+
+
+/**
+ * @summary Update a custom API definition, enable/disable it, or both
+ */
+export const UpdateCustomApiParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const updateCustomApiBodyDisplayNameMax = 80;
+
+export const updateCustomApiBodyDescriptionMax = 300;
+
+export const updateCustomApiBodyBaseUrlMax = 300;
+
+export const updateCustomApiBodyAuthHeaderNameMax = 60;
+
+export const updateCustomApiBodyCredentialMax = 4096;
+
+export const updateCustomApiBodyOperationsItemIdMax = 60;
+
+export const updateCustomApiBodyOperationsItemPathMax = 200;
+
+export const updateCustomApiBodyOperationsItemDescriptionMax = 300;
+
+export const updateCustomApiBodyOperationsItemParamsItemNameMax = 40;
+
+export const updateCustomApiBodyOperationsItemParamsItemDescriptionMax = 300;
+
+
+export const UpdateCustomApiBody = zod.object({
+  "displayName": zod.string().max(updateCustomApiBodyDisplayNameMax).optional(),
+  "description": zod.string().max(updateCustomApiBodyDescriptionMax).nullish(),
+  "baseUrl": zod.string().max(updateCustomApiBodyBaseUrlMax).optional(),
+  "authType": zod.enum(['none', 'api_key', 'bearer']).optional(),
+  "authHeaderName": zod.string().max(updateCustomApiBodyAuthHeaderNameMax).nullish(),
+  "credential": zod.string().max(updateCustomApiBodyCredentialMax).nullish(),
+  "operations": zod.array(zod.object({
+  "id": zod.string().max(updateCustomApiBodyOperationsItemIdMax),
+  "method": zod.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']),
+  "path": zod.string().max(updateCustomApiBodyOperationsItemPathMax),
+  "description": zod.string().max(updateCustomApiBodyOperationsItemDescriptionMax),
+  "level": zod.enum(['read', 'draft', 'write']),
+  "params": zod.array(zod.object({
+  "name": zod.string().max(updateCustomApiBodyOperationsItemParamsItemNameMax),
+  "in": zod.enum(['path', 'query', 'body']),
+  "kind": zod.enum(['string', 'number']),
+  "required": zod.boolean(),
+  "maxLength": zod.number().nullish(),
+  "multiline": zod.boolean().nullish(),
+  "description": zod.string().max(updateCustomApiBodyOperationsItemParamsItemDescriptionMax).nullish()
+}).describe('One typed parameter of a whitelisted operation. Path parameters are always required single URL segments; only body parameters may be multiline.'))
+}).describe('One whitelisted endpoint. GET operations are always level \"read\"; any other method is \"draft\" or \"write\" — writes pass the approval desk before running.')).optional(),
+  "enabled": zod.boolean().optional()
+}).describe('Partial update. Changing the definition (displayName, description, baseUrl, authType, authHeaderName, or operations) bumps the definition revision and invalidates pending approvals; toggling enabled off also invalidates them. The credential is only changed through the rotate endpoint.')
+
+export const updateCustomApiResponseOperationsItemIdMax = 60;
+
+export const updateCustomApiResponseOperationsItemPathMax = 200;
+
+export const updateCustomApiResponseOperationsItemDescriptionMax = 300;
+
+export const updateCustomApiResponseOperationsItemParamsItemNameMax = 40;
+
+export const updateCustomApiResponseOperationsItemParamsItemDescriptionMax = 300;
+
+
+export const UpdateCustomApiResponse = zod.object({
+  "id": zod.string(),
+  "slug": zod.string(),
+  "packageId": zod.string(),
+  "displayName": zod.string(),
+  "description": zod.string(),
+  "baseUrl": zod.string(),
+  "authType": zod.enum(['none', 'api_key', 'bearer']),
+  "authHeaderName": zod.string().nullable(),
+  "hasCredential": zod.boolean(),
+  "operations": zod.array(zod.object({
+  "id": zod.string().max(updateCustomApiResponseOperationsItemIdMax),
+  "method": zod.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']),
+  "path": zod.string().max(updateCustomApiResponseOperationsItemPathMax),
+  "description": zod.string().max(updateCustomApiResponseOperationsItemDescriptionMax),
+  "level": zod.enum(['read', 'draft', 'write']),
+  "params": zod.array(zod.object({
+  "name": zod.string().max(updateCustomApiResponseOperationsItemParamsItemNameMax),
+  "in": zod.enum(['path', 'query', 'body']),
+  "kind": zod.enum(['string', 'number']),
+  "required": zod.boolean(),
+  "maxLength": zod.number().nullish(),
+  "multiline": zod.boolean().nullish(),
+  "description": zod.string().max(updateCustomApiResponseOperationsItemParamsItemDescriptionMax).nullish()
+}).describe('One typed parameter of a whitelisted operation. Path parameters are always required single URL segments; only body parameters may be multiline.'))
+}).describe('One whitelisted endpoint. GET operations are always level \"read\"; any other method is \"draft\" or \"write\" — writes pass the approval desk before running.')),
+  "revision": zod.string(),
+  "enabled": zod.boolean(),
+  "validationStatus": zod.enum(['unchecked', 'ok', 'failed']),
+  "validationDetail": zod.string().nullable(),
+  "validatedAt": zod.coerce.date().nullable(),
+  "grantedAgents": zod.number(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}).describe('Displayable configuration of one owner-whitelisted API. The stored credential is never included in any response; hasCredential only reports whether one is saved.')
+
+
+/**
+ * @summary Remove a custom API, its grants, and any pending approvals for it
+ */
+export const DeleteCustomApiParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const DeleteCustomApiResponse = zod.object({
+  "deleted": zod.boolean(),
+  "removedGrants": zod.number(),
+  "expiredApprovals": zod.number()
+})
+
+
+/**
+ * @summary Set or rotate the stored credential (never echoed back)
+ */
+export const RotateCustomApiCredentialParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const rotateCustomApiCredentialBodyCredentialMax = 4096;
+
+
+export const RotateCustomApiCredentialBody = zod.object({
+  "credential": zod.string().max(rotateCustomApiCredentialBodyCredentialMax)
+})
+
+export const rotateCustomApiCredentialResponseOperationsItemIdMax = 60;
+
+export const rotateCustomApiCredentialResponseOperationsItemPathMax = 200;
+
+export const rotateCustomApiCredentialResponseOperationsItemDescriptionMax = 300;
+
+export const rotateCustomApiCredentialResponseOperationsItemParamsItemNameMax = 40;
+
+export const rotateCustomApiCredentialResponseOperationsItemParamsItemDescriptionMax = 300;
+
+
+export const RotateCustomApiCredentialResponse = zod.object({
+  "id": zod.string(),
+  "slug": zod.string(),
+  "packageId": zod.string(),
+  "displayName": zod.string(),
+  "description": zod.string(),
+  "baseUrl": zod.string(),
+  "authType": zod.enum(['none', 'api_key', 'bearer']),
+  "authHeaderName": zod.string().nullable(),
+  "hasCredential": zod.boolean(),
+  "operations": zod.array(zod.object({
+  "id": zod.string().max(rotateCustomApiCredentialResponseOperationsItemIdMax),
+  "method": zod.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']),
+  "path": zod.string().max(rotateCustomApiCredentialResponseOperationsItemPathMax),
+  "description": zod.string().max(rotateCustomApiCredentialResponseOperationsItemDescriptionMax),
+  "level": zod.enum(['read', 'draft', 'write']),
+  "params": zod.array(zod.object({
+  "name": zod.string().max(rotateCustomApiCredentialResponseOperationsItemParamsItemNameMax),
+  "in": zod.enum(['path', 'query', 'body']),
+  "kind": zod.enum(['string', 'number']),
+  "required": zod.boolean(),
+  "maxLength": zod.number().nullish(),
+  "multiline": zod.boolean().nullish(),
+  "description": zod.string().max(rotateCustomApiCredentialResponseOperationsItemParamsItemDescriptionMax).nullish()
+}).describe('One typed parameter of a whitelisted operation. Path parameters are always required single URL segments; only body parameters may be multiline.'))
+}).describe('One whitelisted endpoint. GET operations are always level \"read\"; any other method is \"draft\" or \"write\" — writes pass the approval desk before running.')),
+  "revision": zod.string(),
+  "enabled": zod.boolean(),
+  "validationStatus": zod.enum(['unchecked', 'ok', 'failed']),
+  "validationDetail": zod.string().nullable(),
+  "validatedAt": zod.coerce.date().nullable(),
+  "grantedAgents": zod.number(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}).describe('Displayable configuration of one owner-whitelisted API. The stored credential is never included in any response; hasCredential only reports whether one is saved.')
+
+
+/**
+ * @summary Probe the API's base URL through the hardened executor
+ */
+export const ValidateCustomApiParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const ValidateCustomApiResponse = zod.object({
+  "status": zod.enum(['ok', 'failed']),
+  "detail": zod.string().nullable(),
+  "validatedAt": zod.coerce.date()
 })
 
 

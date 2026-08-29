@@ -134,6 +134,7 @@ import {
   listRecentAgentActions,
   listTaskActions,
 } from "../connected-apps/actions";
+import { listCustomApiPackageIds } from "../connected-apps/custom-apis";
 import {
   ApprovalDecisionError,
   decideApproval,
@@ -264,13 +265,20 @@ type AppGrantJson = { app: string; accessLevel: AppAccessLevel };
 /**
  * Last entry wins when a payload repeats an app; order is normalized.
  * Grants may target any vetted capability package (built-in app or
- * installed package); anything outside the registry is dropped — a grant
- * to an unknown package could never authorize anything anyway.
+ * installed package) or one of THIS workspace's own custom APIs; anything
+ * else is dropped — a grant to an unknown package could never authorize
+ * anything anyway, and a grant to another workspace's custom API must
+ * never be persisted.
  */
-function dedupeGrants(grants: readonly AppGrantJson[]): AppGrantJson[] {
+function dedupeGrants(
+  grants: readonly AppGrantJson[],
+  workspaceCustomApps: ReadonlySet<string>,
+): AppGrantJson[] {
   const byApp = new Map<string, AppAccessLevel>();
   for (const grant of grants) {
-    if (!findRegistryEntry(grant.app)) continue;
+    if (!findRegistryEntry(grant.app) && !workspaceCustomApps.has(grant.app)) {
+      continue;
+    }
     byApp.set(grant.app, grant.accessLevel);
   }
   return [...byApp.entries()]
@@ -548,6 +556,7 @@ router.post("/agents", async (req, res): Promise<void> => {
   // Grants ride along on the create payload but live in their own table;
   // they must never be spread into the agents insert.
   const { appGrants, ...agentFields } = parsed.data;
+  const customApps = await listCustomApiPackageIds(req.workspaceId!);
   try {
     const outcome = await db.transaction(async (tx) => {
       const [agent] = await tx
@@ -559,7 +568,7 @@ router.post("/agents", async (req, res): Promise<void> => {
           status: "idle",
         })
         .returning();
-      const grants = dedupeGrants(appGrants ?? []);
+      const grants = dedupeGrants(appGrants ?? [], customApps);
       if (grants.length > 0) {
         await tx.insert(agentAppGrantsTable).values(
           grants.map((grant) => ({
@@ -649,6 +658,7 @@ router.patch("/agents/:agentId", async (req, res): Promise<void> => {
     res.status(400).json({ error: "No fields to update" });
     return;
   }
+  const customApps = await listCustomApiPackageIds(req.workspaceId!);
   try {
     const outcome = await db.transaction(async (tx) => {
       const [existing] = await tx
@@ -688,7 +698,7 @@ router.patch("/agents/:agentId", async (req, res): Promise<void> => {
       // that takes effect on the agent's very next action.
       let grants: AppGrantJson[];
       if (appGrants !== undefined) {
-        grants = dedupeGrants(appGrants);
+        grants = dedupeGrants(appGrants, customApps);
         await tx
           .delete(agentAppGrantsTable)
           .where(eq(agentAppGrantsTable.agentId, existing.id));

@@ -24,6 +24,7 @@ import {
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { navigateToExternal } from "@/lib/office-window";
+import { CustomApiSection } from "@/components/custom-api-manager";
 import { Shell } from "@/components/layout/Shell";
 import { PixelCard } from "@/components/ui/pixel-card";
 import { Badge } from "@/components/ui/badge";
@@ -794,6 +795,8 @@ export default function ConnectedAppsPage() {
             <TelegramCard />
           </div>
         )}
+
+        <CustomApiSection />
 
         <div className="border-b-4 border-border pb-4 pt-2">
           <h2 className="font-display text-base sm:text-xl text-foreground uppercase mb-1">

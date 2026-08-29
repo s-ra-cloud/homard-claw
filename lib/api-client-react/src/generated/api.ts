@@ -49,7 +49,15 @@ import type {
   ConnectedAppUpdate,
   ConverseInput,
   ConverseResponse,
+  CustomApi,
+  CustomApiCreate,
+  CustomApiCredentialRotation,
+  CustomApiList,
+  CustomApiSpecImport,
+  CustomApiUpdate,
+  CustomApiValidation,
   DelegationInput,
+  DeleteCustomApiResult,
   Documentation,
   DocumentationChatInput,
   DocumentationChatResponse,
@@ -76,6 +84,7 @@ import type {
   MemoryUpdate,
   NotificationList,
   OfficeOverview,
+  ParsedCustomApiSpec,
   PauseInput,
   ProviderCredentialInput,
   ProviderModels,
@@ -6337,6 +6346,511 @@ export const useUpdateConnectedApp = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getUpdateConnectedAppMutationOptions(options));
+    }
+
+export const getListCustomApisUrl = () => {
+
+
+
+
+  return `/api/connected-apps/custom`
+}
+
+/**
+ * @summary Owner-whitelisted custom API connections (secrets never included)
+ */
+export const listCustomApis = async ( options?: Parameters<typeof customFetch>[1]): Promise<CustomApiList> => {
+
+  return customFetch<CustomApiList>(getListCustomApisUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListCustomApisQueryKey = () => {
+    return [
+    `/api/connected-apps/custom`
+    ] as const;
+    }
+
+
+export const getListCustomApisQueryOptions = <TData = Awaited<ReturnType<typeof listCustomApis>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCustomApis>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListCustomApisQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listCustomApis>>> = ({ signal }) => listCustomApis({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listCustomApis>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListCustomApisQueryResult = NonNullable<Awaited<ReturnType<typeof listCustomApis>>>
+export type ListCustomApisQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Owner-whitelisted custom API connections (secrets never included)
+ */
+
+export function useListCustomApis<TData = Awaited<ReturnType<typeof listCustomApis>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCustomApis>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListCustomApisQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateCustomApiUrl = () => {
+
+
+
+
+  return `/api/connected-apps/custom`
+}
+
+/**
+ * @summary Whitelist a third-party REST API with an exact operation catalog
+ */
+export const createCustomApi = async (customApiCreate: CustomApiCreate, options?: Parameters<typeof customFetch>[1]): Promise<CustomApi> => {
+
+  return customFetch<CustomApi>(getCreateCustomApiUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(customApiCreate)
+  }
+);}
+
+
+
+
+
+export const getCreateCustomApiMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCustomApi>>, TError,{data: BodyType<CustomApiCreate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createCustomApi>>, TError,{data: BodyType<CustomApiCreate>}, TContext> => {
+
+const mutationKey = ['createCustomApi'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createCustomApi>>, {data: BodyType<CustomApiCreate>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createCustomApi(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateCustomApiMutationResult = NonNullable<Awaited<ReturnType<typeof createCustomApi>>>
+    export type CreateCustomApiMutationBody = BodyType<CustomApiCreate>
+    export type CreateCustomApiMutationError = ErrorType<void>
+
+    /**
+ * @summary Whitelist a third-party REST API with an exact operation catalog
+ */
+export const useCreateCustomApi = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCustomApi>>, TError,{data: BodyType<CustomApiCreate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createCustomApi>>,
+        TError,
+        {data: BodyType<CustomApiCreate>},
+        TContext
+      > => {
+      return useMutation(getCreateCustomApiMutationOptions(options));
+    }
+
+export const getParseCustomApiSpecUrl = () => {
+
+
+
+
+  return `/api/connected-apps/custom/parse-spec`
+}
+
+/**
+ * @summary Parse an OpenAPI 3 JSON document into draft operations for review
+ */
+export const parseCustomApiSpec = async (customApiSpecImport: CustomApiSpecImport, options?: Parameters<typeof customFetch>[1]): Promise<ParsedCustomApiSpec> => {
+
+  return customFetch<ParsedCustomApiSpec>(getParseCustomApiSpecUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(customApiSpecImport)
+  }
+);}
+
+
+
+
+
+export const getParseCustomApiSpecMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof parseCustomApiSpec>>, TError,{data: BodyType<CustomApiSpecImport>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof parseCustomApiSpec>>, TError,{data: BodyType<CustomApiSpecImport>}, TContext> => {
+
+const mutationKey = ['parseCustomApiSpec'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof parseCustomApiSpec>>, {data: BodyType<CustomApiSpecImport>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  parseCustomApiSpec(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ParseCustomApiSpecMutationResult = NonNullable<Awaited<ReturnType<typeof parseCustomApiSpec>>>
+    export type ParseCustomApiSpecMutationBody = BodyType<CustomApiSpecImport>
+    export type ParseCustomApiSpecMutationError = ErrorType<void>
+
+    /**
+ * @summary Parse an OpenAPI 3 JSON document into draft operations for review
+ */
+export const useParseCustomApiSpec = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof parseCustomApiSpec>>, TError,{data: BodyType<CustomApiSpecImport>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof parseCustomApiSpec>>,
+        TError,
+        {data: BodyType<CustomApiSpecImport>},
+        TContext
+      > => {
+      return useMutation(getParseCustomApiSpecMutationOptions(options));
+    }
+
+export const getUpdateCustomApiUrl = (id: string,) => {
+
+
+
+
+  return `/api/connected-apps/custom/${id}`
+}
+
+/**
+ * @summary Update a custom API definition, enable/disable it, or both
+ */
+export const updateCustomApi = async (id: string,
+    customApiUpdate: CustomApiUpdate, options?: Parameters<typeof customFetch>[1]): Promise<CustomApi> => {
+
+  return customFetch<CustomApi>(getUpdateCustomApiUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(customApiUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdateCustomApiMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCustomApi>>, TError,{id: string;data: BodyType<CustomApiUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateCustomApi>>, TError,{id: string;data: BodyType<CustomApiUpdate>}, TContext> => {
+
+const mutationKey = ['updateCustomApi'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateCustomApi>>, {id: string;data: BodyType<CustomApiUpdate>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateCustomApi(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateCustomApiMutationResult = NonNullable<Awaited<ReturnType<typeof updateCustomApi>>>
+    export type UpdateCustomApiMutationBody = BodyType<CustomApiUpdate>
+    export type UpdateCustomApiMutationError = ErrorType<void>
+
+    /**
+ * @summary Update a custom API definition, enable/disable it, or both
+ */
+export const useUpdateCustomApi = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCustomApi>>, TError,{id: string;data: BodyType<CustomApiUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateCustomApi>>,
+        TError,
+        {id: string;data: BodyType<CustomApiUpdate>},
+        TContext
+      > => {
+      return useMutation(getUpdateCustomApiMutationOptions(options));
+    }
+
+export const getDeleteCustomApiUrl = (id: string,) => {
+
+
+
+
+  return `/api/connected-apps/custom/${id}`
+}
+
+/**
+ * @summary Remove a custom API, its grants, and any pending approvals for it
+ */
+export const deleteCustomApi = async (id: string, options?: Parameters<typeof customFetch>[1]): Promise<DeleteCustomApiResult> => {
+
+  return customFetch<DeleteCustomApiResult>(getDeleteCustomApiUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteCustomApiMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteCustomApi>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteCustomApi>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['deleteCustomApi'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteCustomApi>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteCustomApi(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteCustomApiMutationResult = NonNullable<Awaited<ReturnType<typeof deleteCustomApi>>>
+
+    export type DeleteCustomApiMutationError = ErrorType<void>
+
+    /**
+ * @summary Remove a custom API, its grants, and any pending approvals for it
+ */
+export const useDeleteCustomApi = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteCustomApi>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteCustomApi>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getDeleteCustomApiMutationOptions(options));
+    }
+
+export const getRotateCustomApiCredentialUrl = (id: string,) => {
+
+
+
+
+  return `/api/connected-apps/custom/${id}/credential`
+}
+
+/**
+ * @summary Set or rotate the stored credential (never echoed back)
+ */
+export const rotateCustomApiCredential = async (id: string,
+    customApiCredentialRotation: CustomApiCredentialRotation, options?: Parameters<typeof customFetch>[1]): Promise<CustomApi> => {
+
+  return customFetch<CustomApi>(getRotateCustomApiCredentialUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(customApiCredentialRotation)
+  }
+);}
+
+
+
+
+
+export const getRotateCustomApiCredentialMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateCustomApiCredential>>, TError,{id: string;data: BodyType<CustomApiCredentialRotation>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof rotateCustomApiCredential>>, TError,{id: string;data: BodyType<CustomApiCredentialRotation>}, TContext> => {
+
+const mutationKey = ['rotateCustomApiCredential'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof rotateCustomApiCredential>>, {id: string;data: BodyType<CustomApiCredentialRotation>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  rotateCustomApiCredential(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RotateCustomApiCredentialMutationResult = NonNullable<Awaited<ReturnType<typeof rotateCustomApiCredential>>>
+    export type RotateCustomApiCredentialMutationBody = BodyType<CustomApiCredentialRotation>
+    export type RotateCustomApiCredentialMutationError = ErrorType<void>
+
+    /**
+ * @summary Set or rotate the stored credential (never echoed back)
+ */
+export const useRotateCustomApiCredential = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateCustomApiCredential>>, TError,{id: string;data: BodyType<CustomApiCredentialRotation>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof rotateCustomApiCredential>>,
+        TError,
+        {id: string;data: BodyType<CustomApiCredentialRotation>},
+        TContext
+      > => {
+      return useMutation(getRotateCustomApiCredentialMutationOptions(options));
+    }
+
+export const getValidateCustomApiUrl = (id: string,) => {
+
+
+
+
+  return `/api/connected-apps/custom/${id}/validate`
+}
+
+/**
+ * @summary Probe the API's base URL through the hardened executor
+ */
+export const validateCustomApi = async (id: string, options?: Parameters<typeof customFetch>[1]): Promise<CustomApiValidation> => {
+
+  return customFetch<CustomApiValidation>(getValidateCustomApiUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getValidateCustomApiMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof validateCustomApi>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof validateCustomApi>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['validateCustomApi'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof validateCustomApi>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  validateCustomApi(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ValidateCustomApiMutationResult = NonNullable<Awaited<ReturnType<typeof validateCustomApi>>>
+
+    export type ValidateCustomApiMutationError = ErrorType<void>
+
+    /**
+ * @summary Probe the API's base URL through the hardened executor
+ */
+export const useValidateCustomApi = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof validateCustomApi>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof validateCustomApi>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getValidateCustomApiMutationOptions(options));
     }
 
 export const getGetTelegramStatusUrl = () => {

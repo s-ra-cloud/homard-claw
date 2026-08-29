@@ -32,16 +32,20 @@ A test that hand-writes a row to simulate a state the real code would have reach
 
 **How to apply:** keep test agents paused (the worker skips paused agents), use the worker's test-only claim scope (`agentIds` + `includePausedAgents`) for ordering assertions, insert `running` rows directly to exercise execution paths, and cancel/block every row a test leaves behind. All provider traffic goes through a stubbed global fetch — never the network.
 
-## Concurrent suite runs are not safe
+## Concurrent suite runs are not safe — now serialized by an advisory lock
 
-The API vitest suite runs files serially (`fileParallelism: false`) but all
-files share the owner's workspace rows in the dev Postgres. Two vitest
-invocations running at once (manual run + validation run + a reviewer's run)
-race on provider-credential rows — one suite deletes `openai_voice`/`openrouter`
-while another expects them seeded — producing phantom 503 failures.
-The live dev API server also shares the DB: its worker/scheduler can fire
-test schedules and create/read notifications, flaking the schedules,
-lifecycle, and memory suites (~1 test per full run). A failure in those areas
-that passes in isolation is interference, not a regression.
-**How to apply:** run one suite at a time; verify suspected flakes by running
-the file alone before debugging.
+All test files share the owner's workspace rows in the dev Postgres, so two
+vitest invocations at once (manual + validation gate + the completion
+reviewer's own verification run — the reviewer DOES run the suite in the same
+workspace) interleave on provider-credential rows, queue recovery, and codex
+leases, producing phantom 503s, duplicate-key restore failures, and stolen
+tasks that never reproduce in a lone run.
+A vitest globalSetup now holds a session-scoped advisory lock for the life of
+each suite run, so concurrent runs queue instead of interleaving ("waiting for
+another suite run" in the output). The live dev API server also shares the DB
+and can still flake schedules/lifecycle/memory tests (~1 per run).
+**How to apply:** trust the suite lock, keep it when touching vitest config;
+a failure that passes in isolation is interference, not a regression. If a
+run seems hung at startup, another suite run is holding the lock.
+
+- The dev Postgres does not auto-sync with merged schema changes; push the schema before blaming tests for "missing relation" errors.

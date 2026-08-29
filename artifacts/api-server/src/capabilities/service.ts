@@ -7,6 +7,7 @@ import { and, eq } from "drizzle-orm";
 import { recordAudit } from "../audit";
 import type { AppOperation } from "../connected-apps/catalog";
 import { findOperation } from "../connected-apps/catalog";
+import { listActiveCustomApiManifests } from "../connected-apps/custom-apis";
 import {
   computePermissionDiff,
   isCapabilityManifest,
@@ -171,6 +172,13 @@ export async function loadWorkspaceCapabilities(
     }
   }
   if (!workspaceId) return { packages, tools };
+  // Owner-whitelisted custom APIs resolve as workspace-pinned packages:
+  // the manifest is synthesized from the current row, its version is the
+  // definition revision, and disabled/malformed rows contribute nothing.
+  for (const manifest of await listActiveCustomApiManifests(workspaceId)) {
+    packages.set(manifest.id, manifest);
+    resolveTools(manifest, tools);
+  }
   const rows = await db
     .select()
     .from(capabilityPackagesTable)

@@ -9,5 +9,9 @@ export default defineConfig({
     fileParallelism: false,
     testTimeout: 20_000,
     hookTimeout: 20_000,
+    // Serialize whole suite runs against the shared dev database: a
+    // session advisory lock makes a second concurrent `vitest run` wait
+    // instead of interleaving with (and corrupting) the first one.
+    globalSetup: ["./src/test-global-setup.ts"],
   },
 });

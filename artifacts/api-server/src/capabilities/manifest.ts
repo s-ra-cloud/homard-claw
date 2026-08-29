@@ -55,6 +55,13 @@ export type CapabilityToolDef = {
         kind: "native";
         /** Name resolved by vetted server code. A manifest never carries code. */
         handler: string;
+      }
+    | {
+        kind: "custom_api";
+        /** The workspace-owned custom_api_connections row this tool renders from. */
+        connectionId: string;
+        /** Operation id inside the connection's saved operation catalog. */
+        operationId: string;
       };
 };
 
@@ -275,6 +282,20 @@ function isWebResearchNativeMigration(
   });
 }
 
+/** Human-readable destination for one executor, used in review diffs. */
+function describeExecutor(executor: CapabilityToolDef["executor"]): string {
+  switch (executor.kind) {
+    case "mcp":
+      return `mcp:${executor.remoteName}`;
+    case "native":
+      return `native:${executor.handler}`;
+    case "custom_api":
+      return `custom_api:${executor.operationId}`;
+    default:
+      return executor.kind;
+  }
+}
+
 export function computePermissionDiff(
   from: CapabilityManifest,
   to: CapabilityManifest,
@@ -341,8 +362,10 @@ export function computePermissionDiff(
     // Executor routing changes are review-gating except MCP → native: the
     // latter replaces a remote endpoint with a compiled server allowlist.
     if (prev.executor.kind !== tool.executor.kind) {
+      // Name the concrete destination on both sides so an owner reviewing
+      // the diff sees WHERE calls would now go, not just the executor kind.
       diff.routingChanges.push(
-        `${name}: executor changed (${prev.executor.kind} → ${tool.executor.kind})`,
+        `${name}: executor changed (${describeExecutor(prev.executor)} → ${describeExecutor(tool.executor)})`,
       );
       if (!vettedNativeMigration) {
         routingExpands = true;
@@ -422,7 +445,10 @@ export function isCapabilityManifest(
     if (!(
       executor.kind === "builtin" ||
       (executor.kind === "mcp" && typeof executor.remoteName === "string") ||
-      (executor.kind === "native" && typeof executor.handler === "string")
+      (executor.kind === "native" && typeof executor.handler === "string") ||
+      (executor.kind === "custom_api" &&
+        typeof executor.connectionId === "string" &&
+        typeof executor.operationId === "string")
     )) {
       return false;
     }
@@ -430,9 +456,13 @@ export function isCapabilityManifest(
   return true;
 }
 
-/** MCP and native handlers cross the agent's no-network sandbox boundary. */
+/** MCP, native, and custom-API tools cross the no-network sandbox boundary. */
 export function isNetworkBackedExecutor(
   executor: CapabilityToolDef["executor"],
 ): boolean {
-  return executor.kind === "mcp" || executor.kind === "native";
+  return (
+    executor.kind === "mcp" ||
+    executor.kind === "native" ||
+    executor.kind === "custom_api"
+  );
 }

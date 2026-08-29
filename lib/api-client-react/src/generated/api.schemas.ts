@@ -814,6 +814,234 @@ export interface ConnectedAppUpdate {
   enabled: boolean;
 }
 
+export type CustomApiParamIn = typeof CustomApiParamIn[keyof typeof CustomApiParamIn];
+
+
+export const CustomApiParamIn = {
+  path: 'path',
+  query: 'query',
+  body: 'body',
+} as const;
+
+export type CustomApiParamKind = typeof CustomApiParamKind[keyof typeof CustomApiParamKind];
+
+
+export const CustomApiParamKind = {
+  string: 'string',
+  number: 'number',
+} as const;
+
+/**
+ * One typed parameter of a whitelisted operation. Path parameters are always required single URL segments; only body parameters may be multiline.
+ */
+export interface CustomApiParam {
+  /** @maxLength 40 */
+  name: string;
+  in: CustomApiParamIn;
+  kind: CustomApiParamKind;
+  required: boolean;
+  /** @nullable */
+  maxLength?: number | null;
+  /** @nullable */
+  multiline?: boolean | null;
+  /**
+     * @maxLength 300
+     * @nullable
+     */
+  description?: string | null;
+}
+
+export type CustomApiOperationMethod = typeof CustomApiOperationMethod[keyof typeof CustomApiOperationMethod];
+
+
+export const CustomApiOperationMethod = {
+  GET: 'GET',
+  POST: 'POST',
+  PUT: 'PUT',
+  PATCH: 'PATCH',
+  DELETE: 'DELETE',
+} as const;
+
+export type CustomApiOperationLevel = typeof CustomApiOperationLevel[keyof typeof CustomApiOperationLevel];
+
+
+export const CustomApiOperationLevel = {
+  read: 'read',
+  draft: 'draft',
+  write: 'write',
+} as const;
+
+/**
+ * One whitelisted endpoint. GET operations are always level "read"; any other method is "draft" or "write" — writes pass the approval desk before running.
+ */
+export interface CustomApiOperation {
+  /** @maxLength 60 */
+  id: string;
+  method: CustomApiOperationMethod;
+  /** @maxLength 200 */
+  path: string;
+  /** @maxLength 300 */
+  description: string;
+  level: CustomApiOperationLevel;
+  params: CustomApiParam[];
+}
+
+export type CustomApiAuthType = typeof CustomApiAuthType[keyof typeof CustomApiAuthType];
+
+
+export const CustomApiAuthType = {
+  none: 'none',
+  api_key: 'api_key',
+  bearer: 'bearer',
+} as const;
+
+export type CustomApiValidationStatus = typeof CustomApiValidationStatus[keyof typeof CustomApiValidationStatus];
+
+
+export const CustomApiValidationStatus = {
+  unchecked: 'unchecked',
+  ok: 'ok',
+  failed: 'failed',
+} as const;
+
+/**
+ * Displayable configuration of one owner-whitelisted API. The stored credential is never included in any response; hasCredential only reports whether one is saved.
+ */
+export interface CustomApi {
+  id: string;
+  slug: string;
+  packageId: string;
+  displayName: string;
+  description: string;
+  baseUrl: string;
+  authType: CustomApiAuthType;
+  /** @nullable */
+  authHeaderName: string | null;
+  hasCredential: boolean;
+  operations: CustomApiOperation[];
+  revision: string;
+  enabled: boolean;
+  validationStatus: CustomApiValidationStatus;
+  /** @nullable */
+  validationDetail: string | null;
+  /** @nullable */
+  validatedAt: string | null;
+  grantedAgents: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CustomApiList {
+  apis: CustomApi[];
+}
+
+export type CustomApiCreateAuthType = typeof CustomApiCreateAuthType[keyof typeof CustomApiCreateAuthType];
+
+
+export const CustomApiCreateAuthType = {
+  none: 'none',
+  api_key: 'api_key',
+  bearer: 'bearer',
+} as const;
+
+export interface CustomApiCreate {
+  /** @maxLength 40 */
+  slug: string;
+  /** @maxLength 80 */
+  displayName: string;
+  /**
+     * @maxLength 300
+     * @nullable
+     */
+  description?: string | null;
+  /** @maxLength 300 */
+  baseUrl: string;
+  authType: CustomApiCreateAuthType;
+  /**
+     * @maxLength 60
+     * @nullable
+     */
+  authHeaderName?: string | null;
+  /**
+     * @maxLength 4096
+     * @nullable
+     */
+  credential?: string | null;
+  operations: CustomApiOperation[];
+}
+
+export type CustomApiUpdateAuthType = typeof CustomApiUpdateAuthType[keyof typeof CustomApiUpdateAuthType];
+
+
+export const CustomApiUpdateAuthType = {
+  none: 'none',
+  api_key: 'api_key',
+  bearer: 'bearer',
+} as const;
+
+/**
+ * Partial update. Changing the definition (displayName, description, baseUrl, authType, authHeaderName, or operations) bumps the definition revision and invalidates pending approvals; toggling enabled off also invalidates them. The credential is only changed through the rotate endpoint.
+ */
+export interface CustomApiUpdate {
+  /** @maxLength 80 */
+  displayName?: string;
+  /**
+     * @maxLength 300
+     * @nullable
+     */
+  description?: string | null;
+  /** @maxLength 300 */
+  baseUrl?: string;
+  authType?: CustomApiUpdateAuthType;
+  /**
+     * @maxLength 60
+     * @nullable
+     */
+  authHeaderName?: string | null;
+  /**
+     * @maxLength 4096
+     * @nullable
+     */
+  credential?: string | null;
+  operations?: CustomApiOperation[];
+  enabled?: boolean;
+}
+
+export interface CustomApiCredentialRotation {
+  /** @maxLength 4096 */
+  credential: string;
+}
+
+export interface CustomApiValidation {
+  status: CustomApiValidationStatus;
+  /** @nullable */
+  detail: string | null;
+  validatedAt: string;
+}
+
+export interface DeleteCustomApiResult {
+  deleted: boolean;
+  removedGrants: number;
+  expiredApprovals: number;
+}
+
+export interface CustomApiSpecImport {
+  /**
+     * OpenAPI 3.x document as JSON text.
+     * @maxLength 524288
+     */
+  document: string;
+}
+
+export interface ParsedCustomApiSpec {
+  operations: CustomApiOperation[];
+  warnings: string[];
+  /** @nullable */
+  suggestedBaseUrl: string | null;
+  /** @nullable */
+  suggestedName: string | null;
+}
+
 export type CapabilityToolLevel = typeof CapabilityToolLevel[keyof typeof CapabilityToolLevel];
 
 

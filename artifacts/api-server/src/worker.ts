@@ -760,6 +760,8 @@ async function parkForAppAction(
     operation: string;
     params: Record<string, unknown>;
     targetSummary: string;
+    /** Custom-API definition revision the request was authorized under. */
+    definitionRevision?: string | null;
   },
 ): Promise<void> {
   const review = await approvalReviewSnapshot(agent.workspaceId!);
@@ -797,6 +799,7 @@ async function parkForAppAction(
       targetSummary: request.targetSummary,
       status: "waiting_approval",
       approvalId: approval.id,
+      definitionRevision: request.definitionRevision ?? null,
     });
     await recordAudit(
       agent.workspaceId,
@@ -2123,6 +2126,10 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
                 operation: verdict.op.name,
                 params: verdict.params,
                 targetSummary: verdict.targetSummary,
+                definitionRevision:
+                  verdict.tool.def.executor.kind === "custom_api"
+                    ? verdict.tool.manifest.version
+                    : null,
               },
             );
             parkedForApproval = true;

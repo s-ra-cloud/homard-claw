@@ -1491,6 +1491,150 @@ paths:
                 $ref: "#/components/schemas/ConnectedApp"
         "404":
           description: Unknown app
+  /connected-apps/custom:
+    get:
+      operationId: listCustomApis
+      tags: [office]
+      summary: Owner-whitelisted custom API connections (secrets never included)
+      responses:
+        "200":
+          description: Custom API list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomApiList"
+    post:
+      operationId: createCustomApi
+      tags: [office]
+      summary: Whitelist a third-party REST API with an exact operation catalog
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomApiCreate"
+      responses:
+        "201":
+          description: Created custom API
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomApi"
+        "400":
+          description: The definition was rejected; the error lists why
+        "409":
+          description: A custom API with this identifier already exists
+  /connected-apps/custom/parse-spec:
+    post:
+      operationId: parseCustomApiSpec
+      tags: [office]
+      summary: Parse an OpenAPI 3 JSON document into draft operations for review
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomApiSpecImport"
+      responses:
+        "200":
+          description: Draft operations (nothing is saved)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParsedCustomApiSpec"
+        "400":
+          description: The document could not be parsed
+  /connected-apps/custom/{id}:
+    patch:
+      operationId: updateCustomApi
+      tags: [office]
+      summary: Update a custom API definition, enable/disable it, or both
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomApiUpdate"
+      responses:
+        "200":
+          description: Updated custom API
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomApi"
+        "400":
+          description: The definition was rejected; the error lists why
+        "404":
+          description: No such custom API in this workspace
+    delete:
+      operationId: deleteCustomApi
+      tags: [office]
+      summary: Remove a custom API, its grants, and any pending approvals for it
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Deletion result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteCustomApiResult"
+        "404":
+          description: No such custom API in this workspace
+  /connected-apps/custom/{id}/credential:
+    post:
+      operationId: rotateCustomApiCredential
+      tags: [office]
+      summary: Set or rotate the stored credential (never echoed back)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomApiCredentialRotation"
+      responses:
+        "200":
+          description: Updated custom API
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomApi"
+        "400":
+          description: The credential was rejected
+        "404":
+          description: No such custom API in this workspace
+  /connected-apps/custom/{id}/validate:
+    post:
+      operationId: validateCustomApi
+      tags: [office]
+      summary: Probe the API's base URL through the hardened executor
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Validation outcome (also stored on the connection)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomApiValidation"
+        "404":
+          description: No such custom API in this workspace
   /telegram/status:
     get:
       operationId: getTelegramStatus
@@ -2105,6 +2249,164 @@ components:
       required: [enabled]
       properties:
         enabled: { type: boolean }
+    CustomApiParam:
+      type: object
+      description: >-
+        One typed parameter of a whitelisted operation. Path parameters are
+        always required single URL segments; only body parameters may be
+        multiline.
+      required: [name, in, kind, required]
+      properties:
+        name: { type: string, maxLength: 40 }
+        in: { type: string, enum: [path, query, body] }
+        kind: { type: string, enum: [string, number] }
+        required: { type: boolean }
+        maxLength: { type: ["number", "null"] }
+        multiline: { type: ["boolean", "null"] }
+        description: { type: ["string", "null"], maxLength: 300 }
+    CustomApiOperation:
+      type: object
+      description: >-
+        One whitelisted endpoint. GET operations are always level "read";
+        any other method is "draft" or "write" — writes pass the approval
+        desk before running.
+      required: [id, method, path, description, level, params]
+      properties:
+        id: { type: string, maxLength: 60 }
+        method: { type: string, enum: [GET, POST, PUT, PATCH, DELETE] }
+        path: { type: string, maxLength: 200 }
+        description: { type: string, maxLength: 300 }
+        level: { type: string, enum: [read, draft, write] }
+        params:
+          type: array
+          items: { $ref: "#/components/schemas/CustomApiParam" }
+    CustomApi:
+      type: object
+      description: >-
+        Displayable configuration of one owner-whitelisted API. The stored
+        credential is never included in any response; hasCredential only
+        reports whether one is saved.
+      required:
+        [
+          id,
+          slug,
+          packageId,
+          displayName,
+          description,
+          baseUrl,
+          authType,
+          authHeaderName,
+          hasCredential,
+          operations,
+          revision,
+          enabled,
+          validationStatus,
+          validationDetail,
+          validatedAt,
+          grantedAgents,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id: { type: string }
+        slug: { type: string }
+        packageId: { type: string }
+        displayName: { type: string }
+        description: { type: string }
+        baseUrl: { type: string }
+        authType: { type: string, enum: [none, api_key, bearer] }
+        authHeaderName: { type: ["string", "null"] }
+        hasCredential: { type: boolean }
+        operations:
+          type: array
+          items: { $ref: "#/components/schemas/CustomApiOperation" }
+        revision: { type: string }
+        enabled: { type: boolean }
+        validationStatus: { type: string, enum: [unchecked, ok, failed] }
+        validationDetail: { type: ["string", "null"] }
+        validatedAt: { type: ["string", "null"], format: date-time }
+        grantedAgents: { type: number }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CustomApiList:
+      type: object
+      required: [apis]
+      properties:
+        apis:
+          type: array
+          items: { $ref: "#/components/schemas/CustomApi" }
+    CustomApiCreate:
+      type: object
+      required: [slug, displayName, baseUrl, authType, operations]
+      properties:
+        slug: { type: string, maxLength: 40 }
+        displayName: { type: string, maxLength: 80 }
+        description: { type: ["string", "null"], maxLength: 300 }
+        baseUrl: { type: string, maxLength: 300 }
+        authType: { type: string, enum: [none, api_key, bearer] }
+        authHeaderName: { type: ["string", "null"], maxLength: 60 }
+        credential: { type: ["string", "null"], maxLength: 4096 }
+        operations:
+          type: array
+          items: { $ref: "#/components/schemas/CustomApiOperation" }
+    CustomApiUpdate:
+      type: object
+      description: >-
+        Partial update. Changing the definition (displayName, description,
+        baseUrl, authType, authHeaderName, or operations) bumps the
+        definition revision and invalidates pending approvals; toggling
+        enabled off also invalidates them. The credential is only changed
+        through the rotate endpoint.
+      properties:
+        displayName: { type: string, maxLength: 80 }
+        description: { type: ["string", "null"], maxLength: 300 }
+        baseUrl: { type: string, maxLength: 300 }
+        authType: { type: string, enum: [none, api_key, bearer] }
+        authHeaderName: { type: ["string", "null"], maxLength: 60 }
+        credential: { type: ["string", "null"], maxLength: 4096 }
+        operations:
+          type: array
+          items: { $ref: "#/components/schemas/CustomApiOperation" }
+        enabled: { type: boolean }
+    CustomApiCredentialRotation:
+      type: object
+      required: [credential]
+      properties:
+        credential: { type: string, maxLength: 4096 }
+    CustomApiValidation:
+      type: object
+      required: [status, detail, validatedAt]
+      properties:
+        status: { type: string, enum: [ok, failed] }
+        detail: { type: ["string", "null"] }
+        validatedAt: { type: string, format: date-time }
+    DeleteCustomApiResult:
+      type: object
+      required: [deleted, removedGrants, expiredApprovals]
+      properties:
+        deleted: { type: boolean }
+        removedGrants: { type: number }
+        expiredApprovals: { type: number }
+    CustomApiSpecImport:
+      type: object
+      required: [document]
+      properties:
+        document:
+          type: string
+          maxLength: 524288
+          description: OpenAPI 3.x document as JSON text.
+    ParsedCustomApiSpec:
+      type: object
+      required: [operations, warnings, suggestedBaseUrl, suggestedName]
+      properties:
+        operations:
+          type: array
+          items: { $ref: "#/components/schemas/CustomApiOperation" }
+        warnings:
+          type: array
+          items: { type: string }
+        suggestedBaseUrl: { type: ["string", "null"] }
+        suggestedName: { type: ["string", "null"] }
     CapabilityTool:
       type: object
       required: [name, description, level, recovery, needsApproval]

@@ -1,10 +1,12 @@
 import {
+  agentsTable,
   appActionsTable,
+  customApiConnectionsTable,
   db,
   tasksTable,
   type AppActionRecord,
 } from "@workspace/db";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { recordAudit } from "../audit";
 import { executeCapabilityTool } from "../capabilities/execute";
 import { findRegistryEntry } from "../capabilities/registry";
@@ -112,6 +114,11 @@ export async function runAllowedAction(input: {
   params: Record<string, unknown>;
   targetSummary: string;
 }): Promise<{ action: AppActionRecord; outcome: ExecutionOutcome }> {
+  const tool = await resolveTool(input.operation, input.workspaceId);
+  // Custom-API rows record the definition revision they run under, so the
+  // audit trail always says which owner-reviewed contract applied.
+  const definitionRevision =
+    tool?.def.executor.kind === "custom_api" ? tool.manifest.version : null;
   const [pending] = await db
     .insert(appActionsTable)
     .values({
@@ -124,13 +131,14 @@ export async function runAllowedAction(input: {
       status: "executing",
       decidedAt: new Date(),
       executingAt: new Date(),
+      definitionRevision,
     })
     .returning();
-  const tool = await resolveTool(input.operation, input.workspaceId);
   const outcome: ExecutionOutcome = tool
     ? await executeCapabilityTool(tool, input.params, {
         actionId: pending.id,
         workspaceId: input.workspaceId,
+        expectedRevision: definitionRevision,
       })
     : { ok: false, kind: "failed", message: "Unknown operation." };
   const action = await finalizeAction(
@@ -146,6 +154,14 @@ export async function runAllowedAction(input: {
  * Claim an approved external write for execution. The guarded UPDATE is the
  * exactly-once fence: only one caller ever moves approved → executing, so
  * an approved email can never be sent twice however many workers race.
+ *
+ * Actions pinned to a custom-API definition revision carry an extra fence:
+ * the claim only succeeds while the owner's connection still exists, is
+ * enabled, and is at the exact approved revision. Because this check lives
+ * inside the same UPDATE statement, it linearizes against a concurrent
+ * owner delete/disable/edit — after that commit, no approved action for the
+ * old definition can ever transition to executing, however the deletion
+ * route interleaves with worker claims.
  */
 export async function claimApprovedAction(
   actionId: string,
@@ -157,6 +173,19 @@ export async function claimApprovedAction(
       and(
         eq(appActionsTable.id, actionId),
         eq(appActionsTable.status, "approved"),
+        sql`(
+          ${appActionsTable.definitionRevision} is null
+          or exists (
+            select 1
+            from ${customApiConnectionsTable}
+            join ${agentsTable}
+              on ${agentsTable.id} = ${appActionsTable.agentId}
+            where ${customApiConnectionsTable.workspaceId} = ${agentsTable.workspaceId}
+              and ('custom_' || ${customApiConnectionsTable.slug}) = ${appActionsTable.app}
+              and ${customApiConnectionsTable.enabled} = true
+              and ${customApiConnectionsTable.revision} = ${appActionsTable.definitionRevision}
+          )
+        )`,
       ),
     )
     .returning();
@@ -410,6 +439,13 @@ export async function executeClaimedAction(
     ? await executeCapabilityTool(tool, action.params ?? {}, {
         actionId: action.id,
         workspaceId,
+        // Bind execution to the definition revision recorded when the
+        // request was made/approved; the executor refuses on mismatch.
+        // Only custom-API actions carry one — built-in operations keep
+        // their original, revision-free context.
+        ...(action.definitionRevision
+          ? { expectedRevision: action.definitionRevision }
+          : {}),
       })
     : { ok: false, kind: "failed", message: "Unknown operation." };
   const finalized = await finalizeAction(action.id, agentName, outcome, workspaceId);

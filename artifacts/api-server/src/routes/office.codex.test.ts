@@ -1855,7 +1855,7 @@ describe("Codex Talk conversations", () => {
     expect(call.options?.sandboxMode).toBe("workspace-write");
     expect(call.options?.networkAccessEnabled).toBe(false);
     expect(call.options?.approvalPolicy).toBe("never");
-    expect(call.input).toContain("lobster agent");
+    expect(call.input).toContain("Crustabot working in the Crustabox office");
     expect(call.input).toContain("How is the kelp doing?");
 
     // The lease is released the moment the turn ends.

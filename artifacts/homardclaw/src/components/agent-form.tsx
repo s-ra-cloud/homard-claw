@@ -9,6 +9,7 @@ import {
   useGetProviders,
   useListCapabilities,
   useListConnectedApps,
+  useListCustomApis,
   useListProviderModels,
 } from "@workspace/api-client-react";
 import { LOBSTER_PRESETS, MarlowLobster } from "@/components/ui/marlow-lobster";
@@ -731,13 +732,18 @@ function ConnectedAppsFields({
 }) {
   const { data: connectedApps } = useListConnectedApps();
   const { data: capabilities } = useListCapabilities();
+  const { data: customApis } = useListCustomApis();
   const apps = connectedApps?.apps ?? [];
   // Installed optional capability packages (e.g. Web Research) are granted
   // exactly like the built-in apps: explicit, per agent, default nothing.
   const packages = (capabilities?.packages ?? []).filter(
     (pkg) => !pkg.builtin && pkg.installed && pkg.status === "active",
   );
-  if (apps.length === 0 && packages.length === 0) return null;
+  // Owner-whitelisted custom APIs join the same explicit-grant model: each
+  // one defaults to "No Access" for every Crustabot.
+  const custom = customApis?.apis ?? [];
+  if (apps.length === 0 && packages.length === 0 && custom.length === 0)
+    return null;
   return (
     <div className="border-4 border-border bg-muted/20 p-4 space-y-3">
       <div>
@@ -858,6 +864,67 @@ function ConnectedAppsFields({
                         <Badge variant="warning">Not Connected</Badge>
                       )}
                     </div>
+                    <p className="text-[9px] text-muted-foreground uppercase font-bold mt-1">
+                      {
+                        ACCESS_LEVEL_OPTIONS.find((o) => o.value === level)
+                          ?.blurb
+                      }
+                    </p>
+                  </div>
+                  <Select onValueChange={field.onChange} value={level}>
+                    <FormControl>
+                      <SelectTrigger
+                        className={`${selectTriggerClass} sm:w-44`}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent className={selectContentClass}>
+                      {ACCESS_LEVEL_OPTIONS.map((option) => (
+                        <SelectItem
+                          key={option.value}
+                          value={option.value}
+                          className={selectItemClass}
+                        >
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage className={messageClass} />
+                </FormItem>
+              );
+            }}
+          />
+        ))}
+        {custom.map((api) => (
+          <FormField
+            key={api.packageId}
+            control={form.control}
+            name={`appGrants.${api.packageId}` as const}
+            render={({ field }) => {
+              const level = field.value ?? "none";
+              return (
+                <FormItem className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 border-2 border-border/50 bg-background/50 p-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold uppercase text-xs">
+                        {api.displayName}
+                      </span>
+                      <Badge variant="outline">Custom API</Badge>
+                      {!api.enabled ? (
+                        <Badge variant="destructive">Disabled</Badge>
+                      ) : api.validationStatus === "ok" ? (
+                        <Badge variant="success">Reachable</Badge>
+                      ) : api.validationStatus === "failed" ? (
+                        <Badge variant="destructive">Check Failed</Badge>
+                      ) : (
+                        <Badge variant="warning">Unchecked</Badge>
+                      )}
+                    </div>
+                    <p className="text-[9px] text-muted-foreground font-mono mt-1 break-all">
+                      {api.baseUrl}
+                    </p>
                     <p className="text-[9px] text-muted-foreground uppercase font-bold mt-1">
                       {
                         ACCESS_LEVEL_OPTIONS.find((o) => o.value === level)

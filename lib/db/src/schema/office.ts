@@ -943,6 +943,13 @@ export const appActionsTable = pgTable(
       withTimezone: true,
     }),
     executedAt: timestamp("executed_at", { withTimezone: true }),
+    /**
+     * For custom-API operations: the connection's definition revision this
+     * request was validated against. Execution re-checks it, so an owner
+     * edit between approval and execution fails closed instead of running
+     * a request under a definition the owner never reviewed.
+     */
+    definitionRevision: text("definition_revision"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -1253,8 +1260,73 @@ export const telegramLinkCodesTable = pgTable(
   ],
 );
 
+/**
+ * One owner-defined third-party REST API per row, whitelisted for this
+ * workspace's agents. The row is the entire contract: the exact HTTPS base
+ * URL, the closed set of allowed operations (method + path template +
+ * typed params + read/draft/write level), and how to authenticate.
+ *
+ * Secrets are separate from displayable configuration: `credentialEnc` is
+ * AES-256-GCM ciphertext, decrypted only at the final server-side request
+ * boundary and never returned by any route. `revision` changes whenever
+ * the definition (not the credential) changes, so approvals and queued
+ * work bound to an older definition fail closed instead of running under
+ * rules the owner never reviewed.
+ */
+export const customApiConnectionsTable = pgTable(
+  "custom_api_connections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspacesTable.id, { onDelete: "cascade" }),
+    /** URL-safe identifier; the capability package id is `custom_<slug>`. */
+    slug: text("slug").notNull(),
+    displayName: text("display_name").notNull(),
+    description: text("description").notNull().default(""),
+    /** HTTPS origin plus optional base path; every operation stays under it. */
+    baseUrl: text("base_url").notNull(),
+    /** "none" | "api_key" | "bearer". */
+    authType: text("auth_type").notNull(),
+    /** Header the API key is sent in (api_key auth only). */
+    authHeaderName: text("auth_header_name"),
+    /** AES-256-GCM ciphertext of the API key/token. Never logged/returned. */
+    credentialEnc: text("credential_enc"),
+    /** The closed operation catalog (bounded, validated JSON). */
+    operations: jsonb("operations").$type<Record<string, unknown>[]>().notNull(),
+    /**
+     * Definition revision: bumped on every change to the displayable
+     * definition (base URL, operations, auth shape). Credential rotation
+     * does NOT bump it — the same reviewed operations simply run with the
+     * new secret.
+     */
+    revision: text("revision")
+      .notNull()
+      .default(sql`gen_random_uuid()::text`),
+    enabled: boolean("enabled").notNull().default(true),
+    // unchecked | ok | failed
+    validationStatus: text("validation_status").notNull().default("unchecked"),
+    validationDetail: text("validation_detail"),
+    validatedAt: timestamp("validated_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("custom_api_connections_ws_slug_unique").on(
+      table.workspaceId,
+      table.slug,
+    ),
+  ],
+);
 export type TelegramLinkRecord = typeof telegramLinksTable.$inferSelect;
 export type TelegramLinkCodeRecord = typeof telegramLinkCodesTable.$inferSelect;
 
 export type WorkspaceConnectedAppRecord =
   typeof workspaceConnectedAppsTable.$inferSelect;
+
+export type CustomApiConnectionRecord =
+  typeof customApiConnectionsTable.$inferSelect;

@@ -774,8 +774,12 @@ describe("skills prompt assembly", () => {
       objective: "Prepare the kelp outlook",
     });
     expect(sandboxed.sensitiveDataSandbox).toBe(true);
-    expect(sandboxed.promptSection).not.toContain("Kelp briefing");
-    expect(sandboxed.promptSection).not.toContain("current harvest forecast");
+    // With no grants and skills excluded, the section may be null entirely;
+    // either way no skill content can reach a sandboxed agent's prompt.
+    expect(sandboxed.promptSection ?? "").not.toContain("Kelp briefing");
+    expect(sandboxed.promptSection ?? "").not.toContain(
+      "current harvest forecast",
+    );
   });
 });
 
