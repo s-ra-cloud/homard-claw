@@ -6,14 +6,13 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type MemoryKind = typeof MemoryKind[keyof typeof MemoryKind];
+export type MemoryCompressionProposalKind = typeof MemoryCompressionProposalKind[keyof typeof MemoryCompressionProposalKind];
 
 
-export const MemoryKind = {
+export const MemoryCompressionProposalKind = {
   fact: 'fact',
   decision: 'decision',
   context: 'context',
-  task_outcome: 'task_outcome',
   relationship: 'relationship',
   procedure: 'procedure',
   lesson: 'lesson',
