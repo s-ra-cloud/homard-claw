@@ -189,12 +189,13 @@ describe("authentication and ownership", () => {
       expect([201, 409, 423, 503]).toContain(res.status);
       if (res.status !== 201) {
         // Fall back to a direct queued row when dispatch refuses (no creds).
-        const [wsA] = await db
+        const [wsARow] = await db
           .select({ id: workspacesTable.id })
           .from(workspacesTable)
           .where(eq(workspacesTable.clerkUserId, USER_A))
           .limit(1);
-        const [row] = await db
+        const wsA = wsARow!;
+        const [rowInsert] = await db
           .insert(tasksTable)
           .values({
             agentId: agentA,
@@ -204,6 +205,7 @@ describe("authentication and ownership", () => {
             status: "failed",
           })
           .returning();
+        const row = rowInsert!;
         return row.id;
       }
       return res.body.id as string;
@@ -305,12 +307,13 @@ describe("authentication and ownership", () => {
       .where(eq(systemStateTable.key, "legacy_workspace_id"))
       .limit(1);
     if (!legacyRow) return; // No legacy workspace in this database.
-    const [legacyWs] = await db
+    const [legacyWsRow] = await db
       .select()
       .from(workspacesTable)
       .where(eq(workspacesTable.id, legacyRow.value))
       .limit(1);
-    expect(legacyWs).toBeTruthy();
+    expect(legacyWsRow).toBeTruthy();
+    const legacyWs = legacyWsRow!;
     const originalHolder = legacyWs.clerkUserId;
 
     process.env.OWNER_EMAIL = "  Owner@Example.Test ";
@@ -339,7 +342,7 @@ describe("authentication and ownership", () => {
         .from(workspacesTable)
         .where(eq(workspacesTable.id, legacyWs.id))
         .limit(1);
-      expect(after.clerkUserId).toBe(originalHolder);
+      expect(after!.clerkUserId).toBe(originalHolder);
 
       // The verified owner address adopts the legacy workspace — including
       // under a race — and the marker follows.
@@ -356,7 +359,7 @@ describe("authentication and ownership", () => {
         .from(workspacesTable)
         .where(eq(workspacesTable.id, legacyWs.id))
         .limit(1);
-      expect(after.clerkUserId).toBe(replacement);
+      expect(after!.clerkUserId).toBe(replacement);
     } finally {
       delete process.env.OWNER_EMAIL;
       authState.emails = {};
@@ -390,20 +393,22 @@ describe("emergency stop", () => {
   it("blocks the caller's queued work and releases for retry — without touching other workspaces", async () => {
     const agentA = await createAgent(USER_A, `${RUN_TAG} Stopper`);
     const agentB = await createAgent(USER_B, `${RUN_TAG} Bystander`);
-    const [wsA] = await db
+    const [wsARow] = await db
       .select({ id: workspacesTable.id })
       .from(workspacesTable)
       .where(eq(workspacesTable.clerkUserId, USER_A))
       .limit(1);
-    const [wsB] = await db
+    const wsA = wsARow!;
+    const [wsBRow] = await db
       .select({ id: workspacesTable.id })
       .from(workspacesTable)
       .where(eq(workspacesTable.clerkUserId, USER_B))
       .limit(1);
+    const wsB = wsBRow!;
 
     // Insert queued rows directly: dispatch would immediately block them
     // with not_configured when no provider credential is present.
-    const [taskA] = await db
+    const [taskARow] = await db
       .insert(tasksTable)
       .values({
         agentId: agentA,
@@ -415,7 +420,8 @@ describe("emergency stop", () => {
         estimatedCostCents: 1,
       })
       .returning();
-    const [taskB] = await db
+    const taskA = taskARow!;
+    const [taskBRow] = await db
       .insert(tasksTable)
       .values({
         agentId: agentB,
@@ -427,6 +433,7 @@ describe("emergency stop", () => {
         estimatedCostCents: 1,
       })
       .returning();
+    const taskB = taskBRow!;
 
     try {
       await asUser(USER_A, async () => {
@@ -436,20 +443,22 @@ describe("emergency stop", () => {
         expect(engage.status).toBe(200);
       });
 
-      const [blockedA] = await db
+      const [blockedARow] = await db
         .select()
         .from(tasksTable)
         .where(eq(tasksTable.id, taskA.id))
         .limit(1);
+      const blockedA = blockedARow!;
       expect(blockedA.status).toBe("blocked");
       expect(blockedA.errorKind).toBe("emergency_stop");
 
       // B's queued work is untouched: the stop is A's alone.
-      const [stillQueuedB] = await db
+      const [stillQueuedBRow] = await db
         .select()
         .from(tasksTable)
         .where(eq(tasksTable.id, taskB.id))
         .limit(1);
+      const stillQueuedB = stillQueuedBRow!;
       expect(stillQueuedB.status).toBe("queued");
 
       await asUser(USER_A, async () => {
@@ -460,11 +469,12 @@ describe("emergency stop", () => {
         const retry = await request(app).post(`/api/tasks/${taskA.id}/retry`);
         expect(retry.status).toBe(200);
       });
-      const [requeued] = await db
+      const [requeuedRow] = await db
         .select()
         .from(tasksTable)
         .where(eq(tasksTable.id, taskA.id))
         .limit(1);
+      const requeued = requeuedRow!;
       expect(requeued.status).toBe("queued");
     } finally {
       await db

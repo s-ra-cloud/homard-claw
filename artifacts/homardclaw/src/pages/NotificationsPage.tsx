@@ -309,7 +309,7 @@ export default function NotificationsPage() {
                   const name = agent?.name ?? "Harbor Bot";
                   const showDay =
                     index === 0 ||
-                    dayLabel(notifications[index - 1].createdAt) !==
+                    dayLabel(notifications[index - 1]!.createdAt) !==
                       dayLabel(notification.createdAt);
                   return (
                     <React.Fragment key={notification.id}>

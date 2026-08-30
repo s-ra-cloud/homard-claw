@@ -129,7 +129,7 @@ type IdleActivity = (typeof IDLE_ACTIVITIES)[number];
 const AT_DESK_STATUSES = new Set(["working", "researching"]);
 
 function randomIdleActivity(): IdleActivity {
-  return IDLE_ACTIVITIES[Math.floor(Math.random() * IDLE_ACTIVITIES.length)];
+  return IDLE_ACTIVITIES[Math.floor(Math.random() * IDLE_ACTIVITIES.length)]!;
 }
 
 function poseForAgent(
@@ -337,7 +337,7 @@ export default function OfficeDashboard() {
         ? undefined
         : new IntersectionObserver(
             ([entry]) => {
-              onScreen = entry.isIntersecting;
+              onScreen = entry!.isIntersecting;
               update();
             },
             { threshold: 0.05 },
@@ -562,7 +562,7 @@ export default function OfficeDashboard() {
       zIndex: floorZIndex(placement.seat.top) + 3,
     })),
     ...floorAgents.map((agent, index) => {
-      const seat = FLOOR_SEATS[index];
+      const seat = FLOOR_SEATS[index]!;
       return {
         agent,
         seat,
@@ -575,7 +575,7 @@ export default function OfficeDashboard() {
     }),
     ...deskAgents.map((agent, index) => ({
       agent,
-      seat: DESK_SEATS[index],
+      seat: DESK_SEATS[index]!,
       dutyRole: undefined,
       mirrorX: false,
       pose: stopped
@@ -588,12 +588,12 @@ export default function OfficeDashboard() {
     // inside — the platform is the separation, not the posture.
     ...exteriorAgents.map((agent, index) => ({
       agent,
-      seat: EXTERIOR_SEATS[index],
+      seat: EXTERIOR_SEATS[index]!,
       dutyRole: undefined,
       mirrorX: false,
       pose: "floor-working" as LobsterPose,
       displayStatus: agent.status,
-      zIndex: floorZIndex(EXTERIOR_SEATS[index].top),
+      zIndex: floorZIndex(EXTERIOR_SEATS[index]!.top),
     })),
   ];
 
@@ -673,7 +673,7 @@ export default function OfficeDashboard() {
                     !stopped && AT_DESK_STATUSES.has(agent.status) ? (
                       <WorkstationScreen
                         key={`${agent.id}-screen`}
-                        station={DESK_SEATS[index]}
+                        station={DESK_SEATS[index]!}
                         status={agent.status}
                         index={index}
                       />

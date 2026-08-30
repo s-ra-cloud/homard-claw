@@ -134,7 +134,7 @@ async function insertCompletedTask(
   wsId: string,
   values: { objective: string; output: string; finishedAt?: Date },
 ) {
-  const [task] = await db
+  const [taskRow] = await db
     .insert(tasksTable)
     .values({
       agentId,
@@ -149,11 +149,11 @@ async function insertCompletedTask(
       finishedAt: values.finishedAt ?? new Date(),
     })
     .returning();
-  return task;
+  return taskRow!;
 }
 
 async function insertRunningTask(agentId: string, objective: string) {
-  const [task] = await db
+  const [taskRow] = await db
     .insert(tasksTable)
     .values({
       agentId,
@@ -167,7 +167,7 @@ async function insertRunningTask(agentId: string, objective: string) {
       estimatedCostCents: 1,
     })
     .returning();
-  return task;
+  return taskRow!;
 }
 
 function utcDayStr(date: Date): string {
@@ -251,15 +251,17 @@ beforeAll(async () => {
   vi.stubEnv("SESSION_SECRET", "task-results-test-secret");
   mainClerkUserId = `task-results-owner-${Date.now()}`;
   otherClerkUserId = `task-results-other-${Date.now()}`;
-  const [workspace] = await db
+  const [workspaceRow] = await db
     .insert(workspacesTable)
     .values({ clerkUserId: mainClerkUserId })
     .returning();
+  const workspace = workspaceRow!;
   workspaceId = workspace.id;
-  const [other] = await db
+  const [otherRow] = await db
     .insert(workspacesTable)
     .values({ clerkUserId: otherClerkUserId })
     .returning();
+  const other = otherRow!;
   otherWorkspaceId = other.id;
   authState.userId = mainClerkUserId;
 });
@@ -1098,7 +1100,9 @@ describe("complete Talk task history (bounded-exhaustive browse)", () => {
       day: "2-digit",
     }).format(new Date());
     const [y, m, d] = today.split("-").map(Number);
-    const dayStart = new Date(new TZDate(y, m - 1, d, 0, 0, 0, tz).getTime());
+    const dayStart = new Date(
+      new TZDate(y!, m! - 1, d!, 0, 0, 0, tz).getTime(),
+    );
     const early = await insertCompletedTask(boundary.id, workspaceId, {
       objective: "sunrise patrol",
       output: "Sunrise patrol done.",

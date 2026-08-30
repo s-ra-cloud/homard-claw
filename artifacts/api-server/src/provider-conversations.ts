@@ -49,7 +49,7 @@ export async function resolveConversation(
     const existing = await latestConversation(agentId, provider);
     if (existing) return ensureConversationWorkspace(existing);
   }
-  const [created] = await db
+  const [createdRow] = await db
     .insert(providerConversationsTable)
     .values({
       agentId,
@@ -59,6 +59,7 @@ export async function resolveConversation(
       workspacePath: "",
     })
     .returning();
+  const created = createdRow!;
   const workspacePath = await ensureCodexWorkspace(agentId, created.id);
   const [updated] = await db
     .update(providerConversationsTable)

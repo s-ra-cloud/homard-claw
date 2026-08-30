@@ -96,7 +96,7 @@ export default function IslandPage() {
         ? undefined
         : new IntersectionObserver(
             ([entry]) => {
-              onScreen = entry.isIntersecting;
+              onScreen = entry!.isIntersecting;
               update();
             },
             { threshold: 0.05 },
@@ -116,7 +116,7 @@ export default function IslandPage() {
   }, [salute]);
 
   const handleSalute = (id: string, index: number) => {
-    setSalute({ id, text: SALUTES[index % SALUTES.length] });
+    setSalute({ id, text: SALUTES[index % SALUTES.length]! });
   };
 
   return (
@@ -184,7 +184,7 @@ export default function IslandPage() {
                   )}
 
                   {visibleBeachAgents.map((agent, i) => {
-                    const spot = BEACH_SPOTS[i];
+                    const spot = BEACH_SPOTS[i]!;
                     const saluting = salute?.id === agent.id;
                     return (
                       <button

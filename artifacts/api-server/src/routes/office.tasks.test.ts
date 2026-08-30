@@ -96,7 +96,7 @@ async function insertTask(
   agentId: string,
   overrides: Partial<typeof tasksTable.$inferInsert> = {},
 ) {
-  const [task] = await db
+  const [taskRow] = await db
     .insert(tasksTable)
     .values({
       agentId,
@@ -111,7 +111,7 @@ async function insertTask(
       ...overrides,
     })
     .returning();
-  return task;
+  return taskRow!;
 }
 
 async function getTaskRow(id: string) {
@@ -170,12 +170,12 @@ beforeAll(async () => {
     .limit(1);
   const boot = await request(app).get("/api/agents");
   expect(boot.status).toBe(200);
-  const [ws] = await db
+  const [wsRow] = await db
     .select({ id: workspacesTable.id })
     .from(workspacesTable)
     .where(eq(workspacesTable.clerkUserId, authState.userId))
     .limit(1);
-  wsId = ws.id;
+  wsId = wsRow!.id;
   createdWorkspace = !existingWorkspace;
   priorCredentialRows = await db
     .select()

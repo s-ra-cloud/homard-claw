@@ -97,18 +97,18 @@ export function parseA1Range(input: string): A1ParseResult {
       error: `"${rangePart}" is not a valid A1 range (too many ':').`,
     };
   }
-  const first = CELL_REF.exec(corners[0].trim());
+  const first = CELL_REF.exec(corners[0]!.trim());
   const second =
-    corners.length === 2 ? CELL_REF.exec(corners[1].trim()) : first;
+    corners.length === 2 ? CELL_REF.exec(corners[1]!.trim()) : first;
   if (!first || !second) {
     return {
       ok: false,
       error: `"${rangePart}" is not a bounded A1 range. Use explicit corners like A1:D50 — open-ended ranges (A:A, 1:20) are not allowed.`,
     };
   }
-  const colA = columnToIndex(first[1]);
+  const colA = columnToIndex(first[1]!);
   const rowA = Number(first[2]);
-  const colB = columnToIndex(second[1]);
+  const colB = columnToIndex(second[1]!);
   const rowB = Number(second[2]);
   if (rowA < 1 || rowB < 1) {
     return { ok: false, error: "Row numbers start at 1." };
@@ -223,7 +223,7 @@ export function parseSheetValues(
       }
     }
     cellCount += cells.length;
-    if (rows.length > 0 && cells.length !== rows[0].length) rectangular = false;
+    if (rows.length > 0 && cells.length !== rows[0]!.length) rectangular = false;
     columnCount = Math.max(columnCount, cells.length);
     rows.push(cells);
   }

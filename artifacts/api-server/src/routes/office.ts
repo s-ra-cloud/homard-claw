@@ -573,7 +573,7 @@ router.post("/agents", async (req, res): Promise<void> => {
   const customApps = await listCustomApiPackageIds(req.workspaceId!);
   try {
     const outcome = await db.transaction(async (tx) => {
-      const [agent] = await tx
+      const [agentRow] = await tx
         .insert(agentsTable)
         .values({
           ...agentFields,
@@ -582,6 +582,7 @@ router.post("/agents", async (req, res): Promise<void> => {
           status: "idle",
         })
         .returning();
+      const agent = agentRow!;
       const grants = dedupeGrants(appGrants ?? [], customApps);
       if (grants.length > 0) {
         await tx.insert(agentAppGrantsTable).values(
@@ -701,11 +702,12 @@ router.patch("/agents/:agentId", async (req, res): Promise<void> => {
       }
       let agent = existing;
       if (Object.keys(updates).length > 0) {
-        [agent] = await tx
+        const [updatedAgent] = await tx
           .update(agentsTable)
           .set(updates)
           .where(eq(agentsTable.id, existing.id))
           .returning();
+        agent = updatedAgent!;
       }
       // Grants are replaced wholesale when supplied: the payload is the
       // complete, owner-approved set, so anything absent is a revocation
@@ -796,7 +798,7 @@ async function duplicateAgentOnce(workspaceId: string, agentId: string) {
       if (n > 50) return { status: 409 as const };
       candidate = `${base} ${n}`;
     }
-    const [agent] = await tx
+    const [agentRow] = await tx
       .insert(agentsTable)
       .values({
         workspaceId,
@@ -817,6 +819,7 @@ async function duplicateAgentOnce(workspaceId: string, agentId: string) {
         status: "idle",
       })
       .returning();
+    const agent = agentRow!;
     // Deliberately NOT copied: connected-app grants and the sensitive-data
     // sandbox flag (the insert above omits sensitiveDataSandbox, so the copy
     // defaults to false). External account access is granted per agent by
@@ -1347,11 +1350,12 @@ router.post("/tasks/:taskId/cancel", async (req, res): Promise<void> => {
     if (!CANCELLABLE_STATUSES.includes(row.task.status)) {
       return { status: 409 as const, current: row.task.status };
     }
-    const [task] = await tx
+    const [taskRow] = await tx
       .update(tasksTable)
       .set({ status: "cancelled", finishedAt: new Date() })
       .where(eq(tasksTable.id, row.task.id))
       .returning();
+    const task = taskRow!;
     // A cancelled task's approval request must die with it, or it could be
     // approved later and resurrect work the owner explicitly stopped.
     await tx
@@ -1418,7 +1422,7 @@ router.post("/tasks/:taskId/retry", async (req, res): Promise<void> => {
     if (!RETRYABLE_STATUSES.includes(row.task.status)) {
       return { status: 409 as const, current: row.task.status };
     }
-    const [task] = await tx
+    const [taskRow] = await tx
       .update(tasksTable)
       .set({
         status: "queued",
@@ -1435,6 +1439,7 @@ router.post("/tasks/:taskId/retry", async (req, res): Promise<void> => {
       })
       .where(eq(tasksTable.id, row.task.id))
       .returning();
+    const task = taskRow!;
     await tx.insert(taskLogsTable).values({
       taskId: task.id,
       level: "info",
@@ -1520,11 +1525,12 @@ router.post("/tasks/:taskId/fallback", async (req, res): Promise<void> => {
               ? { paidFallbackApprovedAt: new Date() }
               : {}),
           };
-    const [task] = await tx
+    const [taskRow] = await tx
       .update(tasksTable)
       .set(changes)
       .where(eq(tasksTable.id, row.task.id))
       .returning();
+    const task = taskRow!;
     const message =
       action === "cancel"
         ? "Stopped by the owner after the provider could not continue."
@@ -1637,7 +1643,9 @@ router.post("/tasks/:taskId/usage", async (req, res): Promise<void> => {
     })
     .where(eq(tasksTable.id, existing.task.id))
     .returning();
-  res.json(RecordTaskUsageResponse.parse(toTaskJson(task, existing.agentName)));
+  res.json(
+    RecordTaskUsageResponse.parse(toTaskJson(task!, existing.agentName)),
+  );
 });
 
 router.post("/emergency-stop", async (req, res): Promise<void> => {

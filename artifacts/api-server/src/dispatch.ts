@@ -200,7 +200,7 @@ export async function dispatchTask(
                 errorMessage: `${providerLabel(routing.provider)} is not configured; add the credential and retry.`,
               }
             : null;
-      const [task] = await tx
+      const [taskRow] = await tx
         .insert(tasksTable)
         .values({
           // The task's durable owner: always the agent's workspace, never
@@ -231,6 +231,7 @@ export async function dispatchTask(
           ...(blockReason ?? {}),
         })
         .returning();
+      const task = taskRow!;
       await tx.insert(taskLogsTable).values({
         taskId: task.id,
         level: blockReason ? "warn" : "info",

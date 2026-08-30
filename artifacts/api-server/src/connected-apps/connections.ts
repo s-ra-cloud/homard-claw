@@ -797,7 +797,7 @@ async function sheetsResolveTab(
       ? exact
       : tabs.filter((p) => p.title.toLowerCase() === tabTitle.toLowerCase());
   if (relaxed.length === 1) {
-    return { ok: true, sheetId: relaxed[0].sheetId, title: relaxed[0].title };
+    return { ok: true, sheetId: relaxed[0]!.sheetId, title: relaxed[0]!.title };
   }
   const listing = tabs.map((p) => `"${p.title}"`).join(", ") || "(none)";
   return {
@@ -1632,7 +1632,7 @@ async function verifyGmailSend(
   if (messages.length === 0) return { kind: "not_executed" };
   return {
     kind: "executed",
-    summary: `Email sent (id ${messages[0].id}) to ${params.to}: "${params.subject}". Confirmed in the mailbox after an interrupted run.`,
+    summary: `Email sent (id ${messages[0]!.id}) to ${params.to}: "${params.subject}". Confirmed in the mailbox after an interrupted run.`,
   };
 }
 
@@ -1857,7 +1857,7 @@ async function verifyDriveCreateFile(
       | { files?: { id: string; name: string; size?: string }[] }
       | null)?.files ?? [];
   if (files.length === 0) return { kind: "not_executed" };
-  const file = files[0];
+  const file = files[0]!;
   // Creation is two calls (create metadata, then upload content), so the
   // file can exist with the upload missing. The media PATCH is idempotent
   // for this exact fileId, so completing it here is safe — never a dupe.
@@ -1913,7 +1913,7 @@ async function verifyDriveCreateSpreadsheet(
     (result.data as { files?: { id: string; name: string }[] } | null)
       ?.files ?? [];
   if (files.length === 0) return { kind: "not_executed" };
-  const file = files[0];
+  const file = files[0]!;
   return {
     kind: "executed",
     summary: `Created Google spreadsheet "${file.name}" (spreadsheetId ${file.id}). Link: ${spreadsheetLink(file.id)} — confirmed after an interrupted run.`,

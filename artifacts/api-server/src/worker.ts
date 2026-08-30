@@ -475,7 +475,7 @@ export async function claimNextTask(
       .where(
         and(eq(agentsTable.id, row.agent.id), eq(agentsTable.status, "idle")),
       );
-    return { task, agent: row.agent };
+    return { task: task!, agent: row.agent };
   });
 }
 
@@ -800,7 +800,7 @@ async function parkForAppAction(
       params: request.params,
       targetSummary: request.targetSummary,
       status: "waiting_approval",
-      approvalId: approval.id,
+      approvalId: approval!.id,
       definitionRevision: request.definitionRevision ?? null,
     });
     await recordAudit(

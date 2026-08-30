@@ -54,7 +54,7 @@ beforeAll(async () => {
     .from(workspacesTable)
     .where(eq(workspacesTable.clerkUserId, authState.userId))
     .limit(1);
-  workspaceId = workspace.id;
+  workspaceId = workspace!.id;
 });
 
 beforeEach(async () => {

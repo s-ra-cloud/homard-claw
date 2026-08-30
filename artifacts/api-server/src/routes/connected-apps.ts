@@ -99,9 +99,9 @@ router.get("/connected-apps", async (req, res): Promise<void> => {
         app,
         displayName: APP_CATALOG[app].displayName,
         enabled: enabledByApp.get(app) ?? true,
-        status: statuses[index].status,
-        statusDetail: statuses[index].detail,
-        accountLabel: statuses[index].accountLabel,
+        status: statuses[index]!.status,
+        statusDetail: statuses[index]!.detail,
+        accountLabel: statuses[index]!.accountLabel,
         grantedAgents: countByApp.get(app) ?? 0,
       })),
     }),
@@ -324,7 +324,7 @@ router.post("/connected-apps/custom", async (req, res): Promise<void> => {
         `Custom API "${definition.displayName}" (${definition.baseUrl}) was whitelisted with ${definition.operations.length} operation${definition.operations.length === 1 ? "" : "s"}.`,
         tx,
       );
-      return inserted;
+      return inserted!;
     });
     publish(wsId, "agents", "overview");
     res.status(201).json(CreateCustomApiResponse.parse(toCustomApiJson(row, 0)));
@@ -520,7 +520,7 @@ router.patch(
         .returning();
       return {
         status: 200 as const,
-        row,
+        row: row!,
         packageId: customApiPackageId(existing.slug),
         definition,
         definitionTouched,
@@ -635,7 +635,7 @@ router.post(
     const counts = await customGrantCounts(wsId, [packageId]);
     res.json(
       RotateCustomApiCredentialResponse.parse(
-        toCustomApiJson(row, counts.get(packageId) ?? 0),
+        toCustomApiJson(row!, counts.get(packageId) ?? 0),
       ),
     );
   },

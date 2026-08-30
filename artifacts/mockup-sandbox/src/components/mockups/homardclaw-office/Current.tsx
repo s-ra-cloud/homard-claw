@@ -111,8 +111,8 @@ const mockAgents: Agent[] = [
 const mockTasks: Task[] = [
   {
     id: "tsk_01jz9q4s6v8x2a",
-    agentId: mockAgents[0].id,
-    agentName: mockAgents[0].name,
+    agentId: mockAgents[0]!.id,
+    agentName: mockAgents[0]!.name,
     objective: "Prepare the morning operations brief and identify blocked work.",
     status: "running",
     provider: "claude_max",
@@ -120,8 +120,8 @@ const mockTasks: Task[] = [
   },
   {
     id: "tsk_02jz9q4s6v8x2b",
-    agentId: mockAgents[1].id,
-    agentName: mockAgents[1].name,
+    agentId: mockAgents[1]!.id,
+    agentName: mockAgents[1]!.name,
     objective: "Analyze this week's competitor announcements and summarize changes.",
     status: "queued",
     provider: "openrouter",
@@ -129,8 +129,8 @@ const mockTasks: Task[] = [
   },
   {
     id: "tsk_03jz9q4s6v8x2c",
-    agentId: mockAgents[3].id,
-    agentName: mockAgents[3].name,
+    agentId: mockAgents[3]!.id,
+    agentName: mockAgents[3]!.name,
     objective: "Export the monthly provider usage report.",
     status: "waiting_approval",
     provider: "openrouter",

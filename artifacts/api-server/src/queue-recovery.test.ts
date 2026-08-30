@@ -114,7 +114,7 @@ async function ensureFixtures(): Promise<void> {
     .insert(workspacesTable)
     .values({ clerkUserId: `${RUN}-owner` })
     .returning({ id: workspacesTable.id });
-  wsId = ws.id;
+  wsId = ws!.id;
   const [agent] = await db
     .insert(agentsTable)
     .values({
@@ -126,7 +126,7 @@ async function ensureFixtures(): Promise<void> {
       avatar: { shellColor: "#C34428", deskStyle: "standard", accessory: "none" },
     })
     .returning({ id: agentsTable.id });
-  agentId = agent.id;
+  agentId = agent!.id;
 }
 
 /** Insert a task that looks abandoned mid-run by a dead worker. */
@@ -145,8 +145,8 @@ async function insertRunningTask(): Promise<string> {
       attempts: 1,
     })
     .returning({ id: tasksTable.id });
-  createdTaskIds.push(task.id);
-  return task.id;
+  createdTaskIds.push(task!.id);
+  return task!.id;
 }
 
 async function taskStatus(id: string): Promise<string> {

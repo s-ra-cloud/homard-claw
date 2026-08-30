@@ -242,13 +242,13 @@ export function calendarDayString(instant: Date, timezone: string): string {
 
 /** UTC instant of local midnight starting the given calendar day. */
 function startOfCalendarDay(dateOnly: string, timezone: string): Date {
-  const [y, m, d] = dateOnly.split("-").map(Number);
+  const [y, m, d] = dateOnly.split("-").map(Number) as [number, number, number];
   return new Date(new TZDate(y, m - 1, d, 0, 0, 0, timezone).getTime());
 }
 
 /** Shift a "YYYY-MM-DD" string by whole calendar days (no timezone math). */
 function shiftDateOnly(dateOnly: string, days: number): string {
-  const [y, m, d] = dateOnly.split("-").map(Number);
+  const [y, m, d] = dateOnly.split("-").map(Number) as [number, number, number];
   return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
 }
 

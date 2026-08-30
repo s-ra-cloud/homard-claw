@@ -150,7 +150,7 @@ async function insertRunningTask(
   agentId: string,
   overrides: Partial<typeof tasksTable.$inferInsert> = {},
 ) {
-  const [task] = await db
+  const [taskRow] = await db
     .insert(tasksTable)
     .values({
       agentId,
@@ -166,7 +166,7 @@ async function insertRunningTask(
       ...overrides,
     })
     .returning();
-  return task;
+  return taskRow!;
 }
 
 async function getTaskRow(id: string) {
@@ -301,10 +301,11 @@ async function approve(approvalId: string) {
 
 beforeAll(async () => {
   vi.stubEnv("SESSION_SECRET", "connected-apps-worker-test-secret");
-  const [workspace] = await db
+  const [workspaceRow] = await db
     .insert(workspacesTable)
     .values({ clerkUserId: `connected-apps-worker-${Date.now()}` })
     .returning();
+  const workspace = workspaceRow!;
   workspaceId = workspace.id;
   authState.userId = workspace.clerkUserId;
   await db.insert(googleAccountsTable).values({
@@ -1060,10 +1061,11 @@ describe("round-limit continuation approval", () => {
     const { task, approval } = await parkOnRoundLimit(agent.id);
 
     // A foreign workspace cannot decide it, no matter how it calls in.
-    const [foreign] = await db
+    const [foreignRow] = await db
       .insert(workspacesTable)
       .values({ clerkUserId: `continuation-foreign-${Date.now()}` })
       .returning();
+    const foreign = foreignRow!;
     try {
       await expect(
         decideApproval({

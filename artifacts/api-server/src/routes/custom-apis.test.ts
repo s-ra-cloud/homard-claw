@@ -120,16 +120,18 @@ function apiBody(overrides: Record<string, unknown> = {}) {
 beforeAll(async () => {
   vi.stubEnv("SESSION_SECRET", "custom-api-routes-test-secret");
   ownClerkId = `custom-api-routes-${Date.now()}`;
-  const [workspace] = await db
+  const [workspaceRow] = await db
     .insert(workspacesTable)
     .values({ clerkUserId: ownClerkId })
     .returning();
+  const workspace = workspaceRow!;
   workspaceId = workspace.id;
   otherClerkId = `custom-api-routes-other-${Date.now()}`;
-  const [other] = await db
+  const [otherRow] = await db
     .insert(workspacesTable)
     .values({ clerkUserId: otherClerkId })
     .returning();
+  const other = otherRow!;
   otherWorkspaceId = other.id;
   authState.userId = ownClerkId;
 });
@@ -305,10 +307,11 @@ describe("custom API management routes", () => {
       authState.userId = ownClerkId;
     }
     // Nothing changed.
-    const [row] = await db
+    const [rowResult] = await db
       .select()
       .from(customApiConnectionsTable)
       .where(eq(customApiConnectionsTable.id, apiId));
+    const row = rowResult!;
     expect(row.enabled).toBe(true);
   });
 
@@ -342,7 +345,7 @@ describe("custom API management routes", () => {
     expect(agentRes.status).toBe(201);
     const agentId = agentRes.body.id;
     createdAgentIds.push(agentId);
-    const [task] = await db
+    const [taskRow] = await db
       .insert(tasksTable)
       .values({
         workspaceId,
@@ -352,7 +355,8 @@ describe("custom API management routes", () => {
         status: "waiting_approval",
       })
       .returning();
-    const [approval] = await db
+    const task = taskRow!;
+    const [approvalRow] = await db
       .insert(approvalsTable)
       .values({
         agentId,
@@ -364,6 +368,7 @@ describe("custom API management routes", () => {
         expiresAt: new Date(Date.now() + 60 * 60 * 1000),
       })
       .returning();
+    const approval = approvalRow!;
     await db.insert(appActionsTable).values({
       taskId: task.id,
       agentId,
@@ -388,20 +393,23 @@ describe("custom API management routes", () => {
     // The probe status resets: the reviewed surface changed.
     expect(res.body.validationStatus).toBe("unchecked");
 
-    const [expiredApproval] = await db
+    const [expiredApprovalRow] = await db
       .select()
       .from(approvalsTable)
       .where(eq(approvalsTable.id, approval.id));
+    const expiredApproval = expiredApprovalRow!;
     expect(expiredApproval.status).toBe("expired");
-    const [expiredAction] = await db
+    const [expiredActionRow] = await db
       .select()
       .from(appActionsTable)
       .where(eq(appActionsTable.approvalId, approval.id));
+    const expiredAction = expiredActionRow!;
     expect(expiredAction.status).toBe("expired");
-    const [blockedTask] = await db
+    const [blockedTaskRow] = await db
       .select()
       .from(tasksTable)
       .where(eq(tasksTable.id, task.id));
+    const blockedTask = blockedTaskRow!;
     expect(blockedTask.status).toBe("blocked");
     expect(blockedTask.errorKind).toBe("approval_expired");
   });
@@ -511,7 +519,7 @@ describe("custom API management routes", () => {
     expect(agentRes.status).toBe(201);
     const agentId: string = agentRes.body.id;
     createdAgentIds.push(agentId);
-    const [task] = await db
+    const [taskRow] = await db
       .insert(tasksTable)
       .values({
         workspaceId,
@@ -521,7 +529,8 @@ describe("custom API management routes", () => {
         status: "working",
       })
       .returning();
-    const [approval] = await db
+    const task = taskRow!;
+    const [approvalRow] = await db
       .insert(approvalsTable)
       .values({
         agentId,
@@ -533,7 +542,8 @@ describe("custom API management routes", () => {
         expiresAt: new Date(Date.now() + 60 * 60 * 1000),
       })
       .returning();
-    const [action] = await db
+    const approval = approvalRow!;
+    const [actionRow] = await db
       .insert(appActionsTable)
       .values({
         taskId: task.id,
@@ -547,6 +557,7 @@ describe("custom API management routes", () => {
         definitionRevision: raceRevision,
       })
       .returning();
+    const action = actionRow!;
 
     // Interleaving A — the mid-removal window: the connection fence has
     // committed (row disabled or already gone) but the approval sweep has
@@ -557,10 +568,11 @@ describe("custom API management routes", () => {
       .set({ enabled: false })
       .where(eq(customApiConnectionsTable.id, raceApiId));
     expect(await claimApprovedAction(action.id)).toBeNull();
-    let [current] = await db
+    let [currentRow] = await db
       .select()
       .from(appActionsTable)
       .where(eq(appActionsTable.id, action.id));
+    let current = currentRow!;
     expect(current.status).toBe("approved");
     await db
       .update(customApiConnectionsTable)
@@ -667,10 +679,11 @@ describe("custom API management routes", () => {
     // And the deletion sweep expired the approval trail for good measure:
     // an action that never reached executing would have been swept; ours
     // was claimed, so it must not have been resurrected either way.
-    [current] = await db
+    [currentRow] = await db
       .select()
       .from(appActionsTable)
       .where(eq(appActionsTable.id, action.id));
+    current = currentRow!;
     expect(current.status).toBe("executing");
   });
 
@@ -732,7 +745,7 @@ describe("custom API management routes", () => {
       });
     expect(agentRes.status).toBe(201);
     createdAgentIds.push(agentRes.body.id);
-    const [task] = await db
+    const [taskRow] = await db
       .insert(tasksTable)
       .values({
         workspaceId,
@@ -742,7 +755,8 @@ describe("custom API management routes", () => {
         status: "working",
       })
       .returning();
-    const [approval] = await db
+    const task = taskRow!;
+    const [approvalRow] = await db
       .insert(approvalsTable)
       .values({
         agentId: agentRes.body.id,
@@ -754,7 +768,8 @@ describe("custom API management routes", () => {
         expiresAt: new Date(Date.now() + 60 * 60 * 1000),
       })
       .returning();
-    const [action] = await db
+    const approval = approvalRow!;
+    const [actionRow] = await db
       .insert(appActionsTable)
       .values({
         taskId: task.id,
@@ -768,6 +783,7 @@ describe("custom API management routes", () => {
         definitionRevision: rev1,
       })
       .returning();
+    const action = actionRow!;
     expect(await claimApprovedAction(action.id)).toBeNull();
 
     // Same for a definition edit followed by a stale write-back of the OLD

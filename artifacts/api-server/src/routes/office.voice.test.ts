@@ -295,7 +295,7 @@ beforeAll(async () => {
     .from(workspacesTable)
     .where(eq(workspacesTable.clerkUserId, authState.userId))
     .limit(1);
-  wsId = ws.id;
+  wsId = ws!.id;
   const [transcripts] = await db
     .select()
     .from(workspaceSettingsTable)
@@ -587,7 +587,7 @@ describe("text conversations", () => {
   it("proposes a teammate task for owner confirmation instead of starting it", async () => {
     const source = await createAgent(`${RUN_TAG} Task Relay Source`);
     const target = await createAgent(`${RUN_TAG} Task Relay Target`);
-    const [team] = await db
+    const [teamInsert] = await db
       .insert(teamsTable)
       .values({
         workspaceId: wsId,
@@ -595,6 +595,7 @@ describe("text conversations", () => {
         leadAgentId: source.id,
       })
       .returning();
+    const team = teamInsert!;
     createdTeamIds.push(team.id);
     await db.insert(teamMembersTable).values([
       { teamId: team.id, agentId: source.id },
@@ -637,7 +638,7 @@ describe("text conversations", () => {
   it("keeps the intended teammate across a clarification turn and never falls back to a self-task", async () => {
     const source = await createAgent(`${RUN_TAG} Clarifying Lead`);
     const target = await createAgent(`${RUN_TAG} Jean-Pierre`);
-    const [team] = await db
+    const [teamInsert] = await db
       .insert(teamsTable)
       .values({
         workspaceId: wsId,
@@ -645,6 +646,7 @@ describe("text conversations", () => {
         leadAgentId: source.id,
       })
       .returning();
+    const team = teamInsert!;
     createdTeamIds.push(team.id);
     await db.insert(teamMembersTable).values([
       { teamId: team.id, agentId: source.id },
@@ -980,7 +982,7 @@ describe("text conversations", () => {
     const survivors = await db
       .select()
       .from(agentMessagesTable)
-      .where(eq(agentMessagesTable.id, nonVoice.id));
+      .where(eq(agentMessagesTable.id, nonVoice!.id));
     expect(survivors).toHaveLength(1);
   });
 
@@ -1674,9 +1676,11 @@ describe("voice conversations", () => {
       day: "2-digit",
     }).format(new Date());
     const [y, m, d] = today.split("-").map(Number);
-    const dayStart = new Date(new TZDate(y, m - 1, d, 0, 0, 0, tz).getTime());
+    const dayStart = new Date(
+      new TZDate(y!, m! - 1, d!, 0, 0, 0, tz).getTime(),
+    );
     const insert = async (objective: string, finishedAt: Date) => {
-      const [task] = await db
+      const [taskInsert] = await db
         .insert(tasksTable)
         .values({
           agentId: agent.id,
@@ -1691,6 +1695,7 @@ describe("voice conversations", () => {
           finishedAt,
         })
         .returning();
+      const task = taskInsert!;
       return task;
     };
     const ids: string[] = [];

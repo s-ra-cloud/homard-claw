@@ -118,10 +118,11 @@ async function rememberSetting(appId: string) {
 
 beforeAll(async () => {
   vi.stubEnv("SESSION_SECRET", "connected-apps-route-test-secret");
-  const [workspace] = await db
+  const [workspaceInsert] = await db
     .insert(workspacesTable)
     .values({ clerkUserId: `connected-apps-route-${Date.now()}` })
     .returning();
+  const workspace = workspaceInsert!;
   workspaceId = workspace.id;
   authState.userId = workspace.clerkUserId;
   await db.insert(googleAccountsTable).values({
