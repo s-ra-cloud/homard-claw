@@ -120,16 +120,18 @@ function apiBody(overrides: Record<string, unknown> = {}) {
 beforeAll(async () => {
   vi.stubEnv("SESSION_SECRET", "custom-api-routes-test-secret");
   ownClerkId = `custom-api-routes-${Date.now()}`;
-  const [workspace] = await db
+  const [workspaceRow] = await db
     .insert(workspacesTable)
     .values({ clerkUserId: ownClerkId })
     .returning();
+  const workspace = workspaceRow!;
   workspaceId = workspace.id;
   otherClerkId = `custom-api-routes-other-${Date.now()}`;
-  const [other] = await db
+  const [otherRow] = await db
     .insert(workspacesTable)
     .values({ clerkUserId: otherClerkId })
     .returning();
+  const other = otherRow!;
   otherWorkspaceId = other.id;
   authState.userId = ownClerkId;
 });
@@ -305,10 +307,11 @@ describe("custom API management routes", () => {
       authState.userId = ownClerkId;
     }
     // Nothing changed.
-    const [row] = await db
+    const [rowResult] = await db
       .select()
       .from(customApiConnectionsTable)
       .where(eq(customApiConnectionsTable.id, apiId));
+    const row = rowResult!;
     expect(row.enabled).toBe(true);
   });
 

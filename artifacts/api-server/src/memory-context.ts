@@ -315,7 +315,7 @@ export async function insertMemoryEnforcingCap(
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(${MEMORY_QUOTA_LOCK}, hashtext(${wsId ?? ""}))`,
     );
-    const [{ count }] = await tx
+    const [countRow] = await tx
       .select({ count: sql<number>`count(*)::int` })
       .from(memoriesTable)
       .where(
@@ -323,6 +323,7 @@ export async function insertMemoryEnforcingCap(
           ? eq(memoriesTable.workspaceId, wsId)
           : isNull(memoriesTable.workspaceId),
       );
+    const count = countRow!.count;
     if (count >= MAX_MEMORIES) {
       if (!pruneToMakeRoom) throw new MemoryQuotaError();
       const needed = count - MAX_MEMORIES + 1;
@@ -338,7 +339,7 @@ export async function insertMemoryEnforcingCap(
       if (pruned.rows.length < needed) return null;
     }
     const [row] = await tx.insert(memoriesTable).values(values).returning();
-    return row;
+    return row!;
   });
 }
 

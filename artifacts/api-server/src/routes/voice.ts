@@ -78,7 +78,7 @@ function agentVoice(
   agent: AgentRow,
 ): "alloy" | "nova" | "onyx" | "shimmer" | null {
   const style = (agent.voiceStyle ?? "").toLowerCase();
-  if (style in VOICE_MAP) return VOICE_MAP[style];
+  if (style in VOICE_MAP) return VOICE_MAP[style]!;
   return "alloy";
 }
 
@@ -1587,7 +1587,7 @@ async function claimExchange(
     .values({ workspaceId, agentId, clientMessageId })
     .onConflictDoNothing()
     .returning({ id: talkExchangesTable.id });
-  if (inserted.length > 0) return { kind: "claimed", claimId: inserted[0].id };
+  if (inserted.length > 0) return { kind: "claimed", claimId: inserted[0]!.id };
 
   const [existing] = await db
     .select()

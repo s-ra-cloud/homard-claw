@@ -155,7 +155,7 @@ router.post("/schedules", async (req, res): Promise<void> => {
     res.status(400).json({ error: "The schedule has no upcoming occurrence" });
     return;
   }
-  const [schedule] = await db
+  const [scheduleRow] = await db
     .insert(schedulesTable)
     .values({
       workspaceId: req.workspaceId!,
@@ -176,6 +176,7 @@ router.post("/schedules", async (req, res): Promise<void> => {
       nextRunAt,
     })
     .returning();
+  const schedule = scheduleRow!;
   await recordAudit(
     req.workspaceId!,
     "schedule.created",
@@ -251,7 +252,7 @@ router.patch("/schedules/:scheduleId", async (req, res): Promise<void> => {
           return { ok: false, status: 400, error: "The schedule has no upcoming occurrence" };
         }
       }
-      const [schedule] = await tx
+      const [scheduleRow] = await tx
         .update(schedulesTable)
         .set({
           name: merged.name,
@@ -281,7 +282,7 @@ router.patch("/schedules/:scheduleId", async (req, res): Promise<void> => {
         })
         .where(eq(schedulesTable.id, existing.id))
         .returning();
-      return { ok: true, schedule };
+      return { ok: true, schedule: scheduleRow! };
     },
   );
   if (!result.ok) {

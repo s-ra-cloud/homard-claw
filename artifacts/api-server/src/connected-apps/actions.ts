@@ -89,13 +89,14 @@ export async function recordDeniedAction(input: {
         decidedAt: new Date(),
       })
       .returning();
+    const action = row!;
     await recordAudit(
       input.workspaceId,
       "app_action.denied",
-      `${input.agentName} was denied a connected-app action (${row.operation}): ${input.reason}`,
+      `${input.agentName} was denied a connected-app action (${action.operation}): ${input.reason}`,
       tx,
     );
-    return row;
+    return action;
   });
 }
 
@@ -134,15 +135,16 @@ export async function runAllowedAction(input: {
       definitionRevision,
     })
     .returning();
+  const pendingAction = pending!;
   const outcome: ExecutionOutcome = tool
     ? await executeCapabilityTool(tool, input.params, {
-        actionId: pending.id,
+        actionId: pendingAction.id,
         workspaceId: input.workspaceId,
         expectedRevision: definitionRevision,
       })
     : { ok: false, kind: "failed", message: "Unknown operation." };
   const action = await finalizeAction(
-    pending.id,
+    pendingAction.id,
     input.agentName,
     outcome,
     input.workspaceId,
@@ -209,13 +211,14 @@ export async function denyClaimedAction(
       .set({ status: "denied", errorMessage: reason, decidedAt: new Date() })
       .where(eq(appActionsTable.id, action.id))
       .returning();
+    const updated = row!;
     await recordAudit(
       workspaceId,
       "app_action.denied",
       `An approved action by ${agentName} (${action.operation}: ${action.targetSummary}) was NOT run: ${reason}`,
       tx,
     );
-    return row;
+    return updated;
   });
 }
 
@@ -476,15 +479,16 @@ async function finalizeAction(
       )
       .where(eq(appActionsTable.id, actionId))
       .returning();
+    const updated = row!;
     await recordAudit(
       workspaceId,
       outcome.ok ? "app_action.executed" : "app_action.failed",
       outcome.ok
-        ? `${agentName} used a connected app: ${row.targetSummary}.`
-        : `A connected-app action by ${agentName} failed (${row.targetSummary}): ${outcome.message.slice(0, 200)}`,
+        ? `${agentName} used a connected app: ${updated.targetSummary}.`
+        : `A connected-app action by ${agentName} failed (${updated.targetSummary}): ${outcome.message.slice(0, 200)}`,
       tx,
     );
-    return row;
+    return updated;
   });
 }
 

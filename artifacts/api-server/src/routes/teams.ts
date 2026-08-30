@@ -145,7 +145,7 @@ router.post(
         .where(eq(workspacesTable.id, req.workspaceId!))
         .limit(1)
         .for("update");
-      const [task] = await tx
+      const [taskRow] = await tx
         .insert(tasksTable)
         .values({
           workspaceId: req.workspaceId!,
@@ -166,6 +166,7 @@ router.post(
           status: "queued",
         })
         .returning();
+      const task = taskRow!;
       await tx.insert(agentMessagesTable).values({
         fromAgentId: source.id,
         toAgentId: target.id,
@@ -334,7 +335,7 @@ router.post("/teams", async (req: Request, res: Response) => {
   }
 
   const teamId = await db.transaction(async (tx) => {
-    const [team] = await tx
+    const [teamRow] = await tx
       .insert(teamsTable)
       .values({
         workspaceId: wsId,
@@ -343,6 +344,7 @@ router.post("/teams", async (req: Request, res: Response) => {
         leadAgentId: body.leadAgentId ?? null,
       })
       .returning();
+    const team = teamRow!;
     if (memberIds.length > 0) {
       await tx
         .insert(teamMembersTable)
@@ -646,7 +648,7 @@ router.post("/tasks/:taskId/delegate", async (req: Request, res: Response) => {
       .where(eq(workspacesTable.id, req.workspaceId!))
       .limit(1)
       .for("update");
-    const [child] = await tx
+    const [childRow] = await tx
       .insert(tasksTable)
       .values({
         agentId: body.agentId,
@@ -668,6 +670,7 @@ router.post("/tasks/:taskId/delegate", async (req: Request, res: Response) => {
         status: "queued",
       })
       .returning();
+    const child = childRow!;
     await tx.insert(agentMessagesTable).values({
       fromAgentId: parent.agent.id,
       toAgentId: body.agentId,

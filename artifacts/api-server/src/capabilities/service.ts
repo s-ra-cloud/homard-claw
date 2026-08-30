@@ -364,7 +364,7 @@ export async function installPackage(
       `The "${packageId}" capability package v${entry.manifest.version} was installed.`,
       tx,
     );
-    return inserted;
+    return inserted!;
   });
   return { ok: true, row };
 }
@@ -434,7 +434,7 @@ export async function applyPendingUpdate(
       `The "${packageId}" capability package update to v${row.pendingVersion} was reviewed and accepted.`,
       tx,
     );
-    return next;
+    return next!;
   });
   return { ok: true, row: updated };
 }

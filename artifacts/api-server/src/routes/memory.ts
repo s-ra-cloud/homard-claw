@@ -573,7 +573,7 @@ router.post("/knowledge", async (req, res): Promise<void> => {
         wordCount,
       })
       .returning();
-    file = inserted;
+    file = inserted!;
   });
   if (quotaError !== null || !file) {
     res.status(409).json({ error: quotaError ?? "Upload failed" });
@@ -609,7 +609,7 @@ router.delete("/knowledge/:fileId", async (req, res): Promise<void> => {
   await recordAudit(
       req.workspaceId!,
       "knowledge.deleted",
-      `Knowledge file "${deleted[0].name}" was deleted.`,
+      `Knowledge file "${deleted[0]!.name}" was deleted.`,
     );
   res.status(204).end();
 });

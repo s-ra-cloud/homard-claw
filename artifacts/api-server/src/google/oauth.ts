@@ -70,12 +70,12 @@ function redirectUriFor(req: Request): string {
   const configured = process.env.GOOGLE_OAUTH_REDIRECT_URI?.trim();
   if (configured) return configured;
   const proto = String(req.headers["x-forwarded-proto"] ?? "https")
-    .split(",")[0]
+    .split(",")[0]!
     .trim();
   const host = String(
     req.headers["x-forwarded-host"] ?? req.headers.host ?? "",
   )
-    .split(",")[0]
+    .split(",")[0]!
     .trim();
   if (!host) {
     throw new GoogleAuthError(
@@ -155,7 +155,7 @@ function jwtPayload(idToken: string): Record<string, unknown> | null {
   const parts = idToken.split(".");
   if (parts.length !== 3) return null;
   try {
-    return JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+    return JSON.parse(Buffer.from(parts[1]!, "base64url").toString("utf8"));
   } catch {
     return null;
   }

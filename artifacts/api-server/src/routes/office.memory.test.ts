@@ -107,11 +107,12 @@ beforeAll(async () => {
   // scopes shared-memory retrieval now.
   const boot = await request(app).get("/api/agents");
   expect(boot.status).toBe(200);
-  const [ws] = await db
+  const [wsRow] = await db
     .select({ id: workspacesTable.id })
     .from(workspacesTable)
     .where(eq(workspacesTable.clerkUserId, ownerId))
     .limit(1);
+  const ws = wsRow!;
   wsId = ws.id;
   createdWorkspace = !existingWorkspace;
   priorCredentialRows = await db
@@ -385,22 +386,26 @@ describe("task context retrieval", () => {
         .values({ kind: "fact", workspaceId: wsId, ...values })
         .returning();
 
-    const [pinnedShared] = await insert({
+    const [pinnedSharedRow] = await insert({
       content: taggedMemory("Always sign off as The Claw Office."),
       pinned: true,
     });
-    const [relevantScoped] = await insert({
+    const pinnedShared = pinnedSharedRow!;
+    const [relevantScopedRow] = await insert({
       content: taggedMemory("The quarterly seaweed report is due each March."),
       agentId: agentA.id,
     });
-    const [disabledShared] = await insert({
+    const relevantScoped = relevantScopedRow!;
+    const [disabledSharedRow] = await insert({
       content: taggedMemory("Disabled seaweed trivia that must not appear."),
       disabled: true,
     });
-    const [foreignScoped] = await insert({
+    const disabledShared = disabledSharedRow!;
+    const [foreignScopedRow] = await insert({
       content: taggedMemory("Stranger-only seaweed intel."),
       agentId: agentB.id,
     });
+    const foreignScoped = foreignScopedRow!;
 
     const context = await buildTaskContext(
       agentA.id,
@@ -428,18 +433,21 @@ describe("task context retrieval", () => {
         .values({ kind: "fact", workspaceId: wsId, ...values })
         .returning();
 
-    const [privatePinned] = await insert({
+    const [privatePinnedRow] = await insert({
       content: taggedMemory("Private plankton ledger procedure."),
       agentId: agent.id,
       pinned: true,
     });
-    const [sharedPinned] = await insert({
+    const privatePinned = privatePinnedRow!;
+    const [sharedPinnedRow] = await insert({
       content: taggedMemory("Office-wide plankton motto everyone repeats."),
       pinned: true, // pinned shared memories are the easiest leak path
     });
-    const [sharedRelevant] = await insert({
+    const sharedPinned = sharedPinnedRow!;
+    const [sharedRelevantRow] = await insert({
       content: taggedMemory("Shared plankton ledger trivia."),
     });
+    const sharedRelevant = sharedRelevantRow!;
 
     // An assigned, relevant knowledge file must also stay out.
     const upload = await request(app)
@@ -480,7 +488,7 @@ describe("task context retrieval", () => {
       .update(agentsTable)
       .set({ sensitiveDataSandbox: true })
       .where(eq(agentsTable.id, agent.id));
-    const [memory] = await db
+    const [memoryRow] = await db
       .insert(memoriesTable)
       .values({
         kind: "fact",
@@ -489,6 +497,7 @@ describe("task context retrieval", () => {
         content: taggedMemory("Confidential payroll detail."),
       })
       .returning();
+    const memory = memoryRow!;
 
     // Re-scoping to shared (agentId: null) is refused while sandboxed.
     const publish = await request(app)
