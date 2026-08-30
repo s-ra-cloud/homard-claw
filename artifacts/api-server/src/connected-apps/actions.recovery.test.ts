@@ -652,10 +652,11 @@ describe("github code workflow executors", () => {
   });
 
   it("refuses every code operation for a workspace with no GitHub connection", async () => {
-    const [stranger] = await db
+    const [strangerInsert] = await db
       .insert(workspacesTable)
       .values({ clerkUserId: `recovery-test-nogh-${Date.now()}` })
       .returning();
+    const stranger = strangerInsert!;
     try {
       const outcome = await executeOperation(
         findOperation("github.put_file")!,
@@ -717,7 +718,7 @@ describe("drive reads by MIME type", () => {
     });
     const outcome = await executeOperation(readOp(), { fileId: "f1" }, ctx());
     expect(outcome.ok).toBe(true);
-    const readCall = driveCalls()[1];
+    const readCall = driveCalls()[1]!;
     expect(readCall.path).toContain("/export?mimeType=text%2Fcsv");
     expect(readCall.path).not.toContain("text%2Fplain");
     if (outcome.ok) {
@@ -735,7 +736,7 @@ describe("drive reads by MIME type", () => {
     });
     const outcome = await executeOperation(readOp(), { fileId: "f1" }, ctx());
     expect(outcome.ok).toBe(true);
-    expect(driveCalls()[1].path).toContain("/export?mimeType=text%2Fplain");
+    expect(driveCalls()[1]!.path).toContain("/export?mimeType=text%2Fplain");
     if (outcome.ok) expect(outcome.summary).toContain("Meeting notes");
   });
 
@@ -743,8 +744,8 @@ describe("drive reads by MIME type", () => {
     stubDriveFile({ mimeType: "text/markdown", mediaBody: "# Readme" });
     const outcome = await executeOperation(readOp(), { fileId: "f1" }, ctx());
     expect(outcome.ok).toBe(true);
-    expect(driveCalls()[1].path).toContain("alt=media");
-    expect(driveCalls()[1].path).not.toContain("/export");
+    expect(driveCalls()[1]!.path).toContain("alt=media");
+    expect(driveCalls()[1]!.path).not.toContain("/export");
     if (outcome.ok) expect(outcome.summary).toContain("# Readme");
   });
 
@@ -802,7 +803,8 @@ describe("reconcileStaleExecutingActions", () => {
       }
       throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
     };
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const [resolvedItem] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const resolved = resolvedItem!;
     expect(resolved.resolution).toBe("confirmed");
     const row = await reloadAction(action.id);
     expect(row.status).toBe("executed");
@@ -827,7 +829,8 @@ describe("reconcileStaleExecutingActions", () => {
       }
       throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
     };
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const [resolvedItem] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const resolved = resolvedItem!;
     expect(resolved.resolution).toBe("requeued");
     expect((await reloadAction(action.id)).status).toBe("approved");
     expect(sendCalls()).toHaveLength(0);
@@ -858,7 +861,8 @@ describe("reconcileStaleExecutingActions", () => {
       approvalId,
     });
     proxyState.handler = () => ({ status: 503, body: "provider down" });
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const [resolvedItem] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const resolved = resolvedItem!;
     expect(resolved.resolution).toBe("unknown");
     const row = await reloadAction(action.id);
     expect(row.status).toBe("failed");
@@ -881,7 +885,8 @@ describe("reconcileStaleExecutingActions", () => {
       }
       throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
     };
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const [resolvedItem] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const resolved = resolvedItem!;
     expect(resolved.resolution).toBe("unknown");
     const row = await reloadAction(action.id);
     expect(row.status).toBe("failed");
@@ -904,7 +909,8 @@ describe("reconcileStaleExecutingActions", () => {
       }
       throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
     };
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const [resolvedItem] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const resolved = resolvedItem!;
     expect(resolved.resolution).toBe("unknown");
     const row = await reloadAction(action.id);
     expect(row.status).toBe("failed");
@@ -932,7 +938,8 @@ describe("reconcileStaleExecutingActions", () => {
       }
       throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
     };
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const [resolvedItem] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const resolved = resolvedItem!;
     expect(resolved.resolution).toBe("confirmed");
     const row = await reloadAction(action.id);
     expect(row.status).toBe("executed");
@@ -953,7 +960,8 @@ describe("reconcileStaleExecutingActions", () => {
     proxyState.handler = (call) => {
       throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
     };
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const [resolvedItem] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const resolved = resolvedItem!;
     expect(resolved.resolution).toBe("unknown");
     expect((await reloadAction(action.id)).status).toBe("failed");
     expect(proxyState.calls).toHaveLength(0);
@@ -972,7 +980,8 @@ describe("reconcileStaleExecutingActions", () => {
       }
       throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
     };
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const [resolvedItem] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const resolved = resolvedItem!;
     expect(resolved.resolution).toBe("not_executed");
     const row = await reloadAction(action.id);
     expect(row.status).toBe("failed");
@@ -1005,7 +1014,8 @@ describe("reconcileStaleExecutingActions", () => {
       }
       throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
     };
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const [resolvedItem] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const resolved = resolvedItem!;
     expect(resolved.resolution).toBe("confirmed");
     const row = await reloadAction(action.id);
     expect(row.status).toBe("executed");
@@ -1026,7 +1036,8 @@ describe("reconcileStaleExecutingActions", () => {
       }
       throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
     };
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const [resolvedItem] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const resolved = resolvedItem!;
     expect(resolved.resolution).toBe("confirmed");
     const row = await reloadAction(action.id);
     expect(row.status).toBe("executed");
@@ -1054,7 +1065,8 @@ describe("reconcileStaleExecutingActions", () => {
       }
       throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
     };
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const [resolvedItem] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const resolved = resolvedItem!;
     expect(resolved.resolution).toBe("requeued");
     const claimed = await claimApprovedAction(action.id);
     expect(claimed).not.toBeNull();
@@ -1101,7 +1113,8 @@ describe("reconcileStaleExecutingActions", () => {
       }
       throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
     };
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const [resolvedItem] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const resolved = resolvedItem!;
     expect(resolved.resolution).toBe("confirmed");
     const row = await reloadAction(action.id);
     expect(row.status).toBe("executed");
@@ -1127,7 +1140,8 @@ describe("reconcileStaleExecutingActions", () => {
     // 404: the branch may never have been created — or repo access may have
     // been revoked after the commit landed. Both are ambiguous.
     proxyState.handler = () => ({ status: 404, body: { message: "Not Found" } });
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const [resolvedItem] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const resolved = resolvedItem!;
     expect(resolved.resolution).toBe("unknown");
     const row = await reloadAction(action.id);
     expect(row.status).toBe("failed");
@@ -1159,7 +1173,8 @@ describe("reconcileStaleExecutingActions", () => {
       }
       throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
     };
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const [resolvedItem] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const resolved = resolvedItem!;
     expect(resolved.resolution).toBe("confirmed");
     const row = await reloadAction(action.id);
     expect(row.status).toBe("executed");
@@ -1183,7 +1198,8 @@ describe("reconcileStaleExecutingActions", () => {
       }
       throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
     };
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const [resolvedItem] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const resolved = resolvedItem!;
     expect(resolved.resolution).toBe("confirmed");
     const row = await reloadAction(action.id);
     expect(row.status).toBe("executed");
@@ -1209,7 +1225,8 @@ describe("reconcileStaleExecutingActions", () => {
       }
       throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
     };
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const [resolvedItem] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const resolved = resolvedItem!;
     expect(resolved.resolution).toBe("requeued");
     const claimed = await claimApprovedAction(action.id);
     expect(claimed).not.toBeNull();
@@ -1258,16 +1275,17 @@ describe("google sheets executors", () => {
     );
     expect(outcome.ok).toBe(true);
     expect(outcome.ok && outcome.summary).toContain("Appended 2 row(s)");
-    const [batch] = batchUpdateCalls();
+    const [batchItem] = batchUpdateCalls();
+    const batch = batchItem!;
     const body = batch.body as {
       requests: Record<string, Record<string, unknown>>[];
     };
     expect(body.requests).toHaveLength(2);
-    expect(body.requests[0].appendCells).toMatchObject({
+    expect(body.requests[0]!.appendCells).toMatchObject({
       sheetId: 31,
       fields: "userEnteredValue",
     });
-    expect(body.requests[1].createDeveloperMetadata).toEqual({
+    expect(body.requests[1]!.createDeveloperMetadata).toEqual({
       developerMetadata: {
         metadataKey: "homardclawActionId",
         metadataValue: actionId,
@@ -1298,7 +1316,7 @@ describe("google sheets executors", () => {
       { actionId: "act-w1", workspaceId },
     );
     expect(outcome.ok).toBe(true);
-    const body = batchUpdateCalls()[0].body as {
+    const body = batchUpdateCalls()[0]!.body as {
       requests: {
         updateCells?: {
           range: Record<string, number>;
@@ -1306,7 +1324,7 @@ describe("google sheets executors", () => {
         };
       }[];
     };
-    const update = body.requests[0].updateCells!;
+    const update = body.requests[0]!.updateCells!;
     expect(update.range).toEqual({
       sheetId: 0,
       startRowIndex: 0,
@@ -1314,7 +1332,7 @@ describe("google sheets executors", () => {
       startColumnIndex: 0,
       endColumnIndex: 3,
     });
-    expect(update.rows[0].values.map((v) => v.userEnteredValue)).toEqual([
+    expect(update.rows[0]!.values.map((v) => v.userEnteredValue)).toEqual([
       { stringValue: "label" },
       { formulaValue: "=SUM(B2:B9)" },
       { numberValue: 3.5 },
@@ -1541,7 +1559,7 @@ describe("google sheets crash recovery", () => {
         const body = call.body as {
           dataFilters: { developerMetadataLookup: Record<string, string> }[];
         };
-        expect(body.dataFilters[0].developerMetadataLookup).toEqual({
+        expect(body.dataFilters[0]!.developerMetadataLookup).toEqual({
           metadataKey: "homardclawActionId",
           metadataValue: action.id,
         });
@@ -1552,7 +1570,8 @@ describe("google sheets crash recovery", () => {
       }
       throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
     };
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const [resolvedItem] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const resolved = resolvedItem!;
     expect(resolved.resolution).toBe("confirmed");
     const row = await reloadAction(action.id);
     expect(row.status).toBe("executed");
@@ -1584,7 +1603,8 @@ describe("google sheets crash recovery", () => {
       }
       throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
     };
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const [resolvedItem] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const resolved = resolvedItem!;
     expect(resolved.resolution).toBe("unknown");
     const row = await reloadAction(action.id);
     expect(row.status).toBe("failed");
@@ -1619,7 +1639,8 @@ describe("google sheets crash recovery", () => {
       }
       throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
     };
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const [resolvedItem] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const resolved = resolvedItem!;
     expect(resolved.resolution).toBe("requeued");
     expect((await reloadAction(action.id)).status).toBe("approved");
     expect(batchUpdateCalls()).toHaveLength(0);
@@ -1633,11 +1654,11 @@ describe("google sheets crash recovery", () => {
     expect(finalized.status).toBe("executed");
     const batches = batchUpdateCalls();
     expect(batches).toHaveLength(1);
-    const body = batches[0].body as {
+    const body = batches[0]!.body as {
       requests: { createDeveloperMetadata?: { developerMetadata: { metadataValue: string } } }[];
     };
     expect(
-      body.requests[1].createDeveloperMetadata!.developerMetadata
+      body.requests[1]!.createDeveloperMetadata!.developerMetadata
         .metadataValue,
     ).toBe(action.id);
   });
@@ -1657,7 +1678,8 @@ describe("google sheets crash recovery", () => {
       }
       throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
     };
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const [resolvedItem] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const resolved = resolvedItem!;
     expect(resolved.resolution).toBe("unknown");
     const row = await reloadAction(action.id);
     expect(row.status).toBe("failed");
@@ -1680,7 +1702,8 @@ describe("google sheets crash recovery", () => {
       }
       throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
     };
-    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const [resolvedItem] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    const resolved = resolvedItem!;
     expect(resolved.resolution).toBe("confirmed");
     const row = await reloadAction(action.id);
     expect(row.status).toBe("executed");
