@@ -1676,9 +1676,11 @@ describe("voice conversations", () => {
       day: "2-digit",
     }).format(new Date());
     const [y, m, d] = today.split("-").map(Number);
-    const dayStart = new Date(new TZDate(y, m - 1, d, 0, 0, 0, tz).getTime());
+    const dayStart = new Date(
+      new TZDate(y!, m! - 1, d!, 0, 0, 0, tz).getTime(),
+    );
     const insert = async (objective: string, finishedAt: Date) => {
-      const [task] = await db
+      const [taskInsert] = await db
         .insert(tasksTable)
         .values({
           agentId: agent.id,
@@ -1693,6 +1695,7 @@ describe("voice conversations", () => {
           finishedAt,
         })
         .returning();
+      const task = taskInsert!;
       return task;
     };
     const ids: string[] = [];
