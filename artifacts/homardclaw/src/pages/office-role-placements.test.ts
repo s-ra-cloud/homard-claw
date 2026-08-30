@@ -15,7 +15,7 @@ describe("office role placements", () => {
     });
     expect(OFFICE_ROLE_SEATS.documentation).toMatchObject({
       left: 74.8,
-      top: 69.4,
+      top: 68.2,
       pose: "hotel-reading",
     });
     expect(OFFICE_ROLE_SEATS.memory).toMatchObject({
