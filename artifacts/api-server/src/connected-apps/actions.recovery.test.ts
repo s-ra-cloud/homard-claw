@@ -510,7 +510,7 @@ describe("github code workflow executors", () => {
       { actionId: "dddd", workspaceId },
     );
     expect(outcome.ok).toBe(true);
-    const body = githubCalls()[0].body as {
+    const body = githubCalls()[0]!.body as {
       message: string;
       content: string;
       branch: string;
@@ -575,7 +575,7 @@ describe("github code workflow executors", () => {
       { actionId: "eeee", workspaceId },
     );
     expect(outcome.ok).toBe(true);
-    const body = githubCalls()[0].body as { title: string; head: string; base: string; body: string };
+    const body = githubCalls()[0]!.body as { title: string; head: string; base: string; body: string };
     expect(body.head).toBe("fix-1");
     expect(body.base).toBe("main");
     expect(body.body).toBe("Details\n\n<!-- homardclaw-action:eeee -->");
@@ -601,7 +601,7 @@ describe("github code workflow executors", () => {
     );
     expect(merged.ok).toBe(true);
     if (merged.ok) expect(merged.summary).toContain(`merge commit ${SHA_B}`);
-    expect((githubCalls()[0].body as { merge_method: string }).merge_method).toBe("merge");
+    expect((githubCalls()[0]!.body as { merge_method: string }).merge_method).toBe("merge");
 
     const moved = await executeOperation(
       op,
