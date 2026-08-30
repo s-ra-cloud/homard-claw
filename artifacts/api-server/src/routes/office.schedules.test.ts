@@ -120,11 +120,12 @@ beforeAll(async () => {
   }
   const boot = await request(app).get("/api/agents");
   expect(boot.status).toBe(200);
-  const [ws] = await db
+  const [wsRow] = await db
     .select({ id: workspacesTable.id })
     .from(workspacesTable)
     .where(eq(workspacesTable.clerkUserId, authState.userId))
     .limit(1);
+  const ws = wsRow!;
   wsId = ws.id;
 });
 
@@ -260,22 +261,24 @@ describe("schedule firing", () => {
       .from(tasksTable)
       .where(eq(tasksTable.scheduleId, created.body.id));
     expect(tasks).toHaveLength(1);
+    const firedTask = tasks[0]!;
     // The canonical dispatch path runs for scheduled tasks too: with a
     // configured provider the task queues; without one it is explicitly
     // blocked with an actionable reason — never silently dropped.
-    if (tasks[0].status === "blocked") {
-      expect(tasks[0].errorKind).toBe("not_configured");
+    if (firedTask.status === "blocked") {
+      expect(firedTask.errorKind).toBe("not_configured");
     } else {
-      expect(tasks[0].status).toBe("queued");
+      expect(firedTask.status).toBe("queued");
     }
-    expect(tasks[0].objective).toContain(RUN_TAG);
+    expect(firedTask.objective).toContain(RUN_TAG);
 
-    const [after] = await db
+    const [afterRow] = await db
       .select()
       .from(schedulesTable)
       .where(eq(schedulesTable.id, created.body.id));
+    const after = afterRow!;
     expect(after.enabled).toBe(false); // once → turned off after firing
-    expect(after.lastTaskId).toBe(tasks[0].id);
+    expect(after.lastTaskId).toBe(firedTask.id);
     expect(after.nextRunAt).toBeNull();
 
     // A second pass must not duplicate the run.
@@ -305,10 +308,11 @@ describe("schedule firing", () => {
       .from(tasksTable)
       .where(eq(tasksTable.scheduleId, created.body.id));
     expect(tasks).toHaveLength(1); // one catch-up run, not three
-    const [after] = await db
+    const [afterRow] = await db
       .select()
       .from(schedulesTable)
       .where(eq(schedulesTable.id, created.body.id));
+    const after = afterRow!;
     expect(after.enabled).toBe(true);
     expect(after.nextRunAt!.getTime()).toBeGreaterThan(Date.now());
   });

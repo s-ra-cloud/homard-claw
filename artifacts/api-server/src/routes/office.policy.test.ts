@@ -648,6 +648,7 @@ describe("approval lifecycle", () => {
         approvalId: approval.id,
       })
       .returning();
+    const action = actionInsert!;
     fetchMock.mockResolvedValue(
       jsonResponse({
         choices: [
@@ -694,7 +695,7 @@ describe("approval lifecycle", () => {
       objective: `${RUN_TAG} continue the bounded connected-app work`,
       continuationSegments: 1,
     });
-    const [approval] = await db
+    const [approvalInsert] = await db
       .insert(approvalsTable)
       .values({
         agentId: requester.id,
@@ -707,6 +708,7 @@ describe("approval lifecycle", () => {
         expiresAt: new Date(Date.now() + 60_000),
       })
       .returning();
+    const approval = approvalInsert!;
     fetchMock.mockResolvedValue(
       jsonResponse({
         choices: [

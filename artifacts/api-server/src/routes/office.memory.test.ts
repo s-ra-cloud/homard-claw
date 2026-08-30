@@ -559,7 +559,7 @@ describe("task context retrieval", () => {
 
   it("enforces the global cap: curated writes get 409, automatic outcomes evict old ones", async () => {
     const agent = await createAgent(`${RUN_TAG} Hoarder`);
-    const [fillerTask] = await db
+    const [fillerTaskRow] = await db
       .insert(tasksTable)
       .values({
         agentId: agent.id,
@@ -569,11 +569,13 @@ describe("task context retrieval", () => {
         status: "completed",
       })
       .returning();
+    const fillerTask = fillerTaskRow!;
 
-    const [{ count: existing }] = await db
+    const [existingRow] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(memoriesTable)
       .where(eq(memoriesTable.workspaceId, wsId));
+    const existing = existingRow!.count;
     const toFill = MAX_MEMORIES - existing;
     expect(toFill).toBeGreaterThan(0);
     // Fill to the cap with automatic outcomes in batches.
@@ -606,10 +608,11 @@ describe("task context retrieval", () => {
         output: "Outcome recorded at capacity.",
       });
       expect(saved).toBe(true);
-      const [{ count: after }] = await db
+      const [afterRow] = await db
         .select({ count: sql<number>`count(*)::int` })
         .from(memoriesTable)
         .where(eq(memoriesTable.workspaceId, wsId));
+      const after = afterRow!.count;
       expect(after).toBeLessThanOrEqual(MAX_MEMORIES);
     } finally {
       // Free the shared database immediately; afterAll would be too late for
@@ -654,7 +657,7 @@ describe("task context retrieval", () => {
       );
     });
 
-    const [task] = await db
+    const [taskRow] = await db
       .insert(tasksTable)
       .values({
         agentId: agent.id,
@@ -670,17 +673,20 @@ describe("task context retrieval", () => {
         estimatedCostCents: 1,
       })
       .returning();
-    const [agentRow] = await db
+    const task = taskRow!;
+    const [agentRowRow] = await db
       .select()
       .from(agentsTable)
       .where(eq(agentsTable.id, agent.id));
+    const agentRow = agentRowRow!;
 
     await runTask({ task, agent: agentRow });
 
-    const [finished] = await db
+    const [finishedRow] = await db
       .select()
       .from(tasksTable)
       .where(eq(tasksTable.id, task.id));
+    const finished = finishedRow!;
     expect(finished.status).toBe("completed");
     expect(finished.contextSources).not.toBeNull();
     expect(finished.contextSources!.some((s) => s.label === "M1")).toBe(true);

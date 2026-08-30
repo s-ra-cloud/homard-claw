@@ -178,7 +178,7 @@ beforeAll(async () => {
     .from(workspacesTable)
     .where(eq(workspacesTable.clerkUserId, authState.userId))
     .limit(1);
-  wsId = ws.id;
+  wsId = ws!.id;
 });
 
 beforeEach(() => {

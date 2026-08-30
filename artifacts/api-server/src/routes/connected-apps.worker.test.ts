@@ -1061,10 +1061,11 @@ describe("round-limit continuation approval", () => {
     const { task, approval } = await parkOnRoundLimit(agent.id);
 
     // A foreign workspace cannot decide it, no matter how it calls in.
-    const [foreign] = await db
+    const [foreignRow] = await db
       .insert(workspacesTable)
       .values({ clerkUserId: `continuation-foreign-${Date.now()}` })
       .returning();
+    const foreign = foreignRow!;
     try {
       await expect(
         decideApproval({
