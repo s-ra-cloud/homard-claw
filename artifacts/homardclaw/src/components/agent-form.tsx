@@ -190,7 +190,7 @@ export const emptyAgentFormValues: AgentFormValues = {
   dailyBudgetCents: "",
   maxTasksPerDay: "",
   approvalThresholdCents: "",
-  shellColor: LOBSTER_PRESETS[0].shellColor,
+  shellColor: LOBSTER_PRESETS[0]!.shellColor,
   appGrants: defaultAppGrants(),
   sensitiveDataSandbox: false,
 };
@@ -645,7 +645,7 @@ function CustomLimitsFields({
   form: UseFormReturn<AgentFormValues>;
 }) {
   const preset = form.watch("securityPreset");
-  const defaults = PROFILE_DEFAULTS[preset] ?? PROFILE_DEFAULTS.assistant;
+  const defaults = PROFILE_DEFAULTS[preset] ?? PROFILE_DEFAULTS.assistant!;
   const limits = [
     {
       name: "maxTaskBudgetCents",
@@ -687,7 +687,7 @@ function CustomLimitsFields({
                   <Input
                     {...field}
                     inputMode="decimal"
-                    placeholder={String(defaults[limit.name])}
+                    placeholder={String(defaults[limit.name]!)}
                     className={inputClass}
                   />
                 </FormControl>

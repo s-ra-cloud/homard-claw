@@ -25,12 +25,12 @@ export interface LobsterPreset {
 
 export const LOBSTER_PRESETS: LobsterPreset[] = presets;
 
-const DEFAULT_PRESET = LOBSTER_PRESETS[0];
+const DEFAULT_PRESET = LOBSTER_PRESETS[0]!;
 
 function parseHex(hex: string): [number, number, number] | null {
   const match = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
   if (!match) return null;
-  const n = parseInt(match[1], 16);
+  const n = parseInt(match[1]!, 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 

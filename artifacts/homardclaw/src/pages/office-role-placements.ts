@@ -88,7 +88,7 @@ export function chooseOfficeRolePlacements(
   add(assignments.memoryAgentId, "memory");
 
   return [...rolesByAgent].map(([agentId, roles]) => {
-    const role = roles[stableIndex(`${loadSeed}:${agentId}`, roles.length)];
+    const role = roles[stableIndex(`${loadSeed}:${agentId}`, roles.length)]!;
     return { agentId, role, seat: OFFICE_ROLE_SEATS[role] };
   });
 }

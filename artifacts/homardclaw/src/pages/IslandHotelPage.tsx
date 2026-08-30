@@ -68,7 +68,7 @@ export default function IslandHotelPage() {
         ? undefined
         : new IntersectionObserver(
             ([entry]) => {
-              onScreen = entry.isIntersecting;
+              onScreen = entry!.isIntersecting;
               update();
             },
             { threshold: 0.05 },
@@ -153,7 +153,7 @@ export default function IslandHotelPage() {
                   />
 
                   {hotelAgents.map((agent, index) => {
-                    const spot = HOTEL_SPOTS[index];
+                    const spot = HOTEL_SPOTS[index]!;
                     const reacting = reaction?.id === agent.id;
                     const spriteSize = Math.round(
                       58 * POSE_CHARACTER_SCALE[spot.pose] * spot.scale,
