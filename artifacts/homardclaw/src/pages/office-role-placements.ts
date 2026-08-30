@@ -15,9 +15,11 @@ export const OFFICE_ROLE_SEATS: Record<OfficeRole, OfficeRoleSeat> = {
   documentation: {
     // Clear blue floor in front of the provider racks. Keeping the whole
     // sprite below the cabinet fronts makes the reader look seated on the
-    // floor rather than pinned to a wall or piece of furniture.
+    // floor rather than pinned to a wall or piece of furniture. Nudged up
+    // from 69.4 so the sprite's feet clear the bottom wall while staying
+    // grounded on the floor.
     left: 74.8,
-    top: 69.4,
+    top: 68.2,
     label: "documentation reading spot in front of Providers",
     pose: "hotel-reading",
     status: "idle",
