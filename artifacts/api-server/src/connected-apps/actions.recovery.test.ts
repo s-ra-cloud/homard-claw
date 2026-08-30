@@ -131,7 +131,7 @@ function sendCalls(): ProxyCall[] {
 }
 
 async function insertApproval(): Promise<string> {
-  const [row] = await db
+  const [rowInsert] = await db
     .insert(approvalsTable)
     .values({
       agentId,
@@ -142,6 +142,7 @@ async function insertApproval(): Promise<string> {
       expiresAt: new Date(Date.now() + 60 * 60 * 1000),
     })
     .returning();
+  const row = rowInsert!;
   return row.id;
 }
 
@@ -157,7 +158,7 @@ async function insertExecutingAction(input: {
   executingAt?: Date;
   recoveryRequeuedAt?: Date;
 }): Promise<AppActionRecord> {
-  const [row] = await db
+  const [rowInsert] = await db
     .insert(appActionsTable)
     .values({
       taskId,
@@ -173,22 +174,23 @@ async function insertExecutingAction(input: {
       recoveryRequeuedAt: input.recoveryRequeuedAt ?? null,
     })
     .returning();
-  return row;
+  return rowInsert!;
 }
 
 async function reloadAction(id: string): Promise<AppActionRecord> {
-  const [row] = await db
+  const [rowSelect] = await db
     .select()
     .from(appActionsTable)
     .where(eq(appActionsTable.id, id));
-  return row;
+  return rowSelect!;
 }
 
 beforeAll(async () => {
-  const [workspace] = await db
+  const [workspaceInsert] = await db
     .insert(workspacesTable)
     .values({ clerkUserId: `recovery-test-${Date.now()}` })
     .returning();
+  const workspace = workspaceInsert!;
   workspaceId = workspace.id;
   await db.insert(googleAccountsTable).values({
     workspaceId,
@@ -207,7 +209,7 @@ beforeAll(async () => {
     accessTokenEnc: encryptGithubToken("test-github-token"),
     scopes: "repo",
   });
-  const [agent] = await db
+  const [agentInsert] = await db
     .insert(agentsTable)
     .values({
       workspaceId,
@@ -219,8 +221,9 @@ beforeAll(async () => {
       paused: true, // the live queue worker must never pick this agent up
     })
     .returning();
+  const agent = agentInsert!;
   agentId = agent.id;
-  const [task] = await db
+  const [taskInsert] = await db
     .insert(tasksTable)
     .values({
       agentId,
@@ -230,6 +233,7 @@ beforeAll(async () => {
       provider: "claude_max",
     })
     .returning();
+  const task = taskInsert!;
   taskId = task.id;
 });
 
@@ -264,7 +268,7 @@ describe("idempotency markers on write executors", () => {
       { actionId: "11111111-2222-3333-4444-555555555555", workspaceId },
     );
     expect(outcome.ok).toBe(true);
-    const raw = (sendCalls()[0].body as { raw: string }).raw;
+    const raw = (sendCalls()[0]!.body as { raw: string }).raw;
     const message = Buffer.from(raw, "base64url").toString("utf8");
     expect(message).toContain(
       "Message-ID: <homardclaw-action-11111111-2222-3333-4444-555555555555@agents.homardclaw>",
@@ -285,7 +289,7 @@ describe("idempotency markers on write executors", () => {
       { actionId: "66666666-7777-8888-9999-000000000000", workspaceId },
     );
     expect(outcome.ok).toBe(true);
-    const raw = (sendCalls()[0].body as { raw: string }).raw;
+    const raw = (sendCalls()[0]!.body as { raw: string }).raw;
     const message = Buffer.from(raw, "base64url").toString("utf8");
     expect(message).toContain(
       "Message-ID: <homardclaw-action-66666666-7777-8888-9999-000000000000@agents.homardclaw>",
@@ -314,7 +318,7 @@ describe("idempotency markers on write executors", () => {
       { actionId: "aaaa", workspaceId },
     );
     expect(outcome.ok).toBe(true);
-    const body = (proxyState.calls[0].body as { body: string }).body;
+    const body = (proxyState.calls[0]!.body as { body: string }).body;
     expect(body).toBe("LGTM\n\n<!-- homardclaw-action:aaaa -->");
   });
 });
@@ -839,7 +843,7 @@ describe("reconcileStaleExecutingActions", () => {
     const { action: finalized } = await executeClaimedAction(claimed!, "Tester", workspaceId);
     expect(finalized.status).toBe("executed");
     expect(sendCalls()).toHaveLength(1);
-    const raw = (sendCalls()[0].body as { raw: string }).raw;
+    const raw = (sendCalls()[0]!.body as { raw: string }).raw;
     expect(Buffer.from(raw, "base64url").toString("utf8")).toContain(
       `Message-ID: <homardclaw-action-${action.id}@agents.homardclaw>`,
     );
@@ -1483,7 +1487,7 @@ describe("google sheets executors", () => {
     expect(outcome.ok && outcome.summary).toContain(
       "https://docs.google.com/spreadsheets/d/spread-1/edit",
     );
-    const body = proxyState.calls[0].body as Record<string, unknown>;
+    const body = proxyState.calls[0]!.body as Record<string, unknown>;
     expect(body.mimeType).toBe("application/vnd.google-apps.spreadsheet");
     expect(body.appProperties).toEqual({ homardclawActionId: "act-c1" });
   });

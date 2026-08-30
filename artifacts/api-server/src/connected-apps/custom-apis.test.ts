@@ -411,12 +411,12 @@ describe("hardened executor", () => {
       .insert(workspacesTable)
       .values({ clerkUserId: `custom-api-exec-${Date.now()}` })
       .returning();
-    workspaceId = ws.id;
+    workspaceId = ws!.id;
     const [other] = await db
       .insert(workspacesTable)
       .values({ clerkUserId: `custom-api-exec-other-${Date.now()}` })
       .returning();
-    otherWorkspaceId = other.id;
+    otherWorkspaceId = other!.id;
     const [inserted] = await db
       .insert(customApiConnectionsTable)
       .values({
@@ -430,7 +430,7 @@ describe("hardened executor", () => {
         operations: baseOps() as unknown as Record<string, unknown>[],
       })
       .returning();
-    row = inserted;
+    row = inserted!;
   });
 
   afterAll(async () => {

@@ -103,8 +103,8 @@ beforeAll(async () => {
       { clerkUserId: `capabilities-test-other-${Date.now()}` },
     ])
     .returning();
-  workspaceId = ws.id;
-  otherWorkspaceId = other.id;
+  workspaceId = ws!.id;
+  otherWorkspaceId = other!.id;
   const [agent] = await db
     .insert(agentsTable)
     .values({
@@ -123,7 +123,7 @@ beforeAll(async () => {
       },
     })
     .returning();
-  agentId = agent.id;
+  agentId = agent!.id;
 });
 
 afterAll(async () => {

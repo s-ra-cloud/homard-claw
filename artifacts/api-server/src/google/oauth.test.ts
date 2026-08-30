@@ -109,7 +109,7 @@ async function startFlow(): Promise<{
     .from(googleOauthStatesTable)
     .where(eq(googleOauthStatesTable.state, state))
     .limit(1);
-  return { authUrl, state, nonce: row.nonce };
+  return { authUrl, state, nonce: row!.nonce };
 }
 
 function goodTokenResponse(nonce: string, overrides?: Record<string, unknown>) {
@@ -140,8 +140,8 @@ beforeAll(async () => {
     .insert(workspacesTable)
     .values({ clerkUserId: USER_B })
     .returning();
-  wsA = a.id;
-  wsB = b.id;
+  wsA = a!.id;
+  wsB = b!.id;
 });
 
 beforeEach(() => {
@@ -188,11 +188,11 @@ describe("start", () => {
       .from(googleOauthStatesTable)
       .where(eq(googleOauthStatesTable.state, state))
       .limit(1);
-    expect(row.workspaceId).toBe(wsA);
-    expect(row.clerkUserId).toBe(USER_A);
-    expect(row.usedAt).toBeNull();
+    expect(row!.workspaceId).toBe(wsA);
+    expect(row!.clerkUserId).toBe(USER_A);
+    expect(row!.usedAt).toBeNull();
     // The verifier stays server-side: it never appears in the consent URL.
-    expect(res_urlHasVerifier(authUrl, row.codeVerifier)).toBe(false);
+    expect(res_urlHasVerifier(authUrl, row!.codeVerifier)).toBe(false);
   });
 
   it("keeps the Drive consent minimal — the Sheets tools add no new scope", async () => {
@@ -233,18 +233,18 @@ describe("callback", () => {
     expect(cb.status).toBe(302);
     expect(cb.headers.location).toContain("gmail=connected");
     // PKCE verifier was sent to the token endpoint.
-    expect(google.tokenCalls[0].get("code_verifier")).toBeTruthy();
+    expect(google.tokenCalls[0]!.get("code_verifier")).toBeTruthy();
 
     const [account] = await db
       .select()
       .from(googleAccountsTable)
       .where(eq(googleAccountsTable.workspaceId, wsA))
       .limit(1);
-    expect(account.email).toBe("person@example.test");
-    expect(account.googleSub).toBe("sub-123");
+    expect(account!.email).toBe("person@example.test");
+    expect(account!.googleSub).toBe("sub-123");
     // Encrypted at rest: envelope format, never the raw token.
-    expect(account.refreshTokenEnc.startsWith("v1.")).toBe(true);
-    expect(account.refreshTokenEnc).not.toContain("rt-secret-1");
+    expect(account!.refreshTokenEnc.startsWith("v1.")).toBe(true);
+    expect(account!.refreshTokenEnc).not.toContain("rt-secret-1");
   });
 
   it("refuses a replayed state", async () => {
@@ -347,7 +347,7 @@ describe("credential use and rotation", () => {
       .from(googleAccountsTable)
       .where(eq(googleAccountsTable.workspaceId, wsA))
       .limit(1);
-    expect(afterRotation.refreshTokenEnc).not.toContain("rt-rotated-2");
+    expect(afterRotation!.refreshTokenEnc).not.toContain("rt-rotated-2");
 
     // A concurrent reconnect bumps the revision; the stale rotation from the
     // old credential must not overwrite it.
@@ -370,8 +370,8 @@ describe("credential use and rotation", () => {
       .from(googleAccountsTable)
       .where(eq(googleAccountsTable.workspaceId, wsA))
       .limit(1);
-    expect(final.revision).toBe(reconnected.revision);
-    expect(final.refreshTokenEnc).toBe(reconnected.refreshTokenEnc);
+    expect(final!.revision).toBe(reconnected!.revision);
+    expect(final!.refreshTokenEnc).toBe(reconnected!.refreshTokenEnc);
   });
 
   it("fails closed with reconnect_required when Google revokes the grant", async () => {
