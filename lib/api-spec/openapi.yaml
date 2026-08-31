@@ -225,6 +225,26 @@ paths:
           description: Agent not found
         "409":
           description: Agent already retired
+  /agents/{agentId}/memory/refresh:
+    post:
+      operationId: refreshAgentMemory
+      tags: [office]
+      summary: Force an immediate memory refresh for one Crustabot
+      parameters:
+        - $ref: "#/components/parameters/AgentId"
+      responses:
+        "201":
+          description: Memory refresh queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryRefreshResult"
+        "404":
+          description: Crustabot not found
+        "409":
+          description: Crustabot is retired or archived
+        "422":
+          description: Requested provider/model/reasoning is not allowed
   /island/agents:
     get:
       operationId: listRetiredAgents
@@ -3552,6 +3572,14 @@ components:
       required: [compressionAgentId]
       properties:
         compressionAgentId: { type: [string, "null"] }
+    MemoryRefreshResult:
+      type: object
+      required: [taskId, agentId, agentName, status]
+      properties:
+        taskId: { type: string }
+        agentId: { type: string }
+        agentName: { type: string }
+        status: { type: string }
     Memory:
       type: object
       required:

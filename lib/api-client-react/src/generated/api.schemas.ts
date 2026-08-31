@@ -2161,6 +2161,13 @@ export interface MemorySettingsInput {
   compressionAgentId: string | null;
 }
 
+export interface MemoryRefreshResult {
+  taskId: string;
+  agentId: string;
+  agentName: string;
+  status: string;
+}
+
 export type MemoryKind = typeof MemoryKind[keyof typeof MemoryKind];
 
 
