@@ -64,6 +64,9 @@ import type {
   DocumentationSettingsInput,
   EmergencyStop,
   EmergencyStopInput,
+  GithubAppDisconnect,
+  GithubAppInstallStart,
+  GithubConnectionInfo,
   GithubOauthDisconnect,
   GithubOauthStart,
   GoogleOauthDisconnect,
@@ -7938,5 +7941,224 @@ export const useDisconnectGithubAccount = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getDisconnectGithubAccountMutationOptions(options));
+    }
+
+export const getGetGithubConnectionUrl = () => {
+
+
+
+
+  return `/api/github/connection`
+}
+
+/**
+ * @summary Which GitHub connect paths this server supports and which one the workspace currently uses (metadata only — never ids, keys, or tokens)
+ */
+export const getGithubConnection = async ( options?: Parameters<typeof customFetch>[1]): Promise<GithubConnectionInfo> => {
+
+  return customFetch<GithubConnectionInfo>(getGetGithubConnectionUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetGithubConnectionQueryKey = () => {
+    return [
+    `/api/github/connection`
+    ] as const;
+    }
+
+
+export const getGetGithubConnectionQueryOptions = <TData = Awaited<ReturnType<typeof getGithubConnection>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getGithubConnection>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetGithubConnectionQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getGithubConnection>>> = ({ signal }) => getGithubConnection({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getGithubConnection>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetGithubConnectionQueryResult = NonNullable<Awaited<ReturnType<typeof getGithubConnection>>>
+export type GetGithubConnectionQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Which GitHub connect paths this server supports and which one the workspace currently uses (metadata only — never ids, keys, or tokens)
+ */
+
+export function useGetGithubConnection<TData = Awaited<ReturnType<typeof getGithubConnection>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getGithubConnection>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetGithubConnectionQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getStartGithubAppInstallUrl = () => {
+
+
+
+
+  return `/api/github/app/install/start`
+}
+
+/**
+ * @summary Begin the GitHub App installation flow for this workspace
+ */
+export const startGithubAppInstall = async ( options?: Parameters<typeof customFetch>[1]): Promise<GithubAppInstallStart> => {
+
+  return customFetch<GithubAppInstallStart>(getStartGithubAppInstallUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getStartGithubAppInstallMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startGithubAppInstall>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof startGithubAppInstall>>, TError,void, TContext> => {
+
+const mutationKey = ['startGithubAppInstall'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startGithubAppInstall>>, void> = () => {
+
+
+          return  startGithubAppInstall(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StartGithubAppInstallMutationResult = NonNullable<Awaited<ReturnType<typeof startGithubAppInstall>>>
+
+    export type StartGithubAppInstallMutationError = ErrorType<void>
+
+    /**
+ * @summary Begin the GitHub App installation flow for this workspace
+ */
+export const useStartGithubAppInstall = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startGithubAppInstall>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof startGithubAppInstall>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getStartGithubAppInstallMutationOptions(options));
+    }
+
+export const getDisconnectGithubAppUrl = () => {
+
+
+
+
+  return `/api/github/app/disconnect`
+}
+
+/**
+ * @summary Remove the workspace's GitHub App installation binding (and best-effort uninstall the app on GitHub)
+ */
+export const disconnectGithubApp = async ( options?: Parameters<typeof customFetch>[1]): Promise<GithubAppDisconnect> => {
+
+  return customFetch<GithubAppDisconnect>(getDisconnectGithubAppUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getDisconnectGithubAppMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectGithubApp>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof disconnectGithubApp>>, TError,void, TContext> => {
+
+const mutationKey = ['disconnectGithubApp'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof disconnectGithubApp>>, void> = () => {
+
+
+          return  disconnectGithubApp(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DisconnectGithubAppMutationResult = NonNullable<Awaited<ReturnType<typeof disconnectGithubApp>>>
+
+    export type DisconnectGithubAppMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Remove the workspace's GitHub App installation binding (and best-effort uninstall the app on GitHub)
+ */
+export const useDisconnectGithubApp = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectGithubApp>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof disconnectGithubApp>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getDisconnectGithubAppMutationOptions(options));
     }
 

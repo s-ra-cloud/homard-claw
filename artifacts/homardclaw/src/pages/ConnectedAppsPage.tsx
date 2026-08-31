@@ -6,6 +6,10 @@ import {
   useDisconnectGoogleAccount,
   useStartGithubOauth,
   useDisconnectGithubAccount,
+  useGetGithubConnection,
+  useStartGithubAppInstall,
+  useDisconnectGithubApp,
+  getGetGithubConnectionQueryKey,
   getListConnectedAppsQueryKey,
   useListCapabilities,
   useInstallCapability,
@@ -95,6 +99,63 @@ function oauthCallbackMessage(
       title: `${appName} sign-in unavailable`,
       description: `${appName} OAuth is not configured on this server yet.`,
     },
+    app_installed: {
+      ok: true,
+      title: "GitHub App installed",
+      description:
+        "The GitHub App is installed. Access now renews itself automatically — no more expired sign-ins.",
+    },
+    app_updated: {
+      ok: true,
+      title: "GitHub App installation updated",
+      description:
+        "The installation's repository access was updated on GitHub.",
+    },
+    install_pending: {
+      title: "Waiting for GitHub approval",
+      description:
+        "The installation was requested and is waiting for an organization admin to approve it on GitHub. Once approved, finish by clicking Install again.",
+    },
+    "error:install_state": {
+      title: "Installation could not be verified",
+      description:
+        "This installation attempt did not start from this page (or was already used). Start again with the Install button.",
+    },
+    "error:install_params": {
+      title: "Installation failed",
+      description:
+        "GitHub's redirect was missing the installation details. Start again with the Install button.",
+    },
+    "error:session_mismatch": {
+      title: "Installation failed",
+      description:
+        "The installation was started from a different sign-in session. Start again with the Install button from this workspace.",
+    },
+    "error:install_suspended": {
+      title: "Installation is suspended",
+      description:
+        "That GitHub App installation is suspended on GitHub, so it cannot be connected. Unsuspend it in the account's GitHub App settings, then install again.",
+    },
+    "error:install_removed": {
+      title: "Installation not found",
+      description:
+        "GitHub no longer reports this installation — it may have been uninstalled mid-flow. Start again with the Install button.",
+    },
+    "error:install_verify": {
+      title: "Installation could not be verified",
+      description:
+        "GitHub rejected this server's app credentials while verifying the installation. The server's GitHub App configuration must be corrected.",
+    },
+    "error:install_claimed": {
+      title: "Installation already in use",
+      description:
+        "That GitHub App installation is already connected to a different workspace. Install the app on an account you own for this workspace.",
+    },
+    "error:github_unreachable": {
+      title: "GitHub could not be reached",
+      description:
+        "GitHub could not be reached to verify the installation. This is usually temporary — try again shortly.",
+    },
   };
   return (
     messages[code] ?? {
@@ -127,6 +188,9 @@ function ConnectActions({ app }: { app: ConnectedApp }) {
   };
   const onDisconnected = () => {
     queryClient.invalidateQueries({ queryKey: getListConnectedAppsQueryKey() });
+    queryClient.invalidateQueries({
+      queryKey: getGetGithubConnectionQueryKey(),
+    });
     toast({
       title: `${app.displayName} disconnected`,
       description:
@@ -148,17 +212,63 @@ function ConnectActions({ app }: { app: ConnectedApp }) {
   const startGithub = useStartGithubOauth({
     mutation: { onSuccess: onStartSuccess, onError: onStartError },
   });
+  const startGithubApp = useStartGithubAppInstall({
+    mutation: {
+      onSuccess: (data: { installUrl: string }) => {
+        navigateToExternal(data.installUrl);
+      },
+      onError: () => {
+        toast({
+          variant: "destructive",
+          title: "Could not start the installation",
+          description:
+            "The GitHub App may not be configured on this server yet. Try again in a moment.",
+        });
+      },
+    },
+  });
   const disconnectGoogle = useDisconnectGoogleAccount({
     mutation: { onSuccess: onDisconnected, onError: onDisconnectError },
   });
   const disconnectGithub = useDisconnectGithubAccount({
     mutation: { onSuccess: onDisconnected, onError: onDisconnectError },
   });
-  const start = app.app === "github" ? startGithub : startGoogle;
-  const disconnect = app.app === "github" ? disconnectGithub : disconnectGoogle;
+  const disconnectGithubApp = useDisconnectGithubApp({
+    mutation: { onSuccess: onDisconnected, onError: onDisconnectError },
+  });
+  // GitHub can connect two ways; ask the server which paths it offers and
+  // which one this workspace currently uses.
+  const githubConnection = useGetGithubConnection({
+    query: {
+      queryKey: getGetGithubConnectionQueryKey(),
+      enabled: app.app === "github",
+    },
+  });
+  const githubInfo = app.app === "github" ? githubConnection.data : undefined;
+  const githubViaApp = githubInfo?.method === "github_app";
+  const githubAppAvailable = Boolean(githubInfo?.appConfigured);
+
+  const start =
+    app.app === "github"
+      ? githubAppAvailable
+        ? startGithubApp
+        : startGithub
+      : startGoogle;
+  const disconnect =
+    app.app === "github"
+      ? githubViaApp
+        ? disconnectGithubApp
+        : disconnectGithub
+      : disconnectGoogle;
   const beginConnect = () => {
     if (app.app === "github") {
-      startGithub.mutate();
+      // Prefer the GitHub App whenever the server offers it: installs renew
+      // access automatically instead of dying with a revoked OAuth token.
+      if (githubAppAvailable) {
+        startGithubApp.mutate();
+      } else {
+        startGithub.mutate();
+      }
     } else {
       startGoogle.mutate({
         data: {
@@ -169,35 +279,73 @@ function ConnectActions({ app }: { app: ConnectedApp }) {
   };
   const confirmText =
     app.app === "github"
-      ? "Disconnect GitHub? Crustabots immediately lose access to this account, including actions you already approved."
+      ? githubViaApp
+        ? "Disconnect the GitHub App? The installation is removed from GitHub and Crustabots immediately lose access — including actions you already approved."
+        : "Disconnect GitHub? Crustabots immediately lose access to this account, including actions you already approved."
       : `Disconnect this Google account? Gmail AND Google Drive access both end immediately — Crustabots lose access to the account, including actions you already approved.`;
+  const githubPrimaryLabel = githubViaApp
+    ? "MANAGE INSTALLATION"
+    : githubInfo?.method === "oauth" && githubAppAvailable
+      ? "SWITCH TO GITHUB APP"
+      : app.status === "connected" || app.status === "expired"
+        ? "RECONNECT"
+        : githubAppAvailable
+          ? "INSTALL GITHUB APP"
+          : "CONNECT GITHUB";
   return (
-    <div className="flex gap-2 flex-wrap">
-      <Button
-        variant={app.status === "connected" ? "outline" : "primary"}
-        size="sm"
-        disabled={start.isPending}
-        onClick={beginConnect}
-      >
-        {start.isPending
-          ? "..."
-          : app.status === "connected" || app.status === "expired"
-            ? "RECONNECT"
-            : `CONNECT ${app.displayName.toUpperCase()}`}
-      </Button>
-      {app.status === "connected" || app.status === "expired" ? (
+    <div className="flex flex-col gap-2">
+      <div className="flex gap-2 flex-wrap">
         <Button
-          variant="outline"
+          variant={app.status === "connected" ? "outline" : "primary"}
           size="sm"
-          disabled={disconnect.isPending}
-          onClick={() => {
-            if (window.confirm(confirmText)) {
-              disconnect.mutate();
-            }
-          }}
+          disabled={
+            start.isPending ||
+            (app.app === "github" && githubConnection.isLoading)
+          }
+          onClick={beginConnect}
         >
-          {disconnect.isPending ? "..." : "DISCONNECT"}
+          {start.isPending
+            ? "..."
+            : app.app === "github"
+              ? githubPrimaryLabel
+              : app.status === "connected" || app.status === "expired"
+                ? "RECONNECT"
+                : `CONNECT ${app.displayName.toUpperCase()}`}
         </Button>
+        {app.status === "connected" ||
+        app.status === "expired" ||
+        (app.app === "github" && githubInfo?.method) ? (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={disconnect.isPending}
+            onClick={() => {
+              if (window.confirm(confirmText)) {
+                disconnect.mutate();
+              }
+            }}
+          >
+            {disconnect.isPending ? "..." : "DISCONNECT"}
+          </Button>
+        ) : null}
+      </div>
+      {app.app === "github" ? (
+        githubViaApp && githubInfo?.installation ? (
+          <p className="text-[10px] text-muted-foreground uppercase font-bold">
+            GitHub App installed on @{githubInfo.installation.accountLogin} (
+            {githubInfo.installation.repositorySelection === "all"
+              ? "all repositories"
+              : "selected repositories"}
+            ) — access renews automatically. Manage repositories from the
+            installation settings on GitHub.
+          </p>
+        ) : githubInfo?.method === "oauth" && githubAppAvailable ? (
+          <p className="text-[10px] text-muted-foreground uppercase font-bold">
+            This workspace still uses the legacy GitHub sign-in, which can
+            expire without warning. Switch to the GitHub App so access renews
+            itself automatically.
+          </p>
+        ) : null
       ) : null}
     </div>
   );

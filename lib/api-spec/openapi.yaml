@@ -1892,6 +1892,48 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/GithubOauthDisconnect"
+  /github/connection:
+    get:
+      operationId: getGithubConnection
+      tags: [office]
+      summary: >-
+        Which GitHub connect paths this server supports and which one the
+        workspace currently uses (metadata only — never ids, keys, or tokens)
+      responses:
+        "200":
+          description: GitHub connection overview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GithubConnectionInfo"
+  /github/app/install/start:
+    post:
+      operationId: startGithubAppInstall
+      tags: [office]
+      summary: Begin the GitHub App installation flow for this workspace
+      responses:
+        "200":
+          description: GitHub installation URL for the browser to visit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GithubAppInstallStart"
+        "503":
+          description: The GitHub App is not configured on this server
+  /github/app/disconnect:
+    post:
+      operationId: disconnectGithubApp
+      tags: [office]
+      summary: >-
+        Remove the workspace's GitHub App installation binding (and
+        best-effort uninstall the app on GitHub)
+      responses:
+        "200":
+          description: Disconnect result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GithubAppDisconnect"
 components:
   parameters:
     AgentId:
@@ -2226,6 +2268,50 @@ components:
           type: string
           description: GitHub consent URL the browser should navigate to.
     GithubOauthDisconnect:
+      type: object
+      required: [disconnected]
+      properties:
+        disconnected: { type: boolean }
+    GithubConnectionInfo:
+      type: object
+      required: [method, appConfigured, oauthConfigured, installation, oauthLogin]
+      properties:
+        method:
+          type: [string, "null"]
+          enum: [github_app, oauth, null]
+          description: >-
+            How the workspace authenticates to GitHub right now. The GitHub
+            App installation always wins when one is bound; null means no
+            GitHub connection of any kind.
+        appConfigured:
+          type: boolean
+          description: Whether this server offers the GitHub App install flow.
+        oauthConfigured:
+          type: boolean
+          description: Whether this server offers the legacy OAuth flow.
+        installation:
+          type: [object, "null"]
+          required: [accountLogin, accountType, repositorySelection, connectedAt]
+          properties:
+            accountLogin: { type: string }
+            accountType:
+              type: string
+              description: GitHub account type the app is installed on ("User" or "Organization").
+            repositorySelection:
+              type: string
+              description: '"all" or "selected" — which repositories the owner granted.'
+            connectedAt: { type: string, format: date-time }
+        oauthLogin:
+          type: [string, "null"]
+          description: Login of the legacy OAuth account, when one is stored.
+    GithubAppInstallStart:
+      type: object
+      required: [installUrl]
+      properties:
+        installUrl:
+          type: string
+          description: GitHub App installation URL the browser should navigate to.
+    GithubAppDisconnect:
       type: object
       required: [disconnected]
       properties:

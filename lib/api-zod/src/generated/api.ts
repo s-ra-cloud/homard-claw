@@ -3953,3 +3953,36 @@ export const DisconnectGithubAccountResponse = zod.object({
 })
 
 
+/**
+ * @summary Which GitHub connect paths this server supports and which one the workspace currently uses (metadata only — never ids, keys, or tokens)
+ */
+export const GetGithubConnectionResponse = zod.object({
+  "method": zod.union([zod.literal('github_app'),zod.literal('oauth'),zod.literal(null)]).nullable().describe('How the workspace authenticates to GitHub right now. The GitHub App installation always wins when one is bound; null means no GitHub connection of any kind.'),
+  "appConfigured": zod.boolean().describe('Whether this server offers the GitHub App install flow.'),
+  "oauthConfigured": zod.boolean().describe('Whether this server offers the legacy OAuth flow.'),
+  "installation": zod.object({
+  "accountLogin": zod.string(),
+  "accountType": zod.string().describe('GitHub account type the app is installed on (\"User\" or \"Organization\").'),
+  "repositorySelection": zod.string().describe('\"all\" or \"selected\" — which repositories the owner granted.'),
+  "connectedAt": zod.coerce.date()
+}).nullable(),
+  "oauthLogin": zod.string().nullable().describe('Login of the legacy OAuth account, when one is stored.')
+})
+
+
+/**
+ * @summary Begin the GitHub App installation flow for this workspace
+ */
+export const StartGithubAppInstallResponse = zod.object({
+  "installUrl": zod.string().describe('GitHub App installation URL the browser should navigate to.')
+})
+
+
+/**
+ * @summary Remove the workspace's GitHub App installation binding (and best-effort uninstall the app on GitHub)
+ */
+export const DisconnectGithubAppResponse = zod.object({
+  "disconnected": zod.boolean()
+})
+
+

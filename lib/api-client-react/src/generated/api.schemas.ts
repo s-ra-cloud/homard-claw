@@ -738,6 +738,58 @@ export interface GithubOauthDisconnect {
   disconnected: boolean;
 }
 
+/**
+ * How the workspace authenticates to GitHub right now. The GitHub App installation always wins when one is bound; null means no GitHub connection of any kind.
+ * @nullable
+ */
+export type GithubConnectionInfoMethod = typeof GithubConnectionInfoMethod[keyof typeof GithubConnectionInfoMethod] | null;
+
+
+export const GithubConnectionInfoMethod = {
+  github_app: 'github_app',
+  oauth: 'oauth',
+} as const;
+
+/**
+ * @nullable
+ */
+export type GithubConnectionInfoInstallation = {
+  accountLogin: string;
+  /** GitHub account type the app is installed on ("User" or "Organization"). */
+  accountType: string;
+  /** "all" or "selected" — which repositories the owner granted. */
+  repositorySelection: string;
+  connectedAt: string;
+} | null;
+
+export interface GithubConnectionInfo {
+  /**
+     * How the workspace authenticates to GitHub right now. The GitHub App installation always wins when one is bound; null means no GitHub connection of any kind.
+     * @nullable
+     */
+  method: GithubConnectionInfoMethod;
+  /** Whether this server offers the GitHub App install flow. */
+  appConfigured: boolean;
+  /** Whether this server offers the legacy OAuth flow. */
+  oauthConfigured: boolean;
+  /** @nullable */
+  installation: GithubConnectionInfoInstallation;
+  /**
+     * Login of the legacy OAuth account, when one is stored.
+     * @nullable
+     */
+  oauthLogin: string | null;
+}
+
+export interface GithubAppInstallStart {
+  /** GitHub App installation URL the browser should navigate to. */
+  installUrl: string;
+}
+
+export interface GithubAppDisconnect {
+  disconnected: boolean;
+}
+
 export interface TelegramStatus {
   available: boolean;
   /** @nullable */

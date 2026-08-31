@@ -18,8 +18,10 @@ import {
 import {
   GithubAuthError,
   checkGithubConnectionHealth,
-  githubAccessToken,
+  githubAuth,
+  githubAuthMethod,
 } from "../github/credentials";
+import { invalidateGithubInstallationToken } from "../github/app-auth";
 import {
   classifyGithubRefusal,
   describeGithubRefusal,
@@ -336,56 +338,104 @@ async function driveJson(
 }
 
 /**
- * Call the GitHub REST API as the workspace's own GitHub account. GitHub
- * refusals are classified precisely (revoked token vs. missing scope vs.
- * repository/organization permission vs. rate limit vs. outage) instead of
- * collapsing every 401/403 into "expired", and every refusal leaves a
- * structured, secret-free log line carrying the workspace/action
- * correlation ids plus GitHub's own request id.
+ * Call the GitHub REST API as the workspace's own GitHub access — the
+ * GitHub App installation when one is bound, the legacy OAuth token
+ * otherwise. GitHub refusals are classified precisely (revoked token vs.
+ * missing scope vs. repository/organization permission vs. rate limit vs.
+ * outage) instead of collapsing every 401/403 into "expired", and every
+ * refusal leaves a structured, secret-free log line carrying the
+ * workspace/action correlation ids plus GitHub's own request id.
+ *
+ * Installation tokens are short-lived by design, so a 401 on one is
+ * retried EXACTLY ONCE with a freshly minted token: a 401 means GitHub
+ * refused the request before doing any work, so the retry can never
+ * duplicate a write, and a second 401 is reported truthfully instead of
+ * looping. OAuth tokens are static — a 401 there is never retried.
  */
 async function githubJson(
   ctx: Pick<ExecutionContext, "workspaceId"> & { actionId?: string | null },
   path: string,
   options?: { method?: string; body?: unknown },
 ): Promise<JsonResult> {
-  return providerJson({
-    workspaceId: ctx.workspaceId,
-    providerLabel: "GitHub",
-    baseUrl: "https://api.github.com",
-    resolveToken: async (id) => (await githubAccessToken(id)).token,
-    path,
-    options,
-    extraHeaders: {
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
-    mapFailure: ({ status, headers, bodyText }) => {
-      const refusal = classifyGithubRefusal(status, headers);
-      const level =
-        refusal.failureClass === "invalid_token" ||
-        refusal.failureClass === "missing_scope"
-          ? "warn"
-          : "info";
-      // Correlation trail only: ids, status, class — never tokens, request
-      // paths (repository names), or provider response bodies.
-      logger[level](
-        {
-          component: "github_api",
-          workspaceId: ctx.workspaceId,
-          actionId: ctx.actionId ?? null,
-          providerStatus: status,
-          failureClass: refusal.failureClass,
-          githubRequestId: refusal.requestId,
-        },
-        "GitHub refused an API call",
-      );
-      const described = describeGithubRefusal(refusal, status);
-      if (!described) return null;
-      // The described message intentionally omits the raw response body.
-      void bodyText;
-      return { ok: false, ...described };
-    },
-  });
+  const workspaceId = ctx.workspaceId;
+  if (!workspaceId) return { ok: false, outcome: NO_WORKSPACE_OUTCOME };
+
+  const resolveAuth = async (): Promise<
+    | { ok: true; token: string; source: "installation" | "oauth" }
+    | { ok: false; failure: { ok: false; outcome: ExecutionOutcome } }
+  > => {
+    try {
+      const auth = await githubAuth(workspaceId);
+      return { ok: true, token: auth.token, source: auth.source };
+    } catch (error) {
+      const failure = credentialFailure(error);
+      if (failure) return { ok: false, failure };
+      throw error;
+    }
+  };
+
+  const attempt = (token: string, source: "installation" | "oauth") =>
+    providerJson({
+      workspaceId,
+      providerLabel: "GitHub",
+      baseUrl: "https://api.github.com",
+      resolveToken: async () => token,
+      path,
+      options,
+      extraHeaders: {
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+      mapFailure: ({ status, headers, bodyText }) => {
+        const refusal = classifyGithubRefusal(status, headers);
+        const level =
+          refusal.failureClass === "invalid_token" ||
+          refusal.failureClass === "missing_scope"
+            ? "warn"
+            : "info";
+        // Correlation trail only: ids, status, class — never tokens,
+        // request paths (repository names), or provider response bodies.
+        logger[level](
+          {
+            component: "github_api",
+            workspaceId,
+            actionId: ctx.actionId ?? null,
+            providerStatus: status,
+            failureClass: refusal.failureClass,
+            authMethod: source,
+            githubRequestId: refusal.requestId,
+          },
+          "GitHub refused an API call",
+        );
+        const described = describeGithubRefusal(refusal, status, source);
+        if (!described) return null;
+        // The described message intentionally omits the raw response body.
+        void bodyText;
+        return { ok: false, ...described };
+      },
+    });
+
+  const auth = await resolveAuth();
+  if (!auth.ok) return auth.failure;
+  const first = await attempt(auth.token, auth.source);
+  if (
+    first.ok ||
+    first.status !== 401 ||
+    auth.source !== "installation"
+  ) {
+    return first;
+  }
+  // The installation token aged out mid-flight (or was invalidated at
+  // GitHub). Refresh once and retry once — never more.
+  invalidateGithubInstallationToken(workspaceId);
+  const refreshed = await resolveAuth();
+  if (!refreshed.ok) return refreshed.failure;
+  if (refreshed.source !== "installation") {
+    // The installation vanished between attempts; report the original
+    // refusal rather than silently switching identities mid-action.
+    return first;
+  }
+  return attempt(refreshed.token, refreshed.source);
 }
 
 /* ------------------------------ Gmail ---------------------------------- */
@@ -1080,12 +1130,28 @@ async function githubListRepos(
   _params: Record<string, unknown>,
   ctx: ExecutionContext,
 ): Promise<ExecutionOutcome> {
+  // Installation tokens are not user tokens: /user/* endpoints do not
+  // exist for them. The equivalent listing is /installation/repositories
+  // (exactly the repositories the owner granted to the app).
+  const method = ctx.workspaceId
+    ? await githubAuthMethod(ctx.workspaceId)
+    : null;
+  const viaApp = method === "github_app";
   const result = await githubJson(
     ctx,
-    "/user/repos?sort=pushed&per_page=30",
+    viaApp
+      ? "/installation/repositories?per_page=30"
+      : "/user/repos?sort=pushed&per_page=30",
   );
   if (!result.ok) return result.outcome;
-  const repos = (result.data as { full_name: string; private: boolean; description?: string | null }[] | null) ?? [];
+  const repos =
+    ((viaApp
+      ? (result.data as {
+          repositories?: { full_name: string; private: boolean; description?: string | null }[];
+        } | null)?.repositories
+      : result.data) as
+      | { full_name: string; private: boolean; description?: string | null }[]
+      | null) ?? [];
   if (repos.length === 0) return { ok: true, summary: "No repositories accessible." };
   return {
     ok: true,

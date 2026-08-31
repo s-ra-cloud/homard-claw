@@ -13,7 +13,11 @@ import {
   createHash,
   randomBytes,
 } from "node:crypto";
-import { db, githubAccountsTable } from "@workspace/db";
+import {
+  db,
+  githubAccountsTable,
+  githubInstallationsTable,
+} from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import {
@@ -21,28 +25,21 @@ import {
   classifyGithubRefusal,
   missingGithubScopes,
 } from "./failures";
+import { GithubAuthError } from "./github-auth-error";
+import {
+  fetchInstallation,
+  githubAppConfig,
+  githubInstallationSummary,
+  githubInstallationToken,
+} from "./app-auth";
 
 // Scope constants and failure classification live in ./failures (pure,
 // import-cycle-free); re-exported here so existing importers keep working.
 export { GITHUB_SCOPES, missingGithubScopes } from "./failures";
 
-export class GithubAuthError extends Error {
-  constructor(
-    /**
-     * "not_connected" — no GitHub account is connected to the workspace.
-     * "reconnect_required" — a credential exists but can no longer be used
-     * (revoked, undecryptable after a SESSION_SECRET rotation, or missing
-     * a required scope); the user must reconnect.
-     * "unavailable" — a transient failure (network, missing server
-     * config); nothing is wrong with the stored credential.
-     */
-    readonly kind: "not_connected" | "reconnect_required" | "unavailable",
-    message: string,
-  ) {
-    super(message);
-    this.name = "GithubAuthError";
-  }
-}
+// The shared error type lives in its own module (both the OAuth store and
+// the app-installation store throw it); re-exported for existing importers.
+export { GithubAuthError } from "./github-auth-error";
 
 const FORMAT = "v1";
 
@@ -283,30 +280,85 @@ export async function githubAccessToken(workspaceId: string): Promise<{
   }
 }
 
+/* ---------------------- Combined auth resolution ----------------------- */
+
+/**
+ * Resolve GitHub authentication for the workspace: GitHub App installation
+ * first, legacy OAuth token second. The installation is authoritative when
+ * its row exists — a mint failure surfaces as itself rather than silently
+ * degrading to a possibly different GitHub identity. Workspaces that never
+ * installed the app keep working through their stored OAuth token.
+ */
+export async function githubAuth(workspaceId: string): Promise<{
+  token: string;
+  login: string;
+  source: "installation" | "oauth";
+}> {
+  const installation = await githubInstallationToken(workspaceId);
+  if (installation) {
+    return {
+      token: installation.token,
+      login: installation.accountLogin,
+      source: "installation",
+    };
+  }
+  const oauth = await githubAccessToken(workspaceId);
+  return { token: oauth.token, login: oauth.login, source: "oauth" };
+}
+
+/**
+ * Which auth method the workspace would use right now, without minting a
+ * token or making any network call. "github_app" wins whenever an
+ * installation row exists (mirrors githubAuth's precedence).
+ */
+export async function githubAuthMethod(
+  workspaceId: string,
+): Promise<"github_app" | "oauth" | null> {
+  if ((await githubInstallationSummary(workspaceId)) !== null) {
+    return "github_app";
+  }
+  const account = await githubAccountSummary(workspaceId);
+  return account ? "oauth" : null;
+}
+
 /* ------------------------- Connection health --------------------------- */
 
 /** Upper bound for the live identity check — the status page must not hang. */
 export const GITHUB_HEALTH_TIMEOUT_MS = 3_500;
 
 /**
- * Live connection health of the workspace's stored GitHub credential,
- * verified against GitHub itself (GET /user) instead of trusting that a
- * stored row means a working token.
+ * Live connection health of the workspace's GitHub access, verified
+ * against GitHub itself instead of trusting that a stored row means a
+ * working credential. Installation-backed workspaces are verified as the
+ * app (does the installation still exist, is it suspended); OAuth-backed
+ * ones by the token identity check (GET /user).
  */
 export type GithubConnectionHealth =
   | { state: "not_connected" }
-  | { state: "connected"; login: string; detail: string | null }
+  | {
+      state: "connected";
+      login: string;
+      detail: string | null;
+      method: "github_app" | "oauth";
+    }
   | {
       state: "reconnect_required";
       login: string;
-      reason: "invalid_token" | "missing_scope" | "undecryptable";
+      reason:
+        | "invalid_token"
+        | "missing_scope"
+        | "undecryptable"
+        | "installation_removed"
+        | "installation_suspended";
       detail: string;
+      method: "github_app" | "oauth";
     }
   | {
       state: "unavailable";
       login: string | null;
       reason: "network" | "provider_error" | "config";
       detail: string;
+      method: "github_app" | "oauth";
     };
 
 /**
@@ -327,6 +379,11 @@ export function clearGithubHealthCache(): void {
   healthCache.clear();
 }
 
+/** Invalidate one workspace's cached verdict (install/reinstall/disconnect). */
+export function invalidateGithubHealth(workspaceId: string): void {
+  healthCache.delete(workspaceId);
+}
+
 /**
  * Check whether the stored GitHub credential actually works, with a
  * bounded timeout. Classification is deliberately conservative:
@@ -341,6 +398,29 @@ export function clearGithubHealthCache(): void {
 export async function checkGithubConnectionHealth(
   workspaceId: string,
 ): Promise<GithubConnectionHealth> {
+  // Installation-first, mirroring githubAuth's resolution order: when an
+  // installation row exists, IT is what agent actions will use, so its
+  // health is the truth the owner needs — not the leftover OAuth row's.
+  const installation = await githubInstallationSummary(workspaceId);
+  if (installation) {
+    const rowKey = `app:${installation.updatedAt.getTime()}`;
+    const cached = healthCache.get(workspaceId);
+    if (cached && cached.rowKey === rowKey && cached.expiresAt > Date.now()) {
+      return cached.health;
+    }
+    const health = await computeInstallationHealth(workspaceId, installation);
+    healthCache.set(workspaceId, {
+      rowKey,
+      expiresAt:
+        Date.now() +
+        (health.state === "unavailable"
+          ? HEALTH_TRANSIENT_TTL_MS
+          : HEALTH_TTL_MS),
+      health,
+    });
+    return health;
+  }
+
   const [row] = await db
     .select({
       login: githubAccountsTable.login,
@@ -359,7 +439,10 @@ export async function checkGithubConnectionHealth(
     return cached.health;
   }
 
-  const health = await computeHealth(workspaceId, row);
+  const health: GithubConnectionHealth = {
+    ...(await computeHealth(workspaceId, row)),
+    method: "oauth",
+  };
   healthCache.set(workspaceId, {
     rowKey,
     expiresAt:
@@ -372,10 +455,144 @@ export async function checkGithubConnectionHealth(
   return health;
 }
 
+/**
+ * Health of an installation-backed connection, verified as the app: GitHub
+ * is asked whether the installation still exists and whether it is
+ * suspended. Classification stays conservative — only GitHub saying
+ * "removed" (404 under our own app JWT) or "suspended" flips the state to
+ * reconnect_required; app-credential problems and outages report
+ * "unavailable" because the owner's installation itself is fine. No
+ * repository names or tokens are fetched, logged, or returned.
+ */
+async function computeInstallationHealth(
+  workspaceId: string,
+  installation: NonNullable<
+    Awaited<ReturnType<typeof githubInstallationSummary>>
+  >,
+): Promise<GithubConnectionHealth> {
+  let config;
+  try {
+    config = githubAppConfig();
+  } catch (error) {
+    return {
+      state: "unavailable",
+      login: installation.accountLogin,
+      reason: "config",
+      detail:
+        error instanceof GithubAuthError
+          ? error.message
+          : "The GitHub App configuration on this server could not be read.",
+      method: "github_app",
+    };
+  }
+  if (!config) {
+    return {
+      state: "unavailable",
+      login: installation.accountLogin,
+      reason: "config",
+      detail:
+        "This workspace uses a GitHub App installation, but the server's GitHub App configuration (GITHUB_APP_ID / GITHUB_APP_SLUG / GITHUB_APP_PRIVATE_KEY) is missing. Restore it to resume access — the installation itself is untouched.",
+      method: "github_app",
+    };
+  }
+  // The installation row stores the id privately; re-read it here rather
+  // than widening the summary type that status pages consume.
+  const [row] = await db
+    .select({ installationId: githubInstallationsTable.installationId })
+    .from(githubInstallationsTable)
+    .where(eq(githubInstallationsTable.workspaceId, workspaceId))
+    .limit(1);
+  if (!row) return { state: "not_connected" };
+  const result = await fetchInstallation(config, row.installationId);
+  if (!result.ok) {
+    switch (result.reason) {
+      case "removed":
+        logger.warn(
+          {
+            component: "github_health",
+            workspaceId,
+            failureClass: "installation_removed",
+          },
+          "GitHub connection health check did not verify as healthy",
+        );
+        return {
+          state: "reconnect_required",
+          login: installation.accountLogin,
+          reason: "installation_removed",
+          detail:
+            "GitHub reports the app installation no longer exists — it was uninstalled on GitHub (or removed by the account's admins). Reinstall the GitHub App to restore access; nothing on this server needs to be recreated.",
+          method: "github_app",
+        };
+      case "app_credentials":
+        return {
+          state: "unavailable",
+          login: installation.accountLogin,
+          reason: "config",
+          detail:
+            "GitHub rejected this server's app credentials (app id / private key), so the installation could not be verified. The installation itself is fine — the server's GitHub App configuration must be corrected.",
+          method: "github_app",
+        };
+      default:
+        return {
+          state: "unavailable",
+          login: installation.accountLogin,
+          reason:
+            result.status !== null && result.status >= 500
+              ? "provider_error"
+              : "network",
+          detail:
+            "GitHub could not be reached to verify the app installation (network problem, timeout, or GitHub outage). This is usually temporary and does not mean access is broken — check again shortly.",
+          method: "github_app",
+        };
+    }
+  }
+  if (result.installation.suspended) {
+    logger.warn(
+      {
+        component: "github_health",
+        workspaceId,
+        failureClass: "installation_suspended",
+      },
+      "GitHub connection health check did not verify as healthy",
+    );
+    return {
+      state: "reconnect_required",
+      login: installation.accountLogin,
+      reason: "installation_suspended",
+      detail:
+        "The GitHub App installation is suspended on GitHub, so agents cannot use it. Unsuspend it in the account's GitHub App settings (or reinstall the app) to restore access.",
+      method: "github_app",
+    };
+  }
+  return {
+    state: "connected",
+    login: result.installation.accountLogin,
+    detail:
+      result.installation.repositorySelection === "all"
+        ? null
+        : "The installation covers the repositories selected on GitHub. Manage the selection from the account's GitHub App settings if agents need more.",
+    method: "github_app",
+  };
+}
+
+/** Distributive Omit: applied member-by-member across a union. */
+type DistributiveOmit<T, K extends keyof never> = T extends unknown
+  ? Omit<T, K>
+  : never;
+
+/**
+ * OAuth-path health, minus the `method` discriminator (the caller stamps
+ * "oauth" on). Never returns not_connected — the caller checked the row.
+ */
 async function computeHealth(
   workspaceId: string,
   row: { login: string; scopes: string; accessTokenEnc: string },
-): Promise<GithubConnectionHealth> {
+): Promise<
+  DistributiveOmit<
+    Exclude<GithubConnectionHealth, { state: "not_connected" }>,
+    "method"
+  >
+> {
   const logHealth = (
     level: "warn" | "info",
     failureClass: string,

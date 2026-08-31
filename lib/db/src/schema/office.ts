@@ -1100,6 +1100,71 @@ export const githubAccountsTable = pgTable("github_accounts", {
     .defaultNow(),
 });
 
+export type GithubInstallationRecord =
+  typeof githubInstallationsTable.$inferSelect;
+
+/**
+ * One GitHub App installation per workspace, created through the in-app
+ * install flow. Deliberately credential-free: only the installation's
+ * identity and safe display metadata are stored. Short-lived installation
+ * access tokens are minted on demand with the deployment-level app key and
+ * cached in memory only — there is nothing durable here to leak or rotate.
+ */
+export const githubInstallationsTable = pgTable(
+  "github_installations",
+  {
+    workspaceId: uuid("workspace_id")
+      .primaryKey()
+      .references(() => workspacesTable.id, { onDelete: "cascade" }),
+    clerkUserId: text("clerk_user_id").notNull(),
+    /** Immutable numeric GitHub installation id (as text). */
+    installationId: text("installation_id").notNull(),
+    /** Safe display label: the account the app is installed on. */
+    accountLogin: text("account_login").notNull(),
+    /** "User" or "Organization" (GitHub's account type). */
+    accountType: text("account_type").notNull(),
+    /** "all" or "selected" — which repositories the owner granted. */
+    repositorySelection: text("repository_selection").notNull(),
+    connectedAt: timestamp("connected_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    // One installation can belong to exactly one workspace: a second
+    // workspace can never claim (and thereby gain the repository access of)
+    // an installation already bound elsewhere.
+    uniqueIndex("github_installations_installation_id_unique").on(
+      table.installationId,
+    ),
+  ],
+);
+
+export type GithubInstallStateRecord =
+  typeof githubInstallStatesTable.$inferSelect;
+
+/**
+ * Single-use GitHub App installation setup states, mirroring the OAuth
+ * state tables: minted when the owner starts the install flow, carried
+ * through GitHub's installation consent screen via the `state` query
+ * parameter, and consumed exactly once by a guarded UPDATE when GitHub
+ * redirects back to the setup callback.
+ */
+export const githubInstallStatesTable = pgTable("github_install_states", {
+  state: text("state").primaryKey(),
+  workspaceId: uuid("workspace_id")
+    .notNull()
+    .references(() => workspacesTable.id, { onDelete: "cascade" }),
+  clerkUserId: text("clerk_user_id").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+});
+
 export type GithubOauthStateRecord = typeof githubOauthStatesTable.$inferSelect;
 
 /**

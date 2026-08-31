@@ -120,20 +120,28 @@ export function classifyGithubRefusal(
  * Owner/agent-facing text for a classified refusal. Returns null for
  * "other" so callers keep their generic mapping. Messages carry the safe
  * GitHub request id for correlation and NEVER a token, header dump, or
- * response body.
+ * response body. `method` picks recovery guidance that matches how the
+ * workspace authenticates: an installation-token 401 after an automatic
+ * refresh is a server/app problem, never something "reconnecting" fixes,
+ * and an installation 403/404 usually means the repository is outside the
+ * installation's selected repositories or granted permissions.
  */
 export function describeGithubRefusal(
   refusal: GithubRefusal,
   status: number,
+  method: "oauth" | "installation" = "oauth",
 ): { kind: "auth" | "failed"; message: string } | null {
   const ref = refusal.requestId
     ? ` (GitHub request ${refusal.requestId})`
     : "";
+  const viaApp = method === "installation";
   switch (refusal.failureClass) {
     case "invalid_token":
       return {
         kind: "auth",
-        message: `GitHub rejected the stored sign-in (HTTP 401): the token was revoked or reset at GitHub. Reconnect GitHub on the Connected Apps page to restore access — the OAuth app itself does not need to be recreated.${ref}`,
+        message: viaApp
+          ? `GitHub rejected the app installation's access token (HTTP 401) even after it was refreshed automatically. This usually means the installation was just removed or suspended on GitHub, or the server's GitHub App credentials are wrong. Check the GitHub connection on the Connected Apps page.${ref}`
+          : `GitHub rejected the stored sign-in (HTTP 401): the token was revoked or reset at GitHub. Reconnect GitHub on the Connected Apps page to restore access — the OAuth app itself does not need to be recreated.${ref}`,
       };
     case "missing_scope":
       return {
@@ -148,7 +156,9 @@ export function describeGithubRefusal(
     case "forbidden":
       return {
         kind: "failed",
-        message: `GitHub refused access to this resource (HTTP 403). The connected account may lack permission on the repository, or its organization restricts OAuth apps. Reconnecting alone will not fix this — restore the account's repository or organization authorization on GitHub, then retry.${ref}`,
+        message: viaApp
+          ? `GitHub refused access to this resource (HTTP 403). The repository is likely not covered by the GitHub App installation — either it is outside the repositories selected for the app, or the app lacks the needed permission there. Update the installation's repository access in the account's GitHub App settings, then retry. Reinstalling alone will not add repositories that were not selected.${ref}`
+          : `GitHub refused access to this resource (HTTP 403). The connected account may lack permission on the repository, or its organization restricts OAuth apps. Reconnecting alone will not fix this — restore the account's repository or organization authorization on GitHub, then retry.${ref}`,
       };
     case "server_error":
       return {
@@ -158,7 +168,9 @@ export function describeGithubRefusal(
     case "not_found":
       return {
         kind: "failed",
-        message: `GitHub returned 404 Not Found. The resource may not exist — or the connected account may not have access to it (GitHub hides private resources from accounts without permission).${ref}`,
+        message: viaApp
+          ? `GitHub returned 404 Not Found. The resource may not exist — or it may be outside the repositories granted to the GitHub App installation (GitHub hides inaccessible resources). Check the installation's repository selection in the account's GitHub App settings.${ref}`
+          : `GitHub returned 404 Not Found. The resource may not exist — or the connected account may not have access to it (GitHub hides private resources from accounts without permission).${ref}`,
       };
     default:
       return null;
