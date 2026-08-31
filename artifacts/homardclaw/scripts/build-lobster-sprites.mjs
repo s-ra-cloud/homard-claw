@@ -256,26 +256,51 @@ function keyOutBackground(img) {
   for (let y = 0; y < height; y++) {
     stack.push(y * width, y * width + width - 1);
   }
-  const near = (i) => {
+  const near = (i, threshold) => {
     const d = i * 4;
     if (data[d + 3] < 8) return true;
     return (
       Math.abs(data[d] - bg[0]) +
         Math.abs(data[d + 1] - bg[1]) +
         Math.abs(data[d + 2] - bg[2]) <
-      60
+      threshold
     );
   };
-  while (stack.length) {
-    const i = stack.pop();
-    if (i < 0 || i >= width * height || seen[i]) continue;
-    if (!near(i)) continue;
-    seen[i] = 1;
-    data[i * 4 + 3] = 0;
-    const x = i % width;
-    if (x > 0) stack.push(i - 1);
-    if (x < width - 1) stack.push(i + 1);
-    stack.push(i - width, i + width);
+  const flood = (threshold) => {
+    while (stack.length) {
+      const i = stack.pop();
+      if (i < 0 || i >= width * height || seen[i]) continue;
+      if (!near(i, threshold)) continue;
+      seen[i] = 1;
+      data[i * 4 + 3] = 0;
+      const x = i % width;
+      if (x > 0) stack.push(i - 1);
+      if (x < width - 1) stack.push(i + 1);
+      stack.push(i - width, i + width);
+    }
+  };
+  flood(60);
+  // The source art anti-aliases its outline against the flat backdrop, leaving a
+  // thin ring of partially-blended (light grey) opaque pixels that the strict
+  // flood fill above never reaches — `downsample` later hardens that ring to a
+  // fully opaque halo around every sprite. A flood fill with a looser threshold
+  // would risk tunnelling clean through any real artwork it touches (an eye
+  // highlight, a light shell tone), so instead erode exactly two rings from the
+  // freshly-cut edge: each pass only clears pixels already touching transparency,
+  // one ring at a time, regardless of how loose the threshold is.
+  for (let pass = 0; pass < 2; pass++) {
+    const toClear = [];
+    for (let i = 0; i < width * height; i++) {
+      if (data[i * 4 + 3] === 0) continue;
+      const x = i % width;
+      const onEdge =
+        (x > 0 && data[(i - 1) * 4 + 3] === 0) ||
+        (x < width - 1 && data[(i + 1) * 4 + 3] === 0) ||
+        (i - width >= 0 && data[(i - width) * 4 + 3] === 0) ||
+        (i + width < width * height && data[(i + width) * 4 + 3] === 0);
+      if (onEdge && near(i, 200)) toClear.push(i);
+    }
+    for (const i of toClear) data[i * 4 + 3] = 0;
   }
   return img;
 }
