@@ -1844,89 +1844,6 @@ router.get("/providers", async (req, res): Promise<void> => {
 });
 
 /**
- * Store this workspace's own Claude Code token or OpenRouter API key.
- * The value is encrypted per workspace, never logged, never echoed back,
- * and never mentioned in audit entries — only the outcome is.
- */
-router.put(
-  "/providers/:provider/credential",
-  async (req, res): Promise<void> => {
-    const params = SetProviderCredentialParams.safeParse(req.params);
-    if (!params.success) {
-      res.status(400).json({ error: "Unknown provider" });
-      return;
-    }
-    const provider = params.data.provider as "claude_max" | "openrouter";
-    const parsed = SetProviderCredentialBody.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({
-        error: "A credential of at least 8 characters is required.",
-      });
-      return;
-    }
-    if (provider === "claude_max") {
-      // Reject the wrong kind of secret before it is stored, with precise
-      // remediation. The guidance never quotes the submitted value.
-      const problem = claudeSetupTokenProblem(parsed.data.credential);
-      if (problem) {
-        res.status(400).json({ error: problem });
-        return;
-      }
-    }
-    try {
-      await saveProviderCredential(
-        req.workspaceId!,
-        provider,
-        parsed.data.credential,
-      );
-    } catch (error) {
-      if (error instanceof ProviderCredentialError) {
-        res.status(503).json({ error: error.message });
-        return;
-      }
-      throw error;
-    }
-    clearProviderCaches();
-    await recordAudit(
-      req.workspaceId!,
-      "providers.credential_set",
-      `A ${providerLabel(provider)} credential was stored for this workspace.`,
-    );
-    res.json(
-      SetProviderCredentialResponse.parse(
-        await getProviderHealth(req.workspaceId!, provider),
-      ),
-    );
-  },
-);
-
-router.delete(
-  "/providers/:provider/credential",
-  async (req, res): Promise<void> => {
-    const params = DeleteProviderCredentialParams.safeParse(req.params);
-    if (!params.success) {
-      res.status(400).json({ error: "Unknown provider" });
-      return;
-    }
-    const provider = params.data.provider as "claude_max" | "openrouter";
-    const removed = await deleteProviderCredential(req.workspaceId!, provider);
-    clearProviderCaches();
-    await recordAudit(
-      req.workspaceId!,
-      "providers.credential_removed",
-      removed
-        ? `The workspace's ${providerLabel(provider)} credential was removed.`
-        : `A ${providerLabel(provider)} credential removal was requested, but none was stored.`,
-    );
-    res.json(
-      DeleteProviderCredentialResponse.parse(
-        await getProviderHealth(req.workspaceId!, provider),
-      ),
-    );
-  },
-);
-
-/**
  * Local-only Codex connection check for the signed-in account. It inspects
  * that account's stored sign-in, its recorded auth mode, and SDK
  * availability — it never starts a thread, so it cannot spend anyone's
@@ -2025,6 +1942,96 @@ router.post("/providers/codex/bootstrap", async (req, res): Promise<void> => {
   req.log.info({ action: outcome.action }, "Codex bootstrap");
   res.json(BootstrapCodexResponse.parse(outcome));
 });
+
+/**
+ * Store this workspace's own Claude Code token or OpenRouter API key.
+ * The value is encrypted per workspace, never logged, never echoed back,
+ * and never mentioned in audit entries — only the outcome is.
+ *
+ * ORDERING: these `:provider` routes are registered AFTER every literal
+ * `/providers/codex/...` route on purpose. Express matches in registration
+ * order, so putting a `:provider` pattern first would swallow
+ * `DELETE /providers/codex/credential` and reject "codex" as an unknown
+ * provider (a real production bug). Keep literal provider routes above
+ * parameterized ones.
+ */
+router.put(
+  "/providers/:provider/credential",
+  async (req, res): Promise<void> => {
+    const params = SetProviderCredentialParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: "Unknown provider" });
+      return;
+    }
+    const provider = params.data.provider as "claude_max" | "openrouter";
+    const parsed = SetProviderCredentialBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: "A credential of at least 8 characters is required.",
+      });
+      return;
+    }
+    if (provider === "claude_max") {
+      // Reject the wrong kind of secret before it is stored, with precise
+      // remediation. The guidance never quotes the submitted value.
+      const problem = claudeSetupTokenProblem(parsed.data.credential);
+      if (problem) {
+        res.status(400).json({ error: problem });
+        return;
+      }
+    }
+    try {
+      await saveProviderCredential(
+        req.workspaceId!,
+        provider,
+        parsed.data.credential,
+      );
+    } catch (error) {
+      if (error instanceof ProviderCredentialError) {
+        res.status(503).json({ error: error.message });
+        return;
+      }
+      throw error;
+    }
+    clearProviderCaches();
+    await recordAudit(
+      req.workspaceId!,
+      "providers.credential_set",
+      `A ${providerLabel(provider)} credential was stored for this workspace.`,
+    );
+    res.json(
+      SetProviderCredentialResponse.parse(
+        await getProviderHealth(req.workspaceId!, provider),
+      ),
+    );
+  },
+);
+
+router.delete(
+  "/providers/:provider/credential",
+  async (req, res): Promise<void> => {
+    const params = DeleteProviderCredentialParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: "Unknown provider" });
+      return;
+    }
+    const provider = params.data.provider as "claude_max" | "openrouter";
+    const removed = await deleteProviderCredential(req.workspaceId!, provider);
+    clearProviderCaches();
+    await recordAudit(
+      req.workspaceId!,
+      "providers.credential_removed",
+      removed
+        ? `The workspace's ${providerLabel(provider)} credential was removed.`
+        : `A ${providerLabel(provider)} credential removal was requested, but none was stored.`,
+    );
+    res.json(
+      DeleteProviderCredentialResponse.parse(
+        await getProviderHealth(req.workspaceId!, provider),
+      ),
+    );
+  },
+);
 
 router.get("/providers/settings", async (req, res): Promise<void> => {
   res.json(

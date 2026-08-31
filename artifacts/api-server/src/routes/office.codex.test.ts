@@ -855,6 +855,35 @@ describe("Codex owner endpoints", () => {
     expect(bad.body.error).toMatch(/gpt-9-imaginary/);
   });
 
+  it("disconnects a Codex sign-in over HTTP instead of rejecting it as an unknown provider", async () => {
+    // Regression: the generic `/providers/:provider/credential` route used
+    // to be registered before the literal codex one, so this exact request
+    // came back 400 "Unknown provider" in production.
+    await connectAuth(CHATGPT_AUTH);
+    const res = await request(app).delete("/api/providers/codex/credential");
+    expect(res.status).toBe(200);
+    expect(res.body.action).toBe("disconnected");
+
+    // A second disconnect is a clean no-op, still never a routing 400.
+    const again = await request(app).delete("/api/providers/codex/credential");
+    expect(again.status).toBe(200);
+    expect(again.body.action).toBe("skipped");
+  });
+
+  it("keeps generic provider credential routes working alongside the codex ones", async () => {
+    // The reorder must not weaken the parameterized routes it now follows.
+    for (const provider of ["claude_max", "openrouter"] as const) {
+      const res = await request(app).delete(
+        `/api/providers/${provider}/credential`,
+      );
+      expect(res.status).toBe(200);
+      expect(res.body.provider).toBe(provider);
+    }
+    const bogus = await request(app).delete("/api/providers/bogus/credential");
+    expect(bogus.status).toBe(400);
+    expect(bogus.body.error).toBe("Unknown provider");
+  });
+
   it("keeps per-agent Codex preferences across create and update", async () => {
     const agent = await createAgent(`${RUN_TAG} Prefs`, {
       codexModel: "gpt-5.6-luna",
