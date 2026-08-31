@@ -197,7 +197,7 @@ beforeAll(async () => {
     email: "tester@example.com",
     refreshTokenEnc: encryptRefreshToken("test-refresh-token"),
     scopes:
-      "openid email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file",
+      "openid email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive",
   });
   await db.insert(githubAccountsTable).values({
     workspaceId,
@@ -1415,7 +1415,7 @@ describe("google sheets executors", () => {
     expect(batchUpdateCalls()).toHaveLength(0);
   });
 
-  it("explains a drive.file edit denial instead of asking the owner to reconnect", async () => {
+  it("explains a Sheets edit denial instead of asking the owner to reconnect", async () => {
     proxyState.handler = (call) => {
       if (call.method === "GET" && call.path.includes("/v4/spreadsheets/")) {
         return tabsResponse([{ sheetId: 2, title: "Data" }]);
@@ -1436,7 +1436,7 @@ describe("google sheets executors", () => {
     expect(outcome.ok).toBe(false);
     expect(!outcome.ok && outcome.kind).toBe("failed");
     expect(!outcome.ok && outcome.message).toContain(
-      "only edit spreadsheets it created",
+      "edit rights on this spreadsheet",
     );
   });
 
@@ -1517,6 +1517,378 @@ describe("google sheets executors", () => {
     );
     expect(empty.ok).toBe(true);
     expect(empty.ok && empty.summary).toContain("is empty");
+  });
+});
+
+describe("drive organization executors", () => {
+  const FOLDER_MIME = "application/vnd.google-apps.folder";
+
+  it("creates a folder with the action marker after validating the parent", async () => {
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("/drive/v3/files/parent-1")) {
+        return {
+          status: 200,
+          body: { id: "parent-1", name: "Projects", mimeType: FOLDER_MIME },
+        };
+      }
+      if (call.method === "POST" && call.path.includes("/drive/v3/files")) {
+        return { status: 200, body: { id: "folder-9" } };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.create_folder")!,
+      { name: "Invoices 2026", parentFolderId: "parent-1" },
+      { actionId: "act-f1", workspaceId },
+    );
+    expect(outcome.ok).toBe(true);
+    expect(outcome.ok && outcome.summary).toContain("folder-9");
+    const create = proxyState.calls.find((c) => c.method === "POST")!;
+    const body = create.body as Record<string, unknown>;
+    expect(body.mimeType).toBe(FOLDER_MIME);
+    expect(body.parents).toEqual(["parent-1"]);
+    expect(body.appProperties).toEqual({ homardclawActionId: "act-f1" });
+  });
+
+  it("refuses to create a folder inside a plain file", async () => {
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("/drive/v3/files/doc-1")) {
+        return {
+          status: 200,
+          body: { id: "doc-1", name: "Notes.txt", mimeType: "text/plain" },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.create_folder")!,
+      { name: "Sub", parentFolderId: "doc-1" },
+      { actionId: "act-f2", workspaceId },
+    );
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.message).toContain("not a folder");
+    // Nothing was created after the failed validation.
+    expect(proxyState.calls.some((c) => c.method === "POST")).toBe(false);
+  });
+
+  it("renames an item, sending the new name and marker in one PATCH", async () => {
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("/drive/v3/files/file-1")) {
+        return {
+          status: 200,
+          body: { id: "file-1", name: "Old name", mimeType: "text/plain" },
+        };
+      }
+      if (call.method === "PATCH" && call.path.includes("/drive/v3/files/file-1")) {
+        return { status: 200, body: { id: "file-1", name: "New name" } };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.rename_item")!,
+      { fileId: "file-1", newName: "New name" },
+      { actionId: "act-r9", workspaceId },
+    );
+    expect(outcome.ok).toBe(true);
+    expect(outcome.ok && outcome.summary).toContain('"Old name"');
+    expect(outcome.ok && outcome.summary).toContain('"New name"');
+    const patch = proxyState.calls.find((c) => c.method === "PATCH")!;
+    const body = patch.body as Record<string, unknown>;
+    expect(body.name).toBe("New name");
+    expect(body.appProperties).toEqual({ homardclawActionId: "act-r9" });
+  });
+
+  it("moves an item into a folder, replacing its previous parents", async () => {
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("/drive/v3/files/file-2")) {
+        return {
+          status: 200,
+          body: {
+            id: "file-2",
+            name: "Report",
+            mimeType: "text/plain",
+            parents: ["old-parent"],
+          },
+        };
+      }
+      if (call.method === "GET" && call.path.includes("/drive/v3/files/dest-1")) {
+        return {
+          status: 200,
+          body: { id: "dest-1", name: "Archive", mimeType: FOLDER_MIME },
+        };
+      }
+      if (call.method === "PATCH" && call.path.includes("/drive/v3/files/file-2")) {
+        expect(call.path).toContain("addParents=dest-1");
+        expect(call.path).toContain("removeParents=old-parent");
+        return {
+          status: 200,
+          body: { id: "file-2", name: "Report", parents: ["dest-1"] },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.move_item")!,
+      { fileId: "file-2", destinationFolderId: "dest-1" },
+      { actionId: "act-m1", workspaceId },
+    );
+    expect(outcome.ok).toBe(true);
+    expect(outcome.ok && outcome.summary).toContain('"Archive"');
+    const patch = proxyState.calls.find((c) => c.method === "PATCH")!;
+    expect(
+      (patch.body as Record<string, unknown>).appProperties,
+    ).toEqual({ homardclawActionId: "act-m1" });
+  });
+
+  it("finds shared-drive items in search and can move one by the returned id", async () => {
+    // Discovery: the search must span shared drives, or organization of
+    // shared-drive files is impossible without an externally supplied id.
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("/drive/v3/files?q=")) {
+        expect(call.path).toContain("corpora=allDrives");
+        expect(call.path).toContain("supportsAllDrives=true");
+        expect(call.path).toContain("includeItemsFromAllDrives=true");
+        return {
+          status: 200,
+          body: {
+            files: [
+              {
+                id: "shared-file-1",
+                name: "Team plan",
+                mimeType: "text/plain",
+                modifiedTime: "2026-08-30T10:00:00Z",
+                driveId: "team-drive-1",
+              },
+            ],
+          },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const search = await executeOperation(
+      findOperation("google_drive.search")!,
+      { query: "Team plan" },
+      { actionId: "act-s1", workspaceId },
+    );
+    expect(search.ok).toBe(true);
+    expect(search.ok && search.summary).toContain("shared-file-1");
+    expect(search.ok && search.summary).toContain("in a shared drive");
+
+    // The returned id then works for a move: every organization call sends
+    // supportsAllDrives so shared-drive items are reachable.
+    proxyState.handler = (call) => {
+      expect(call.path).toContain("supportsAllDrives=true");
+      if (call.method === "GET" && call.path.includes("/drive/v3/files/shared-file-1")) {
+        return {
+          status: 200,
+          body: {
+            id: "shared-file-1",
+            name: "Team plan",
+            mimeType: "text/plain",
+            parents: ["shared-old-parent"],
+          },
+        };
+      }
+      if (call.method === "GET" && call.path.includes("/drive/v3/files/shared-dest")) {
+        return {
+          status: 200,
+          body: { id: "shared-dest", name: "Archive", mimeType: FOLDER_MIME },
+        };
+      }
+      if (call.method === "PATCH" && call.path.includes("/drive/v3/files/shared-file-1")) {
+        expect(call.path).toContain("addParents=shared-dest");
+        expect(call.path).toContain("removeParents=shared-old-parent");
+        return {
+          status: 200,
+          body: { id: "shared-file-1", name: "Team plan", parents: ["shared-dest"] },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const moved = await executeOperation(
+      findOperation("google_drive.move_item")!,
+      { fileId: "shared-file-1", destinationFolderId: "shared-dest" },
+      { actionId: "act-s2", workspaceId },
+    );
+    expect(moved.ok).toBe(true);
+  });
+
+  it("refuses to move into a destination that is not a folder", async () => {
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("/drive/v3/files/file-3")) {
+        return {
+          status: 200,
+          body: { id: "file-3", name: "Sheet", mimeType: "text/plain", parents: ["p"] },
+        };
+      }
+      if (call.method === "GET" && call.path.includes("/drive/v3/files/doc-2")) {
+        return {
+          status: 200,
+          body: { id: "doc-2", name: "Plain doc", mimeType: "text/plain" },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.move_item")!,
+      { fileId: "file-3", destinationFolderId: "doc-2" },
+      { actionId: "act-m2", workspaceId },
+    );
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.message).toContain("not a folder");
+    expect(proxyState.calls.some((c) => c.method === "PATCH")).toBe(false);
+  });
+
+  it("translates an item-permission 403 on rename into an actionable failure", async () => {
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("/drive/v3/files/shared-1")) {
+        return {
+          status: 200,
+          body: { id: "shared-1", name: "Someone else's", mimeType: "text/plain" },
+        };
+      }
+      if (call.method === "PATCH") {
+        return {
+          status: 403,
+          body: { error: { message: "The caller does not have permission" } },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.rename_item")!,
+      { fileId: "shared-1", newName: "Mine now" },
+      { actionId: "act-r10", workspaceId },
+    );
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.kind).toBe("failed");
+    expect(!outcome.ok && outcome.message).toContain("shared read-only");
+  });
+
+  it("fails closed with reconnect guidance when full Drive access was never granted", async () => {
+    // A separate workspace whose Google grant predates the broad scope.
+    const [oldWorkspace] = await db
+      .insert(workspacesTable)
+      .values({ clerkUserId: `recovery-test-oldscope-${Date.now()}` })
+      .returning();
+    await db.insert(googleAccountsTable).values({
+      workspaceId: oldWorkspace.id,
+      clerkUserId: oldWorkspace.clerkUserId,
+      googleSub: "old-sub",
+      email: "old@example.com",
+      refreshTokenEnc: encryptRefreshToken("old-refresh-token"),
+      scopes:
+        "openid email https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file",
+    });
+    proxyState.handler = (call) => {
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.rename_item")!,
+      { fileId: "any", newName: "Renamed" },
+      { actionId: "act-r11", workspaceId: oldWorkspace.id },
+    );
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.kind).toBe("auth");
+    expect(!outcome.ok && outcome.message).toContain("full Google Drive access");
+    // Fails before Google is ever contacted.
+    expect(proxyState.calls).toHaveLength(0);
+    await db
+      .delete(googleAccountsTable)
+      .where(eq(googleAccountsTable.workspaceId, oldWorkspace.id));
+    await db
+      .delete(workspacesTable)
+      .where(eq(workspacesTable.id, oldWorkspace.id));
+  });
+});
+
+describe("drive organization crash recovery", () => {
+  it("confirms a stranded rename by the item's embedded marker", async () => {
+    const approvalId = await insertApproval();
+    const action = await insertExecutingAction({
+      operation: "google_drive.rename_item",
+      app: "google_drive",
+      params: { fileId: "file-7", newName: "Final name" },
+      approvalId,
+    });
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("/drive/v3/files/file-7")) {
+        return {
+          status: 200,
+          body: {
+            id: "file-7",
+            name: "Final name",
+            appProperties: { homardclawActionId: action.id },
+          },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    expect(resolved.resolution).toBe("confirmed");
+    const row = await reloadAction(action.id);
+    expect(row.status).toBe("executed");
+    expect(row.resultSummary).toContain('"Final name"');
+    // Only the verification read hit the provider.
+    expect(proxyState.calls.every((c) => c.method === "GET")).toBe(true);
+  });
+
+  it("settles as unknown when the item carries someone else's marker — never a replay", async () => {
+    const approvalId = await insertApproval();
+    const action = await insertExecutingAction({
+      operation: "google_drive.move_item",
+      app: "google_drive",
+      params: { fileId: "file-8", destinationFolderId: "dest-9" },
+      approvalId,
+    });
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("/drive/v3/files/file-8")) {
+        return {
+          status: 200,
+          // A later action overwrote the single marker key. Our move may or
+          // may not have landed first — recovery must NOT requeue it, or an
+          // already-done move could replay over the later change.
+          body: {
+            id: "file-8",
+            name: "Report",
+            parents: ["dest-9"],
+            appProperties: { homardclawActionId: "some-other-action" },
+          },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    expect(resolved.resolution).toBe("unknown");
+    const row = await reloadAction(action.id);
+    expect(row.status).toBe("failed");
+    expect(row.errorMessage).toContain("cannot be confirmed");
+    expect(proxyState.calls.every((c) => c.method === "GET")).toBe(true);
+  });
+
+  it("settles a marker-less move as unknown instead of claiming non-delivery", async () => {
+    const action = await insertExecutingAction({
+      operation: "google_drive.move_item",
+      app: "google_drive",
+      params: { fileId: "file-9", destinationFolderId: "dest-2" },
+    });
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("/drive/v3/files/file-9")) {
+        return {
+          status: 200,
+          // Looks untouched — but the marker is a mutable per-app key, so
+          // absence cannot prove the interrupted PATCH never landed.
+          body: { id: "file-9", name: "Report", parents: ["old-parent"], appProperties: {} },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    expect(resolved.resolution).toBe("unknown");
+    const row = await reloadAction(action.id);
+    expect(row.status).toBe("failed");
+    expect(row.errorMessage).toContain("not retried");
+    expect(proxyState.calls.every((c) => c.method === "GET")).toBe(true);
   });
 });
 

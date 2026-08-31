@@ -103,13 +103,24 @@ export const GMAIL_SCOPES = [
 ] as const;
 
 /**
- * The Drive scopes for the catalog: read any file, create/manage only the
- * files HomardClaw itself creates. Never full write over the whole Drive.
+ * The baseline Drive scopes: read any file, create/manage only the files
+ * HomardClaw itself creates. Every existing connection has at least these.
  */
 export const DRIVE_SCOPES = [
   "https://www.googleapis.com/auth/drive.readonly",
   "https://www.googleapis.com/auth/drive.file",
 ] as const;
+
+/**
+ * Google's broad full-Drive scope. The OWNER CHOSE this deliberately: the
+ * catalog's organization operations (create folder, rename, move) must work
+ * on files that already existed before HomardClaw, which drive.file can
+ * never touch. It is requested at Drive consent but never silently assumed:
+ * a connection that declined it keeps working for reads and app-created
+ * files, and only the organization operations fail closed with reconnect
+ * guidance. Delete and share stay out of the catalog regardless of scope.
+ */
+export const DRIVE_ORGANIZE_SCOPE = "https://www.googleapis.com/auth/drive";
 
 /** Scopes requested at consent: identity + the Gmail set. */
 export const REQUESTED_SCOPES = [
@@ -118,11 +129,13 @@ export const REQUESTED_SCOPES = [
   ...GMAIL_SCOPES,
 ] as const;
 
-/** Scopes requested by the incremental Drive consent: identity + Drive. */
+/** Scopes requested by the incremental Drive consent: identity + Drive,
+ * including the broad organization scope (see DRIVE_ORGANIZE_SCOPE). */
 export const DRIVE_REQUESTED_SCOPES = [
   "openid",
   "email",
   ...DRIVE_SCOPES,
+  DRIVE_ORGANIZE_SCOPE,
 ] as const;
 
 function missingScopes(
@@ -130,6 +143,12 @@ function missingScopes(
   required: readonly string[],
 ): string[] {
   const have = new Set(granted.split(/\s+/).filter(Boolean));
+  // The broad Drive scope supersedes both narrow ones: a grant that has it
+  // can do everything drive.readonly and drive.file allow, so their literal
+  // absence must not read as a narrowed grant.
+  if (have.has(DRIVE_ORGANIZE_SCOPE)) {
+    for (const scope of DRIVE_SCOPES) have.add(scope);
+  }
   return required.filter((scope) => !have.has(scope));
 }
 
@@ -141,6 +160,11 @@ export function missingDriveScopes(granted: string): string[] {
   return missingScopes(granted, DRIVE_SCOPES);
 }
 
+/** True when the grant can organize pre-existing Drive files. */
+export function hasDriveOrganizeScope(granted: string): boolean {
+  return missingScopes(granted, [DRIVE_ORGANIZE_SCOPE]).length === 0;
+}
+
 export type GoogleAccountSummary = {
   email: string;
   scopes: string;
@@ -148,6 +172,8 @@ export type GoogleAccountSummary = {
   updatedAt: Date;
   missingScopes: string[];
   missingDriveScopes: string[];
+  /** False when the grant predates (or declined) the broad Drive scope. */
+  canOrganizeDrive: boolean;
 };
 
 /** Metadata only — never decrypts, safe on every request. */
@@ -169,6 +195,7 @@ export async function googleAccountSummary(
     ...row,
     missingScopes: missingGmailScopes(row.scopes),
     missingDriveScopes: missingDriveScopes(row.scopes),
+    canOrganizeDrive: hasDriveOrganizeScope(row.scopes),
   };
 }
 
@@ -317,10 +344,37 @@ export async function driveAccessToken(workspaceId: string): Promise<{
   return googleAccessToken(workspaceId, DRIVE_SCOPES, "Google Drive");
 }
 
+/**
+ * Resolve a token for Drive ORGANIZATION work (create folder, rename,
+ * move). Requires the broad Drive scope on top of the baseline: a
+ * connection made before that scope existed — or one that declined it —
+ * fails closed here with reconnect guidance, before any provider call.
+ */
+export async function driveOrganizeAccessToken(workspaceId: string): Promise<{
+  token: string;
+  email: string;
+  googleSub: string;
+}> {
+  return googleAccessToken(
+    workspaceId,
+    [...DRIVE_SCOPES, DRIVE_ORGANIZE_SCOPE],
+    "Google Drive",
+    {
+      partialScopeMessage:
+        "Organizing existing Drive files (creating folders, renaming, moving) needs full Google Drive access, which this connection has not granted. Reconnect Google Drive from the Connected Apps page and approve the full access request.",
+    },
+  );
+}
+
 async function googleAccessToken(
   workspaceId: string,
   requiredScopes: readonly string[],
   serviceLabel: string,
+  options?: {
+    /** Overrides the generic message when SOME scopes are granted but the
+     * required set is incomplete (reconnect_required, not not_connected). */
+    partialScopeMessage?: string;
+  },
 ): Promise<{
   token: string;
   email: string;
@@ -340,12 +394,14 @@ async function googleAccessToken(
   const missing = missingScopes(row.scopes, requiredScopes);
   if (missing.length > 0) {
     // All scopes absent = this service was never connected; a partial set
-    // means a grant was narrowed and must be re-consented.
+    // means a grant was narrowed (or an expanded scope was never granted)
+    // and must be re-consented.
+    const partial = missing.length < requiredScopes.length;
     throw new GoogleAuthError(
-      missing.length === requiredScopes.length
-        ? "not_connected"
-        : "reconnect_required",
-      `The connected Google account has not granted the required ${serviceLabel} permissions (${missing.join(", ")}). Connect ${serviceLabel} and grant all requested access.`,
+      partial ? "reconnect_required" : "not_connected",
+      partial && options?.partialScopeMessage
+        ? options.partialScopeMessage
+        : `The connected Google account has not granted the required ${serviceLabel} permissions (${missing.join(", ")}). Connect ${serviceLabel} and grant all requested access.`,
     );
   }
   const cached = accessTokens.get(workspaceId);

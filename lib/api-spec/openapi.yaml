@@ -2245,7 +2245,10 @@ components:
       description: >
         Which Google-backed app to request consent for. Omitting the body
         (or the service) starts a Gmail flow; google_drive runs an
-        incremental consent that adds Drive scopes to the same account.
+        incremental consent that adds Drive scopes to the same account —
+        including full Google Drive access, so agents can organize existing
+        files (create folders, rename, move) with per-action owner approval.
+        Deleting files and changing sharing are never offered.
       properties:
         service: { type: string, enum: [gmail, google_drive] }
     GoogleOauthStart:

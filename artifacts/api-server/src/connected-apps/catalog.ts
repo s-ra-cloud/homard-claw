@@ -138,7 +138,8 @@ export const APP_OPERATIONS: AppOperation[] = [
     name: "google_drive.search",
     app: "google_drive",
     level: "read",
-    description: "Find files by name or content; params: query",
+    description:
+      "Find files by name or content, across My Drive and shared drives; params: query",
     params: [str("query", true, 500)],
     target: (p) => `Drive search for "${p.query}"`,
   },
@@ -160,10 +161,47 @@ export const APP_OPERATIONS: AppOperation[] = [
     params: [str("name", true, 300), str("content", true, 100000)],
     target: (p) => `Create Drive file "${p.name}"`,
   },
+  /* ----- Drive organization (folders, rename, move).
+   * These work on the owner's EXISTING files, so they run under the broad
+   * Drive scope the owner granted at connect time — and rename/move are
+   * externally visible writes, individually approved. There is deliberately
+   * NO delete and NO sharing/permission change in this catalog. */
+  {
+    name: "google_drive.create_folder",
+    app: "google_drive",
+    level: "draft",
+    description:
+      "Create a new folder in the owner's Drive; params: name, parentFolderId (optional — omit for the top level of My Drive)",
+    params: [str("name", true, 300), str("parentFolderId", false, 200)],
+    target: (p) =>
+      p.parentFolderId
+        ? `Create Drive folder "${p.name}" inside folder ${p.parentFolderId}`
+        : `Create Drive folder "${p.name}" at the top level of My Drive`,
+  },
+  {
+    name: "google_drive.rename_item",
+    app: "google_drive",
+    level: "write",
+    description:
+      "Rename an existing Drive file or folder (contents and sharing unchanged; links keep working); params: fileId, newName",
+    params: [str("fileId", true, 200), str("newName", true, 300)],
+    target: (p) => `Rename Drive item ${p.fileId} to "${p.newName}"`,
+  },
+  {
+    name: "google_drive.move_item",
+    app: "google_drive",
+    level: "write",
+    description:
+      'Move a Drive file or folder into another folder; params: fileId, destinationFolderId (use "root" for the top level of My Drive)',
+    params: [str("fileId", true, 200), str("destinationFolderId", true, 200)],
+    target: (p) =>
+      `Move Drive item ${p.fileId} into folder ${p.destinationFolderId}`,
+  },
   /* ----- Google Sheets (native spreadsheets, on the same Drive consent).
-   * Reads use drive.readonly; every mutation runs under drive.file, so
-   * Google itself limits edits to spreadsheets this app created or was
-   * explicitly handed. There is deliberately NO delete, clear, or share. */
+   * Mutations run on the baseline Drive token: with full Drive granted,
+   * edits reach any spreadsheet the owner can edit; older grants stay
+   * limited to spreadsheets this app created or was explicitly handed.
+   * There is deliberately NO delete, clear, or share. */
   {
     name: "google_drive.create_spreadsheet",
     app: "google_drive",

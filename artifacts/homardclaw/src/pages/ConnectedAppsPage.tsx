@@ -347,6 +347,15 @@ function ConnectActions({ app }: { app: ConnectedApp }) {
           </p>
         ) : null
       ) : null}
+      {app.app === "google_drive" ? (
+        <p className="text-[10px] text-muted-foreground uppercase font-bold max-w-xs">
+          Connecting asks Google for full Drive access so Crustabots can
+          organize your existing files — create folders, rename, and move
+          them. Every rename and move still waits for your approval, and
+          Crustabots can never delete files or change who they are shared
+          with.
+        </p>
+      ) : null}
     </div>
   );
 }

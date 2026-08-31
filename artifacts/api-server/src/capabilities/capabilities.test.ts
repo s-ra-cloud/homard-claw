@@ -344,7 +344,7 @@ describe("registry", () => {
     const drive = listRegistryEntries().find(
       (e) => e.manifest.id === "google_drive",
     )!.manifest;
-    expect(drive.version).toBe("1.1.0");
+    expect(drive.version).toBe("1.2.0");
     const byName = new Map(drive.tools.map((t) => [t.name, t]));
     // The seven Sheets operations, with their exact risk levels.
     expect(byName.get("google_drive.create_spreadsheet")?.level).toBe("draft");
@@ -354,13 +354,22 @@ describe("registry", () => {
     expect(byName.get("google_drive.append_sheet_rows")?.level).toBe("write");
     expect(byName.get("google_drive.add_sheet_tab")?.level).toBe("write");
     expect(byName.get("google_drive.rename_sheet_tab")?.level).toBe("write");
-    // No delete, clear, share, move, or trash tool may ever appear.
+    // The organization tools, with their exact risk levels: folder creation
+    // is a draft (invisible until used), rename/move are approved writes.
+    expect(byName.get("google_drive.create_folder")?.level).toBe("draft");
+    expect(byName.get("google_drive.rename_item")?.level).toBe("write");
+    expect(byName.get("google_drive.move_item")?.level).toBe("write");
+    // No delete, clear, share, or trash tool may ever appear. (Rename and
+    // move are deliberate additions — reversible organization, not
+    // destruction; delete and sharing changes remain excluded.)
     for (const tool of drive.tools) {
-      expect(tool.name).not.toMatch(/delete|clear|share|move|trash/i);
+      expect(tool.name).not.toMatch(/delete|clear|share|trash/i);
     }
-    // The teaching skill for spreadsheets ships with the package.
+    // The teaching skills for spreadsheets and organizing ship with the
+    // package.
     const skillIds = drive.skills.map((s) => s.id);
     expect(skillIds).toContain("drive-sheets-editing");
+    expect(skillIds).toContain("drive-organizing");
   });
 });
 

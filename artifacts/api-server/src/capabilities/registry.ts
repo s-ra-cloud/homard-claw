@@ -76,7 +76,7 @@ const GMAIL_PACKAGE = builtinPackage(
 const DRIVE_PACKAGE = builtinPackage(
   "google_drive",
   "Google Drive",
-  "Find and read files, create text files and native Google Sheets spreadsheets, and edit spreadsheet tabs, ranges, and rows in the owner's Google Drive.",
+  "Find and read files, create text files, folders, and native Google Sheets spreadsheets, organize existing files and folders (rename, move), and edit spreadsheet tabs, ranges, and rows in the owner's Google Drive.",
   [
     {
       id: "drive-file-handling",
@@ -84,6 +84,13 @@ const DRIVE_PACKAGE = builtinPackage(
       triggers: ["drive", "document", "file", "doc"],
       instructions:
         "Search by name or content first, then read only the files that matter. When creating files, use clear names the owner will recognize later. For native spreadsheet work, prefer the sheet tools over read_file's CSV export.",
+    },
+    {
+      id: "drive-organizing",
+      title: "Organizing Drive files and folders",
+      triggers: ["folder", "organize", "rename", "move", "tidy", "cleanup"],
+      instructions:
+        "Never guess file or folder ids: find each item with google_drive.search first and use the exact id it returned. Plan the folder structure before moving anything, create the folders, then move files one by one — each rename and move is individually approved by the owner, so batch your proposals sensibly and explain the intended structure. move_item replaces the item's current location (it never ends up in two places); use destinationFolderId \"root\" for the top level of My Drive. Renaming or moving never changes sharing or breaks links. There is no delete and no sharing change — do not promise either.",
     },
     {
       id: "drive-sheets-editing",
@@ -105,7 +112,9 @@ const DRIVE_PACKAGE = builtinPackage(
   ],
   // 1.1.0 added the bounded Google Sheets toolset (create spreadsheet,
   // list tabs, bounded reads, range writes, row appends, add/rename tab).
-  "1.1.0",
+  // 1.2.0 added Drive organization (create folder, rename, move) over the
+  // broad Drive scope the owner grants at connect time.
+  "1.2.0",
 );
 
 const GITHUB_PACKAGE = builtinPackage(

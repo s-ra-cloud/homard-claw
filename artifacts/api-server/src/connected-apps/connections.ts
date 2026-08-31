@@ -12,6 +12,7 @@ import {
 import {
   GoogleAuthError,
   driveAccessToken,
+  driveOrganizeAccessToken,
   gmailAccessToken,
   googleAccountSummary,
 } from "../google/credentials";
@@ -80,6 +81,18 @@ export async function connectionStatus(
         detail:
           "Your Google account is connected, but Drive access has not been granted yet. Connect Google Drive to add it.",
         accountLabel: null,
+      };
+    }
+    if (!account.canOrganizeDrive) {
+      // Baseline Drive works (reads, app-created files) but the connection
+      // predates — or declined — the broad organization scope. That is a
+      // reconnect situation, deliberately distinct from "never connected":
+      // the account label stays visible and reads keep working meanwhile.
+      return {
+        status: "expired",
+        detail:
+          "Drive is connected for reading and app-created files, but organizing existing files (creating folders, renaming, moving) needs full Google Drive access. Reconnect Google Drive and approve the full access request to enable it.",
+        accountLabel: account.email,
       };
     }
     return { status: "connected", detail: null, accountLabel: account.email };
@@ -619,20 +632,26 @@ async function driveSearch(
   const q = encodeURIComponent(
     `(name contains '${term}' or fullText contains '${term}') and trashed = false`,
   );
+  // corpora=allDrives + the two flags make search span My Drive AND every
+  // shared drive the owner can reach — without them Google silently omits
+  // shared-drive items, leaving rename/move unable to discover their ids.
   const result = await driveJson(
     ctx.workspaceId,
-    `/drive/v3/files?q=${q}&pageSize=10&fields=${encodeURIComponent("files(id,name,mimeType,modifiedTime)")}`,
+    `/drive/v3/files?q=${q}&pageSize=10&fields=${encodeURIComponent("files(id,name,mimeType,modifiedTime,driveId)")}&corpora=allDrives&supportsAllDrives=true&includeItemsFromAllDrives=true`,
   );
   if (!result.ok) return result.outcome;
   const files =
-    (result.data as { files?: { id: string; name: string; mimeType: string; modifiedTime?: string }[] } | null)
+    (result.data as { files?: { id: string; name: string; mimeType: string; modifiedTime?: string; driveId?: string }[] } | null)
       ?.files ?? [];
   if (files.length === 0) return { ok: true, summary: "No files matched." };
   return {
     ok: true,
     summary: truncate(
       files
-        .map((f) => `- fileId ${f.id} | ${f.name} | ${f.mimeType} | modified ${f.modifiedTime ?? "?"}`)
+        .map(
+          (f) =>
+            `- fileId ${f.id} | ${f.name} | ${f.mimeType} | modified ${f.modifiedTime ?? "?"}${f.driveId ? " | in a shared drive" : ""}`,
+        )
         .join("\n"),
     ),
   };
@@ -658,16 +677,17 @@ async function driveReadFile(
   ctx: ExecutionContext,
 ): Promise<ExecutionOutcome> {
   const fileId = encodeURIComponent(String(params.fileId));
+  // supportsAllDrives lets reads reach shared-drive files by id too.
   const meta = await driveJson(
     ctx.workspaceId,
-    `/drive/v3/files/${fileId}?fields=${encodeURIComponent("id,name,mimeType")}`,
+    `/drive/v3/files/${fileId}?fields=${encodeURIComponent("id,name,mimeType")}&supportsAllDrives=true`,
   );
   if (!meta.ok) return meta.outcome;
   const file = meta.data as { name?: string; mimeType?: string };
   const mime = file.mimeType ?? "";
   const path = mime.startsWith(DRIVE_EXPORTABLE_PREFIX)
     ? `/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent(driveExportMime(mime))}`
-    : `/drive/v3/files/${fileId}?alt=media`;
+    : `/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`;
   const content = await driveJson(ctx.workspaceId, path);
   if (!content.ok) return content.outcome;
   const text =
@@ -720,16 +740,229 @@ async function driveCreateFile(
   };
 }
 
+/* ---------------- Drive organization (folders, rename, move) ------------ */
+
+/** Drive's folder MIME type — the only valid parent/destination kind. */
+const DRIVE_FOLDER_MIME = "application/vnd.google-apps.folder";
+
+/**
+ * Call the Drive API with the broad organization scope. Unlike driveJson,
+ * the token resolution here requires the full Drive grant, so a connection
+ * that never granted it (or declined it at consent) fails closed with
+ * reconnect guidance before Google is ever contacted.
+ */
+async function driveOrganizeJson(
+  workspaceId: string | null,
+  path: string,
+  options?: { method?: string; body?: unknown },
+): Promise<JsonResult> {
+  return providerJson({
+    workspaceId,
+    providerLabel: "Google Drive",
+    baseUrl: "https://www.googleapis.com",
+    resolveToken: async (id) => (await driveOrganizeAccessToken(id)).token,
+    path,
+    options,
+  });
+}
+
+/**
+ * Translate a 403 on an organization mutation into something actionable.
+ * With the full Drive scope granted, a 403 means the OWNER's account lacks
+ * edit rights on that specific item (typically shared read-only by someone
+ * else) — reconnecting would not change that, so it must not surface as an
+ * auth problem. Genuine scope complaints keep their reconnect guidance.
+ */
+function explainDriveEditDenied(outcome: ExecutionOutcome): ExecutionOutcome {
+  if (
+    outcome.ok ||
+    outcome.kind !== "auth" ||
+    !outcome.message.includes("HTTP 403") ||
+    /insufficient|scope/i.test(outcome.message)
+  ) {
+    return outcome;
+  }
+  return {
+    ok: false,
+    kind: "failed",
+    message:
+      "Google refused the change (HTTP 403). The connected account can see this item but does not have permission to modify it — it is likely shared read-only by someone else — so it cannot be renamed or moved from here.",
+  };
+}
+
+/** Fetch id, name, mimeType (and parents) for one Drive item.
+ * supportsAllDrives lets organization reach shared-drive items too. */
+async function driveItemMeta(
+  workspaceId: string | null,
+  fileId: string,
+): Promise<
+  | { ok: true; item: { id?: string; name?: string; mimeType?: string; parents?: string[] } }
+  | { ok: false; outcome: ExecutionOutcome }
+> {
+  const meta = await driveOrganizeJson(
+    workspaceId,
+    `/drive/v3/files/${encodeURIComponent(fileId)}?fields=${encodeURIComponent("id,name,mimeType,parents")}&supportsAllDrives=true`,
+  );
+  if (!meta.ok) return { ok: false, outcome: meta.outcome };
+  return {
+    ok: true,
+    item: meta.data as {
+      id?: string;
+      name?: string;
+      mimeType?: string;
+      parents?: string[];
+    },
+  };
+}
+
+async function driveCreateFolder(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const parent = params.parentFolderId ? String(params.parentFolderId) : null;
+  if (parent) {
+    // Validate the parent up front: creating "inside" a plain file would
+    // either fail opaquely or land somewhere the owner did not approve.
+    const meta = await driveItemMeta(ctx.workspaceId, parent);
+    if (!meta.ok) return meta.outcome;
+    if (meta.item.mimeType !== DRIVE_FOLDER_MIME) {
+      return {
+        ok: false,
+        kind: "failed",
+        message: `The parent (${meta.item.name ?? parent}) is a file, not a folder. Folders can only be created inside a folder — or at the top level when parentFolderId is omitted.`,
+      };
+    }
+  }
+  const created = await driveOrganizeJson(
+    ctx.workspaceId,
+    "/drive/v3/files?supportsAllDrives=true",
+    {
+      method: "POST",
+      body: {
+        name: String(params.name),
+        mimeType: DRIVE_FOLDER_MIME,
+        ...(parent ? { parents: [parent] } : {}),
+        // Same recovery marker as create_file: a crashed run can later ask
+        // Drive "does a folder created by action X exist?" exactly.
+        ...(ctx.actionId
+          ? { appProperties: { [DRIVE_ACTION_KEY]: ctx.actionId } }
+          : {}),
+      },
+    },
+  );
+  if (!created.ok) return created.outcome;
+  const folder = created.data as { id?: string } | null;
+  if (!folder?.id) {
+    return {
+      ok: false,
+      kind: "failed",
+      message: "Drive did not return a folder id.",
+    };
+  }
+  return {
+    ok: true,
+    summary: `Created Drive folder "${params.name}" (folderId ${folder.id})${parent ? ` inside folder ${parent}` : ""}.`,
+  };
+}
+
+async function driveRenameItem(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const fileId = String(params.fileId);
+  const meta = await driveItemMeta(ctx.workspaceId, fileId);
+  if (!meta.ok) return meta.outcome;
+  const kindWord =
+    meta.item.mimeType === DRIVE_FOLDER_MIME ? "folder" : "file";
+  const updated = await driveOrganizeJson(
+    ctx.workspaceId,
+    `/drive/v3/files/${encodeURIComponent(fileId)}?fields=${encodeURIComponent("id,name")}&supportsAllDrives=true`,
+    {
+      method: "PATCH",
+      body: {
+        name: String(params.newName),
+        // The marker rides on the same PATCH, so its presence on the item
+        // is the mutation's receipt during crash recovery.
+        ...(ctx.actionId
+          ? { appProperties: { [DRIVE_ACTION_KEY]: ctx.actionId } }
+          : {}),
+      },
+    },
+  );
+  if (!updated.ok) return explainDriveEditDenied(updated.outcome);
+  return {
+    ok: true,
+    summary: `Renamed Drive ${kindWord} "${meta.item.name ?? fileId}" to "${params.newName}" (fileId ${fileId}).`,
+  };
+}
+
+async function driveMoveItem(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const fileId = String(params.fileId);
+  const destinationId = String(params.destinationFolderId);
+  if (fileId === destinationId) {
+    return {
+      ok: false,
+      kind: "failed",
+      message: "An item cannot be moved into itself.",
+    };
+  }
+  const meta = await driveItemMeta(ctx.workspaceId, fileId);
+  if (!meta.ok) return meta.outcome;
+  const dest = await driveItemMeta(ctx.workspaceId, destinationId);
+  if (!dest.ok) return dest.outcome;
+  if (dest.item.mimeType !== DRIVE_FOLDER_MIME) {
+    return {
+      ok: false,
+      kind: "failed",
+      message: `The destination (${dest.item.name ?? destinationId}) is a file, not a folder — items can only be moved into folders (or "root" for the top level of My Drive).`,
+    };
+  }
+  const resolvedDestId = dest.item.id ?? destinationId;
+  // Replace the current parents rather than adding a second one: "move"
+  // must never silently turn into "appears in two places". Items without a
+  // readable parent (e.g. shared items outside My Drive) just gain one.
+  const removeParents = (meta.item.parents ?? [])
+    .filter((p) => p !== resolvedDestId)
+    .join(",");
+  const query = new URLSearchParams({
+    addParents: resolvedDestId,
+    fields: "id,name,parents",
+    supportsAllDrives: "true",
+  });
+  if (removeParents) query.set("removeParents", removeParents);
+  const moved = await driveOrganizeJson(
+    ctx.workspaceId,
+    `/drive/v3/files/${encodeURIComponent(fileId)}?${query.toString()}`,
+    {
+      method: "PATCH",
+      body: {
+        ...(ctx.actionId
+          ? { appProperties: { [DRIVE_ACTION_KEY]: ctx.actionId } }
+          : {}),
+      },
+    },
+  );
+  if (!moved.ok) return explainDriveEditDenied(moved.outcome);
+  const kindWord =
+    meta.item.mimeType === DRIVE_FOLDER_MIME ? "folder" : "file";
+  return {
+    ok: true,
+    summary: `Moved Drive ${kindWord} "${meta.item.name ?? fileId}" into folder "${dest.item.name ?? destinationId}" (fileId ${fileId}).`,
+  };
+}
+
 /* ---------------------------- Google Sheets ----------------------------- */
 
 /**
  * Call the Sheets API as the workspace's own Google account. Sheets rides
- * on the SAME Drive consent — deliberately no new scope is ever requested:
- * drive.readonly covers reading any spreadsheet the account can see, and
- * drive.file limits every edit to spreadsheets HomardClaw itself created
- * (or was explicitly handed). The account-wide "spreadsheets" edit scope
- * is never asked for, so no tool here can touch data the owner did not
- * make available to this app.
+ * on the SAME Drive consent — the account-wide "spreadsheets" edit scope is
+ * never asked for. It runs on the BASELINE Drive token (not the organize
+ * one) so connections that predate full Drive access keep editing the
+ * spreadsheets HomardClaw created; with full Drive granted, Google extends
+ * edits to any spreadsheet the owner's account can edit.
  */
 async function sheetsJson(
   workspaceId: string | null,
@@ -752,11 +985,16 @@ function spreadsheetLink(id: string): string {
 }
 
 /**
- * Translate the drive.file denial into something actionable. A 403 on a
- * Sheets mutation almost always means "this spreadsheet was never made
- * available to HomardClaw" — reconnecting would not change that, so it
- * must not surface as an auth problem the owner tries to fix by
- * reconnecting. (Missing scopes are caught before any call is made.)
+ * Translate a Sheets-mutation denial into something actionable. Since the
+ * broad Drive scope, the owner's account can edit any spreadsheet it has
+ * edit rights on — so a 403 here means either the OWNER lacks edit rights
+ * on that document (shared read-only by someone else), or the connection
+ * predates full Drive access and can still only edit files HomardClaw
+ * created. Neither is fixed by retrying, so it must not surface as a
+ * generic auth problem. (Missing scopes on the token itself are caught
+ * before any call is made — but only for operations that REQUIRE the broad
+ * scope; Sheets edits still run on the baseline token so old connections
+ * keep working on app-created spreadsheets.)
  */
 function explainSheetsEditDenied(outcome: ExecutionOutcome): ExecutionOutcome {
   if (
@@ -771,7 +1009,7 @@ function explainSheetsEditDenied(outcome: ExecutionOutcome): ExecutionOutcome {
     ok: false,
     kind: "failed",
     message:
-      "Google refused the edit (HTTP 403). HomardClaw can only edit spreadsheets it created itself — other spreadsheets in the connected account stay read-only by design. Create a new spreadsheet with google_drive.create_spreadsheet and work there instead.",
+      "Google refused the edit (HTTP 403). Either the connected account does not have edit rights on this spreadsheet (it may be shared read-only), or the Drive connection predates full Drive access and can only edit spreadsheets HomardClaw created — reconnecting Google Drive with full access fixes the latter.",
   };
 }
 
@@ -1678,6 +1916,9 @@ const EXECUTORS: Record<
   "google_drive.search": driveSearch,
   "google_drive.read_file": driveReadFile,
   "google_drive.create_file": driveCreateFile,
+  "google_drive.create_folder": driveCreateFolder,
+  "google_drive.rename_item": driveRenameItem,
+  "google_drive.move_item": driveMoveItem,
   "google_drive.create_spreadsheet": driveCreateSpreadsheet,
   "google_drive.list_sheet_tabs": sheetsListTabs,
   "google_drive.read_sheet_range": sheetsReadRange,
@@ -2055,6 +2296,85 @@ async function verifyDriveCreateSpreadsheet(
   };
 }
 
+async function verifyDriveCreateFolder(
+  params: Record<string, unknown>,
+  actionId: string,
+  workspaceId: string | null,
+): Promise<VerificationResult> {
+  // Same marker, same query as create_file. Folder creation is a single
+  // call, so found = fully done. The query needs only the baseline scope;
+  // the shared-drive flags let it find folders created in shared drives.
+  const q = encodeURIComponent(
+    `appProperties has { key='${DRIVE_ACTION_KEY}' and value='${actionId}' } and trashed = false`,
+  );
+  const result = await driveJson(
+    workspaceId,
+    `/drive/v3/files?q=${q}&pageSize=1&fields=${encodeURIComponent("files(id,name)")}&supportsAllDrives=true&includeItemsFromAllDrives=true`,
+  );
+  if (!result.ok) {
+    return { kind: "unknown", message: failureMessage(result.outcome) };
+  }
+  const files =
+    (result.data as { files?: { id: string; name: string }[] } | null)
+      ?.files ?? [];
+  if (files.length === 0) return { kind: "not_executed" };
+  const folder = files[0];
+  return {
+    kind: "executed",
+    summary: `Created Drive folder "${folder.name}" (folderId ${folder.id}). Confirmed after an interrupted run.`,
+  };
+}
+
+/**
+ * Shared verifier for rename_item and move_item. The mutation PATCH writes
+ * the item's name/parents AND the action-id marker in one atomic request,
+ * so the marker on the item IS the mutation's receipt: match ⇒ it landed.
+ *
+ * Marker ABSENCE, however, is deliberately never treated as proof of
+ * non-execution. Unlike a folder's creation marker (immutable once set) or
+ * Sheets developer metadata (additive entries), this marker is a single
+ * per-app key on a MUTABLE item: the original PATCH can succeed and a
+ * later legitimate change — the owner, another approved action — can
+ * overwrite the key before recovery looks. Requeueing on absence could
+ * then replay an already-done rename/move over that later change without
+ * a fresh approval. Ambiguous evidence settles "unknown": the owner
+ * re-approves if the change is still wanted, and nothing is ever silently
+ * done twice.
+ */
+function verifyDriveOrganizeMutation(
+  describe: (params: Record<string, unknown>) => string,
+): (
+  params: Record<string, unknown>,
+  actionId: string,
+  workspaceId: string | null,
+) => Promise<VerificationResult> {
+  return async (params, actionId, workspaceId) => {
+    const result = await driveOrganizeJson(
+      workspaceId,
+      `/drive/v3/files/${encodeURIComponent(String(params.fileId))}?fields=${encodeURIComponent("id,name,parents,appProperties")}&supportsAllDrives=true`,
+    );
+    if (!result.ok) {
+      return { kind: "unknown", message: failureMessage(result.outcome) };
+    }
+    const item = result.data as {
+      name?: string;
+      parents?: string[];
+      appProperties?: Record<string, string>;
+    } | null;
+    if (item?.appProperties?.[DRIVE_ACTION_KEY] === actionId) {
+      return {
+        kind: "executed",
+        summary: `${describe(params)} Confirmed by the item's embedded action marker after an interrupted run.`,
+      };
+    }
+    return {
+      kind: "unknown",
+      message:
+        "The item does not carry this action's marker, so the change cannot be confirmed — but a later change to the same item could have replaced the marker, so it cannot be ruled out either. It was not retried; check the item in Drive and approve the change again if it is still wanted.",
+    };
+  };
+}
+
 /**
  * Shared verifier for the four spreadsheet mutations. Every mutation ships
  * in one atomic batchUpdate with a developer-metadata marker keyed by the
@@ -2160,6 +2480,27 @@ const VERIFIERS: Record<
   "google_drive.create_spreadsheet": {
     consistency: "eventual",
     verify: verifyDriveCreateSpreadsheet,
+  },
+  "google_drive.create_folder": {
+    consistency: "eventual",
+    verify: verifyDriveCreateFolder,
+  },
+  // Rename/move read the item itself by id (read-after-write consistent,
+  // hence "strong": a found marker is trusted immediately). The verifier
+  // never answers not_executed — see verifyDriveOrganizeMutation for why
+  // marker absence on a mutable item must settle unknown, not requeue.
+  "google_drive.rename_item": {
+    consistency: "strong",
+    verify: verifyDriveOrganizeMutation(
+      (p) => `Renamed the Drive item to "${p.newName}" (fileId ${p.fileId}).`,
+    ),
+  },
+  "google_drive.move_item": {
+    consistency: "strong",
+    verify: verifyDriveOrganizeMutation(
+      (p) =>
+        `Moved the Drive item (fileId ${p.fileId}) into folder ${p.destinationFolderId}.`,
+    ),
   },
   // Sheets mutations are "eventual" NOT because the metadata read lags —
   // it reads the document — but because absence cannot be ordered against

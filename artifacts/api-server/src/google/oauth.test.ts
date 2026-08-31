@@ -195,7 +195,7 @@ describe("start", () => {
     expect(res_urlHasVerifier(authUrl, row.codeVerifier)).toBe(false);
   });
 
-  it("keeps the Drive consent minimal — the Sheets tools add no new scope", async () => {
+  it("requests the Drive scopes including full-Drive organization access", async () => {
     const res = await request(app)
       .post("/api/google/oauth/start")
       .set("x-forwarded-proto", "https")
@@ -203,14 +203,14 @@ describe("start", () => {
       .send({ service: "google_drive" });
     expect(res.status).toBe(200);
     const scope = new URL(res.body.authUrl).searchParams.get("scope")!;
-    // Sheets rides on the Drive grant: drive.readonly for reads,
-    // drive.file so edits reach only spreadsheets this app created or was
-    // explicitly handed. The account-wide spreadsheets edit scope — and
-    // full Drive — are never requested.
+    // Sheets still rides on the Drive grant — the account-wide spreadsheets
+    // edit scope is never requested. Full Drive IS requested (an owner
+    // decision): the organization tools (create folder, rename, move) must
+    // reach files that existed before HomardClaw, which drive.file cannot.
     expect(scope).toContain("drive.readonly");
     expect(scope).toContain("drive.file");
     expect(scope).not.toContain("auth/spreadsheets");
-    expect(scope.split(" ")).not.toContain(
+    expect(scope.split(" ")).toContain(
       "https://www.googleapis.com/auth/drive",
     );
     // Incremental consent: connecting Drive must not drop Gmail.

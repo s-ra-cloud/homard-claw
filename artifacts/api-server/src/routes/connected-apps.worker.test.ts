@@ -314,7 +314,7 @@ beforeAll(async () => {
     email: "worker-test@example.com",
     refreshTokenEnc: encryptRefreshToken("test-refresh-token"),
     scopes:
-      "openid email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly",
+      "openid email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive",
   });
 
   // Apps must be enabled workspace-wide for grants to take effect;
