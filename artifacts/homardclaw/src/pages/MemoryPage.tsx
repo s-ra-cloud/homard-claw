@@ -16,6 +16,7 @@ import {
   useDeleteWorkspaceSkill,
   useGetMemorySettings,
   useUpdateMemorySettings,
+  useRefreshAgentMemory,
   exportMemories,
   getListMemoriesQueryKey,
   getListKnowledgeFilesQueryKey,
@@ -63,6 +64,7 @@ import {
   Users,
   Sparkles,
   Wrench,
+  RefreshCw,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
@@ -1047,6 +1049,7 @@ export default function MemoryPage() {
   const { data: agents } = useListAgents();
   const { data: memorySettings } = useGetMemorySettings();
   const updateMemorySettings = useUpdateMemorySettings();
+  const refreshAgentMemory = useRefreshAgentMemory();
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const activeAgents = useMemo(
@@ -1056,6 +1059,7 @@ export default function MemoryPage() {
         .map((a) => ({ id: a.id, name: a.name })),
     [agents],
   );
+  const [refreshAgentId, setRefreshAgentId] = useState("");
   const compressionAgents = useMemo(
     () =>
       (agents ?? []).filter(
@@ -1083,6 +1087,25 @@ export default function MemoryPage() {
     } catch (error) {
       toast({
         title: "Could not update memory compression",
+        description: apiErrorMessage(error, "Try again."),
+        variant: "destructive",
+      });
+    }
+  };
+
+  const triggerMemoryRefresh = async () => {
+    if (!refreshAgentId) return;
+    try {
+      const result = await refreshAgentMemory.mutateAsync({
+        agentId: refreshAgentId,
+      });
+      toast({
+        title: `Memory refresh triggered for ${result.agentName}`,
+        description: "It's now queued and will run shortly.",
+      });
+    } catch (error) {
+      toast({
+        title: "Could not trigger memory refresh",
         description: apiErrorMessage(error, "Try again."),
         variant: "destructive",
       });
@@ -1145,6 +1168,53 @@ export default function MemoryPage() {
                 ))}
               </SelectContent>
             </Select>
+          </div>
+        </PixelCard>
+
+        <PixelCard className="p-4 sm:p-5">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+            <div className="flex min-w-0 flex-1 items-start gap-3">
+              <RefreshCw className="mt-0.5 h-5 w-5 shrink-0 text-accent" />
+              <div>
+                <h2 className="text-sm font-bold uppercase">
+                  Force memory update
+                </h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Queue an immediate memory refresh for one Crustabot instead
+                  of waiting for it to happen automatically.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2 sm:w-auto">
+              <Select value={refreshAgentId} onValueChange={setRefreshAgentId}>
+                <SelectTrigger
+                  className={`${selectTriggerClass} sm:w-56`}
+                  data-testid="select-memory-refresh-agent"
+                >
+                  <SelectValue placeholder="Choose a Crustabot" />
+                </SelectTrigger>
+                <SelectContent className={selectContentClass}>
+                  {activeAgents.map((agent) => (
+                    <SelectItem
+                      key={agent.id}
+                      value={agent.id}
+                      className={selectItemClass}
+                    >
+                      {agent.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                onClick={triggerMemoryRefresh}
+                disabled={!refreshAgentId || refreshAgentMemory.isPending}
+                className="rounded-none text-xs font-bold uppercase shrink-0"
+                data-testid="button-refresh-agent-memory"
+              >
+                <RefreshCw className="w-4 h-4 mr-1" />
+                {refreshAgentMemory.isPending ? "Triggering..." : "Update now"}
+              </Button>
+            </div>
           </div>
         </PixelCard>
 

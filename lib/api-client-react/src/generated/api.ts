@@ -81,6 +81,7 @@ import type {
   Memory,
   MemoryInput,
   MemoryList,
+  MemoryRefreshResult,
   MemorySettings,
   MemorySettingsInput,
   MemoryUpdate,
@@ -1035,6 +1036,77 @@ export const useRetireAgent = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getRetireAgentMutationOptions(options));
+    }
+
+export const getRefreshAgentMemoryUrl = (agentId: string,) => {
+
+
+
+
+  return `/api/agents/${agentId}/memory/refresh`
+}
+
+/**
+ * @summary Force an immediate memory refresh for one Crustabot
+ */
+export const refreshAgentMemory = async (agentId: string, options?: Parameters<typeof customFetch>[1]): Promise<MemoryRefreshResult> => {
+
+  return customFetch<MemoryRefreshResult>(getRefreshAgentMemoryUrl(agentId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRefreshAgentMemoryMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshAgentMemory>>, TError,{agentId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof refreshAgentMemory>>, TError,{agentId: string}, TContext> => {
+
+const mutationKey = ['refreshAgentMemory'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof refreshAgentMemory>>, {agentId: string}> = (props) => {
+          const {agentId} = props ?? {};
+
+          return  refreshAgentMemory(agentId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RefreshAgentMemoryMutationResult = NonNullable<Awaited<ReturnType<typeof refreshAgentMemory>>>
+
+    export type RefreshAgentMemoryMutationError = ErrorType<void>
+
+    /**
+ * @summary Force an immediate memory refresh for one Crustabot
+ */
+export const useRefreshAgentMemory = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshAgentMemory>>, TError,{agentId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof refreshAgentMemory>>,
+        TError,
+        {agentId: string},
+        TContext
+      > => {
+      return useMutation(getRefreshAgentMemoryMutationOptions(options));
     }
 
 export const getListRetiredAgentsUrl = () => {

@@ -10,6 +10,8 @@ import {
   ListKnowledgeFilesResponse,
   ListMemoriesQueryParams,
   ListMemoriesResponse,
+  RefreshAgentMemoryParams,
+  RefreshAgentMemoryResponse,
   SetKnowledgeAssignmentsBody,
   SetKnowledgeAssignmentsParams,
   SetKnowledgeAssignmentsResponse,
@@ -30,6 +32,7 @@ import {
   workspaceSettingsTable,
 } from "@workspace/db";
 import { recordAudit } from "../audit";
+import { dispatchTask } from "../dispatch";
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { Router, type IRouter } from "express";
 import {
@@ -39,6 +42,9 @@ import {
   MAX_KNOWLEDGE_TOTAL_BYTES,
   MemoryQuotaError,
 } from "../memory-context";
+
+const MANUAL_MEMORY_REFRESH_OBJECTIVE =
+  "Review your memory bank: reflect on your recent work, then refresh your durable memories — correct or remove anything stale or inaccurate, and save anything new that's worth remembering.";
 
 /**
  * Memory and knowledge management. Mounted inside the office router, so
@@ -171,6 +177,52 @@ router.put("/memory/settings", async (req, res): Promise<void> => {
   });
 
   res.json(UpdateMemorySettingsResponse.parse(memorySettingsPayload(agent)));
+});
+
+router.post("/agents/:agentId/memory/refresh", async (req, res): Promise<void> => {
+  const params = RefreshAgentMemoryParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: "Invalid Crustabot id" });
+    return;
+  }
+  const outcome = await dispatchTask({
+    agentId: params.data.agentId,
+    workspaceId: req.workspaceId!,
+    objective: MANUAL_MEMORY_REFRESH_OBJECTIVE,
+  });
+  if (outcome.status === 404) {
+    res.status(404).json({ error: "Crustabot not found" });
+    return;
+  }
+  if (outcome.status === 409) {
+    res.status(409).json({
+      error: "This Crustabot is retired or archived and cannot take new work",
+    });
+    return;
+  }
+  if (outcome.status === 422) {
+    res.status(422).json({ error: outcome.message });
+    return;
+  }
+  if (outcome.status === 425) {
+    res.status(503).json({
+      error: "Crustabot configuration is changing; please retry",
+    });
+    return;
+  }
+  await recordAudit(
+    req.workspaceId!,
+    "memory.manual_refresh",
+    `A manual memory refresh was triggered for ${outcome.agentName}.`,
+  );
+  res.status(201).json(
+    RefreshAgentMemoryResponse.parse({
+      taskId: outcome.task.id,
+      agentId: outcome.task.agentId,
+      agentName: outcome.agentName,
+      status: outcome.task.status,
+    }),
+  );
 });
 
 function toMemoryJson(
