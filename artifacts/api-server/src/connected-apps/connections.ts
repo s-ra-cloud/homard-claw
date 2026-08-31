@@ -17,9 +17,14 @@ import {
 } from "../google/credentials";
 import {
   GithubAuthError,
+  checkGithubConnectionHealth,
   githubAccessToken,
-  githubAccountSummary,
 } from "../github/credentials";
+import {
+  classifyGithubRefusal,
+  describeGithubRefusal,
+} from "../github/failures";
+import { logger } from "../lib/logger";
 
 /**
  * Live connection state of the workspace owner's account for one app.
@@ -77,19 +82,35 @@ export async function connectionStatus(
     }
     return { status: "connected", detail: null, accountLabel: account.email };
   }
-  const account = await githubAccountSummary(workspaceId);
-  if (!account) {
-    return { status: "not_connected", detail: null, accountLabel: null };
+  // GitHub: a stored row is NOT treated as proof of a working connection.
+  // The health check verifies the credential against GitHub itself (with a
+  // bounded timeout and a short cache), so a revoked or undecryptable token
+  // surfaces as "reconnect needed" here — before any agent task depends on
+  // it — while a transient GitHub outage reports "unavailable" instead of
+  // silently flipping the account to broken.
+  const health = await checkGithubConnectionHealth(workspaceId);
+  switch (health.state) {
+    case "not_connected":
+      return { status: "not_connected", detail: null, accountLabel: null };
+    case "connected":
+      return {
+        status: "connected",
+        detail: health.detail,
+        accountLabel: health.login,
+      };
+    case "reconnect_required":
+      return {
+        status: "expired",
+        detail: health.detail,
+        accountLabel: health.login,
+      };
+    default:
+      return {
+        status: "unavailable",
+        detail: health.detail,
+        accountLabel: health.login,
+      };
   }
-  if (account.missingScopes.length > 0) {
-    return {
-      status: "expired",
-      detail:
-        "The connected GitHub account is missing required permissions. Reconnect and grant all requested access.",
-      accountLabel: account.login,
-    };
-  }
-  return { status: "connected", detail: null, accountLabel: account.login };
 }
 
 /** Longest result payload ever fed back to a model or stored on an action. */
@@ -210,6 +231,16 @@ async function providerJson(input: {
   extraHeaders?: Record<string, string>;
   /** When set, a non-JSON body is sent verbatim with these headers. */
   rawBody?: boolean;
+  /**
+   * Provider-specific refusal mapping (given the status and response
+   * headers, never the credential). Return null to fall back to the
+   * generic mapping.
+   */
+  mapFailure?: (refusal: {
+    status: number;
+    headers: Headers;
+    bodyText: string;
+  }) => ExecutionOutcome | null;
 }): Promise<JsonResult> {
   const { workspaceId, path, options } = input;
   if (!workspaceId) return { ok: false, outcome: NO_WORKSPACE_OUTCOME };
@@ -251,7 +282,12 @@ async function providerJson(input: {
   if (!response.ok) {
     return {
       ok: false,
-      outcome: mapProxyFailure(response.status, text),
+      outcome:
+        input.mapFailure?.({
+          status: response.status,
+          headers: response.headers,
+          bodyText: text,
+        }) ?? mapProxyFailure(response.status, text),
       status: response.status,
     };
   }
@@ -299,14 +335,21 @@ async function driveJson(
   });
 }
 
-/** Call the GitHub REST API as the workspace's own GitHub account. */
+/**
+ * Call the GitHub REST API as the workspace's own GitHub account. GitHub
+ * refusals are classified precisely (revoked token vs. missing scope vs.
+ * repository/organization permission vs. rate limit vs. outage) instead of
+ * collapsing every 401/403 into "expired", and every refusal leaves a
+ * structured, secret-free log line carrying the workspace/action
+ * correlation ids plus GitHub's own request id.
+ */
 async function githubJson(
-  workspaceId: string | null,
+  ctx: Pick<ExecutionContext, "workspaceId"> & { actionId?: string | null },
   path: string,
   options?: { method?: string; body?: unknown },
 ): Promise<JsonResult> {
   return providerJson({
-    workspaceId,
+    workspaceId: ctx.workspaceId,
     providerLabel: "GitHub",
     baseUrl: "https://api.github.com",
     resolveToken: async (id) => (await githubAccessToken(id)).token,
@@ -315,6 +358,32 @@ async function githubJson(
     extraHeaders: {
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
+    },
+    mapFailure: ({ status, headers, bodyText }) => {
+      const refusal = classifyGithubRefusal(status, headers);
+      const level =
+        refusal.failureClass === "invalid_token" ||
+        refusal.failureClass === "missing_scope"
+          ? "warn"
+          : "info";
+      // Correlation trail only: ids, status, class — never tokens, request
+      // paths (repository names), or provider response bodies.
+      logger[level](
+        {
+          component: "github_api",
+          workspaceId: ctx.workspaceId,
+          actionId: ctx.actionId ?? null,
+          providerStatus: status,
+          failureClass: refusal.failureClass,
+          githubRequestId: refusal.requestId,
+        },
+        "GitHub refused an API call",
+      );
+      const described = describeGithubRefusal(refusal, status);
+      if (!described) return null;
+      // The described message intentionally omits the raw response body.
+      void bodyText;
+      return { ok: false, ...described };
     },
   });
 }
@@ -1012,7 +1081,7 @@ async function githubListRepos(
   ctx: ExecutionContext,
 ): Promise<ExecutionOutcome> {
   const result = await githubJson(
-    ctx.workspaceId,
+    ctx,
     "/user/repos?sort=pushed&per_page=30",
   );
   if (!result.ok) return result.outcome;
@@ -1035,7 +1104,7 @@ async function githubReadFile(
   const { owner, repo, path } = params;
   const ref = params.ref ? `?ref=${encodeURIComponent(String(params.ref))}` : "";
   const result = await githubJson(
-    ctx.workspaceId,
+    ctx,
     `/repos/${encodeURIComponent(String(owner))}/${encodeURIComponent(String(repo))}/contents/${String(path).split("/").map(encodeURIComponent).join("/")}${ref}`,
   );
   if (!result.ok) return result.outcome;
@@ -1058,7 +1127,7 @@ async function githubListIssues(
     ? String(params.state)
     : "open";
   const result = await githubJson(
-    ctx.workspaceId,
+    ctx,
     `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/issues?state=${state}&per_page=20`,
   );
   if (!result.ok) return result.outcome;
@@ -1099,7 +1168,7 @@ async function githubCreateIssue(
     ctx.actionId,
   );
   const result = await githubJson(
-    ctx.workspaceId,
+    ctx,
     `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/issues`,
     {
       method: "POST",
@@ -1123,7 +1192,7 @@ async function githubCommentOnIssue(
 ): Promise<ExecutionOutcome> {
   const issueNumber = Math.trunc(Number(params.issueNumber));
   const result = await githubJson(
-    ctx.workspaceId,
+    ctx,
     `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/issues/${issueNumber}/comments`,
     {
       method: "POST",
@@ -1209,7 +1278,7 @@ async function githubListBranches(
   ctx: ExecutionContext,
 ): Promise<ExecutionOutcome> {
   const result = await githubJson(
-    ctx.workspaceId,
+    ctx,
     `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/branches?per_page=100`,
   );
   if (!result.ok) return result.outcome;
@@ -1255,7 +1324,7 @@ async function githubListDirectory(
     query = `?ref=${encodeURIComponent(ref)}`;
   }
   const result = await githubJson(
-    ctx.workspaceId,
+    ctx,
     `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/contents/${encodedPath}${query}`,
   );
   if (!result.ok) return result.outcome;
@@ -1312,7 +1381,7 @@ async function githubGetPullRequest(
     return badParam("pullNumber must be a positive integer.");
   }
   const result = await githubJson(
-    ctx.workspaceId,
+    ctx,
     `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/pulls/${pullNumber}`,
   );
   if (!result.ok) return result.outcome;
@@ -1341,7 +1410,7 @@ async function githubCreateBranch(
   // always created at a SHA the owner can audit, never at a moving target
   // interpreted server-side.
   const resolved = await githubJson(
-    ctx.workspaceId,
+    ctx,
     `${repoPath}/commits/${encodeRefPath(fromRef)}`,
   );
   if (!resolved.ok) {
@@ -1358,7 +1427,7 @@ async function githubCreateBranch(
       `GitHub did not return a commit for "${fromRef}". No branch was created.`,
     );
   }
-  const created = await githubJson(ctx.workspaceId, `${repoPath}/git/refs`, {
+  const created = await githubJson(ctx, `${repoPath}/git/refs`, {
     method: "POST",
     body: { ref: `refs/heads/${branch}`, sha },
   });
@@ -1398,7 +1467,7 @@ async function githubPutFile(
   // the branch's commits and prove whether exactly this commit landed.
   const message = withGithubMarker(String(params.message), ctx.actionId);
   const result = await githubJson(
-    ctx.workspaceId,
+    ctx,
     `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/contents/${encodedPath}`,
     {
       method: "PUT",
@@ -1443,7 +1512,7 @@ async function githubOpenPullRequest(
     ctx.actionId,
   );
   const result = await githubJson(
-    ctx.workspaceId,
+    ctx,
     `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/pulls`,
     {
       method: "POST",
@@ -1495,7 +1564,7 @@ async function githubMergePullRequest(
     return badParam("method must be one of: merge, squash, rebase.");
   }
   const result = await githubJson(
-    ctx.workspaceId,
+    ctx,
     `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/pulls/${pullNumber}/merge`,
     {
       method: "PUT",
@@ -1642,7 +1711,7 @@ async function verifyGithubCreateIssue(
   workspaceId: string | null,
 ): Promise<VerificationResult> {
   const result = await githubJson(
-    workspaceId,
+    { workspaceId, actionId },
     `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/issues?state=all&sort=created&direction=desc&per_page=100`,
   );
   if (!result.ok) {
@@ -1679,7 +1748,7 @@ async function verifyGithubComment(
 ): Promise<VerificationResult> {
   const issueNumber = Math.trunc(Number(params.issueNumber));
   const result = await githubJson(
-    workspaceId,
+    { workspaceId, actionId },
     `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/issues/${issueNumber}/comments?per_page=100`,
   );
   if (!result.ok) {
@@ -1713,7 +1782,7 @@ async function verifyGithubCreateBranch(
   const branch = safeGitRef(params.branch);
   if (branch === null) return { kind: "not_executed" };
   const result = await githubJson(
-    workspaceId,
+    { workspaceId, actionId: _actionId },
     `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/git/ref/heads/${encodeRefPath(branch)}`,
   );
   if (result.ok) {
@@ -1738,7 +1807,7 @@ async function verifyGithubPutFile(
   const branch = safeGitRef(params.branch);
   if (branch === null) return { kind: "not_executed" };
   const result = await githubJson(
-    workspaceId,
+    { workspaceId, actionId },
     `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/commits?sha=${encodeURIComponent(branch)}&path=${encodeURIComponent(String(params.path))}&per_page=100`,
   );
   if (!result.ok) {
@@ -1778,7 +1847,7 @@ async function verifyGithubOpenPullRequest(
   const head = safeGitRef(params.head);
   if (head === null) return { kind: "not_executed" };
   const result = await githubJson(
-    workspaceId,
+    { workspaceId, actionId },
     `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/pulls?state=all&head=${encodeURIComponent(`${String(params.owner)}:${head}`)}&per_page=100`,
   );
   if (!result.ok) {
@@ -1814,7 +1883,7 @@ async function verifyGithubMergePullRequest(
   const pullNumber = positiveInt(params.pullNumber);
   if (pullNumber === null) return { kind: "not_executed" };
   const result = await githubJson(
-    workspaceId,
+    { workspaceId, actionId: _actionId },
     `/repos/${encodeURIComponent(String(params.owner))}/${encodeURIComponent(String(params.repo))}/pulls/${pullNumber}`,
   );
   if (!result.ok) {

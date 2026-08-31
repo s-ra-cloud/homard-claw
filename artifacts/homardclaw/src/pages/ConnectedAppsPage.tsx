@@ -247,7 +247,7 @@ function AppCard({ app }: { app: ConnectedApp }) {
                   ? `Account: ${app.accountLabel}`
                   : "Account connected"
                 : app.status === "expired"
-                  ? "Account authorization expired — reconnect to resume"
+                  ? "Sign-in no longer working — reconnect to restore access"
                   : app.status === "not_connected"
                     ? "No account connected yet"
                     : "Connection status temporarily unavailable"}

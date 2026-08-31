@@ -1,5 +1,6 @@
 import { pool } from "@workspace/db";
 import app from "./app";
+import { logGithubCredentialStartupHealth } from "./github/credentials";
 import { logger } from "./lib/logger";
 import { abortAllInFlight, startWorker, stopWorker } from "./worker";
 import { ensureWorkspaceBackfill } from "./workspace";
@@ -58,6 +59,15 @@ const server = app.listen(port, (err) => {
   // Legacy single-owner data must belong to the owner's workspace before
   // any request or worker claim can rely on workspace scoping. Fail loudly
   // but keep serving: the backfill is idempotent and retried on next boot.
+  // Deployment-configuration canary: prove stored GitHub credentials are
+  // still decryptable with the current SESSION_SECRET, so a rotated or lost
+  // secret shows up in deployment logs at boot (as an explicit
+  // encryption-key mismatch) instead of as mystery auth failures later.
+  // Fire-and-forget: diagnostics never block serving.
+  logGithubCredentialStartupHealth().catch((err) => {
+    logger.warn({ err }, "GitHub credential startup check failed");
+  });
+
   ensureWorkspaceBackfill()
     .catch((err) => {
       logger.error({ err }, "Workspace backfill failed");

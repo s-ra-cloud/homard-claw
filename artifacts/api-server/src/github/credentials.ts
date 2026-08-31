@@ -15,6 +15,16 @@ import {
 } from "node:crypto";
 import { db, githubAccountsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { logger } from "../lib/logger";
+import {
+  GITHUB_SCOPES,
+  classifyGithubRefusal,
+  missingGithubScopes,
+} from "./failures";
+
+// Scope constants and failure classification live in ./failures (pure,
+// import-cycle-free); re-exported here so existing importers keep working.
+export { GITHUB_SCOPES, missingGithubScopes } from "./failures";
 
 export class GithubAuthError extends Error {
   constructor(
@@ -96,24 +106,6 @@ function decryptGithubToken(payload: string): string {
   }
 }
 
-/**
- * The single OAuth scope the catalog needs: "repo" covers reading private
- * repositories and files plus creating issues and comments. GitHub OAuth
- * apps offer no finer-grained repo scope.
- */
-export const GITHUB_SCOPES = ["repo"] as const;
-
-/** GitHub reports granted scopes comma-separated ("repo,read:user"). */
-export function missingGithubScopes(granted: string): string[] {
-  const have = new Set(
-    granted
-      .split(/[,\s]+/)
-      .map((s) => s.trim())
-      .filter(Boolean),
-  );
-  return GITHUB_SCOPES.filter((scope) => !have.has(scope));
-}
-
 export type GithubAccountSummary = {
   login: string;
   scopes: string;
@@ -175,6 +167,9 @@ export async function saveGithubAccount(input: {
         updatedAt: now,
       },
     });
+  // A fresh credential must be re-verified immediately: the page the owner
+  // lands on after reconnecting has to show live truth, not a cached "bad".
+  healthCache.delete(input.workspaceId);
 }
 
 export function githubClientConfig(): {
@@ -203,6 +198,7 @@ export async function deleteGithubAccount(
       login: githubAccountsTable.login,
       accessTokenEnc: githubAccountsTable.accessTokenEnc,
     });
+  healthCache.delete(workspaceId);
   if (!row) return null;
   // Best-effort revocation at GitHub so the grant disappears from the
   // user's authorized-apps page too. Failure is fine — the row is already
@@ -250,10 +246,330 @@ export async function githubAccessToken(workspaceId: string): Promise<{
   }
   const missing = missingGithubScopes(row.scopes);
   if (missing.length > 0) {
+    logger.warn(
+      {
+        component: "github_credentials",
+        workspaceId,
+        failureClass: "missing_scope",
+        missingScopes: missing,
+      },
+      "GitHub credential resolution refused: stored grant lacks required scopes",
+    );
     throw new GithubAuthError(
       "reconnect_required",
       `The connected GitHub account is missing required permissions (${missing.join(", ")}). Reconnect GitHub and grant all requested access.`,
     );
   }
-  return { token: decryptGithubToken(row.accessTokenEnc), login: row.login };
+  try {
+    return { token: decryptGithubToken(row.accessTokenEnc), login: row.login };
+  } catch (error) {
+    if (error instanceof GithubAuthError) {
+      // Secret-free evidence trail: WHICH workspace's credential failed and
+      // WHY (undecryptable row vs. missing server config) — never the
+      // ciphertext, plaintext, or key material.
+      logger.error(
+        {
+          component: "github_credentials",
+          workspaceId,
+          failureClass:
+            error.kind === "unavailable"
+              ? "server_config"
+              : "credential_unreadable",
+        },
+        "GitHub credential resolution failed before any GitHub call was made",
+      );
+    }
+    throw error;
+  }
+}
+
+/* ------------------------- Connection health --------------------------- */
+
+/** Upper bound for the live identity check — the status page must not hang. */
+export const GITHUB_HEALTH_TIMEOUT_MS = 3_500;
+
+/**
+ * Live connection health of the workspace's stored GitHub credential,
+ * verified against GitHub itself (GET /user) instead of trusting that a
+ * stored row means a working token.
+ */
+export type GithubConnectionHealth =
+  | { state: "not_connected" }
+  | { state: "connected"; login: string; detail: string | null }
+  | {
+      state: "reconnect_required";
+      login: string;
+      reason: "invalid_token" | "missing_scope" | "undecryptable";
+      detail: string;
+    }
+  | {
+      state: "unavailable";
+      login: string | null;
+      reason: "network" | "provider_error" | "config";
+      detail: string;
+    };
+
+/**
+ * Short-lived verification cache so the Connected Apps page (and anything
+ * else polling status) does not burn GitHub rate limit on every render.
+ * Entries are keyed to the credential row's updatedAt, so a reconnect
+ * invalidates instantly, and save/delete clear the entry outright.
+ * Transient "unavailable" results expire faster than settled ones.
+ */
+const healthCache = new Map<
+  string,
+  { rowKey: string; expiresAt: number; health: GithubConnectionHealth }
+>();
+const HEALTH_TTL_MS = 60_000;
+const HEALTH_TRANSIENT_TTL_MS = 15_000;
+
+export function clearGithubHealthCache(): void {
+  healthCache.clear();
+}
+
+/**
+ * Check whether the stored GitHub credential actually works, with a
+ * bounded timeout. Classification is deliberately conservative:
+ * - only provider evidence (401, missing live scopes, undecryptable row)
+ *   marks the credential as needing reconnection;
+ * - a network failure, timeout, or GitHub 5xx reports "unavailable" and
+ *   NEVER flips a stored credential to "broken";
+ * - a rate-limit refusal proves the credential authenticated (a revoked
+ *   token would have been a 401), so it reports "connected".
+ * Nothing here logs or returns the token.
+ */
+export async function checkGithubConnectionHealth(
+  workspaceId: string,
+): Promise<GithubConnectionHealth> {
+  const [row] = await db
+    .select({
+      login: githubAccountsTable.login,
+      scopes: githubAccountsTable.scopes,
+      accessTokenEnc: githubAccountsTable.accessTokenEnc,
+      updatedAt: githubAccountsTable.updatedAt,
+    })
+    .from(githubAccountsTable)
+    .where(eq(githubAccountsTable.workspaceId, workspaceId))
+    .limit(1);
+  if (!row) return { state: "not_connected" };
+
+  const rowKey = String(row.updatedAt.getTime());
+  const cached = healthCache.get(workspaceId);
+  if (cached && cached.rowKey === rowKey && cached.expiresAt > Date.now()) {
+    return cached.health;
+  }
+
+  const health = await computeHealth(workspaceId, row);
+  healthCache.set(workspaceId, {
+    rowKey,
+    expiresAt:
+      Date.now() +
+      (health.state === "unavailable"
+        ? HEALTH_TRANSIENT_TTL_MS
+        : HEALTH_TTL_MS),
+    health,
+  });
+  return health;
+}
+
+async function computeHealth(
+  workspaceId: string,
+  row: { login: string; scopes: string; accessTokenEnc: string },
+): Promise<GithubConnectionHealth> {
+  const logHealth = (
+    level: "warn" | "info",
+    failureClass: string,
+    extra: Record<string, unknown> = {},
+  ): void => {
+    logger[level](
+      {
+        component: "github_health",
+        workspaceId,
+        failureClass,
+        ...extra,
+      },
+      "GitHub connection health check did not verify as healthy",
+    );
+  };
+
+  // Stored-scope shortfall needs no network call — the grant is known bad.
+  const storedMissing = missingGithubScopes(row.scopes);
+  if (storedMissing.length > 0) {
+    logHealth("warn", "missing_scope", { missingScopes: storedMissing });
+    return {
+      state: "reconnect_required",
+      login: row.login,
+      reason: "missing_scope",
+      detail: `The connected GitHub account is missing required permissions (${storedMissing.join(", ")}). Reconnect GitHub and approve all requested access.`,
+    };
+  }
+
+  let token: string;
+  try {
+    token = decryptGithubToken(row.accessTokenEnc);
+  } catch (error) {
+    if (error instanceof GithubAuthError && error.kind === "unavailable") {
+      logHealth("warn", "server_config");
+      return {
+        state: "unavailable",
+        login: row.login,
+        reason: "config",
+        detail: error.message,
+      };
+    }
+    logHealth("warn", "credential_unreadable");
+    return {
+      state: "reconnect_required",
+      login: row.login,
+      reason: "undecryptable",
+      detail:
+        "The stored GitHub sign-in can no longer be decrypted — this usually means the server's credential-encryption secret (SESSION_SECRET) changed since it was stored, for example after a deployment configuration change. Reconnect GitHub once to store a fresh credential; the OAuth app itself does not need to be recreated.",
+    };
+  }
+
+  let response: Response;
+  try {
+    response = await fetch("https://api.github.com/user", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+      signal: AbortSignal.timeout(GITHUB_HEALTH_TIMEOUT_MS),
+    });
+  } catch {
+    logHealth("info", "network");
+    return {
+      state: "unavailable",
+      login: row.login,
+      reason: "network",
+      detail:
+        "GitHub could not be reached to verify this connection (network problem or timeout). This is usually temporary and does not mean the sign-in is broken — check again shortly.",
+    };
+  }
+
+  if (response.ok) {
+    // The live X-OAuth-Scopes header is the ground truth for what this
+    // token can do right now — stored scopes can go stale if the grant
+    // was edited at GitHub.
+    const liveScopes = response.headers.get("x-oauth-scopes");
+    const liveMissing =
+      liveScopes !== null ? missingGithubScopes(liveScopes) : [];
+    if (liveMissing.length > 0) {
+      logHealth("warn", "missing_scope", { missingScopes: liveMissing });
+      return {
+        state: "reconnect_required",
+        login: row.login,
+        reason: "missing_scope",
+        detail: `GitHub reports this sign-in no longer has the required permission${liveMissing.length === 1 ? "" : "s"} (${liveMissing.join(", ")}). Reconnect GitHub and approve all requested access.`,
+      };
+    }
+    return { state: "connected", login: row.login, detail: null };
+  }
+
+  const refusal = classifyGithubRefusal(response.status, response.headers);
+  const logExtra = {
+    providerStatus: response.status,
+    githubRequestId: refusal.requestId,
+  };
+  switch (refusal.failureClass) {
+    case "invalid_token":
+      logHealth("warn", "invalid_token", logExtra);
+      return {
+        state: "reconnect_required",
+        login: row.login,
+        reason: "invalid_token",
+        detail: `GitHub reports the stored sign-in is no longer valid — it was revoked or reset at GitHub, so agents cannot use it. Reconnect GitHub once to restore access; the OAuth app itself does not need to be recreated.${refusal.requestId ? ` (GitHub request ${refusal.requestId})` : ""}`,
+      };
+    case "missing_scope":
+      logHealth("warn", "missing_scope", {
+        ...logExtra,
+        missingScopes: refusal.missingScopes,
+      });
+      return {
+        state: "reconnect_required",
+        login: row.login,
+        reason: "missing_scope",
+        detail: `GitHub reports this sign-in is missing required permissions (${refusal.missingScopes.join(", ")}). Reconnect GitHub and approve all requested access.`,
+      };
+    case "rate_limited":
+      // Authenticated rate limiting means the token WORKS.
+      return {
+        state: "connected",
+        login: row.login,
+        detail:
+          "GitHub accepted the sign-in but is rate-limiting requests right now; agent work against GitHub may need to retry until the limit resets.",
+      };
+    default:
+      logHealth("info", refusal.failureClass, logExtra);
+      return {
+        state: "unavailable",
+        login: row.login,
+        reason: "provider_error",
+        detail: `GitHub could not verify the connection just now (HTTP ${response.status}). This did not report the sign-in as invalid and is usually temporary — check again shortly.${refusal.requestId ? ` (GitHub request ${refusal.requestId})` : ""}`,
+      };
+  }
+}
+
+/* ----------------------- Startup diagnostics --------------------------- */
+
+/**
+ * Boot-time proof that every stored GitHub credential is decryptable with
+ * the CURRENT SESSION_SECRET. A redeployment that rotated or lost the
+ * secret surfaces here, in deployment logs, as an explicit
+ * "encryption_key_mismatch" naming the affected workspace — instead of as
+ * a mystery "expired" failure the first time an agent touches GitHub.
+ * Decryption happens in memory only; nothing derived from the token is
+ * logged or returned.
+ */
+export async function logGithubCredentialStartupHealth(): Promise<{
+  checked: number;
+  unreadable: number;
+}> {
+  let rows: { workspaceId: string; accessTokenEnc: string }[];
+  try {
+    rows = await db
+      .select({
+        workspaceId: githubAccountsTable.workspaceId,
+        accessTokenEnc: githubAccountsTable.accessTokenEnc,
+      })
+      .from(githubAccountsTable)
+      .limit(200);
+  } catch (error) {
+    logger.warn(
+      { component: "github_credentials", err: error },
+      "GitHub credential startup check could not read the credential table",
+    );
+    return { checked: 0, unreadable: 0 };
+  }
+  let unreadable = 0;
+  for (const row of rows) {
+    try {
+      decryptGithubToken(row.accessTokenEnc);
+    } catch (error) {
+      if (error instanceof GithubAuthError && error.kind === "unavailable") {
+        logger.error(
+          { component: "github_credentials", failureClass: "server_config" },
+          "SESSION_SECRET is not configured on this server: no stored GitHub credential can be decrypted until it is restored. Restore the ORIGINAL secret to keep existing connections working.",
+        );
+        return { checked: rows.length, unreadable: rows.length };
+      }
+      unreadable += 1;
+      logger.error(
+        {
+          component: "github_credentials",
+          workspaceId: row.workspaceId,
+          failureClass: "encryption_key_mismatch",
+        },
+        "Stored GitHub credential cannot be decrypted with the current SESSION_SECRET — the secret changed since the credential was stored (or the row is corrupt). The workspace owner must reconnect GitHub once; recreating the OAuth app is NOT required.",
+      );
+    }
+  }
+  if (rows.length > 0 && unreadable === 0) {
+    logger.info(
+      { component: "github_credentials", checked: rows.length },
+      "All stored GitHub credentials decrypt with the current SESSION_SECRET",
+    );
+  }
+  return { checked: rows.length, unreadable };
 }

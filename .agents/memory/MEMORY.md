@@ -23,3 +23,4 @@
 - [Claude setup-token auth](claude-setup-token-auth.md) — OAuth tokens only work on /v1/messages with both betas, CLI identity headers, and the exact Claude Code identity system block first.
 - [Internal read capabilities](internal-read-capabilities.md) — internal agent reads ride the app_action channel but bypass the catalog: server-supplied caller, no action rows, sandbox denied both ways.
 - [Talk task-history browse](talk-task-history-browse.md) — Talk uses a bounded multi-page collector with browse-vs-search modes and owner-timezone days; worker path stays single-page UTC.
+- [GitHub connection health](github-connection-health.md) — never trust a stored credential row; live-verify with conservative classes (401=reconnect, rate-limit=working, plain 403=repo access, 5xx/network=transient).
