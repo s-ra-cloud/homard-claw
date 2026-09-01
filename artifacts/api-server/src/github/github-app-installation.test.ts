@@ -149,6 +149,7 @@ beforeAll(async () => {
     "GITHUB_APP_SLUG",
     "GITHUB_APP_PRIVATE_KEY",
     "GITHUB_APP_PRIVATE_KEY_PEM",
+    "GITHUB_APP_PRIVATE_KEY_BASE64",
   ]) {
     savedEnv[key] = process.env[key];
   }

@@ -70,6 +70,7 @@ export function githubAppConfig(): GithubAppConfig | null {
   // from a malformed legacy secret even when their secrets UI can only
   // confirm (not overwrite) an existing value.
   const rawKey = (
+    process.env.GITHUB_APP_PRIVATE_KEY_BASE64 ??
     process.env.GITHUB_APP_PRIVATE_KEY_PEM ??
     process.env.GITHUB_APP_PRIVATE_KEY
   )?.trim();
