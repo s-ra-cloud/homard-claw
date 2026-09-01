@@ -27,10 +27,12 @@ import {
 } from "./failures";
 import { GithubAuthError } from "./github-auth-error";
 import {
+  findPersonalInstallationForGithubUser,
   fetchInstallation,
   githubAppConfig,
   githubInstallationSummary,
   githubInstallationToken,
+  invalidateGithubInstallationToken,
 } from "./app-auth";
 
 // Scope constants and failure classification live in ./failures (pure,
@@ -304,6 +306,89 @@ export async function githubAuth(workspaceId: string): Promise<{
   }
   const oauth = await githubAccessToken(workspaceId);
   return { token: oauth.token, login: oauth.login, source: "oauth" };
+}
+
+/**
+ * Repair the narrow case where the owner installed the GitHub App on their
+ * personal account but GitHub's setup redirect never persisted the binding.
+ *
+ * The match is deliberately strict: the app installation's immutable
+ * account id must equal the immutable id captured by the workspace's prior
+ * OAuth identity, its type must be User (never Organization), and the safe
+ * login label must also agree. A unique-index conflict is never overridden.
+ */
+export async function recoverPersonalGithubAppBinding(
+  workspaceId: string,
+): Promise<boolean> {
+  const [oauth] = await db
+    .select({
+      clerkUserId: githubAccountsTable.clerkUserId,
+      githubUserId: githubAccountsTable.githubUserId,
+      login: githubAccountsTable.login,
+    })
+    .from(githubAccountsTable)
+    .where(eq(githubAccountsTable.workspaceId, workspaceId))
+    .limit(1);
+  if (!oauth) return false;
+
+  try {
+    const config = githubAppConfig();
+    if (!config) return false;
+    const installation = await findPersonalInstallationForGithubUser(
+      config,
+      oauth.githubUserId,
+    );
+    if (
+      !installation ||
+      installation.suspended ||
+      installation.accountLogin.toLowerCase() !== oauth.login.toLowerCase()
+    ) {
+      return false;
+    }
+    const now = new Date();
+    const [inserted] = await db
+      .insert(githubInstallationsTable)
+      .values({
+        workspaceId,
+        clerkUserId: oauth.clerkUserId,
+        installationId: installation.installationId,
+        accountLogin: installation.accountLogin,
+        accountType: installation.accountType,
+        repositorySelection: installation.repositorySelection,
+        connectedAt: now,
+        updatedAt: now,
+      })
+      // Either this workspace was repaired concurrently or another workspace
+      // already owns the installation. Never steal or overwrite either row.
+      .onConflictDoNothing()
+      .returning({ workspaceId: githubInstallationsTable.workspaceId });
+    if (!inserted) {
+      return (await githubInstallationSummary(workspaceId)) !== null;
+    }
+    invalidateGithubInstallationToken(workspaceId);
+    invalidateGithubHealth(workspaceId);
+    logger.info(
+      {
+        component: "github_app",
+        workspaceId,
+        recovery: "matched_personal_account",
+      },
+      "Recovered a missing GitHub App workspace binding",
+    );
+    return true;
+  } catch (error) {
+    logger.info(
+      {
+        component: "github_app",
+        workspaceId,
+        recovery: "not_available",
+        failureClass:
+          error instanceof GithubAuthError ? error.kind : "unexpected",
+      },
+      "Could not recover a missing GitHub App workspace binding",
+    );
+    return false;
+  }
 }
 
 /**

@@ -21,6 +21,7 @@ import {
   checkGithubConnectionHealth,
   githubAuth,
   githubAuthMethod,
+  recoverPersonalGithubAppBinding,
 } from "../github/credentials";
 import { invalidateGithubInstallationToken } from "../github/app-auth";
 import {
@@ -431,6 +432,21 @@ async function githubJson(
   const auth = await resolveAuth();
   if (!auth.ok) return auth.failure;
   const first = await attempt(auth.token, auth.source);
+  if (
+    !first.ok &&
+    first.status === 401 &&
+    auth.source === "oauth" &&
+    (await recoverPersonalGithubAppBinding(workspaceId))
+  ) {
+    // A 401 means GitHub rejected the OAuth request before performing any
+    // work. If the owner's matching personal App installation was present
+    // but its callback was lost, repair the binding and retry once under
+    // the installation identity.
+    const recovered = await resolveAuth();
+    if (recovered.ok && recovered.source === "installation") {
+      return attempt(recovered.token, recovered.source);
+    }
+  }
   if (
     first.ok ||
     first.status !== 401 ||

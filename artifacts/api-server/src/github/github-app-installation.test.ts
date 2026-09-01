@@ -91,6 +91,7 @@ import {
   encryptGithubToken,
   githubAuth,
   githubAuthMethod,
+  recoverPersonalGithubAppBinding,
 } from "./credentials";
 import {
   clearGithubInstallationTokenCache,
@@ -295,6 +296,132 @@ describe("installation token minting and caching", () => {
     githubState.handler = happyHandler();
     expect(await githubInstallationToken(oauthWorkspaceId)).toBeNull();
     expect(githubState.calls.length).toBe(0);
+  });
+});
+
+describe("lost setup-callback recovery", () => {
+  it("repairs an exact personal-account installation after OAuth is revoked and retries once as the app", async () => {
+    const RECOVERED_INSTALLATION_ID = "737373";
+    githubState.handler = (call) => {
+      if (
+        call.path === "/repos/oauth-only/demo/issues?state=open&per_page=20" &&
+        call.auth === OAUTH_TOKEN
+      ) {
+        return { status: 401, body: { message: "Bad credentials" } };
+      }
+      if (call.path === "/app/installations?per_page=100&page=1") {
+        return {
+          status: 200,
+          body: Array.from({ length: 100 }, (_, index) => ({
+            id: 600000 + index,
+            account: {
+              id: 700000 + index,
+              login: `foreign-${index}`,
+              type: "User",
+            },
+            repository_selection: "selected",
+            suspended_at: null,
+          })),
+        };
+      }
+      if (call.path === "/app/installations?per_page=100&page=2") {
+        return {
+          status: 200,
+          body: [
+            {
+              id: Number(RECOVERED_INSTALLATION_ID),
+              account: { id: 2222, login: "oauth-only", type: "User" },
+              repository_selection: "selected",
+              suspended_at: null,
+            },
+          ],
+        };
+      }
+      if (
+        call.path ===
+        `/app/installations/${RECOVERED_INSTALLATION_ID}/access_tokens`
+      ) {
+        return {
+          status: 201,
+          body: {
+            token: MINTED_TOKEN,
+            expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+          },
+        };
+      }
+      if (
+        call.path === "/repos/oauth-only/demo/issues?state=open&per_page=20" &&
+        call.auth === MINTED_TOKEN
+      ) {
+        return { status: 200, body: [] };
+      }
+      throw new Error(`unexpected GitHub call: ${call.method} ${call.path}`);
+    };
+
+    try {
+      const outcome = await executeOperation(
+        findOperation("github.list_issues")!,
+        { owner: "oauth-only", repo: "demo", state: "open" },
+        { actionId: "recover-app-1", workspaceId: oauthWorkspaceId },
+      );
+      expect(outcome.ok).toBe(true);
+      expect(githubState.calls.map((call) => call.auth)).toEqual([
+        OAUTH_TOKEN,
+        "jwt",
+        "jwt",
+        "jwt",
+        MINTED_TOKEN,
+      ]);
+      const [binding] = await db
+        .select()
+        .from(githubInstallationsTable)
+        .where(eq(githubInstallationsTable.workspaceId, oauthWorkspaceId))
+        .limit(1);
+      expect(binding).toMatchObject({
+        installationId: RECOVERED_INSTALLATION_ID,
+        accountLogin: "oauth-only",
+        accountType: "User",
+      });
+    } finally {
+      await db
+        .delete(githubInstallationsTable)
+        .where(eq(githubInstallationsTable.workspaceId, oauthWorkspaceId));
+    }
+  });
+
+  it("never binds an organization or a different personal account", async () => {
+    githubState.handler = (call) => {
+      if (call.path === "/app/installations?per_page=100&page=1") {
+        return {
+          status: 200,
+          body: [
+            {
+              // Same display login is not enough: organizations are excluded.
+              id: 818181,
+              account: { id: 2222, login: "oauth-only", type: "Organization" },
+              repository_selection: "all",
+            },
+            {
+              // Personal install, but its immutable account id is foreign.
+              id: 919191,
+              account: { id: 9999, login: "oauth-only", type: "User" },
+              repository_selection: "all",
+            },
+          ],
+        };
+      }
+      throw new Error(`unexpected GitHub call: ${call.method} ${call.path}`);
+    };
+
+    expect(
+      await recoverPersonalGithubAppBinding(oauthWorkspaceId),
+    ).toBe(false);
+    const [binding] = await db
+      .select()
+      .from(githubInstallationsTable)
+      .where(eq(githubInstallationsTable.workspaceId, oauthWorkspaceId))
+      .limit(1);
+    expect(binding).toBeUndefined();
   });
 });
 

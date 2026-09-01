@@ -166,6 +166,64 @@ export type GithubInstallationDetails = {
   suspended: boolean;
 };
 
+/**
+ * Find this app's installation on one exact personal GitHub account.
+ *
+ * This is a recovery seam for an owner who installed the GitHub App but
+ * whose setup callback never reached HomardClaw. Matching uses GitHub's
+ * immutable numeric account id from the previously verified OAuth identity,
+ * never a browser-supplied login. Organization installations are excluded:
+ * an OAuth user's id does not prove authority over an organization.
+ */
+export async function findPersonalInstallationForGithubUser(
+  config: GithubAppConfig,
+  githubUserId: string,
+): Promise<GithubInstallationDetails | null> {
+  // GitHub returns at most 100 installations per page. Ten bounded pages
+  // avoid an unbounded provider loop while covering 1,000 installations.
+  // If all ten are full, fail explicitly rather than silently pretending
+  // a later matching installation does not exist.
+  for (let page = 0; page < 10; page += 1) {
+    const path = `/app/installations?per_page=100&page=${page + 1}`;
+    const result = await appApi(config, path);
+    if (!result.ok) {
+      throw new GithubAuthError(
+        "unavailable",
+        "GitHub App installations could not be checked just now.",
+      );
+    }
+    if (!Array.isArray(result.data)) return null;
+    const rows = result.data as Array<{
+      id?: number;
+      account?: { id?: number; login?: string; type?: string };
+      repository_selection?: string;
+      suspended_at?: string | null;
+    }>;
+    for (const row of rows) {
+      if (
+        typeof row.id === "number" &&
+        typeof row.account?.id === "number" &&
+        String(row.account.id) === githubUserId &&
+        row.account.type === "User" &&
+        row.account.login
+      ) {
+        return {
+          installationId: String(row.id),
+          accountLogin: row.account.login,
+          accountType: row.account.type,
+          repositorySelection: row.repository_selection ?? "selected",
+          suspended: Boolean(row.suspended_at),
+        };
+      }
+    }
+    if (rows.length < 100) return null;
+  }
+  throw new GithubAuthError(
+    "unavailable",
+    "GitHub App installation recovery exceeded its safe page limit.",
+  );
+}
+
 export type FetchInstallationResult =
   | { ok: true; installation: GithubInstallationDetails }
   | {
