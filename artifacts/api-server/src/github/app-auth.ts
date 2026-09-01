@@ -66,19 +66,25 @@ function parsePrivateKey(raw: string): KeyObject | null {
 export function githubAppConfig(): GithubAppConfig | null {
   const appId = process.env.GITHUB_APP_ID?.trim();
   const appSlug = process.env.GITHUB_APP_SLUG?.trim();
-  const rawKey = process.env.GITHUB_APP_PRIVATE_KEY?.trim();
+  // Prefer the explicit PEM replacement key. This lets an operator recover
+  // from a malformed legacy secret even when their secrets UI can only
+  // confirm (not overwrite) an existing value.
+  const rawKey = (
+    process.env.GITHUB_APP_PRIVATE_KEY_PEM ??
+    process.env.GITHUB_APP_PRIVATE_KEY
+  )?.trim();
   if (!appId && !appSlug && !rawKey) return null;
   if (!appId || !appSlug || !rawKey) {
     throw new GithubAuthError(
       "unavailable",
-      "The GitHub App is only partially configured on this server (GITHUB_APP_ID, GITHUB_APP_SLUG, and GITHUB_APP_PRIVATE_KEY must all be set).",
+      "The GitHub App is only partially configured on this server (GITHUB_APP_ID, GITHUB_APP_SLUG, and a GitHub App private key must all be set).",
     );
   }
   const privateKey = parsePrivateKey(rawKey);
   if (!privateKey) {
     throw new GithubAuthError(
       "unavailable",
-      "GITHUB_APP_PRIVATE_KEY is set but is not a readable RSA private key (PEM). Paste the .pem file GitHub generated for the app.",
+      "The configured GitHub App private key is not a readable RSA private key (PEM). Paste the .pem file GitHub generated for the app.",
     );
   }
   return { appId, appSlug, privateKey };

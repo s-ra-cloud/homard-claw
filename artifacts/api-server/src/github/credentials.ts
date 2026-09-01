@@ -828,6 +828,31 @@ export async function logGithubCredentialStartupHealth(): Promise<{
   checked: number;
   unreadable: number;
 }> {
+  try {
+    const appConfig = githubAppConfig();
+    if (appConfig) {
+      logger.info(
+        { component: "github_app", configuration: "valid" },
+        "GitHub App startup configuration is valid",
+      );
+    } else {
+      logger.info(
+        { component: "github_app", configuration: "absent" },
+        "GitHub App startup configuration is not configured",
+      );
+    }
+  } catch (error) {
+    logger.error(
+      {
+        component: "github_app",
+        configuration: "invalid",
+        failureClass:
+          error instanceof GithubAuthError ? error.kind : "unexpected",
+      },
+      "GitHub App startup configuration is invalid",
+    );
+  }
+
   let rows: { workspaceId: string; accessTokenEnc: string }[];
   try {
     rows = await db
