@@ -1004,7 +1004,8 @@
   gap: 0;
 }
 
-.iso-office.is-immersive .side-panel {
+.iso-office.is-immersive .side-panel,
+.iso-office.is-immersive .approval--expanded {
   display: none;
 }
 
@@ -1169,6 +1170,41 @@
   border-color: var(--shell-dark);
 }
 
+/* Expanded approval banner: full-width row above the room view, so the
+   pending request gets real room instead of the cramped 250px rail. */
+.approval--expanded {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 24px;
+  padding: 18px 22px;
+}
+.approval--expanded h2 {
+  margin: 0;
+  flex: 0 0 auto;
+}
+.approval--expanded p,
+.approval--expanded .approval-empty,
+.approval--expanded .approved {
+  margin: 0;
+  flex: 1 1 320px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.approval--expanded .approval-actions {
+  flex: 0 0 auto;
+  margin: 0;
+}
+.approval--expanded .approval-actions button {
+  padding: 9px 18px;
+  font-size: 10px;
+}
+.approval--expanded .approval-link {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
 .iso-office--state {
   min-height: 100%;
   display: flex;
@@ -1239,9 +1275,6 @@
   .side-panel {
     grid-template-columns: repeat(2, 1fr);
   }
-  .side-panel .approval {
-    grid-column: span 2;
-  }
   .room-caption {
     top: 10px;
   }
@@ -1264,8 +1297,10 @@
   .side-panel {
     grid-template-columns: 1fr;
   }
-  .side-panel .approval {
-    grid-column: auto;
+  .approval--expanded {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 14px;
   }
   .quiet-card {
     box-shadow: 3px 3px 0 #546b72;
