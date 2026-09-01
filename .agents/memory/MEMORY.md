@@ -26,3 +26,4 @@
 - [GitHub connection health](github-connection-health.md) — never trust a stored credential row; live-verify with conservative classes (401=reconnect, rate-limit=working, plain 403=repo access, 5xx/network=transient).
 - [GitHub App installation auth](github-app-installation-auth.md) — installation-first with OAuth fallback; in-memory minting single-flighted by row version, retry-once on 401, /user/* endpoints don't work.
 - [Inline provider calls](inline-provider-calls.md) — synchronous model calls from routes branch codex→runCodexTalkTurn (strict profile) else callProvider; whole-reply rejection, never a hidden task.
+- [Web client API error shape](web-api-error-shape.md) — toasts must read ApiError.data.error via the shared api-error helper; axios-style error.response reads silently collapse to the generic fallback.

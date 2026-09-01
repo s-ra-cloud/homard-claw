@@ -38,8 +38,23 @@ const REVIEW_MEMORY_LIMIT = 60;
 const REVIEW_CHAR_BUDGET = 24_000;
 /** Most operations accepted per patch section (add/update/remove). */
 const MAX_REFRESH_OPS = 20;
-/** Whole-call deadline; a maintenance review must stay interactive. */
+/**
+ * Whole-call deadline; a maintenance review must stay interactive. This is
+ * deliberately sized for the deployed request path: the deployment proxy
+ * allows roughly five minutes per request (see the SSE keepalive notes in
+ * routes/events.ts) and browsers time out fetches around the same mark, so
+ * a synchronous 120s review always produces a real HTTP response — the
+ * page never needs a polling job for this. Codex turns are the slow case
+ * (CLI startup + streamed turn) and stay well inside this budget.
+ */
 const REFRESH_TIMEOUT_MS = 120_000;
+
+let refreshTimeoutOverrideMs: number | null = null;
+
+/** Test hook: shrink the whole-call deadline so timeout tests don't sleep 2 minutes. */
+export function setMemoryRefreshTimeout(ms: number | null): void {
+  refreshTimeoutOverrideMs = ms;
+}
 
 /** Kinds the model may create. `task_outcome` stays automatic-only. */
 const ADDABLE_KINDS = ["fact", "decision", "context", "relationship"] as const;
@@ -67,7 +82,14 @@ type ParsedPatch = {
 class MalformedPatchError extends Error {}
 
 function parseJsonReply(output: string): unknown {
-  const trimmed = output.trim();
+  let trimmed = output.trim();
+  // Codex-style models habitually wrap JSON in a markdown fence despite the
+  // no-fences instruction. Tolerate EXACTLY one fenced block that spans the
+  // whole reply and contains only the object. Prose around (or between)
+  // fences still fails the brace check below — the prompt-injection guard
+  // depends on rejecting any reply that is not a lone JSON object.
+  const fenced = /^```(?:json)?\s*\n?([\s\S]*?)\n?```$/.exec(trimmed);
+  if (fenced) trimmed = fenced[1].trim();
   if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
     throw new MalformedPatchError(
       "The reply must contain exactly one JSON object and no other text.",
@@ -260,15 +282,38 @@ function buildReviewPrompt(
 
 /** Map a provider failure onto an HTTP status plus an actionable message. */
 function providerFailure(
-  agentName: string,
+  agent: { id: string; name: string },
   error: unknown,
 ): { ok: false; status: number; error: string } {
+  const agentName = agent.name;
   if (error instanceof CodexTalkError) {
-    const detail = error.message;
+    // Structured, safe diagnostics: the kind alone separates credential
+    // materialization ("workspace"/"setup"), session auth ("auth"), lease
+    // contention ("busy"), plan/allowance replies, request-deadline aborts
+    // ("timeout"/"cancelled"), and raw provider errors — no credentials or
+    // memory contents are ever logged.
+    logger.warn(
+      { agentId: agent.id, provider: "codex_chatgpt", kind: error.kind },
+      "Manual memory refresh failed in the Codex maintenance turn",
+    );
+    // Fixed, sanitized messages only — CodexTalkError.message can echo raw
+    // provider/CLI detail (paths, tokens, upstream error text), which the
+    // Talk routes also never forward to the browser.
     switch (error.kind) {
       case "setup":
+        return {
+          ok: false,
+          status: 422,
+          error:
+            "The ChatGPT Codex connection is not ready, so the review could not start. Open Providers and connect or repair ChatGPT, then try again.",
+        };
       case "auth":
-        return { ok: false, status: 422, error: detail };
+        return {
+          ok: false,
+          status: 422,
+          error:
+            "The ChatGPT session was rejected. Open Providers, reconnect ChatGPT, then run the refresh again.",
+        };
       case "busy":
         return {
           ok: false,
@@ -277,21 +322,46 @@ function providerFailure(
             "The ChatGPT Codex session is busy with another run; retry in a moment.",
         };
       case "allowance":
+        return {
+          ok: false,
+          status: 429,
+          error:
+            "The ChatGPT plan allowance is used up, so the review did not run. Try again once it resets.",
+        };
       case "rate_limit":
-        return { ok: false, status: 429, error: detail };
+        return {
+          ok: false,
+          status: 429,
+          error:
+            "ChatGPT is rate-limiting requests. Wait a moment, then run the refresh again.",
+        };
       case "timeout":
       case "cancelled":
+        return {
+          ok: false,
+          status: 503,
+          error: `${agentName}'s memory review did not finish: the Codex run timed out or was interrupted. Nothing was changed; try again shortly.`,
+        };
       case "workspace":
         return {
           ok: false,
           status: 503,
-          error: `${agentName}'s memory review did not finish: ${detail}`,
+          error: `${agentName}'s private Codex workspace could not be prepared, so the review did not run. Try again; if this keeps happening, check the server's Codex workspace configuration.`,
         };
       default:
-        return { ok: false, status: 502, error: detail };
+        return {
+          ok: false,
+          status: 502,
+          error:
+            "Codex provider error: ChatGPT could not complete the memory review. Nothing was changed; check Providers, then try again.",
+        };
     }
   }
   if (error instanceof ProviderCallError) {
+    logger.warn(
+      { agentId: agent.id, kind: error.kind },
+      "Manual memory refresh failed in the provider call",
+    );
     const detail = error.userMessage ?? error.message;
     switch (error.kind) {
       case "not_configured":
@@ -383,7 +453,7 @@ export async function refreshAgentMemories(input: {
   const controller = new AbortController();
   const deadline = setTimeout(
     () => controller.abort("timeout"),
-    REFRESH_TIMEOUT_MS,
+    refreshTimeoutOverrideMs ?? REFRESH_TIMEOUT_MS,
   );
   let output: string;
   try {
@@ -427,7 +497,7 @@ export async function refreshAgentMemories(input: {
           });
     output = result.output;
   } catch (error) {
-    return providerFailure(agent.name, error);
+    return providerFailure({ id: agent.id, name: agent.name }, error);
   } finally {
     clearTimeout(deadline);
   }

@@ -17,6 +17,7 @@ import {
   agentsTable,
   codexCredentialsTable,
   db,
+  memoriesTable,
   pool,
   providerConversationsTable,
   providerLeasesTable,
@@ -69,6 +70,7 @@ import {
 import { saveCodexCredential } from "../codex/credential-store";
 import { acquireProviderLease, codexLeaseKey } from "../provider-leases";
 import { setCodexTalkLeaseWait } from "../talk-codex";
+import { setMemoryRefreshTimeout } from "../memory-refresh";
 import { randomUUID } from "node:crypto";
 import { setCodexLeaseHeartbeatMs } from "../codex/config";
 import { runCodexHealthCheck, resetCodexHealthCheck } from "../scheduler";
@@ -2549,6 +2551,36 @@ describe("Codex Talk conversations", () => {
 });
 
 describe("manual memory refresh through Codex", () => {
+  afterEach(async () => {
+    setCodexTalkLeaseWait(null);
+    setMemoryRefreshTimeout(null);
+    if (createdAgentIds.length > 0) {
+      await db
+        .delete(memoriesTable)
+        .where(inArray(memoriesTable.agentId, createdAgentIds));
+    }
+  });
+
+  async function seedMemory(
+    agentId: string,
+    content: string,
+    extra: Partial<typeof memoriesTable.$inferInsert> = {},
+  ) {
+    const [row] = await db
+      .insert(memoriesTable)
+      .values({ workspaceId: wsId, agentId, kind: "fact", content, ...extra })
+      .returning();
+    return row!;
+  }
+
+  async function memoryContents(agentId: string): Promise<string[]> {
+    const rows = await db
+      .select({ content: memoriesTable.content })
+      .from(memoriesTable)
+      .where(eq(memoriesTable.agentId, agentId));
+    return rows.map((row) => row.content).sort();
+  }
+
   /** Conversations and workspace folders left behind for one agent. */
   async function leftovers(agentId: string) {
     const conversations = await db
@@ -2623,5 +2655,272 @@ describe("manual memory refresh through Codex", () => {
       vi.stubEnv("CODEX_WORKSPACE_ROOT", workspaceRoot);
       await rm(blocker, { force: true });
     }
+  });
+
+  it("applies a validated patch through the owner's ChatGPT session without a task or fallback", async () => {
+    const agent = await createAgent(`${RUN_TAG} Groomer Prime`);
+    // A real Talk exchange first, so the refresh has a resumable thread it
+    // could wrongly resume — or wrongly destroy.
+    turnScript = [talkTurn()];
+    const talk = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Warm up the thread." });
+    expect(talk.status).toBe(200);
+    const [talkRow] = await talkConversationRows(agent.id);
+    expect(talkRow).toBeDefined();
+
+    const stale = await seedMemory(
+      agent.id,
+      `${RUN_TAG} the deploy pipeline still uses Jenkins`,
+    );
+    const obsolete = await seedMemory(
+      agent.id,
+      `${RUN_TAG} duplicate stale note`,
+    );
+    const pinnedRow = await seedMemory(
+      agent.id,
+      `${RUN_TAG} owner decision: reports ship on Fridays`,
+      { kind: "decision", pinned: true },
+    );
+
+    fetchMock.mockClear();
+    const addedContent = `${RUN_TAG} the deploy pipeline moved to GitHub Actions`;
+    const updatedContent = `${RUN_TAG} Jenkins was retired in 2026`;
+    turnScript = [
+      successTurn(
+        JSON.stringify({
+          add: [{ kind: "fact", content: addedContent }],
+          update: [{ id: stale.id, content: updatedContent }],
+          remove: [{ id: obsolete.id }],
+        }),
+      ),
+    ];
+    const res = await request(app).post(
+      `/api/agents/${agent.id}/memory/refresh`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      agentId: agent.id,
+      agentName: agent.name,
+      status: "updated",
+      added: 1,
+      updated: 1,
+      removed: 1,
+    });
+
+    // The memory bank now matches the patch exactly; the pin is untouched.
+    expect(await memoryContents(agent.id)).toEqual(
+      [addedContent, updatedContent, pinnedRow.content].sort(),
+    );
+
+    // The review ran as one brand-new Codex turn — never resuming the Talk
+    // thread — under the forced maintenance sandbox, in its own work folder.
+    expect(sdkCalls).toHaveLength(2);
+    const call = sdkCalls[1]!;
+    expect(call.kind).toBe("start");
+    expect(call.options?.sandboxMode).toBe("read-only");
+    expect(call.options?.networkAccessEnabled).toBe(false);
+    expect(call.options?.webSearchMode).toBe("disabled");
+    expect(call.input).toContain(stale.id);
+    expect(call.options?.workingDirectory).not.toBe(
+      sdkCalls[0]!.options?.workingDirectory,
+    );
+
+    // The Talk conversation survives, still resumable; the ephemeral
+    // review conversation is gone.
+    const convs = await talkConversationRows(agent.id);
+    expect(convs).toHaveLength(1);
+    expect(convs[0]!.id).toBe(talkRow!.id);
+    expect(convs[0]!.resumable).toBe(true);
+
+    // No ordinary task was created and no metered provider was touched.
+    const tasks = await db
+      .select()
+      .from(tasksTable)
+      .where(eq(tasksTable.agentId, agent.id));
+    expect(tasks).toHaveLength(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // The ChatGPT credential lease is free again.
+    const fingerprint = await codexAuthFingerprint(authState.userId);
+    const leases = await db
+      .select()
+      .from(providerLeasesTable)
+      .where(eq(providerLeasesTable.key, codexLeaseKey(fingerprint!)));
+    expect(leases).toHaveLength(0);
+  });
+
+  it("accepts a patch wrapped in a lone markdown fence", async () => {
+    // Codex models habitually fence JSON despite the no-fences instruction;
+    // a fence around the object (and nothing else) must not fail the review.
+    const agent = await createAgent(`${RUN_TAG} Fencer`);
+    const doomed = await seedMemory(agent.id, `${RUN_TAG} fenced removal target`);
+    turnScript = [
+      successTurn(
+        "```json\n" +
+          JSON.stringify({ add: [], update: [], remove: [{ id: doomed.id }] }) +
+          "\n```",
+      ),
+    ];
+    const res = await request(app).post(
+      `/api/agents/${agent.id}/memory/refresh`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.removed).toBe(1);
+    expect(await memoryContents(agent.id)).toEqual([]);
+  });
+
+  it("rejects prose around the JSON and changes nothing", async () => {
+    const agent = await createAgent(`${RUN_TAG} Chatty`);
+    const kept = await seedMemory(agent.id, `${RUN_TAG} must survive prose reply`);
+    turnScript = [
+      successTurn(
+        `Certainly! Here is the patch: {"add":[],"update":[],"remove":[{"id":"${kept.id}"}]}`,
+      ),
+    ];
+    const res = await request(app).post(
+      `/api/agents/${agent.id}/memory/refresh`,
+    );
+    expect(res.status).toBe(502);
+    expect(res.body.error).toMatch(/unusable memory review/i);
+    expect(res.body.error).toMatch(/nothing was changed/i);
+    expect(await memoryContents(agent.id)).toEqual([kept.content]);
+  });
+
+  it("reports a missing ChatGPT sign-in as a setup problem, not a generic failure", async () => {
+    const agent = await createAgent(`${RUN_TAG} Groomer Signed Out`);
+    const kept = await seedMemory(agent.id, `${RUN_TAG} survives signed-out refresh`);
+    await disconnectCodexCredential(authState.userId);
+    fetchMock.mockClear();
+
+    const res = await request(app).post(
+      `/api/agents/${agent.id}/memory/refresh`,
+    );
+    expect(res.status).toBe(422);
+    expect(res.body.error).toMatch(/reconnect ChatGPT|Providers/i);
+    expect(res.body.error).not.toMatch(/provider key|try again/i);
+    // Codex was never reached and no metered provider stepped in.
+    expect(sdkCalls).toHaveLength(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await memoryContents(agent.id)).toEqual([kept.content]);
+  });
+
+  it("maps a ChatGPT authentication failure to an actionable 422", async () => {
+    const agent = await createAgent(`${RUN_TAG} Groomer Locked Out`);
+    const kept = await seedMemory(agent.id, `${RUN_TAG} survives auth failure`);
+    turnScript = [failingTurn("401 unauthorized: please run codex login")];
+
+    const res = await request(app).post(
+      `/api/agents/${agent.id}/memory/refresh`,
+    );
+    expect(res.status).toBe(422);
+    expect(res.body.error).toMatch(/ChatGPT session/i);
+    // Sanitized: the raw CLI hint never reaches the browser.
+    expect(res.body.error).not.toMatch(/codex login|401/);
+    expect(await memoryContents(agent.id)).toEqual([kept.content]);
+  });
+
+  it("returns a clear busy message when another run holds the ChatGPT credential", async () => {
+    const agent = await createAgent(`${RUN_TAG} Groomer Queued`);
+    const kept = await seedMemory(agent.id, `${RUN_TAG} survives busy session`);
+    setCodexTalkLeaseWait({ totalMs: 250, intervalMs: 100 });
+    const fingerprint = await codexAuthFingerprint(authState.userId);
+    await db.insert(providerLeasesTable).values({
+      key: codexLeaseKey(fingerprint!),
+      taskId: randomUUID(),
+      holder: "another-process-entirely",
+      acquiredAt: new Date(),
+      heartbeatAt: new Date(),
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+
+    const res = await request(app).post(
+      `/api/agents/${agent.id}/memory/refresh`,
+    );
+    expect(res.status).toBe(503);
+    expect(res.body.error).toMatch(/busy/i);
+    // The review never reached Codex and never stole the lease.
+    expect(sdkCalls).toHaveLength(0);
+    const [lease] = await db
+      .select()
+      .from(providerLeasesTable)
+      .where(eq(providerLeasesTable.key, codexLeaseKey(fingerprint!)));
+    expect(lease?.holder).toBe("another-process-entirely");
+    expect(await memoryContents(agent.id)).toEqual([kept.content]);
+  });
+
+  it("maps an exhausted plan allowance to a 429", async () => {
+    const agent = await createAgent(`${RUN_TAG} Groomer Broke`);
+    const kept = await seedMemory(agent.id, `${RUN_TAG} survives allowance stop`);
+    fetchMock.mockClear();
+    turnScript = [failingTurn("You've hit your usage limit for the week")];
+
+    const res = await request(app).post(
+      `/api/agents/${agent.id}/memory/refresh`,
+    );
+    expect(res.status).toBe(429);
+    expect(res.body.error).toMatch(/allowance/i);
+    // Fail closed: exhausted allowance never silently bills a metered key.
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await memoryContents(agent.id)).toEqual([kept.content]);
+  });
+
+  it("maps provider rate limiting to a 429 without raw provider text", async () => {
+    const agent = await createAgent(`${RUN_TAG} Groomer Throttled`);
+    turnScript = [failingTurn("429 Too Many Requests, please slow down.")];
+
+    const res = await request(app).post(
+      `/api/agents/${agent.id}/memory/refresh`,
+    );
+    expect(res.status).toBe(429);
+    expect(res.body.error).toMatch(/rate-limit/i);
+    expect(res.body.error).not.toMatch(/Too Many Requests/);
+  });
+
+  it("aborts a hung Codex turn at the deadline and reports a retryable timeout", async () => {
+    const agent = await createAgent(`${RUN_TAG} Groomer Stuck`);
+    const kept = await seedMemory(agent.id, `${RUN_TAG} survives timeout`);
+    setMemoryRefreshTimeout(400);
+    turnScript = [{ events: [], hangUntilAborted: true }];
+
+    const res = await request(app).post(
+      `/api/agents/${agent.id}/memory/refresh`,
+    );
+    expect(res.status).toBe(503);
+    expect(res.body.error).toMatch(/did not finish/i);
+    expect(res.body.error).toMatch(/timed out/i);
+    expect(await memoryContents(agent.id)).toEqual([kept.content]);
+
+    // The aborted turn still cleaned up: no conversation row, no work
+    // folder, no held lease.
+    const after = await leftovers(agent.id);
+    expect(after.conversations).toHaveLength(0);
+    expect(after.dirs).toEqual([]);
+    const fingerprint = await codexAuthFingerprint(authState.userId);
+    const leases = await db
+      .select()
+      .from(providerLeasesTable)
+      .where(eq(providerLeasesTable.key, codexLeaseKey(fingerprint!)));
+    expect(leases).toHaveLength(0);
+  });
+
+  it("never leaks raw detail from an unknown Codex runtime failure", async () => {
+    const agent = await createAgent(`${RUN_TAG} Groomer Exploded`);
+    const kept = await seedMemory(agent.id, `${RUN_TAG} survives runtime failure`);
+    fetchMock.mockClear();
+    turnScript = [
+      failingTurn(
+        "ECONNRESET at /home/runner/.codex/auth.json token=sk-secret-999",
+      ),
+    ];
+
+    const res = await request(app).post(
+      `/api/agents/${agent.id}/memory/refresh`,
+    );
+    expect(res.status).toBe(502);
+    expect(res.body.error).toMatch(/Codex provider error/i);
+    expect(res.body.error).not.toMatch(/ECONNRESET|auth\.json|sk-secret/);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await memoryContents(agent.id)).toEqual([kept.content]);
   });
 });

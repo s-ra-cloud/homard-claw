@@ -34,6 +34,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { apiErrorMessage } from "@/lib/api-error";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Dialog,
@@ -100,12 +101,6 @@ async function readTextFile(file: File): Promise<string> {
     );
   }
   return text;
-}
-
-function apiErrorMessage(error: unknown, fallback: string): string {
-  const data = (error as { response?: { data?: { error?: string } } })?.response
-    ?.data;
-  return data?.error ?? fallback;
 }
 
 function MemoryEditorDialog({
@@ -1123,6 +1118,10 @@ export default function MemoryPage() {
         });
       }
     } catch (error) {
+      // A dropped connection or proxy timeout can hide a review that
+      // actually finished server-side, so re-fetch the list either way —
+      // a genuinely failed refresh changed nothing, making this harmless.
+      queryClient.invalidateQueries({ queryKey: getListMemoriesQueryKey() });
       toast({
         title: "Could not refresh memories",
         description: apiErrorMessage(error, "Try again."),
