@@ -2285,7 +2285,8 @@ components:
         disconnected: { type: boolean }
     GithubConnectionInfo:
       type: object
-      required: [method, appConfigured, oauthConfigured, installation, oauthLogin]
+      required:
+        [method, appConfigured, oauthConfigured, installation, oauthLogin]
       properties:
         method:
           type: [string, "null"]
@@ -2302,7 +2303,8 @@ components:
           description: Whether this server offers the legacy OAuth flow.
         installation:
           type: [object, "null"]
-          required: [accountLogin, accountType, repositorySelection, connectedAt]
+          required:
+            [accountLogin, accountType, repositorySelection, connectedAt]
           properties:
             accountLogin: { type: string }
             accountType:
@@ -3211,7 +3213,8 @@ components:
         # generation and orphaned running work was requeued.
         outcome:
           type: string
-          enum: [already_active, healthy_elsewhere, stalled_elsewhere, recovered]
+          enum:
+            [already_active, healthy_elsewhere, stalled_elsewhere, recovered]
         ownershipChanged: { type: boolean }
         # Orphaned tasks OF THE CALLING WORKSPACE requeued by this pass.
         # The pass itself is global (one worker serves every workspace),
@@ -3439,15 +3442,25 @@ components:
         decision: { type: string, enum: [approved, rejected] }
     ApprovalSettings:
       type: object
-      required: [reviewerAgentId, reviewerAgentName]
+      required:
+        [
+          reviewerAgentId,
+          reviewerAgentName,
+          alwaysApproveEverything,
+          failedTaskRetryLimit,
+        ]
       properties:
         reviewerAgentId: { type: [string, "null"] }
         reviewerAgentName: { type: [string, "null"] }
+        alwaysApproveEverything: { type: boolean }
+        failedTaskRetryLimit: { type: number, minimum: 1, maximum: 3 }
     ApprovalSettingsInput:
       type: object
       required: [reviewerAgentId]
       properties:
         reviewerAgentId: { type: [string, "null"] }
+        alwaysApproveEverything: { type: boolean }
+        failedTaskRetryLimit: { type: number, minimum: 1, maximum: 3 }
     ProviderStatus:
       type: object
       required:

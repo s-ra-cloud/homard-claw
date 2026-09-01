@@ -714,7 +714,7 @@ export const GoogleOauthStartRequestService = {
 } as const;
 
 /**
- * Which Google-backed app to request consent for. Omitting the body (or the service) starts a Gmail flow; google_drive runs an incremental consent that adds Drive scopes to the same account.
+ * Which Google-backed app to request consent for. Omitting the body (or the service) starts a Gmail flow; google_drive runs an incremental consent that adds Drive scopes to the same account — including full Google Drive access, so agents can organize existing files (create folders, rename, move) with per-action owner approval. Deleting files and changing sharing are never offered.
  */
 export interface GoogleOauthStartRequest {
   service?: GoogleOauthStartRequestService;
@@ -1911,11 +1911,23 @@ export interface ApprovalSettings {
   reviewerAgentId: string | null;
   /** @nullable */
   reviewerAgentName: string | null;
+  alwaysApproveEverything: boolean;
+  /**
+     * @minimum 1
+     * @maximum 3
+     */
+  failedTaskRetryLimit: number;
 }
 
 export interface ApprovalSettingsInput {
   /** @nullable */
   reviewerAgentId: string | null;
+  alwaysApproveEverything?: boolean;
+  /**
+     * @minimum 1
+     * @maximum 3
+     */
+  failedTaskRetryLimit?: number;
 }
 
 export type ProviderStatusProvider = typeof ProviderStatusProvider[keyof typeof ProviderStatusProvider];

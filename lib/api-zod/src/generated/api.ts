@@ -1381,22 +1381,40 @@ export const ListApprovalsResponse = zod.array(ListApprovalsResponseItem)
 /**
  * @summary Read the automatic approval reviewer selection
  */
+export const getApprovalSettingsResponseFailedTaskRetryLimitMax = 3;
+
+
+
 export const GetApprovalSettingsResponse = zod.object({
   "reviewerAgentId": zod.string().nullable(),
-  "reviewerAgentName": zod.string().nullable()
+  "reviewerAgentName": zod.string().nullable(),
+  "alwaysApproveEverything": zod.boolean(),
+  "failedTaskRetryLimit": zod.number().min(1).max(getApprovalSettingsResponseFailedTaskRetryLimitMax)
 })
 
 
 /**
  * @summary Select or disable the automatic approval reviewer
  */
+export const updateApprovalSettingsBodyFailedTaskRetryLimitMax = 3;
+
+
+
 export const UpdateApprovalSettingsBody = zod.object({
-  "reviewerAgentId": zod.string().nullable()
+  "reviewerAgentId": zod.string().nullable(),
+  "alwaysApproveEverything": zod.boolean().optional(),
+  "failedTaskRetryLimit": zod.number().min(1).max(updateApprovalSettingsBodyFailedTaskRetryLimitMax).optional()
 })
+
+export const updateApprovalSettingsResponseFailedTaskRetryLimitMax = 3;
+
+
 
 export const UpdateApprovalSettingsResponse = zod.object({
   "reviewerAgentId": zod.string().nullable(),
-  "reviewerAgentName": zod.string().nullable()
+  "reviewerAgentName": zod.string().nullable(),
+  "alwaysApproveEverything": zod.boolean(),
+  "failedTaskRetryLimit": zod.number().min(1).max(updateApprovalSettingsResponseFailedTaskRetryLimitMax)
 })
 
 
@@ -3924,7 +3942,7 @@ export const UninstallCapabilityResponse = zod.object({
  */
 export const StartGoogleOauthBody = zod.object({
   "service": zod.enum(['gmail', 'google_drive']).optional()
-}).describe('Which Google-backed app to request consent for. Omitting the body (or the service) starts a Gmail flow; google_drive runs an incremental consent that adds Drive scopes to the same account.\n')
+}).describe('Which Google-backed app to request consent for. Omitting the body (or the service) starts a Gmail flow; google_drive runs an incremental consent that adds Drive scopes to the same account — including full Google Drive access, so agents can organize existing files (create folders, rename, move) with per-action owner approval. Deleting files and changing sharing are never offered.\n')
 
 export const StartGoogleOauthResponse = zod.object({
   "authUrl": zod.string().describe('Google consent URL the browser should navigate to.')

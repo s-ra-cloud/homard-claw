@@ -11,4 +11,10 @@ export interface ApprovalSettings {
   reviewerAgentId: string | null;
   /** @nullable */
   reviewerAgentName: string | null;
+  alwaysApproveEverything: boolean;
+  /**
+     * @minimum 1
+     * @maximum 3
+     */
+  failedTaskRetryLimit: number;
 }

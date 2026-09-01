@@ -17,8 +17,28 @@ import { notifyTaskEvent } from "./notifications";
 import { resolveRouting } from "./providers";
 import { recordAudit } from "./audit";
 import { runCodexTalkTurn } from "./talk-codex";
+import {
+  FAILED_TASK_RETRY_LIMIT_SETTING,
+  MAX_FAILED_TASK_RETRY_LIMIT,
+  getFailedTaskRetryLimit,
+  getWorkspaceSetting,
+  setWorkspaceSetting,
+} from "./workspace";
 
 export const APPROVAL_REVIEWER_SETTING = "approval_reviewer_agent_id";
+
+/** Owner override: skip the approval desk entirely and approve on sight. */
+export const ALWAYS_APPROVE_EVERYTHING_SETTING = "always_approve_everything";
+
+export async function workspaceAlwaysApproves(
+  workspaceId: string,
+): Promise<boolean> {
+  const value = await getWorkspaceSetting(
+    workspaceId,
+    ALWAYS_APPROVE_EVERYTHING_SETTING,
+  );
+  return value === "true";
+}
 
 const REVIEW_TIMEOUT_MS = 45_000;
 const STALE_REVIEW_MS = 5 * 60_000;
@@ -254,6 +274,77 @@ export async function updateApprovalReviewerSettings(
   };
 }
 
+/**
+ * The shared approval preferences shown on both the task board and the
+ * approval board: the AI reviewer selection, the owner's blunt
+ * "always approve everything" override, and the failed-task retry ceiling.
+ * One workspace-wide truth, read and written through this single API.
+ */
+export type ApprovalSettings = ApprovalReviewerSettings & {
+  alwaysApproveEverything: boolean;
+  failedTaskRetryLimit: number;
+};
+
+export async function getApprovalSettings(
+  workspaceId: string,
+): Promise<ApprovalSettings> {
+  const [reviewer, alwaysApproveEverything, failedTaskRetryLimit] =
+    await Promise.all([
+      getApprovalReviewerSettings(workspaceId),
+      workspaceAlwaysApproves(workspaceId),
+      getFailedTaskRetryLimit(workspaceId),
+    ]);
+  return { ...reviewer, alwaysApproveEverything, failedTaskRetryLimit };
+}
+
+export type ApprovalSettingsUpdate = {
+  reviewerAgentId: string | null;
+  /** Omitted fields are left exactly as they were. */
+  alwaysApproveEverything?: boolean;
+  failedTaskRetryLimit?: number;
+};
+
+export async function updateApprovalSettings(
+  workspaceId: string,
+  input: ApprovalSettingsUpdate,
+): Promise<ApprovalSettings> {
+  if (
+    input.failedTaskRetryLimit !== undefined &&
+    (!Number.isInteger(input.failedTaskRetryLimit) ||
+      input.failedTaskRetryLimit < 1 ||
+      input.failedTaskRetryLimit > MAX_FAILED_TASK_RETRY_LIMIT)
+  ) {
+    throw new ApprovalReviewerSettingsError(
+      400,
+      `The retry limit must be a whole number between 1 and ${MAX_FAILED_TASK_RETRY_LIMIT}.`,
+    );
+  }
+  const reviewer = await updateApprovalReviewerSettings(
+    workspaceId,
+    input.reviewerAgentId,
+  );
+  if (input.alwaysApproveEverything !== undefined) {
+    await setWorkspaceSetting(
+      workspaceId,
+      ALWAYS_APPROVE_EVERYTHING_SETTING,
+      input.alwaysApproveEverything ? "true" : "false",
+    );
+  }
+  if (input.failedTaskRetryLimit !== undefined) {
+    await setWorkspaceSetting(
+      workspaceId,
+      FAILED_TASK_RETRY_LIMIT_SETTING,
+      String(input.failedTaskRetryLimit),
+    );
+  }
+  const [alwaysApproveEverything, failedTaskRetryLimit] = await Promise.all([
+    workspaceAlwaysApproves(workspaceId),
+    getFailedTaskRetryLimit(workspaceId),
+  ]);
+  publish(workspaceId, "approvals");
+  return { ...reviewer, alwaysApproveEverything, failedTaskRetryLimit };
+}
+
 /** Values stamped on a new approval. Null means notify the owner directly. */
 export async function approvalReviewSnapshot(workspaceId: string): Promise<{
   reviewerAgentId: string;
@@ -341,7 +432,6 @@ async function claimNextReview(
     };
   });
 }
-
 
 function clip(value: string, max: number): string {
   return value.length > max ? `${value.slice(0, max - 1)}…` : value;
