@@ -962,6 +962,26 @@ async function parkForContinuation(
   );
 }
 
+/**
+ * Plain-language failure announcements. A provider call can finish without
+ * a technical error yet still report, in its own words, that the task
+ * failed — an objective carried over from a prior failed attempt, or a
+ * final answer like "I was unable to complete this task." Those attempts
+ * must not be filed as `completed`: the malformed-app-actions check above
+ * catches one structural way a "success" is hollow, this catches the model
+ * saying so directly.
+ */
+const FAILURE_LANGUAGE_PATTERN =
+  /\b(this task (?:has )?failed|task failed|i (?:was|am) unable to complete|i could not complete|i (?:was|am) not able to complete|unable to complete (?:this|the) task|failed to complete (?:this|the) task|could not be completed|did not complete successfully|i (?:was|am) unable to finish|attempt failed)\b/i;
+
+function reportsFailure(
+  ...texts: Array<string | null | undefined>
+): boolean {
+  return texts.some(
+    (text) => text != null && FAILURE_LANGUAGE_PATTERN.test(text),
+  );
+}
+
 /** Execute one claimed task attempt end to end. */
 export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
   const provider = task.provider as ProviderId;
@@ -2309,6 +2329,73 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
           workspaceId,
           "task.failed",
           `A task for ${agent.name} failed: every connected-app request it produced was malformed, so no action ran.`,
+        );
+      } else {
+        // Cancelled (or stopped) while the call was in flight; keep that
+        // status but still record what the attempt consumed.
+        await db
+          .update(tasksTable)
+          .set(usage)
+          .where(
+            and(
+              eq(tasksTable.id, task.id),
+              eq(tasksTable.attempts, task.attempts),
+            ),
+          );
+        await setTaskPhase(task.id, task.attempts, "cancelled", workspaceId);
+      }
+      return;
+    }
+    // Neither a technical error nor a structurally hollow success — but the
+    // task's own description or the model's final answer may still say, in
+    // plain language, that it failed. Trust that over a default "completed"
+    // status: a false positive costs an extra attempt, a false negative
+    // hides a failure from retry handling entirely.
+    if (reportsFailure(task.objective, finalOutput)) {
+      const failureMessage =
+        "The task's description or the provider's final output reported failure in plain language, so this attempt is recorded as failed instead of completed.";
+      if (task.attempts < maxAttempts) {
+        const backoffMs = RETRY_BACKOFF_MS * task.attempts;
+        await db
+          .update(tasksTable)
+          .set({
+            ...usage,
+            status: "queued",
+            notBefore: new Date(Date.now() + backoffMs),
+            errorKind: "reported_failure",
+            errorMessage: failureMessage,
+            output: finalOutput,
+          })
+          .where(
+            and(
+              eq(tasksTable.id, task.id),
+              eq(tasksTable.status, "running"),
+              eq(tasksTable.attempts, task.attempts),
+            ),
+          );
+        await setTaskPhase(task.id, task.attempts, "failed", workspaceId);
+        await addTaskLog(
+          task.id,
+          "warn",
+          `${failureMessage} Retrying in ${Math.round(backoffMs / 1000)}s (attempt ${task.attempts} of ${maxAttempts}).`,
+        );
+        publish(workspaceId, "tasks");
+        return;
+      }
+      const failed = await finishIfStillRunning(task.id, task.attempts, {
+        ...usage,
+        status: "failed",
+        errorKind: "reported_failure",
+        errorMessage: failureMessage,
+        output: finalOutput,
+      });
+      if (failed) {
+        await setTaskPhase(task.id, task.attempts, "failed", workspaceId);
+        await addTaskLog(task.id, "error", `Failed: ${failureMessage}`);
+        await recordAudit(
+          workspaceId,
+          "task.failed",
+          `A task for ${agent.name} failed: its description or output reported failure.`,
         );
       } else {
         // Cancelled (or stopped) while the call was in flight; keep that
