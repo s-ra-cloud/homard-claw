@@ -210,6 +210,36 @@ describe("schedule CRUD", () => {
       Date.now(),
     );
 
+    const edited = await request(app)
+      .patch(`/api/schedules/${created.body.id}`)
+      .send({
+        name: `${RUN_TAG} roster renamed`,
+        objective: `${RUN_TAG} revised objective`,
+        priority: "high",
+        cadence: "weekly",
+        timeOfDay: "14:30",
+        daysOfWeek: [2, 4],
+        budgetCents: 500,
+      });
+    expect(edited.status).toBe(200);
+    expect(edited.body).toMatchObject({
+      name: `${RUN_TAG} roster renamed`,
+      objective: `${RUN_TAG} revised objective`,
+      priority: "high",
+      cadence: "weekly",
+      timeOfDay: "14:30",
+      daysOfWeek: [2, 4],
+      budgetCents: 500,
+    });
+    expect(new Date(edited.body.nextRunAt).getTime()).toBeGreaterThan(
+      Date.now(),
+    );
+
+    const fetched = await request(app).get("/api/schedules");
+    expect(
+      fetched.body.find((s: { id: string }) => s.id === created.body.id),
+    ).toMatchObject({ name: `${RUN_TAG} roster renamed`, cadence: "weekly" });
+
     const deleted = await request(app).delete(
       `/api/schedules/${created.body.id}`,
     );
