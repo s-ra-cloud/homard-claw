@@ -22,7 +22,6 @@ import AgentsPage from "@/pages/AgentsPage";
 import NewAgentPage from "@/pages/NewAgentPage";
 import EditAgentPage from "@/pages/EditAgentPage";
 import TasksPage from "@/pages/TasksPage";
-import TeamsPage from "@/pages/TeamsPage";
 import TalkPage from "@/pages/TalkPage";
 import ApprovalsPage from "@/pages/ApprovalsPage";
 import ProvidersPage from "@/pages/ProvidersPage";
@@ -229,8 +228,10 @@ function ClerkProviderWithRoutes() {
               <ProtectedRoute component={TasksPage} />
             </Route>
 
+            {/* Teams moved into the Crustabots page as its Teams tab; this
+                keeps old links and bookmarks working. */}
             <Route path="/teams">
-              <ProtectedRoute component={TeamsPage} />
+              <Redirect to="/agents?tab=teams" />
             </Route>
 
             <Route path="/talk">

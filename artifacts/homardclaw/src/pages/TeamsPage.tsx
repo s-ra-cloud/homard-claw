@@ -9,7 +9,6 @@ import {
   useListAgents,
   type Team,
 } from "@workspace/api-client-react";
-import { Shell } from "@/components/layout/Shell";
 import { PixelCard } from "@/components/ui/pixel-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,7 +23,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
-import { Crown, Plus, Trash2, UserMinus, UserPlus, Users } from "lucide-react";
+import { Crown, Plus, Trash2, UserMinus, UserPlus } from "lucide-react";
 
 const selectTriggerClass =
   "bg-background border-4 border-border rounded-none focus:ring-0 focus:border-primary font-mono text-sm uppercase";
@@ -324,7 +323,12 @@ function TeamCard({
   );
 }
 
-export default function TeamsPage() {
+/**
+ * The Teams tab of the Crustabots page (see AgentsPage). Team controls used
+ * to live on their own routed page; they now share the Crustabot menu with
+ * the roster so team management has one discoverable home.
+ */
+export function TeamsPanel() {
   const { data: teams, isLoading } = useListTeams({
     query: { queryKey: TEAMS_KEY },
   });
@@ -336,41 +340,33 @@ export default function TeamsPage() {
     .map((agent) => ({ id: agent.id, name: agent.name, title: agent.title }));
 
   return (
-    <Shell>
-      <div className="p-4 sm:p-6 space-y-6 max-w-5xl">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="font-display uppercase text-2xl flex items-center gap-2">
-              <Users className="w-6 h-6 text-primary" />
-              Teams
-            </h1>
-            <p className="font-mono text-xs text-muted-foreground mt-1">
-              A team's lead can hand parts of its own work to teammates. Nobody
-              outside a team can be delegated to.
-            </p>
-          </div>
-          <NewTeamForm agents={roster} />
-        </div>
-
-        {isLoading ? (
-          <p className="font-mono text-xs uppercase text-muted-foreground animate-pulse">
-            Loading teams...
-          </p>
-        ) : (teams ?? []).length === 0 ? (
-          <PixelCard className="p-6">
-            <p className="font-mono text-sm text-muted-foreground">
-              No teams yet. Create one, add a few lobsters, and name a lead —
-              then the lead can split its tasks across the team.
-            </p>
-          </PixelCard>
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2">
-            {teams!.map((team) => (
-              <TeamCard key={team.id} team={team} agents={roster} />
-            ))}
-          </div>
-        )}
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="font-mono text-xs text-muted-foreground max-w-2xl">
+          A team's lead can hand parts of its own work to teammates. Nobody
+          outside a team can be delegated to.
+        </p>
+        <NewTeamForm agents={roster} />
       </div>
-    </Shell>
+
+      {isLoading ? (
+        <p className="font-mono text-xs uppercase text-muted-foreground animate-pulse">
+          Loading teams...
+        </p>
+      ) : (teams ?? []).length === 0 ? (
+        <PixelCard className="p-6">
+          <p className="font-mono text-sm text-muted-foreground">
+            No teams yet. Create one, add a few lobsters, and name a lead —
+            then the lead can split its tasks across the team.
+          </p>
+        </PixelCard>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2">
+          {teams!.map((team) => (
+            <TeamCard key={team.id} team={team} agents={roster} />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

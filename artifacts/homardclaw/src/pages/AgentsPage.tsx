@@ -9,6 +9,7 @@ import { PixelCard } from "@/components/ui/pixel-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MarlowLobster } from "@/components/ui/marlow-lobster";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Palmtree,
   Pause,
@@ -18,15 +19,28 @@ import {
   Server,
   Shield,
 } from "lucide-react";
-import { Link, useLocation } from "wouter";
+import { Link, useLocation, useSearch } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
+import { TeamsPanel } from "./TeamsPage";
+
+type AgentsTab = "roster" | "teams";
 
 export default function AgentsPage() {
   const { data: agents, isLoading } = useListAgents();
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
+  const search = useSearch();
   const { toast } = useToast();
+
+  const activeTab: AgentsTab =
+    new URLSearchParams(search).get("tab") === "teams" ? "teams" : "roster";
+
+  const handleTabChange = (tab: string) => {
+    setLocation(tab === "teams" ? "/agents?tab=teams" : "/agents", {
+      replace: true,
+    });
+  };
 
   const invalidateRoster = () => {
     queryClient.invalidateQueries({ queryKey: ["/api/agents"] });
@@ -105,24 +119,42 @@ export default function AgentsPage() {
   return (
     <Shell>
       <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6 sm:space-y-8">
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b-4 border-border pb-6">
+        <div className="space-y-4 border-b-4 border-border pb-6">
           <div>
             <h1 className="font-display text-lg sm:text-2xl text-foreground uppercase mb-2">
-              Crustabot Roster
+              Crustabots
             </h1>
             <p className="text-muted-foreground text-sm">
-              Manage your configurable Crustabot crew.
+              Manage your configurable Crustabot crew and the teams they work
+              in.
             </p>
           </div>
-          <Link href="/agents/new">
-            <Button variant="primary">
-              <Plus className="w-4 h-4 mr-2" />
-              Recruit Crustabot
-            </Button>
-          </Link>
+          <Tabs value={activeTab} onValueChange={handleTabChange}>
+            <TabsList>
+              <TabsTrigger value="roster" data-testid="tab-roster">
+                Roster
+              </TabsTrigger>
+              <TabsTrigger value="teams" data-testid="tab-teams">
+                Teams
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
         </div>
 
-        {isLoading ? (
+        {activeTab === "roster" && (
+          <div className="flex justify-end">
+            <Link href="/agents/new">
+              <Button variant="primary">
+                <Plus className="w-4 h-4 mr-2" />
+                Recruit Crustabot
+              </Button>
+            </Link>
+          </div>
+        )}
+
+        {activeTab === "teams" ? (
+          <TeamsPanel />
+        ) : isLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
             {[1, 2, 3].map((i) => (
               <PixelCard key={i} className="animate-pulse h-64 bg-muted/50">
