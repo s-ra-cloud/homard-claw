@@ -51,6 +51,8 @@ export const SCENE_HOTSPOTS: SceneHotspot[] = [
   },
   // Crustabot and Team navigation lives on two unused instrument banks in the
   // port control console. The four wall computers are workstations only.
+  // Both banks open the Crustabots page — Teams lands on its Teams tab —
+  // since team navigation now lives inside the Crustabot menu.
   {
     href: "/agents",
     label: "Crustabots",
@@ -62,7 +64,7 @@ export const SCENE_HOTSPOTS: SceneHotspot[] = [
     extraClass: "scene-hotspot--console",
   },
   {
-    href: "/teams",
+    href: "/agents?tab=teams",
     label: "Teams",
     ariaLabel: "Centre server instrument bank — open Teams",
     left: "16.7%",
