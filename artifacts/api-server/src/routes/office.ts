@@ -147,8 +147,8 @@ import {
 } from "../approvals";
 import {
   ApprovalReviewerSettingsError,
-  getApprovalReviewerSettings,
-  updateApprovalReviewerSettings,
+  getApprovalSettings,
+  updateApprovalSettings,
 } from "../approval-reviewer";
 import { findRegistryEntry } from "../capabilities/registry";
 import connectedAppsRouter from "./connected-apps";
@@ -1729,7 +1729,7 @@ router.get("/approvals", async (req, res): Promise<void> => {
 router.get("/approvals/settings", async (req, res): Promise<void> => {
   res.json(
     GetApprovalSettingsResponse.parse(
-      await getApprovalReviewerSettings(req.workspaceId!),
+      await getApprovalSettings(req.workspaceId!),
     ),
   );
 });
@@ -1741,10 +1741,7 @@ router.put("/approvals/settings", async (req, res): Promise<void> => {
     return;
   }
   try {
-    const settings = await updateApprovalReviewerSettings(
-      req.workspaceId!,
-      body.data.reviewerAgentId,
-    );
+    const settings = await updateApprovalSettings(req.workspaceId!, body.data);
     res.json(UpdateApprovalSettingsResponse.parse(settings));
   } catch (error) {
     if (error instanceof ApprovalReviewerSettingsError) {

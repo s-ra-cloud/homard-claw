@@ -11,6 +11,7 @@ import {
   ApprovalDecisionDecision,
 } from "@workspace/api-client-react";
 import { Shell } from "@/components/layout/Shell";
+import { AlwaysApproveSwitch } from "@/components/approvals/approval-preferences";
 import { PixelCard } from "@/components/ui/pixel-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -134,6 +135,10 @@ export default function ApprovalsPage() {
             {pendingApprovals.length} Pending
           </Badge>
         </div>
+
+        <PixelCard className="border-border">
+          <AlwaysApproveSwitch idPrefix="approvals-board" />
+        </PixelCard>
 
         <PixelCard className="border-accent/50">
           <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)] md:items-center">

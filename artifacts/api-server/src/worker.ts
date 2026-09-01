@@ -98,7 +98,10 @@ import { logger } from "./lib/logger";
 import {
   approvalReviewSnapshot,
   reviewPendingApprovals,
+  workspaceAlwaysApproves,
 } from "./approval-reviewer";
+import { ApprovalDecisionError, decideApproval } from "./approvals";
+import { getFailedTaskRetryLimit } from "./workspace";
 
 /**
  * Persistent task runner: the tasks table is the queue, this module is the
@@ -665,6 +668,26 @@ async function autoApproveTalkTask(
   return approved;
 }
 
+/**
+ * Owner override for "always approve everything": decide a just-parked
+ * approval exactly as an owner clicking Approve would, requeuing its task.
+ * Returns false (harmlessly) if the approval was already decided elsewhere
+ * in the moment between parking and this call.
+ */
+async function autoApproveParkedApproval(
+  workspaceId: string,
+  approvalId: string | null,
+): Promise<boolean> {
+  if (!approvalId) return false;
+  try {
+    await decideApproval({ workspaceId, approvalId, decision: "approved" });
+    return true;
+  } catch (error) {
+    if (error instanceof ApprovalDecisionError) return false;
+    throw error;
+  }
+}
+
 async function settleAgentStatus(
   agentId: string,
   workspaceId?: string | null,
@@ -686,7 +709,11 @@ async function parkForApproval(
   { task, agent }: ClaimedTask,
   reason: string,
 ): Promise<void> {
-  const review = await approvalReviewSnapshot(agent.workspaceId!);
+  const workspaceId = agent.workspaceId!;
+  const alwaysApprove = await workspaceAlwaysApproves(workspaceId);
+  const review = alwaysApprove
+    ? null
+    : await approvalReviewSnapshot(workspaceId);
   const parked = await db.transaction(async (tx) => {
     const [updated] = await tx
       .update(tasksTable)
@@ -699,7 +726,7 @@ async function parkForApproval(
         ),
       )
       .returning({ id: tasksTable.id });
-    if (!updated) return false;
+    if (!updated) return { ok: false as const, approvalId: null };
     const [pending] = await tx
       .select({ id: approvalsTable.id })
       .from(approvalsTable)
@@ -710,15 +737,20 @@ async function parkForApproval(
         ),
       )
       .limit(1);
+    let approvalId = pending?.id ?? null;
     if (!pending) {
-      await tx.insert(approvalsTable).values({
-        agentId: agent.id,
-        taskId: task.id,
-        action: `Run task: ${task.objective.slice(0, 120)}`,
-        details: reason,
-        expiresAt: new Date(Date.now() + APPROVAL_TTL_MS),
-        ...(review ?? {}),
-      });
+      const [inserted] = await tx
+        .insert(approvalsTable)
+        .values({
+          agentId: agent.id,
+          taskId: task.id,
+          action: `Run task: ${task.objective.slice(0, 120)}`,
+          details: reason,
+          expiresAt: new Date(Date.now() + APPROVAL_TTL_MS),
+          ...(review ?? {}),
+        })
+        .returning({ id: approvalsTable.id });
+      approvalId = inserted.id;
     } else if (review) {
       // A recovered task can encounter an older pending row. Attach the
       // current reviewer before suppressing the owner notification so the
@@ -740,13 +772,24 @@ async function parkForApproval(
       `${agent.name} needs approval to run a task: ${reason}`,
       tx,
     );
-    return true;
+    return { ok: true as const, approvalId };
   });
-  if (parked) {
-    publish(agent.workspaceId, "tasks", "approvals", "overview");
-    if (!review) await notifyTaskEvent("approval_needed", task, reason);
+  if (parked.ok) {
+    publish(workspaceId, "tasks", "approvals", "overview");
+    const autoApproved =
+      alwaysApprove &&
+      (await autoApproveParkedApproval(workspaceId, parked.approvalId));
+    if (!autoApproved && !review) {
+      await notifyTaskEvent("approval_needed", task, reason);
+    }
   }
-  await addTaskLog(task.id, "info", `Waiting for your approval: ${reason}`);
+  await addTaskLog(
+    task.id,
+    "info",
+    alwaysApprove
+      ? `Automatically approved because "always approve everything" is enabled: ${reason}`
+      : `Waiting for your approval: ${reason}`,
+  );
 }
 
 /**
@@ -766,7 +809,11 @@ async function parkForAppAction(
     definitionRevision?: string | null;
   },
 ): Promise<void> {
-  const review = await approvalReviewSnapshot(agent.workspaceId!);
+  const workspaceId = agent.workspaceId!;
+  const alwaysApprove = await workspaceAlwaysApproves(workspaceId);
+  const review = alwaysApprove
+    ? null
+    : await approvalReviewSnapshot(workspaceId);
   const parked = await db.transaction(async (tx) => {
     const [updated] = await tx
       .update(tasksTable)
@@ -779,7 +826,7 @@ async function parkForAppAction(
         ),
       )
       .returning({ id: tasksTable.id });
-    if (!updated) return false;
+    if (!updated) return { ok: false as const, approvalId: null };
     const [approval] = await tx
       .insert(approvalsTable)
       .values({
@@ -809,11 +856,14 @@ async function parkForAppAction(
       `${agent.name} asked to use a connected app: ${request.targetSummary}. Waiting for the owner.`,
       tx,
     );
-    return true;
+    return { ok: true as const, approvalId: approval.id as string | null };
   });
-  if (parked) {
-    publish(agent.workspaceId, "tasks", "approvals", "overview");
-    if (!review) {
+  if (parked.ok) {
+    publish(workspaceId, "tasks", "approvals", "overview");
+    const autoApproved =
+      alwaysApprove &&
+      (await autoApproveParkedApproval(workspaceId, parked.approvalId));
+    if (!autoApproved && !review) {
       await notifyTaskEvent(
         "approval_needed",
         task,
@@ -824,7 +874,9 @@ async function parkForAppAction(
   await addTaskLog(
     task.id,
     "info",
-    `Waiting for your approval to run: ${request.targetSummary}`,
+    alwaysApprove
+      ? `Automatically approved because "always approve everything" is enabled: ${request.targetSummary}`
+      : `Waiting for your approval to run: ${request.targetSummary}`,
   );
 }
 
@@ -844,7 +896,11 @@ async function parkForContinuation(
 ): Promise<void> {
   const segment = task.continuationSegments + 1;
   const details = `${agent.name} used all ${MAX_ACTION_ROUNDS} connected-app action rounds in this segment and still has actions to run. Approving continues the SAME task for one more bounded segment under the same round limit, remaining budget, and current app grants (write actions still need their own approval). Rejecting ends the task with the work completed so far.`;
-  const review = await approvalReviewSnapshot(agent.workspaceId!);
+  const workspaceId = agent.workspaceId!;
+  const alwaysApprove = await workspaceAlwaysApproves(workspaceId);
+  const review = alwaysApprove
+    ? null
+    : await approvalReviewSnapshot(workspaceId);
   const parked = await db.transaction(async (tx) => {
     const [updated] = await tx
       .update(tasksTable)
@@ -863,27 +919,33 @@ async function parkForContinuation(
         ),
       )
       .returning({ id: tasksTable.id });
-    if (!updated) return false;
-    await tx.insert(approvalsTable).values({
-      agentId: agent.id,
-      taskId: task.id,
-      kind: "task_continuation",
-      action: `Continue task: ${task.objective.slice(0, 120)}`,
-      details,
-      expiresAt: new Date(Date.now() + APPROVAL_TTL_MS),
-      ...(review ?? {}),
-    });
+    if (!updated) return { ok: false as const, approvalId: null };
+    const [inserted] = await tx
+      .insert(approvalsTable)
+      .values({
+        agentId: agent.id,
+        taskId: task.id,
+        kind: "task_continuation",
+        action: `Continue task: ${task.objective.slice(0, 120)}`,
+        details,
+        expiresAt: new Date(Date.now() + APPROVAL_TTL_MS),
+        ...(review ?? {}),
+      })
+      .returning({ id: approvalsTable.id });
     await recordAudit(
       agent.workspaceId,
       "approval.requested",
       `${agent.name} paused a task at the connected-app round limit and needs approval to continue it (bounded segment ${segment + 1}).`,
       tx,
     );
-    return true;
+    return { ok: true as const, approvalId: inserted.id };
   });
-  if (parked) {
-    publish(agent.workspaceId, "tasks", "approvals", "overview");
-    if (!review) {
+  if (parked.ok) {
+    publish(workspaceId, "tasks", "approvals", "overview");
+    const autoApproved =
+      alwaysApprove &&
+      (await autoApproveParkedApproval(workspaceId, parked.approvalId));
+    if (!autoApproved && !review) {
       await notifyTaskEvent(
         "approval_needed",
         task,
@@ -894,7 +956,9 @@ async function parkForContinuation(
   await addTaskLog(
     task.id,
     "info",
-    `Paused at the connected-app round limit (${MAX_ACTION_ROUNDS} rounds used this segment). Waiting for your approval to continue with the remaining actions.`,
+    alwaysApprove
+      ? `Automatically approved another bounded segment because "always approve everything" is enabled (${MAX_ACTION_ROUNDS} rounds used).`
+      : `Paused at the connected-app round limit (${MAX_ACTION_ROUNDS} rounds used this segment). Waiting for your approval to continue with the remaining actions.`,
   );
 }
 
@@ -929,12 +993,15 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     .limit(1);
   agent = freshAgent ?? agent;
   const perms = effectivePermissions(agent);
+  const retryLimit = await getFailedTaskRetryLimit(workspaceId);
 
   // Retry ceiling, checked before anything is dispatched. The claim already
   // consumed this attempt, so a cap of 0 blocks the very first run, and a
-  // cap tightened after the task was queued applies immediately.
+  // cap tightened after the task was queued (by policy or the owner's
+  // workspace-wide retry limit) applies immediately.
   const maxAttempts = Math.min(
     MAX_ATTEMPTS,
+    retryLimit,
     perms.maxAttempts !== null ? perms.maxAttempts : MAX_ATTEMPTS,
   );
   if (task.attempts > maxAttempts) {

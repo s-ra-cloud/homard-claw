@@ -297,6 +297,30 @@ export async function setWorkspaceSetting(
     });
 }
 
+/** Owner-configurable ceiling on automatic attempts for a failed task. */
+export const FAILED_TASK_RETRY_LIMIT_SETTING = "failed_task_retry_limit";
+export const MAX_FAILED_TASK_RETRY_LIMIT = 3;
+export const DEFAULT_FAILED_TASK_RETRY_LIMIT = MAX_FAILED_TASK_RETRY_LIMIT;
+
+/** Falls back to the default whenever unset or outside the allowed range. */
+export async function getFailedTaskRetryLimit(
+  workspaceId: string,
+): Promise<number> {
+  const raw = await getWorkspaceSetting(
+    workspaceId,
+    FAILED_TASK_RETRY_LIMIT_SETTING,
+  );
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  if (
+    !Number.isInteger(parsed) ||
+    parsed < 1 ||
+    parsed > MAX_FAILED_TASK_RETRY_LIMIT
+  ) {
+    return DEFAULT_FAILED_TASK_RETRY_LIMIT;
+  }
+  return parsed;
+}
+
 /**
  * One-time startup migration: create the legacy workspace for the recorded
  * single owner and hand every pre-workspace row to it. Idempotent — each

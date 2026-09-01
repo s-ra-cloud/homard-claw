@@ -8,7 +8,7 @@
 import type { GoogleOauthStartRequestService } from './googleOauthStartRequestService';
 
 /**
- * Which Google-backed app to request consent for. Omitting the body (or the service) starts a Gmail flow; google_drive runs an incremental consent that adds Drive scopes to the same account.
+ * Which Google-backed app to request consent for. Omitting the body (or the service) starts a Gmail flow; google_drive runs an incremental consent that adds Drive scopes to the same account — including full Google Drive access, so agents can organize existing files (create folders, rename, move) with per-action owner approval. Deleting files and changing sharing are never offered.
  */
 export interface GoogleOauthStartRequest {
   service?: GoogleOauthStartRequestService;

@@ -31,6 +31,10 @@ import {
   type InputAttachment,
 } from "@workspace/api-client-react";
 import { Shell } from "@/components/layout/Shell";
+import {
+  AlwaysApproveSwitch,
+  FailedTaskRetryLimitSelect,
+} from "@/components/approvals/approval-preferences";
 import { AppActionList } from "@/components/app-action-list";
 import { PixelCard } from "@/components/ui/pixel-card";
 import { Badge } from "@/components/ui/badge";
@@ -1820,6 +1824,13 @@ export default function TasksPage() {
         </div>
 
         <QueueHealthPanel />
+
+        <PixelCard className="border-border">
+          <div className="grid gap-5 sm:grid-cols-2">
+            <AlwaysApproveSwitch idPrefix="task-board" />
+            <FailedTaskRetryLimitSelect idPrefix="task-board" />
+          </div>
+        </PixelCard>
 
         {tasksLoading ? (
           <div className="space-y-4">
