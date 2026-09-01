@@ -351,6 +351,57 @@ describe("worker execution", () => {
     expect(String(call?.[0])).toContain("openrouter.ai");
   });
 
+  it("treats a plainly-worded failure in the model's output as failed, not completed, and retries it", async () => {
+    const agent = await createAgent(`${RUN_TAG} SelfReported`);
+    const task = await insertTask(agent.id, { status: "running", attempts: 1 });
+    const selfReportedFailure = () =>
+      jsonResponse({
+        choices: [
+          {
+            message: {
+              content: "I was unable to complete this task: the source file was missing.",
+            },
+          },
+        ],
+        usage: { prompt_tokens: 100, completion_tokens: 20 },
+      });
+    fetchMock.mockResolvedValueOnce(selfReportedFailure());
+
+    await runTask({ task, agent: await loadAgent(agent.id) });
+    const requeued = await getTaskRow(task.id);
+    expect(requeued?.status).toBe("queued");
+    expect(requeued?.errorKind).toBe("reported_failure");
+    expect(requeued?.notBefore && requeued.notBefore > new Date()).toBe(true);
+
+    // Final attempt exhausts the retry budget: it must land on `failed`,
+    // never `completed`, even though the provider call itself succeeded.
+    const [lastAttempt] = await db
+      .update(tasksTable)
+      .set({ status: "running", attempts: 3 })
+      .where(eq(tasksTable.id, task.id))
+      .returning();
+    fetchMock.mockResolvedValueOnce(selfReportedFailure());
+    await runTask({ task: lastAttempt!, agent: await loadAgent(agent.id) });
+    const failed = await getTaskRow(task.id);
+    expect(failed?.status).toBe("failed");
+    expect(failed?.errorKind).toBe("reported_failure");
+  });
+
+  it("fails a task whose own description reports failure, even with an unremarkable output", async () => {
+    const agent = await createAgent(`${RUN_TAG} DescriptionFlag`);
+    const task = await insertTask(agent.id, {
+      status: "running",
+      attempts: 1,
+      objective: `${RUN_TAG} this task failed on the previous run, please retry`,
+    });
+    fetchMock.mockResolvedValueOnce(jsonResponse(OPENROUTER_SUCCESS));
+
+    await runTask({ task, agent: await loadAgent(agent.id) });
+    const requeued = await getTaskRow(task.id);
+    expect(requeued?.status).toBe("queued");
+    expect(requeued?.errorKind).toBe("reported_failure");
+  });
+
   it("fails with a structured auth error when the provider rejects the credential", async () => {
     const agent = await createAgent(`${RUN_TAG} Rejected`);
     const task = await insertTask(agent.id, {
