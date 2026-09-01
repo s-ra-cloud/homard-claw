@@ -6,7 +6,6 @@ import {
   useUpdateSchedule,
   useDeleteSchedule,
   type Schedule,
-  type ScheduleInput,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Shell } from "@/components/layout/Shell";
@@ -22,6 +21,7 @@ import {
   Power,
   Clock,
   AlertTriangle,
+  Pencil,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
@@ -48,6 +48,15 @@ function cadenceSummary(schedule: Schedule): string {
     return `Weekly on ${days} at ${schedule.timeOfDay}`;
   }
   return `Monthly on day ${schedule.dayOfMonth} at ${schedule.timeOfDay}`;
+}
+
+// datetime-local inputs render in the browser's local time, mirroring how
+// `submit()` turns that value back into an absolute instant with `new
+// Date(...).toISOString()`.
+function toDatetimeLocalValue(value: string | Date): string {
+  const date = new Date(value);
+  const offsetMs = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
 }
 
 function statusBadge(status: string | null | undefined) {
@@ -79,8 +88,9 @@ export default function SchedulesPage() {
   );
 
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  const [form, setForm] = useState({
+  const emptyForm = () => ({
     name: "",
     agentId: "",
     objective: "",
@@ -99,6 +109,32 @@ export default function SchedulesPage() {
       onApprovalNeeded: true,
     },
   });
+  const [form, setForm] = useState(emptyForm);
+
+  const startEdit = (schedule: Schedule) => {
+    setEditingId(schedule.id);
+    setForm({
+      name: schedule.name,
+      agentId: schedule.agentId,
+      objective: schedule.objective,
+      priority: schedule.priority as "low" | "normal" | "high",
+      cadence: schedule.cadence as Cadence,
+      timezone: schedule.timezone,
+      runAt: schedule.runAt ? toDatetimeLocalValue(schedule.runAt) : "",
+      timeOfDay: schedule.timeOfDay ?? "09:00",
+      daysOfWeek: schedule.daysOfWeek ?? [1, 2, 3, 4, 5],
+      dayOfMonth: schedule.dayOfMonth ?? 1,
+      budgetCents:
+        schedule.budgetCents != null ? String(schedule.budgetCents) : "",
+      notify: schedule.notify,
+    });
+    setShowForm(true);
+  };
+
+  const closeForm = () => {
+    setShowForm(false);
+    setEditingId(null);
+  };
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ["/api/schedules"] });
@@ -108,8 +144,8 @@ export default function SchedulesPage() {
     mutation: {
       onSuccess: () => {
         invalidate();
-        setShowForm(false);
-        setForm((prev) => ({ ...prev, name: "", objective: "" }));
+        closeForm();
+        setForm(emptyForm());
         toast({ title: "Schedule created" });
       },
       onError: (error) =>
@@ -122,7 +158,16 @@ export default function SchedulesPage() {
   });
   const updateSchedule = useUpdateSchedule({
     mutation: {
-      onSuccess: invalidate,
+      onSuccess: (_data, variables) => {
+        invalidate();
+        // The Pause/Resume toggle also goes through this hook and should
+        // keep working without popping the edit panel open or shut.
+        if (variables.scheduleId === editingId) {
+          closeForm();
+          setForm(emptyForm());
+          toast({ title: "Schedule updated" });
+        }
+      },
       onError: (error) =>
         toast({
           title: "Could not update schedule",
@@ -156,44 +201,47 @@ export default function SchedulesPage() {
       });
       return;
     }
-    const data: ScheduleInput = {
+    if (form.cadence === "once" && !form.runAt) {
+      toast({
+        title: "Missing run time",
+        description: "Pick when the one-time schedule should fire.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (form.cadence === "weekly" && form.daysOfWeek.length === 0) {
+      toast({
+        title: "Missing weekdays",
+        description: "Pick at least one day of the week.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const timing =
+      form.cadence === "once"
+        ? { runAt: new Date(form.runAt).toISOString() }
+        : form.cadence === "weekly"
+          ? { timeOfDay: form.timeOfDay, daysOfWeek: form.daysOfWeek }
+          : form.cadence === "monthly"
+            ? { timeOfDay: form.timeOfDay, dayOfMonth: form.dayOfMonth }
+            : { timeOfDay: form.timeOfDay };
+    const common = {
       name: form.name.trim(),
-      agentId: form.agentId,
       objective: form.objective.trim(),
       priority: form.priority,
       cadence: form.cadence,
       timezone: form.timezone,
       notify: form.notify,
+      ...timing,
       ...(form.budgetCents !== "" && Number(form.budgetCents) > 0
         ? { budgetCents: Number(form.budgetCents) }
         : {}),
     };
-    if (form.cadence === "once") {
-      if (!form.runAt) {
-        toast({
-          title: "Missing run time",
-          description: "Pick when the one-time schedule should fire.",
-          variant: "destructive",
-        });
-        return;
-      }
-      data.runAt = new Date(form.runAt).toISOString();
+    if (editingId) {
+      updateSchedule.mutate({ scheduleId: editingId, data: common });
     } else {
-      data.timeOfDay = form.timeOfDay;
-      if (form.cadence === "weekly") {
-        if (form.daysOfWeek.length === 0) {
-          toast({
-            title: "Missing weekdays",
-            description: "Pick at least one day of the week.",
-            variant: "destructive",
-          });
-          return;
-        }
-        data.daysOfWeek = form.daysOfWeek;
-      }
-      if (form.cadence === "monthly") data.dayOfMonth = form.dayOfMonth;
+      createSchedule.mutate({ data: { ...common, agentId: form.agentId } });
     }
-    createSchedule.mutate({ data });
   };
 
   const inputCls =
@@ -213,17 +261,30 @@ export default function SchedulesPage() {
             </p>
           </div>
           <Button
-            onClick={() => setShowForm((v) => !v)}
+            onClick={() => {
+              if (showForm && !editingId) {
+                closeForm();
+              } else {
+                setEditingId(null);
+                setForm(emptyForm());
+                setShowForm(true);
+              }
+            }}
             className="pixel-shadow uppercase text-xs font-bold"
             data-testid="button-new-schedule"
           >
             <Plus className="w-4 h-4 mr-2" />
-            {showForm ? "Close" : "New Schedule"}
+            {showForm && !editingId ? "Close" : "New Schedule"}
           </Button>
         </div>
 
         {showForm && (
           <PixelCard className="p-4 sm:p-6 space-y-4">
+            {editingId && (
+              <p className="text-xs font-bold uppercase text-muted-foreground">
+                Editing schedule
+              </p>
+            )}
             <div className="grid sm:grid-cols-2 gap-4">
               <div>
                 <label className="text-xs font-bold uppercase text-muted-foreground block mb-1">
@@ -244,6 +305,7 @@ export default function SchedulesPage() {
                 <select
                   className={inputCls}
                   value={form.agentId}
+                  disabled={!!editingId}
                   onChange={(e) =>
                     setForm({ ...form, agentId: e.target.value })
                   }
@@ -256,6 +318,11 @@ export default function SchedulesPage() {
                     </option>
                   ))}
                 </select>
+                {editingId && (
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Delete and recreate the schedule to reassign it.
+                  </p>
+                )}
               </div>
             </div>
             <div>
@@ -464,14 +531,32 @@ export default function SchedulesPage() {
                 ))}
               </div>
             </div>
-            <Button
-              onClick={submit}
-              disabled={createSchedule.isPending}
-              className="pixel-shadow uppercase text-xs font-bold"
-              data-testid="button-create-schedule"
-            >
-              {createSchedule.isPending ? "Creating…" : "Create Schedule"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                onClick={submit}
+                disabled={createSchedule.isPending || updateSchedule.isPending}
+                className="pixel-shadow uppercase text-xs font-bold"
+                data-testid="button-create-schedule"
+              >
+                {editingId
+                  ? updateSchedule.isPending
+                    ? "Saving…"
+                    : "Save Changes"
+                  : createSchedule.isPending
+                    ? "Creating…"
+                    : "Create Schedule"}
+              </Button>
+              {editingId && (
+                <Button
+                  variant="outline"
+                  onClick={closeForm}
+                  className="uppercase text-xs font-bold"
+                  data-testid="button-cancel-edit"
+                >
+                  Cancel
+                </Button>
+              )}
+            </div>
           </PixelCard>
         )}
 
@@ -538,6 +623,16 @@ export default function SchedulesPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="uppercase text-[10px] font-bold"
+                      onClick={() => startEdit(schedule)}
+                      data-testid={`button-edit-${schedule.id}`}
+                    >
+                      <Pencil className="w-3 h-3 mr-1" />
+                      Edit
+                    </Button>
                     <Button
                       variant="outline"
                       size="sm"
