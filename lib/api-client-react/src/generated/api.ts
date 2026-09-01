@@ -1050,7 +1050,7 @@ export const getRefreshAgentMemoryUrl = (agentId: string,) => {
 }
 
 /**
- * @summary Force an immediate memory refresh for one Crustabot
+ * @summary Review and refresh one Crustabot's durable memories now
  */
 export const refreshAgentMemory = async (agentId: string, options?: Parameters<typeof customFetch>[1]): Promise<MemoryRefreshResult> => {
 
@@ -1099,7 +1099,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RefreshAgentMemoryMutationError = ErrorType<void>
 
     /**
- * @summary Force an immediate memory refresh for one Crustabot
+ * @summary Review and refresh one Crustabot's durable memories now
  */
 export const useRefreshAgentMemory = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshAgentMemory>>, TError,{agentId: string}, TContext>, request?: SecondParameter<typeof customFetch>}

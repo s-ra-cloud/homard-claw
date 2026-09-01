@@ -5,10 +5,13 @@
  * Crustabox private Crustabot office API
  * OpenAPI spec version: 0.1.0
  */
+import type { MemoryRefreshResultStatus } from './memoryRefreshResultStatus';
 
 export interface MemoryRefreshResult {
-  taskId: string;
   agentId: string;
   agentName: string;
-  status: string;
+  status: MemoryRefreshResultStatus;
+  added: number;
+  updated: number;
+  removed: number;
 }

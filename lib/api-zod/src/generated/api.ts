@@ -1129,17 +1129,19 @@ export const RetireAgentResponse = zod.object({
 
 
 /**
- * @summary Force an immediate memory refresh for one Crustabot
+ * @summary Review and refresh one Crustabot's durable memories now
  */
 export const RefreshAgentMemoryParams = zod.object({
   "agentId": zod.coerce.string()
 })
 
 export const RefreshAgentMemoryResponse = zod.object({
-  "taskId": zod.string(),
   "agentId": zod.string(),
   "agentName": zod.string(),
-  "status": zod.string()
+  "status": zod.enum(['updated', 'no_changes']),
+  "added": zod.number(),
+  "updated": zod.number(),
+  "removed": zod.number()
 })
 
 

@@ -135,6 +135,7 @@ export * from './memoryInputKind';
 export * from './memoryKind';
 export * from './memoryList';
 export * from './memoryRefreshResult';
+export * from './memoryRefreshResultStatus';
 export * from './memorySettings';
 export * from './memorySettingsInput';
 export * from './memoryUpdate';

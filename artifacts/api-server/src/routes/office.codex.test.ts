@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import express from "express";
 import request from "supertest";
@@ -2544,6 +2544,84 @@ describe("Codex Talk conversations", () => {
       await db
         .delete(agentMessagesTable)
         .where(eq(agentMessagesTable.fromAgentId, agent.id));
+    }
+  });
+});
+
+describe("manual memory refresh through Codex", () => {
+  /** Conversations and workspace folders left behind for one agent. */
+  async function leftovers(agentId: string) {
+    const conversations = await db
+      .select()
+      .from(providerConversationsTable)
+      .where(eq(providerConversationsTable.agentId, agentId));
+    const dirs = await readdir(path.join(workspaceRoot, agentId)).catch(
+      () => [] as string[],
+    );
+    return { conversations, dirs };
+  }
+
+  it("runs ephemerally: repeated refreshes accumulate no conversations or work folders", async () => {
+    const agent = await createAgent(`${RUN_TAG} Memory Groomer`);
+    turnScript = [
+      successTurn('{"add":[],"update":[],"remove":[]}'),
+      successTurn('{"add":[],"update":[],"remove":[]}'),
+    ];
+
+    for (let round = 0; round < 2; round++) {
+      const res = await request(app).post(
+        `/api/agents/${agent.id}/memory/refresh`,
+      );
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe("no_changes");
+    }
+    // Both reviews really went through the scripted Codex SDK…
+    expect(sdkCalls).toHaveLength(2);
+    // …under the forced maintenance sandbox: read-only and offline, even
+    // though this agent's own settings (assistant preset, autonomous, no
+    // sensitive-data flag) would normally allow workspace writes.
+    for (const call of sdkCalls) {
+      expect(call.options?.sandboxMode).toBe("read-only");
+      expect(call.options?.networkAccessEnabled).toBe(false);
+    }
+    // …yet neither left a provider conversation row or a work folder.
+    const afterSuccess = await leftovers(agent.id);
+    expect(afterSuccess.conversations).toHaveLength(0);
+    expect(afterSuccess.dirs).toEqual([]);
+
+    // A failed review (unusable reply) must clean up just the same.
+    turnScript = [successTurn("All memories look great to me, no JSON needed.")];
+    const bad = await request(app).post(
+      `/api/agents/${agent.id}/memory/refresh`,
+    );
+    expect(bad.status).toBe(502);
+    const afterFailure = await leftovers(agent.id);
+    expect(afterFailure.conversations).toHaveLength(0);
+    expect(afterFailure.dirs).toEqual([]);
+  });
+
+  it("leaves no conversation row behind when workspace setup itself fails", async () => {
+    const agent = await createAgent(`${RUN_TAG} Groomer Blocked`);
+    // A regular file where a directory must go makes every mkdir under it
+    // fail — the same trick the workspace-preparation tests use — so the
+    // conversation row is created but its directory never materializes.
+    const blocker = path.join(workspaceRoot, `refresh-blocker-${Date.now()}`);
+    await mkdir(workspaceRoot, { recursive: true });
+    await writeFile(blocker, "not a directory");
+    vi.stubEnv("CODEX_WORKSPACE_ROOT", path.join(blocker, "sub"));
+    try {
+      const res = await request(app).post(
+        `/api/agents/${agent.id}/memory/refresh`,
+      );
+      expect(res.status).toBeGreaterThanOrEqual(400);
+      const rows = await db
+        .select()
+        .from(providerConversationsTable)
+        .where(eq(providerConversationsTable.agentId, agent.id));
+      expect(rows).toHaveLength(0);
+    } finally {
+      vi.stubEnv("CODEX_WORKSPACE_ROOT", workspaceRoot);
+      await rm(blocker, { force: true });
     }
   });
 });

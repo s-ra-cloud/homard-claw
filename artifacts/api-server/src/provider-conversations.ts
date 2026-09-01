@@ -1,6 +1,9 @@
+import { rm } from "node:fs/promises";
+import path from "node:path";
 import { db, providerConversationsTable } from "@workspace/db";
 import type { ProviderConversationRecord } from "@workspace/db";
 import { and, desc, eq } from "drizzle-orm";
+import { codexWorkspaceRoot } from "./codex/config";
 import { ensureCodexWorkspace } from "./codex/execute";
 import type { ProviderId } from "./providers";
 
@@ -59,7 +62,19 @@ export async function resolveConversation(
       workspacePath: "",
     })
     .returning();
-  const workspacePath = await ensureCodexWorkspace(agentId, created.id);
+  let workspacePath: string;
+  try {
+    workspacePath = await ensureCodexWorkspace(agentId, created.id);
+  } catch (error) {
+    // The row precedes its directory so the id can name it; if the
+    // directory never materializes the row must not survive either, or
+    // every failed setup would leave a dangling conversation behind.
+    await db
+      .delete(providerConversationsTable)
+      .where(eq(providerConversationsTable.id, created.id))
+      .catch(() => {});
+    throw error;
+  }
   const [updated] = await db
     .update(providerConversationsTable)
     .set({ workspacePath })
@@ -144,4 +159,38 @@ export async function getConversation(
     .where(eq(providerConversationsTable.id, conversationId))
     .limit(1);
   return row ?? null;
+}
+
+/**
+ * Destroy a conversation outright: delete its row and remove its isolated
+ * workspace directory. For ephemeral one-shot system turns (e.g. memory
+ * maintenance) that must never accumulate provider conversations or Codex
+ * work folders on disk.
+ *
+ * The directory is only removed when it clearly lives under the configured
+ * Codex workspace root — a drifted or empty stored path is never fed to a
+ * recursive delete. The row is deleted even when the filesystem cleanup
+ * fails: a leaked directory is bounded scratch space, but a surviving row
+ * would keep the "conversation" alive forever.
+ */
+export async function destroyConversation(
+  conversation: ProviderConversationRecord,
+): Promise<void> {
+  let rmFailure: unknown = null;
+  const root = codexWorkspaceRoot();
+  if (
+    root &&
+    conversation.workspacePath &&
+    conversation.workspacePath.startsWith(root + path.sep)
+  ) {
+    try {
+      await rm(conversation.workspacePath, { recursive: true, force: true });
+    } catch (error) {
+      rmFailure = error;
+    }
+  }
+  await db
+    .delete(providerConversationsTable)
+    .where(eq(providerConversationsTable.id, conversation.id));
+  if (rmFailure !== null) throw rmFailure;
 }

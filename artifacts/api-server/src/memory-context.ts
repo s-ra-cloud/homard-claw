@@ -293,7 +293,7 @@ export class MemoryQuotaError extends Error {
 }
 
 /** Advisory lock key serializing memory quota checks with inserts. */
-const MEMORY_QUOTA_LOCK = 872_001;
+export const MEMORY_QUOTA_LOCK = 872_001;
 /** Advisory lock key serializing knowledge storage quota checks. */
 export const KNOWLEDGE_QUOTA_LOCK = 872_002;
 

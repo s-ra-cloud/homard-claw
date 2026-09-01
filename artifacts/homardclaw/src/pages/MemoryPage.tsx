@@ -1099,13 +1099,32 @@ export default function MemoryPage() {
       const result = await refreshAgentMemory.mutateAsync({
         agentId: refreshAgentId,
       });
-      toast({
-        title: `Memory refresh triggered for ${result.agentName}`,
-        description: "It's now queued and will run shortly.",
-      });
+      // The refresh applied (or skipped) changes synchronously; show the
+      // reviewed list right away.
+      queryClient.invalidateQueries({ queryKey: getListMemoriesQueryKey() });
+      if (result.status === "no_changes") {
+        toast({
+          title: `${result.agentName}'s memories are already current`,
+          description: "It reviewed its memory bank and found nothing to change.",
+        });
+      } else {
+        const parts = [
+          result.added > 0 ? `added ${result.added}` : null,
+          result.updated > 0 ? `updated ${result.updated}` : null,
+          result.removed > 0 ? `removed ${result.removed}` : null,
+        ].filter(Boolean);
+        toast({
+          title: `Memory refresh complete for ${result.agentName}`,
+          description: `It ${parts.join(", ")} ${
+            result.added + result.updated + result.removed === 1
+              ? "memory"
+              : "memories"
+          }.`,
+        });
+      }
     } catch (error) {
       toast({
-        title: "Could not trigger memory refresh",
+        title: "Could not refresh memories",
         description: apiErrorMessage(error, "Try again."),
         variant: "destructive",
       });
@@ -1180,8 +1199,8 @@ export default function MemoryPage() {
                   Force memory update
                 </h2>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Queue an immediate memory refresh for one Crustabot instead
-                  of waiting for it to happen automatically.
+                  Have one Crustabot review its saved memories right now and
+                  apply corrections — nothing is added to the task queue.
                 </p>
               </div>
             </div>
@@ -1212,7 +1231,7 @@ export default function MemoryPage() {
                 data-testid="button-refresh-agent-memory"
               >
                 <RefreshCw className="w-4 h-4 mr-1" />
-                {refreshAgentMemory.isPending ? "Triggering..." : "Update now"}
+                {refreshAgentMemory.isPending ? "Reviewing..." : "Update now"}
               </Button>
             </div>
           </div>

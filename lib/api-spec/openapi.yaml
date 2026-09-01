@@ -229,12 +229,12 @@ paths:
     post:
       operationId: refreshAgentMemory
       tags: [office]
-      summary: Force an immediate memory refresh for one Crustabot
+      summary: Review and refresh one Crustabot's durable memories now
       parameters:
         - $ref: "#/components/parameters/AgentId"
       responses:
-        "201":
-          description: Memory refresh queued
+        "200":
+          description: Memory review finished and validated changes applied
           content:
             application/json:
               schema:
@@ -242,9 +242,17 @@ paths:
         "404":
           description: Crustabot not found
         "409":
-          description: Crustabot is retired or archived
+          description:
+            Crustabot is retired or archived, the emergency stop is engaged,
+            or the memory limit is reached
         "422":
-          description: Requested provider/model/reasoning is not allowed
+          description: Provider routing or configuration is not usable
+        "429":
+          description: Provider is rate limited or its allowance is exhausted
+        "502":
+          description: Provider returned an unusable memory review
+        "503":
+          description: Provider did not finish in time; retry shortly
   /island/agents:
     get:
       operationId: listRetiredAgents
@@ -3663,12 +3671,14 @@ components:
         compressionAgentId: { type: [string, "null"] }
     MemoryRefreshResult:
       type: object
-      required: [taskId, agentId, agentName, status]
+      required: [agentId, agentName, status, added, updated, removed]
       properties:
-        taskId: { type: string }
         agentId: { type: string }
         agentName: { type: string }
-        status: { type: string }
+        status: { type: string, enum: [updated, no_changes] }
+        added: { type: number }
+        updated: { type: number }
+        removed: { type: number }
     Memory:
       type: object
       required:

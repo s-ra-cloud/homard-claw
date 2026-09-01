@@ -2213,11 +2213,21 @@ export interface MemorySettingsInput {
   compressionAgentId: string | null;
 }
 
+export type MemoryRefreshResultStatus = typeof MemoryRefreshResultStatus[keyof typeof MemoryRefreshResultStatus];
+
+
+export const MemoryRefreshResultStatus = {
+  updated: 'updated',
+  no_changes: 'no_changes',
+} as const;
+
 export interface MemoryRefreshResult {
-  taskId: string;
   agentId: string;
   agentName: string;
-  status: string;
+  status: MemoryRefreshResultStatus;
+  added: number;
+  updated: number;
+  removed: number;
 }
 
 export type MemoryKind = typeof MemoryKind[keyof typeof MemoryKind];

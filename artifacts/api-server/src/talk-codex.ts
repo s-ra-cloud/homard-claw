@@ -16,11 +16,13 @@ import {
   renewProviderLease,
 } from "./provider-leases";
 import {
+  destroyConversation,
   markConversationUnresumable,
   recordThreadId,
   resolveConversation,
   touchConversation,
 } from "./provider-conversations";
+import type { ProviderConversationRecord } from "@workspace/db";
 import { loadAgentAppAccess } from "./connected-apps/authorize";
 import { sanitizeErrorMessage } from "./lib/sanitize";
 
@@ -183,6 +185,22 @@ export type CodexTalkRequest = {
   signal: AbortSignal;
   /** Start a fresh isolated conversation for one-shot system work. */
   conversationMode?: "continue" | "new";
+  /**
+   * Destroy the conversation (row and isolated workspace directory) once
+   * the turn ends, success or failure. For maintenance turns that need no
+   * continuity: without this, every one-shot turn would leave a permanent
+   * provider conversation and Codex work folder behind. Implies a fresh
+   * conversation — an agent's resumable task thread is never destroyed.
+   */
+  ephemeral?: boolean;
+  /**
+   * Force the sensitive-data sandbox for this turn no matter what the
+   * agent's live app-access settings say. Maintenance turns (memory
+   * review) run under the strictest profile by design; without this flag
+   * the fresh settings load below would replace the caller's `true` with
+   * the agent's own — possibly relaxed — persisted value.
+   */
+  forceSensitiveDataSandbox?: boolean;
 };
 
 /**
@@ -278,27 +296,39 @@ export async function runCodexTalkTurn(
   }, codexLeaseHeartbeatMs());
   heartbeat.unref?.();
 
+  // Every conversation an ephemeral turn touches is destroyed on the way
+  // out — success or failure — so one-shot maintenance work never piles up
+  // conversation rows or Codex work folders.
+  const ephemeralConversations: ProviderConversationRecord[] = [];
   try {
     // Sandbox inputs are loaded fresh so a sensitive-data flag toggled a
     // moment ago applies to this very turn. A load failure fails closed to
     // the agent row's own persisted flag.
     let sensitiveDataSandbox = input.agent.sensitiveDataSandbox;
-    try {
-      sensitiveDataSandbox = (
-        await loadAgentAppAccess(input.agent.id, input.agent.workspaceId)
-      ).sensitiveDataSandbox;
-    } catch (error) {
-      logger.warn(
-        { agentId: input.agent.id, error },
-        "Could not load app access for a Talk turn; using the agent's persisted sandbox flag",
-      );
+    if (input.forceSensitiveDataSandbox) {
+      // A forced sandbox is not negotiable — skip the live load entirely
+      // so no settings read can ever relax it.
+      sensitiveDataSandbox = true;
+    } else {
+      try {
+        sensitiveDataSandbox = (
+          await loadAgentAppAccess(input.agent.id, input.agent.workspaceId)
+        ).sensitiveDataSandbox;
+      } catch (error) {
+        logger.warn(
+          { agentId: input.agent.id, error },
+          "Could not load app access for a Talk turn; using the agent's persisted sandbox flag",
+        );
+      }
     }
 
     // Two attempts at most: "continue" resumes the agent's latest thread
     // for continuity; if that resume is what failed (a wiped scratch disk
     // leaves stale thread ids behind after every deploy), the conversation
     // is marked unresumable and the turn runs once more on a fresh thread.
-    let mode: "continue" | "new" = input.conversationMode ?? "continue";
+    let mode: "continue" | "new" = input.ephemeral
+      ? "new"
+      : (input.conversationMode ?? "continue");
     for (let attempt = 0; ; attempt++) {
       // The agent's most recent resumable conversation keeps continuity
       // with its task history; a fresh agent gets a fresh workspace.
@@ -320,6 +350,7 @@ export async function runCodexTalkTurn(
         );
       }
       const conversationId = conversation.id;
+      if (input.ephemeral) ephemeralConversations.push(conversation);
 
       let result: ProviderCallResult;
       try {
@@ -406,6 +437,14 @@ export async function runCodexTalkTurn(
   } finally {
     clearInterval(heartbeat);
     input.signal.removeEventListener("abort", forwardAbort);
+    for (const conversation of ephemeralConversations) {
+      await destroyConversation(conversation).catch((error: unknown) => {
+        logger.warn(
+          { agentId: input.agent.id, conversationId: conversation.id, error },
+          "Could not destroy an ephemeral Codex conversation after a turn",
+        );
+      });
+    }
     if (!leaseLost) {
       // Release deletes only our own row, so this is safe even if the
       // lease expired and was re-taken between the last beat and now.
