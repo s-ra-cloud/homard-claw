@@ -11,8 +11,12 @@
 
 import { randomBytes } from "node:crypto";
 import { Router, type IRouter, type Request } from "express";
-import { db, githubOauthStatesTable } from "@workspace/db";
-import { and, eq, isNull, lt } from "drizzle-orm";
+import {
+  db,
+  githubAccountsTable,
+  githubOauthStatesTable,
+} from "@workspace/db";
+import { and, eq, gt, isNull, lt, ne, sql } from "drizzle-orm";
 import { requireWorkspace } from "../workspace";
 import { recordAudit } from "../audit";
 import { publish } from "../events";
@@ -29,6 +33,13 @@ const router: IRouter = Router();
 router.use(requireWorkspace);
 
 const STATE_TTL_MS = 10 * 60 * 1000;
+const RECENT_CONNECTION_COOLDOWN_MS = 60 * 1000;
+const CALLBACK_CLAIM_TTL_MS = 60 * 1000;
+const GITHUB_OAUTH_TIMEOUT_MS = 15 * 1000;
+// Registry: 872001/2 memory quotas, 872003 audit chain, 872005 Talk
+// history, 872007 skills quota. This lock serializes OAuth starts per
+// workspace so repeated clicks/tabs cannot mint parallel states.
+const GITHUB_OAUTH_START_LOCK = 872_006;
 
 /** Same origin-derivation rules as the Google flow, GitHub callback path. */
 function redirectUriFor(req: Request): string {
@@ -62,25 +73,93 @@ router.post("/github/oauth/start", async (req, res, next): Promise<void> => {
   try {
     const { clientId } = githubClientConfig();
     const redirectUri = redirectUriFor(req);
-    const state = randomBytes(32).toString("base64url");
-    // Housekeeping: drop long-expired states so the table stays small.
-    await db
-      .delete(githubOauthStatesTable)
-      .where(
-        lt(githubOauthStatesTable.expiresAt, new Date(Date.now() - STATE_TTL_MS)),
+    const now = new Date();
+    const outcome = await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(${GITHUB_OAUTH_START_LOCK}, hashtext(${req.workspaceId!}))`,
       );
-    await db.insert(githubOauthStatesTable).values({
-      state,
-      workspaceId: req.workspaceId!,
-      clerkUserId: req.workspaceUserId!,
-      redirectUri,
-      expiresAt: new Date(Date.now() + STATE_TTL_MS),
+
+      // A callback that just succeeded already supplied a fresh token. Refuse
+      // another start from a stale tab instead of creating a token burst.
+      const [recent] = await tx
+        .select({ updatedAt: githubAccountsTable.updatedAt })
+        .from(githubAccountsTable)
+        .where(eq(githubAccountsTable.workspaceId, req.workspaceId!))
+        .limit(1);
+      if (
+        recent &&
+        recent.updatedAt.getTime() >
+          now.getTime() - RECENT_CONNECTION_COOLDOWN_MS
+      ) {
+        return { kind: "recent" as const };
+      }
+
+      const [inFlight] = await tx
+        .select({ state: githubOauthStatesTable.state })
+        .from(githubOauthStatesTable)
+        .where(
+          and(
+            eq(githubOauthStatesTable.workspaceId, req.workspaceId!),
+            eq(githubOauthStatesTable.clerkUserId, req.workspaceUserId!),
+            gt(
+              githubOauthStatesTable.usedAt,
+              new Date(now.getTime() - CALLBACK_CLAIM_TTL_MS),
+            ),
+          ),
+        )
+        .limit(1);
+      if (inFlight) return { kind: "in_flight" as const };
+
+      // Concurrent clicks share one state and therefore can complete at most
+      // one token exchange: the callback consumes that state atomically.
+      const [active] = await tx
+        .select({ state: githubOauthStatesTable.state })
+        .from(githubOauthStatesTable)
+        .where(
+          and(
+            eq(githubOauthStatesTable.workspaceId, req.workspaceId!),
+            eq(githubOauthStatesTable.clerkUserId, req.workspaceUserId!),
+            eq(githubOauthStatesTable.redirectUri, redirectUri),
+            isNull(githubOauthStatesTable.usedAt),
+            gt(githubOauthStatesTable.expiresAt, now),
+          ),
+        )
+        .limit(1);
+      if (active) return { kind: "state" as const, state: active.state };
+
+      const state = randomBytes(32).toString("base64url");
+      // Housekeeping: drop long-expired states so the table stays small.
+      await tx
+        .delete(githubOauthStatesTable)
+        .where(
+          lt(
+            githubOauthStatesTable.expiresAt,
+            new Date(now.getTime() - STATE_TTL_MS),
+          ),
+        );
+      await tx.insert(githubOauthStatesTable).values({
+        state,
+        workspaceId: req.workspaceId!,
+        clerkUserId: req.workspaceUserId!,
+        redirectUri,
+        expiresAt: new Date(now.getTime() + STATE_TTL_MS),
+      });
+      return { kind: "state" as const, state };
     });
+    if (outcome.kind !== "state") {
+      res.status(409).json({
+        error:
+          outcome.kind === "recent"
+            ? "GitHub was connected moments ago. Reload the page instead of reconnecting again."
+            : "A GitHub reconnect is already finishing. Wait a moment and reload the page.",
+      });
+      return;
+    }
     const url = new URL("https://github.com/login/oauth/authorize");
     url.searchParams.set("client_id", clientId);
     url.searchParams.set("redirect_uri", redirectUri);
     url.searchParams.set("scope", GITHUB_SCOPES.join(" "));
-    url.searchParams.set("state", state);
+    url.searchParams.set("state", outcome.state);
     res.json({ authUrl: url.toString() });
   } catch (error) {
     if (error instanceof GithubAuthError) {
@@ -118,115 +197,165 @@ router.get("/github/oauth/callback", async (req, res): Promise<void> => {
     fail("missing_params");
     return;
   }
-  // Consume the state exactly once, and only for the session that minted it.
-  const [row] = await db
-    .update(githubOauthStatesTable)
-    .set({ usedAt: new Date() })
-    .where(
-      and(
-        eq(githubOauthStatesTable.state, state),
-        isNull(githubOauthStatesTable.usedAt),
-      ),
-    )
-    .returning();
-  if (!row) {
+  const [candidate] = await db
+    .select()
+    .from(githubOauthStatesTable)
+    .where(eq(githubOauthStatesTable.state, state))
+    .limit(1);
+  if (!candidate) {
     fail("state");
     return;
   }
   if (
-    row.clerkUserId !== req.workspaceUserId ||
-    row.workspaceId !== req.workspaceId
+    candidate.clerkUserId !== req.workspaceUserId ||
+    candidate.workspaceId !== req.workspaceId
   ) {
     fail("session_mismatch");
     return;
   }
-  if (row.expiresAt.getTime() < Date.now()) {
+  if (candidate.expiresAt.getTime() < Date.now()) {
     fail("expired");
     return;
   }
-  let config: { clientId: string; clientSecret: string };
-  try {
-    config = githubClientConfig();
-  } catch {
-    fail("not_configured");
+
+  // One durable winner per workspace reconnect burst. The winner is marked
+  // in-flight and every sibling state is removed in the same locked
+  // transaction before any provider call. A concurrent callback that read a
+  // sibling just before deletion still loses its guarded UPDATE.
+  const row = await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(${GITHUB_OAUTH_START_LOCK}, hashtext(${candidate.workspaceId}))`,
+    );
+    const [claimed] = await tx
+      .update(githubOauthStatesTable)
+      .set({ usedAt: new Date() })
+      .where(
+        and(
+          eq(githubOauthStatesTable.state, state),
+          isNull(githubOauthStatesTable.usedAt),
+        ),
+      )
+      .returning();
+    if (!claimed) return null;
+    await tx
+      .delete(githubOauthStatesTable)
+      .where(
+        and(
+          eq(githubOauthStatesTable.workspaceId, claimed.workspaceId),
+          eq(githubOauthStatesTable.clerkUserId, claimed.clerkUserId),
+          ne(githubOauthStatesTable.state, claimed.state),
+        ),
+      );
+    return claimed;
+  });
+  if (!row) {
+    fail("state");
     return;
   }
-  let tokenResponse: Response;
-  try {
-    tokenResponse = await fetch("https://github.com/login/oauth/access_token", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Accept: "application/json",
-      },
-      body: new URLSearchParams({
-        client_id: config.clientId,
-        client_secret: config.clientSecret,
-        code,
-        redirect_uri: row.redirectUri,
-      }),
-    });
-  } catch {
-    fail("github_unreachable");
-    return;
-  }
-  if (!tokenResponse.ok) {
-    fail("exchange");
-    return;
-  }
-  const tokens = (await tokenResponse.json()) as {
-    access_token?: string;
-    scope?: string;
-    error?: string;
+
+  const releaseClaim = async (): Promise<void> => {
+    try {
+      await db
+        .delete(githubOauthStatesTable)
+        .where(eq(githubOauthStatesTable.state, state));
+    } catch {
+      // The start route ignores claims older than one minute, so a cleanup
+      // failure cannot wedge reconnects indefinitely.
+    }
   };
-  if (!tokens.access_token || tokens.error) {
-    fail("exchange");
-    return;
-  }
-  const grantedScopes = tokens.scope ?? "";
-  if (missingGithubScopes(grantedScopes).length > 0) {
-    fail("scopes");
-    return;
-  }
-  // Ask GitHub who the token belongs to — identity comes from the
-  // provider, never from anything the browser supplied.
-  let user: { id?: number; login?: string };
+
   try {
-    const userResponse = await fetch("https://api.github.com/user", {
-      headers: {
-        Authorization: `Bearer ${tokens.access_token}`,
-        Accept: "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-      },
-    });
-    if (!userResponse.ok) {
+    let config: { clientId: string; clientSecret: string };
+    try {
+      config = githubClientConfig();
+    } catch {
+      fail("not_configured");
+      return;
+    }
+    let tokenResponse: Response;
+    try {
+      tokenResponse = await fetch(
+        "https://github.com/login/oauth/access_token",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Accept: "application/json",
+          },
+          body: new URLSearchParams({
+            client_id: config.clientId,
+            client_secret: config.clientSecret,
+            code,
+            redirect_uri: row.redirectUri,
+          }),
+          signal: AbortSignal.timeout(GITHUB_OAUTH_TIMEOUT_MS),
+        },
+      );
+    } catch {
+      fail("github_unreachable");
+      return;
+    }
+    if (!tokenResponse.ok) {
+      fail("exchange");
+      return;
+    }
+    const tokens = (await tokenResponse.json()) as {
+      access_token?: string;
+      scope?: string;
+      error?: string;
+    };
+    if (!tokens.access_token || tokens.error) {
+      fail("exchange");
+      return;
+    }
+    const grantedScopes = tokens.scope ?? "";
+    if (missingGithubScopes(grantedScopes).length > 0) {
+      fail("scopes");
+      return;
+    }
+    // Ask GitHub who the token belongs to — identity comes from the
+    // provider, never from anything the browser supplied.
+    let user: { id?: number; login?: string };
+    try {
+      const userResponse = await fetch("https://api.github.com/user", {
+        headers: {
+          Authorization: `Bearer ${tokens.access_token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+        signal: AbortSignal.timeout(GITHUB_OAUTH_TIMEOUT_MS),
+      });
+      if (!userResponse.ok) {
+        fail("identity");
+        return;
+      }
+      user = (await userResponse.json()) as { id?: number; login?: string };
+    } catch {
+      fail("github_unreachable");
+      return;
+    }
+    if (typeof user.id !== "number" || !user.login) {
       fail("identity");
       return;
     }
-    user = (await userResponse.json()) as { id?: number; login?: string };
-  } catch {
-    fail("github_unreachable");
-    return;
+    await saveGithubAccount({
+      workspaceId: row.workspaceId,
+      clerkUserId: row.clerkUserId,
+      githubUserId: String(user.id),
+      login: user.login,
+      accessToken: tokens.access_token,
+      scopes: grantedScopes,
+    });
+    await recordAudit(
+      row.workspaceId,
+      "connected_app.github_connected",
+      `GitHub was connected for this workspace (@${user.login}).`,
+    );
+    publish(row.workspaceId, "overview");
+    res.redirect(connectedAppsUrl("connected"));
+  } finally {
+    await releaseClaim();
   }
-  if (typeof user.id !== "number" || !user.login) {
-    fail("identity");
-    return;
-  }
-  await saveGithubAccount({
-    workspaceId: row.workspaceId,
-    clerkUserId: row.clerkUserId,
-    githubUserId: String(user.id),
-    login: user.login,
-    accessToken: tokens.access_token,
-    scopes: grantedScopes,
-  });
-  await recordAudit(
-    row.workspaceId,
-    "connected_app.github_connected",
-    `GitHub was connected for this workspace (@${user.login}).`,
-  );
-  publish(row.workspaceId, "overview");
-  res.redirect(connectedAppsUrl("connected"));
 });
 
 /**

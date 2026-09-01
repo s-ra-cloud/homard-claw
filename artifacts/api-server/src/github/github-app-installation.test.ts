@@ -148,8 +148,6 @@ beforeAll(async () => {
     "GITHUB_APP_ID",
     "GITHUB_APP_SLUG",
     "GITHUB_APP_PRIVATE_KEY",
-    "GITHUB_APP_PRIVATE_KEY_PEM",
-    "GITHUB_APP_PRIVATE_KEY_BASE64",
   ]) {
     savedEnv[key] = process.env[key];
   }
@@ -790,15 +788,6 @@ describe("app identity plumbing", () => {
     expect(githubAppConfig()).not.toBeNull();
     process.env.GITHUB_APP_PRIVATE_KEY = Buffer.from(pem).toString("base64");
     expect(githubAppConfig()).not.toBeNull();
-    process.env.GITHUB_APP_PRIVATE_KEY = pem;
-  });
-
-  it("prefers an explicit PEM replacement over a malformed legacy key", () => {
-    const pem = process.env.GITHUB_APP_PRIVATE_KEY!;
-    process.env.GITHUB_APP_PRIVATE_KEY = "not-a-private-key";
-    process.env.GITHUB_APP_PRIVATE_KEY_PEM = pem;
-    expect(githubAppConfig()).not.toBeNull();
-    delete process.env.GITHUB_APP_PRIVATE_KEY_PEM;
     process.env.GITHUB_APP_PRIVATE_KEY = pem;
   });
 

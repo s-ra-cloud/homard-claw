@@ -828,45 +828,6 @@ export async function logGithubCredentialStartupHealth(): Promise<{
   checked: number;
   unreadable: number;
 }> {
-  try {
-    const appConfig = githubAppConfig();
-    if (appConfig) {
-      logger.info(
-        { component: "github_app", configuration: "valid" },
-        "GitHub App startup configuration is valid",
-      );
-    } else {
-      logger.info(
-        { component: "github_app", configuration: "absent" },
-        "GitHub App startup configuration is not configured",
-      );
-    }
-  } catch (error) {
-    const configuredKey =
-      process.env.GITHUB_APP_PRIVATE_KEY_BASE64 ??
-      process.env.GITHUB_APP_PRIVATE_KEY_PEM ??
-      process.env.GITHUB_APP_PRIVATE_KEY ??
-      "";
-    logger.error(
-      {
-        component: "github_app",
-        configuration: "invalid",
-        failureClass:
-          error instanceof GithubAuthError ? error.kind : "unexpected",
-        keySource: process.env.GITHUB_APP_PRIVATE_KEY_BASE64
-          ? "base64_override"
-          : process.env.GITHUB_APP_PRIVATE_KEY_PEM
-            ? "pem_override"
-            : "legacy",
-        hasBeginMarker: configuredKey.includes("-----BEGIN"),
-        hasEndMarker: configuredKey.includes("-----END"),
-        hasLineBreak:
-          configuredKey.includes("\n") || configuredKey.includes("\\n"),
-      },
-      "GitHub App startup configuration is invalid",
-    );
-  }
-
   let rows: { workspaceId: string; accessTokenEnc: string }[];
   try {
     rows = await db
