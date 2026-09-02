@@ -34,6 +34,7 @@ import { resolveRouting } from "../providers";
 import { CodexTalkError, runCodexTalkTurn } from "../talk-codex";
 import { collectTaskResultsForTalk } from "../task-results";
 import { isValidTimezone } from "../recurrence";
+import { detectDayOffGrant, sendAgentOnLeave } from "../leave";
 import {
   deleteProviderCredential,
   getProviderCredential,
@@ -822,6 +823,34 @@ async function generateReply(
   }> = [],
   ownerTimezone?: string,
 ): Promise<GeneratedReply> {
+  // A day-off grant is deterministic and self-only, so it is recognized
+  // before any model call — no cost, no risk of the model missing or
+  // inventing one. Already-on-leave is answered the same way without
+  // re-granting (idempotent: a second "take the day off" mid-leave should
+  // never push the return time back out).
+  if (detectDayOffGrant(userText)) {
+    if (agent.onLeaveUntil && agent.onLeaveUntil.getTime() > Date.now()) {
+      return {
+        reply:
+          "I'm already on Retirement Island enjoying my day off — back at 08:00 tomorrow, Europe/Paris time.",
+        taskObjective: null,
+        proposedDelegation: null,
+        pendingDelegation: null,
+        exchange: null,
+      };
+    }
+    const leave = await sendAgentOnLeave(agent.id, workspaceId);
+    if (leave.status === 200) {
+      return {
+        reply:
+          "Thank you! Heading to Retirement Island now — back at 08:00 tomorrow, Europe/Paris time.",
+        taskObjective: null,
+        proposedDelegation: null,
+        pendingDelegation: null,
+        exchange: null,
+      };
+    }
+  }
   const calendar = ownerCalendar(ownerTimezone);
   const directory = await coworkerDirectory(workspaceId, agent);
   const coworkers = agent.sensitiveDataSandbox

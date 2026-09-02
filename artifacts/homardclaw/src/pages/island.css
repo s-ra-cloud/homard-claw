@@ -534,6 +534,15 @@
   color: #447568;
 }
 
+.island__roster-card--leave {
+  border-color: #b58a2e;
+  box-shadow: 4px 4px 0 #8a6a1f;
+}
+
+.island__roster-card--leave .island__roster-date {
+  color: #b58a2e;
+}
+
 .island__state {
   min-height: 60vh;
   display: flex;

@@ -267,6 +267,20 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/RetiredAgent"
+  /island/leave:
+    get:
+      operationId: listAgentsOnLeave
+      tags: [office]
+      summary: List Crustabots currently on an approved day off
+      responses:
+        "200":
+          description: Agents on leave
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AgentOnLeave"
   /tasks:
     get:
       operationId: listTasks
@@ -2064,6 +2078,13 @@ components:
         avatar: { $ref: "#/components/schemas/AvatarConfig" }
         archived: { type: boolean }
         archivedAt: { type: ["string", "null"] }
+        onLeaveUntil:
+          type: ["string", "null"]
+          format: date-time
+          description: >-
+            Set while the agent is on an owner-granted day off; the instant
+            (Europe/Paris 08:00 the following morning) it automatically
+            returns from Retirement Island. Null when not on leave.
         createdAt: { type: string, format: date-time }
     AgentPermissions:
       type: object
@@ -2158,6 +2179,38 @@ components:
         avatar: { $ref: "#/components/schemas/AvatarConfig" }
         createdAt: { type: string, format: date-time }
         retiredAt: { type: string, format: date-time }
+    AgentOnLeave:
+      type: object
+      required:
+        [
+          id,
+          name,
+          title,
+          mission,
+          provider,
+          securityPreset,
+          avatar,
+          createdAt,
+          onLeaveUntil,
+        ]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        title: { type: string }
+        mission: { type: string }
+        provider:
+          {
+            type: ["string", "null"],
+            enum: [claude_max, codex_chatgpt, openrouter, null],
+          }
+        model: { type: ["string", "null"] }
+        securityPreset: { type: string, enum: [observer, assistant, operator] }
+        avatar: { $ref: "#/components/schemas/AvatarConfig" }
+        createdAt: { type: string, format: date-time }
+        onLeaveUntil:
+          type: string
+          format: date-time
+          description: When this Crustabot automatically returns from Retirement Island.
     AvatarConfig:
       type: object
       required: [shellColor, deskStyle, accessory]

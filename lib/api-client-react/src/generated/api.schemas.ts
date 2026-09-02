@@ -236,6 +236,11 @@ export interface Agent {
   archived: boolean;
   /** @nullable */
   archivedAt?: string | null;
+  /**
+     * Set while the agent is on an owner-granted day off; the instant (Europe/Paris 08:00 the following morning) it automatically returns from Retirement Island. Null when not on leave.
+     * @nullable
+     */
+  onLeaveUntil?: string | null;
   createdAt: string;
 }
 
@@ -503,6 +508,43 @@ export interface RetiredAgent {
   avatar: AvatarConfig;
   createdAt: string;
   retiredAt: string;
+}
+
+/**
+ * @nullable
+ */
+export type AgentOnLeaveProvider = typeof AgentOnLeaveProvider[keyof typeof AgentOnLeaveProvider] | null;
+
+
+export const AgentOnLeaveProvider = {
+  claude_max: 'claude_max',
+  codex_chatgpt: 'codex_chatgpt',
+  openrouter: 'openrouter',
+} as const;
+
+export type AgentOnLeaveSecurityPreset = typeof AgentOnLeaveSecurityPreset[keyof typeof AgentOnLeaveSecurityPreset];
+
+
+export const AgentOnLeaveSecurityPreset = {
+  observer: 'observer',
+  assistant: 'assistant',
+  operator: 'operator',
+} as const;
+
+export interface AgentOnLeave {
+  id: string;
+  name: string;
+  title: string;
+  mission: string;
+  /** @nullable */
+  provider: AgentOnLeaveProvider;
+  /** @nullable */
+  model?: string | null;
+  securityPreset: AgentOnLeaveSecurityPreset;
+  avatar: AvatarConfig;
+  createdAt: string;
+  /** When this Crustabot automatically returns from Retirement Island. */
+  onLeaveUntil: string;
 }
 
 /**
