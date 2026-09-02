@@ -1333,8 +1333,19 @@ describe("Codex serialization and recovery", () => {
     });
     expect(claimed).not.toBeNull();
     const running = runTask(claimed!);
-    // Cancel while the turn is still streaming.
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Cancel only once the SDK turn is actually in flight. A fixed sleep
+    // raced the worker's startup (workspace setup, lease acquisition, DB
+    // writes) under a loaded suite: a cancel that lands before the abort
+    // handle is registered has nothing to abort, so the hanging mock turn
+    // waits forever and the test times out. The mock records the call the
+    // moment runStreamed begins — which is strictly after the abort handle
+    // exists — and it resolves immediately when the signal is already
+    // aborted, so cancelling after this point is deterministic.
+    const startedBy = Date.now() + 15_000;
+    while (sdkCalls.length === 0) {
+      if (Date.now() > startedBy) throw new Error("SDK turn never started");
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
     await request(app).post(`/api/tasks/${task.id}/cancel`);
     await running;
 

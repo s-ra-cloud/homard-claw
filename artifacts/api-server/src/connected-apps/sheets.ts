@@ -11,6 +11,12 @@ export const MAX_MUTATION_CELLS = 500;
 export const MAX_APPEND_ROWS = 100;
 /** Longest string a single cell may carry. */
 export const MAX_CELL_CHARS = 2_000;
+/** Caps for the destructive edits: clearing values and deleting whole
+ * rows/columns. A clear may cover more cells than a write because it
+ * carries no payload to review — the approved range says it all. */
+export const MAX_CLEAR_CELLS = 5_000;
+export const MAX_DELETE_ROWS = 100;
+export const MAX_DELETE_COLUMNS = 26;
 
 /** Grid bounds we accept (Sheets itself caps a document at 10M cells). */
 const MAX_COLUMNS = 18_278; // "ZZZ"

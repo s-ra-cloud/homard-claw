@@ -60,6 +60,8 @@ const PROVIDER_BASES: Record<string, string> = {
   "https://gmail.googleapis.com": "gmail",
   "https://www.googleapis.com": "google_drive",
   "https://sheets.googleapis.com": "sheets",
+  "https://docs.googleapis.com": "docs",
+  "https://slides.googleapis.com": "slides",
   "https://api.github.com": "github",
 };
 vi.stubGlobal(
@@ -2061,6 +2063,1216 @@ describe("google sheets crash recovery", () => {
       "https://docs.google.com/spreadsheets/d/spread-9/edit",
     );
     // Only the verification read hit the provider — nothing was created.
+    expect(proxyState.calls.every((c) => c.method === "GET")).toBe(true);
+  });
+});
+
+describe("google docs executors", () => {
+  const DOC_REVISION = "rev-doc-1";
+
+  it("reads a document into an indexed outline with its revisionId", async () => {
+    proxyState.handler = (call) => {
+      if (call.connector === "docs" && call.method === "GET") {
+        expect(call.path).toContain("/v1/documents/doc-1");
+        expect(call.path).toContain("includeTabsContent=true");
+        return {
+          status: 200,
+          body: {
+            revisionId: DOC_REVISION,
+            title: "Plan",
+            tabs: [
+              {
+                tabProperties: { tabId: "t.0", title: "Plan" },
+                documentTab: {
+                  body: {
+                    content: [
+                      {
+                        startIndex: 1,
+                        endIndex: 6,
+                        paragraph: {
+                          paragraphStyle: { namedStyleType: "HEADING_1" },
+                          elements: [{ textRun: { content: "Plan\n" } }],
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.read_doc")!,
+      { fileId: "doc-1" },
+      { actionId: null, workspaceId },
+    );
+    expect(outcome.ok).toBe(true);
+    expect(outcome.ok && outcome.summary).toContain(DOC_REVISION);
+    expect(outcome.ok && outcome.summary).toContain("[1..6) HEADING_1 Plan⏎");
+    // A single-tab doc reads as a plain outline, without tab labels.
+    expect(outcome.ok && outcome.summary).not.toContain("tabId t.0");
+  });
+
+  it("labels every tab of a multi-tab document so edits can target them", async () => {
+    proxyState.handler = (call) => {
+      if (call.connector === "docs" && call.method === "GET") {
+        return {
+          status: 200,
+          body: {
+            revisionId: DOC_REVISION,
+            title: "Plan",
+            tabs: [
+              {
+                tabProperties: { tabId: "t.0", title: "Overview" },
+                documentTab: {
+                  body: {
+                    content: [
+                      {
+                        startIndex: 1,
+                        endIndex: 6,
+                        paragraph: { elements: [{ textRun: { content: "One\n" } }] },
+                      },
+                    ],
+                  },
+                },
+                childTabs: [
+                  {
+                    tabProperties: { tabId: "t.1", title: "Detail" },
+                    documentTab: {
+                      body: {
+                        content: [
+                          {
+                            startIndex: 1,
+                            endIndex: 6,
+                            paragraph: {
+                              elements: [{ textRun: { content: "Two\n" } }],
+                            },
+                          },
+                        ],
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.read_doc")!,
+      { fileId: "doc-1" },
+      { actionId: null, workspaceId },
+    );
+    expect(outcome.ok).toBe(true);
+    expect(outcome.ok && outcome.summary).toContain("2 tabs");
+    expect(outcome.ok && outcome.summary).toContain('tab "Overview" (tabId t.0)');
+    expect(outcome.ok && outcome.summary).toContain('tab "Detail" (tabId t.1)');
+  });
+
+  it("sends every edit revision-fenced through writeControl", async () => {
+    proxyState.handler = (call) => {
+      if (call.connector === "docs" && call.path.includes(":batchUpdate")) {
+        return {
+          status: 200,
+          body: { writeControl: { requiredRevisionId: "rev-doc-2" } },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.insert_doc_text")!,
+      {
+        fileId: "doc-1",
+        revisionId: DOC_REVISION,
+        index: 6,
+        text: "Hello",
+        tabId: "t.1",
+      },
+      { actionId: "act-d1", workspaceId },
+    );
+    expect(outcome.ok).toBe(true);
+    expect(outcome.ok && outcome.summary).toContain("rev-doc-2");
+    const [batch] = proxyState.calls.filter((c) => c.connector === "docs");
+    const body = batch.body as {
+      requests: Record<string, unknown>[];
+      writeControl: { requiredRevisionId: string };
+    };
+    expect(
+      (body.requests[0].insertText as { location: Record<string, unknown> })
+        .location,
+    ).toEqual({ index: 6, tabId: "t.1" });
+    expect(body.writeControl).toEqual({ requiredRevisionId: DOC_REVISION });
+    expect(body.requests).toEqual([
+      { insertText: { location: { index: 6, tabId: "t.1" }, text: "Hello" } },
+    ]);
+  });
+
+  it("translates a stale-revision 400 into a read-again failure, nothing applied", async () => {
+    proxyState.handler = (call) => {
+      if (call.connector === "docs" && call.path.includes(":batchUpdate")) {
+        return {
+          status: 400,
+          body: {
+            error: {
+              message:
+                "The provided revision ID doesn't match the latest revision.",
+            },
+          },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.delete_doc_range")!,
+      { fileId: "doc-1", revisionId: "rev-stale", startIndex: 2, endIndex: 5 },
+      { actionId: "act-d2", workspaceId },
+    );
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.kind).toBe("failed");
+    expect(!outcome.ok && outcome.message).toContain("NOTHING was changed");
+    expect(!outcome.ok && outcome.message).toContain("fresh revisionId");
+  });
+
+  it("refuses invalid ranges and empty formatting before any provider call", async () => {
+    proxyState.handler = (call) => {
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const zeroStart = await executeOperation(
+      findOperation("google_drive.delete_doc_range")!,
+      { fileId: "d", revisionId: "r", startIndex: 0, endIndex: 4 },
+      { actionId: "act-d3", workspaceId },
+    );
+    expect(zeroStart.ok).toBe(false);
+    expect(!zeroStart.ok && zeroStart.message).toContain("at least 1");
+    const noStyle = await executeOperation(
+      findOperation("google_drive.format_doc_range")!,
+      { fileId: "d", revisionId: "r", startIndex: 1, endIndex: 4 },
+      { actionId: "act-d4", workspaceId },
+    );
+    expect(noStyle.ok).toBe(false);
+    expect(!noStyle.ok && noStyle.message).toContain("No formatting");
+    expect(proxyState.calls).toHaveLength(0);
+  });
+
+  it("builds formatting requests with an exact field mask", async () => {
+    proxyState.handler = (call) => {
+      if (call.connector === "docs" && call.path.includes(":batchUpdate")) {
+        return {
+          status: 200,
+          body: { writeControl: { requiredRevisionId: "rev-doc-3" } },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.format_doc_range")!,
+      {
+        fileId: "doc-1",
+        revisionId: DOC_REVISION,
+        startIndex: 2,
+        endIndex: 9,
+        bold: "true",
+        strikethrough: "false",
+      },
+      { actionId: "act-d5", workspaceId },
+    );
+    expect(outcome.ok).toBe(true);
+    const body = proxyState.calls[0].body as {
+      requests: { updateTextStyle: Record<string, unknown> }[];
+    };
+    expect(body.requests[0].updateTextStyle).toEqual({
+      range: { startIndex: 2, endIndex: 9 },
+      textStyle: { bold: true, strikethrough: false },
+      fields: "bold,strikethrough",
+    });
+  });
+});
+
+describe("google slides executors", () => {
+  const REV = "rev-slides-1";
+
+  it("creates a presentation through one atomic Drive call with the marker", async () => {
+    proxyState.handler = (call) => {
+      if (call.connector === "google_drive" && call.method === "POST") {
+        return { status: 200, body: { id: "pres-9" } };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.create_presentation")!,
+      { name: "Q3 Review" },
+      { actionId: "act-p1", workspaceId },
+    );
+    expect(outcome.ok).toBe(true);
+    expect(outcome.ok && outcome.summary).toContain(
+      "https://docs.google.com/presentation/d/pres-9/edit",
+    );
+    const body = proxyState.calls[0].body as Record<string, unknown>;
+    expect(body.mimeType).toBe("application/vnd.google-apps.presentation");
+    expect(body.appProperties).toEqual({ homardclawActionId: "act-p1" });
+  });
+
+  it("adds a slide with a deterministic action-derived object id", async () => {
+    const actionId = "99999999-8888-7777-6666-555555555555";
+    proxyState.handler = (call) => {
+      if (call.connector === "slides" && call.path.includes(":batchUpdate")) {
+        return {
+          status: 200,
+          body: {
+            writeControl: { requiredRevisionId: "rev-slides-2" },
+            replies: [{ createSlide: { objectId: `hc-${actionId}` } }],
+          },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.add_slide")!,
+      {
+        fileId: "pres-1",
+        revisionId: REV,
+        layout: "title_and_body",
+        insertAtIndex: "2",
+      },
+      { actionId, workspaceId },
+    );
+    expect(outcome.ok).toBe(true);
+    const body = proxyState.calls[0].body as {
+      requests: { createSlide: Record<string, unknown> }[];
+      writeControl: { requiredRevisionId: string };
+    };
+    expect(body.writeControl.requiredRevisionId).toBe(REV);
+    expect(body.requests[0].createSlide).toEqual({
+      objectId: `hc-${actionId}`,
+      insertionIndex: 2,
+      slideLayoutReference: { predefinedLayout: "TITLE_AND_BODY" },
+    });
+  });
+
+  it("rejects unknown layouts, listing the vocabulary, before any call", async () => {
+    proxyState.handler = (call) => {
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.add_slide")!,
+      { fileId: "pres-1", revisionId: REV, layout: "fancy" },
+      { actionId: "act-p2", workspaceId },
+    );
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.message).toContain("title_and_body");
+    expect(proxyState.calls).toHaveLength(0);
+  });
+
+  it("refuses to delete an object that is not a slide", async () => {
+    proxyState.handler = (call) => {
+      if (call.connector === "slides" && call.method === "GET") {
+        return {
+          status: 200,
+          body: {
+            revisionId: REV,
+            slides: [{ objectId: "p1" }, { objectId: "p2" }],
+          },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.delete_slide")!,
+      { fileId: "pres-1", revisionId: REV, slideObjectId: "title-box-3" },
+      { actionId: "act-p3", workspaceId },
+    );
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.message).toContain("not a slide");
+    // The membership read went out; no mutation ever did.
+    expect(proxyState.calls.every((c) => c.method === "GET")).toBe(true);
+  });
+
+  it("refuses to duplicate an object that is not a slide", async () => {
+    proxyState.handler = (call) => {
+      if (call.connector === "slides" && call.method === "GET") {
+        return {
+          status: 200,
+          body: {
+            revisionId: REV,
+            slides: [{ objectId: "p1" }, { objectId: "p2" }],
+          },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.duplicate_slide")!,
+      { fileId: "pres-1", revisionId: REV, slideObjectId: "title-box-3" },
+      { actionId: "act-p3b", workspaceId },
+    );
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.message).toContain("not a slide");
+    // The membership read went out; no mutation ever did.
+    expect(proxyState.calls.every((c) => c.method === "GET")).toBe(true);
+  });
+
+  it("duplicates a verified slide with the action-derived copy id", async () => {
+    const actionId = "10000000-0000-4000-8000-00000000000d";
+    proxyState.handler = (call) => {
+      if (call.connector === "slides" && call.method === "GET") {
+        return {
+          status: 200,
+          body: {
+            revisionId: REV,
+            slides: [{ objectId: "p1" }, { objectId: "p2" }],
+          },
+        };
+      }
+      if (call.connector === "slides" && call.path.includes(":batchUpdate")) {
+        return {
+          status: 200,
+          body: {
+            writeControl: { requiredRevisionId: "rev-slides-4" },
+            replies: [{ duplicateObject: { objectId: `hc-${actionId}` } }],
+          },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.duplicate_slide")!,
+      { fileId: "pres-1", revisionId: REV, slideObjectId: "p2" },
+      { actionId, workspaceId },
+    );
+    expect(outcome.ok).toBe(true);
+    expect(outcome.ok && outcome.summary).toContain(`hc-${actionId}`);
+    const mutation = proxyState.calls.find((c) => c.method !== "GET")!;
+    const body = mutation.body as {
+      requests: { duplicateObject: Record<string, unknown> }[];
+      writeControl: { requiredRevisionId: string };
+    };
+    expect(body.writeControl).toEqual({ requiredRevisionId: REV });
+    expect(body.requests[0].duplicateObject).toEqual({
+      objectId: "p2",
+      objectIds: { p2: `hc-${actionId}` },
+    });
+  });
+
+  it("scopes replace_slide_text to one slide when given, and fences the edit", async () => {
+    proxyState.handler = (call) => {
+      if (call.connector === "slides" && call.method === "GET") {
+        return {
+          status: 200,
+          body: {
+            revisionId: REV,
+            slides: [
+              { objectId: "p1", pageElements: [] },
+              {
+                objectId: "p2",
+                pageElements: [
+                  {
+                    shape: {
+                      text: {
+                        textElements: [
+                          { textRun: { content: "Q2 up, Q2 down\n" } },
+                        ],
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        };
+      }
+      if (call.connector === "slides" && call.path.includes(":batchUpdate")) {
+        return {
+          status: 200,
+          body: {
+            writeControl: { requiredRevisionId: "rev-slides-3" },
+            replies: [{ replaceAllText: { occurrencesChanged: 2 } }],
+          },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.replace_slide_text")!,
+      {
+        fileId: "pres-1",
+        revisionId: REV,
+        findText: "Q2",
+        replaceText: "Q3",
+        slideObjectId: "p2",
+      },
+      { actionId: "act-p4", workspaceId },
+    );
+    expect(outcome.ok).toBe(true);
+    expect(outcome.ok && outcome.summary).toContain("2 occurrence(s)");
+    const mutation = proxyState.calls.find((c) => c.method !== "GET")!;
+    const body = mutation.body as {
+      requests: { replaceAllText: Record<string, unknown> }[];
+    };
+    expect(body.requests[0].replaceAllText).toEqual({
+      containsText: { text: "Q2", matchCase: true },
+      replaceText: "Q3",
+      pageObjectIds: ["p2"],
+    });
+  });
+
+  it("refuses a replace_slide_text beyond the occurrence bound before any mutation", async () => {
+    proxyState.handler = (call) => {
+      if (call.connector === "slides" && call.method === "GET") {
+        return {
+          status: 200,
+          body: {
+            revisionId: REV,
+            slides: [
+              {
+                objectId: "p1",
+                pageElements: [
+                  {
+                    shape: {
+                      text: {
+                        textElements: [
+                          { textRun: { content: "Q2 ".repeat(101) } },
+                        ],
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.replace_slide_text")!,
+      { fileId: "pres-1", revisionId: REV, findText: "Q2", replaceText: "Q3" },
+      { actionId: "act-p4b", workspaceId },
+    );
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.message).toContain("limited to 100");
+    expect(proxyState.calls.every((c) => c.method === "GET")).toBe(true);
+  });
+
+  it("counts a doc replace against the fenced revision and applies within the bound", async () => {
+    proxyState.handler = (call) => {
+      if (call.connector === "docs" && call.method === "GET") {
+        return {
+          status: 200,
+          body: {
+            revisionId: REV,
+            body: {
+              content: [
+                {
+                  paragraph: {
+                    elements: [{ textRun: { content: "alpha beta alpha\n" } }],
+                  },
+                },
+              ],
+            },
+          },
+        };
+      }
+      if (call.connector === "docs" && call.path.includes(":batchUpdate")) {
+        return {
+          status: 200,
+          body: {
+            writeControl: { requiredRevisionId: "rev-doc-9" },
+            replies: [{ replaceAllText: { occurrencesChanged: 2 } }],
+          },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.replace_doc_text")!,
+      { fileId: "doc-1", revisionId: REV, findText: "alpha", replaceText: "omega" },
+      { actionId: "act-d10", workspaceId },
+    );
+    expect(outcome.ok).toBe(true);
+    expect(outcome.ok && outcome.summary).toContain("2 occurrence(s)");
+  });
+
+  it("refuses a doc replace beyond the occurrence bound before any mutation", async () => {
+    proxyState.handler = (call) => {
+      if (call.connector === "docs" && call.method === "GET") {
+        return {
+          status: 200,
+          body: {
+            revisionId: REV,
+            body: {
+              content: [
+                {
+                  paragraph: {
+                    elements: [{ textRun: { content: "alpha ".repeat(101) } }],
+                  },
+                },
+              ],
+            },
+          },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.replace_doc_text")!,
+      { fileId: "doc-1", revisionId: REV, findText: "alpha", replaceText: "x" },
+      { actionId: "act-d11", workspaceId },
+    );
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.message).toContain("limited to 100");
+    expect(proxyState.calls.every((c) => c.method === "GET")).toBe(true);
+  });
+
+  it("pins a multi-tab doc replace to exactly the tabs it counted", async () => {
+    const tabWith = (tabId: string, text: string, childTabs: unknown[] = []) => ({
+      tabProperties: { tabId },
+      documentTab: {
+        body: {
+          content: [{ paragraph: { elements: [{ textRun: { content: text } }] } }],
+        },
+      },
+      childTabs,
+    });
+    proxyState.handler = (call) => {
+      if (call.connector === "docs" && call.method === "GET") {
+        return {
+          status: 200,
+          body: {
+            revisionId: REV,
+            tabs: [
+              tabWith("t.0", "alpha one\n", [tabWith("t.2", "alpha nested\n")]),
+              tabWith("t.1", "alpha two alpha three\n"),
+            ],
+          },
+        };
+      }
+      if (call.connector === "docs" && call.path.includes(":batchUpdate")) {
+        return {
+          status: 200,
+          body: {
+            writeControl: { requiredRevisionId: "rev-doc-10" },
+            replies: [{ replaceAllText: { occurrencesChanged: 4 } }],
+          },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.replace_doc_text")!,
+      { fileId: "doc-1", revisionId: REV, findText: "alpha", replaceText: "x" },
+      { actionId: "act-d10b", workspaceId },
+    );
+    expect(outcome.ok).toBe(true);
+    expect(outcome.ok && outcome.summary).toContain("4 occurrence(s)");
+    const mutation = proxyState.calls.find((c) => c.method !== "GET")!;
+    const body = mutation.body as {
+      requests: { replaceAllText: Record<string, unknown> }[];
+    };
+    // Every tab — including the nested child tab — is named explicitly, so
+    // the mutation's scope is provably the scope the pre-count measured.
+    expect(body.requests[0].replaceAllText).toEqual({
+      containsText: { text: "alpha", matchCase: true },
+      replaceText: "x",
+      tabsCriteria: { tabIds: ["t.0", "t.2", "t.1"] },
+    });
+  });
+
+  it("counts occurrences across EVERY tab of a multi-tab doc before replacing", async () => {
+    const tabWith = (tabId: string, text: string) => ({
+      tabProperties: { tabId },
+      documentTab: {
+        body: {
+          content: [{ paragraph: { elements: [{ textRun: { content: text } }] } }],
+        },
+      },
+    });
+    proxyState.handler = (call) => {
+      if (call.connector === "docs" && call.method === "GET") {
+        expect(call.path).toContain("includeTabsContent=true");
+        return {
+          status: 200,
+          body: {
+            revisionId: REV,
+            // 60 + 60 occurrences: each tab is under the bound, the whole
+            // document (which is what an unscoped replaceAllText edits) is
+            // not.
+            tabs: [
+              tabWith("t.0", "alpha ".repeat(60)),
+              tabWith("t.1", "alpha ".repeat(60)),
+            ],
+          },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.replace_doc_text")!,
+      { fileId: "doc-1", revisionId: REV, findText: "alpha", replaceText: "x" },
+      { actionId: "act-d11b", workspaceId },
+    );
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.message).toContain("occurs 120 times");
+    expect(!outcome.ok && outcome.message).toContain("limited to 100");
+    expect(proxyState.calls.every((c) => c.method === "GET")).toBe(true);
+  });
+
+  it("refuses a doc replace whose pre-count read sees a moved revision, changing nothing", async () => {
+    proxyState.handler = (call) => {
+      if (call.connector === "docs" && call.method === "GET") {
+        return {
+          status: 200,
+          body: {
+            revisionId: "rev-moved-on",
+            body: {
+              content: [
+                {
+                  paragraph: {
+                    elements: [{ textRun: { content: "alpha\n" } }],
+                  },
+                },
+              ],
+            },
+          },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.replace_doc_text")!,
+      { fileId: "doc-1", revisionId: REV, findText: "alpha", replaceText: "x" },
+      { actionId: "act-d12", workspaceId },
+    );
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.message).toContain("NOTHING was changed");
+    expect(proxyState.calls.every((c) => c.method === "GET")).toBe(true);
+  });
+
+  it("reports a doc replace with no matches without dispatching a mutation", async () => {
+    proxyState.handler = (call) => {
+      if (call.connector === "docs" && call.method === "GET") {
+        return {
+          status: 200,
+          body: {
+            revisionId: REV,
+            body: {
+              content: [
+                {
+                  paragraph: {
+                    elements: [{ textRun: { content: "nothing here\n" } }],
+                  },
+                },
+              ],
+            },
+          },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.replace_doc_text")!,
+      { fileId: "doc-1", revisionId: REV, findText: "alpha", replaceText: "x" },
+      { actionId: "act-d13", workspaceId },
+    );
+    expect(outcome.ok).toBe(true);
+    expect(outcome.ok && outcome.summary).toContain("found nowhere");
+    expect(proxyState.calls.every((c) => c.method === "GET")).toBe(true);
+  });
+
+  it("refuses a stale revision on slides edits with nothing applied", async () => {
+    proxyState.handler = (call) => {
+      if (call.connector === "slides" && call.path.includes(":batchUpdate")) {
+        return {
+          status: 400,
+          body: {
+            error: { message: "The requested revision is not the most recent." },
+          },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.insert_slide_text")!,
+      {
+        fileId: "pres-1",
+        revisionId: "rev-stale",
+        elementObjectId: "title-1",
+        insertAtIndex: 0,
+        text: "Hi",
+      },
+      { actionId: "act-p5", workspaceId },
+    );
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.message).toContain("NOTHING was changed");
+  });
+});
+
+describe("plain-text editing and trash executors", () => {
+  it("edits a text file with read-modify-write and an atomic multipart marker", async () => {
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("alt=media")) {
+        return { status: 200, body: "hello world\nhello again\n" };
+      }
+      if (call.method === "GET" && call.path.includes("/drive/v3/files/txt-1")) {
+        return {
+          status: 200,
+          body: { id: "txt-1", name: "notes.txt", mimeType: "text/plain", size: "24" },
+        };
+      }
+      if (call.method === "PATCH" && call.path.includes("/upload/drive/v3/files/txt-1")) {
+        expect(call.path).toContain("uploadType=multipart");
+        return { status: 200, body: { id: "txt-1" } };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.update_text_file")!,
+      { fileId: "txt-1", mode: "replace", findText: "hello", content: "goodbye" },
+      { actionId: "act-t1", workspaceId },
+    );
+    expect(outcome.ok).toBe(true);
+    expect(outcome.ok && outcome.summary).toContain("2 occurrence(s)");
+    const patch = proxyState.calls.find((c) => c.method === "PATCH")!;
+    const raw = String(patch.body);
+    // The marker metadata and the new content travel in ONE request.
+    expect(raw).toContain('"homardclawActionId":"act-t1"');
+    expect(raw).toContain("goodbye world\ngoodbye again\n");
+  });
+
+  it("refuses to delete a spreadsheet's final tab before any mutation", async () => {
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("/v4/spreadsheets/")) {
+        return tabsResponse([{ sheetId: 0, title: "Only" }]);
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.delete_sheet_tab")!,
+      { spreadsheetId: "sheet-1", tabTitle: "Only" },
+      { actionId: "act-lt1", workspaceId },
+    );
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.message).toContain("only tab");
+    expect(!outcome.ok && outcome.message).toContain("trash_item");
+    expect(batchUpdateCalls()).toHaveLength(0);
+  });
+
+  it("verifies octet-stream content is really text before editing it", async () => {
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("alt=media")) {
+        return { status: 200, body: "PK\u0003\u0004\u0000binary" };
+      }
+      if (call.method === "GET" && call.path.includes("/drive/v3/files/blob-1")) {
+        return {
+          status: 200,
+          body: {
+            id: "blob-1",
+            name: "archive",
+            mimeType: "application/octet-stream",
+            size: "12",
+          },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    // Even overwrite mode downloads first: the label alone proves nothing.
+    const outcome = await executeOperation(
+      findOperation("google_drive.update_text_file")!,
+      { fileId: "blob-1", mode: "overwrite", content: "text now" },
+      { actionId: "act-t6", workspaceId },
+    );
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.message).toContain("binary");
+    expect(proxyState.calls.some((c) => c.method === "PATCH")).toBe(false);
+  });
+
+  it("refuses a derived edit when the file's revision moved during preparation", async () => {
+    let metadataReads = 0;
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("alt=media")) {
+        return { status: 200, body: "line one\n" };
+      }
+      if (call.method === "GET" && call.path.includes("headRevisionId")) {
+        metadataReads += 1;
+        return {
+          status: 200,
+          body: {
+            id: "txt-3",
+            name: "log.txt",
+            mimeType: "text/plain",
+            size: "9",
+            // First read fences at rev-1; the pre-upload re-check sees rev-2.
+            headRevisionId: metadataReads === 1 ? "rev-1" : "rev-2",
+          },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.update_text_file")!,
+      { fileId: "txt-3", mode: "append", content: "line two\n" },
+      { actionId: "act-t7", workspaceId },
+    );
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.message).toContain("changed while");
+    expect(metadataReads).toBe(2);
+    expect(proxyState.calls.some((c) => c.method === "PATCH")).toBe(false);
+  });
+
+  it("refuses native Google files and non-text files without touching content", async () => {
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("/drive/v3/files/gdoc-1")) {
+        return {
+          status: 200,
+          body: {
+            id: "gdoc-1",
+            name: "Plan",
+            mimeType: "application/vnd.google-apps.document",
+          },
+        };
+      }
+      if (call.method === "GET" && call.path.includes("/drive/v3/files/img-1")) {
+        return {
+          status: 200,
+          body: { id: "img-1", name: "photo.png", mimeType: "image/png", size: "5" },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const native = await executeOperation(
+      findOperation("google_drive.update_text_file")!,
+      { fileId: "gdoc-1", mode: "overwrite", content: "x" },
+      { actionId: "act-t2", workspaceId },
+    );
+    expect(native.ok).toBe(false);
+    expect(!native.ok && native.message).toContain("Docs, Sheets, or Slides");
+    const binary = await executeOperation(
+      findOperation("google_drive.update_text_file")!,
+      { fileId: "img-1", mode: "overwrite", content: "x" },
+      { actionId: "act-t3", workspaceId },
+    );
+    expect(binary.ok).toBe(false);
+    expect(!binary.ok && binary.message).toContain("not a plain-text file");
+    expect(proxyState.calls.every((c) => c.method === "GET")).toBe(true);
+  });
+
+  it("fails a replace whose findText matches nothing, changing nothing", async () => {
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("alt=media")) {
+        return { status: 200, body: "alpha beta" };
+      }
+      if (call.method === "GET" && call.path.includes("/drive/v3/files/txt-2")) {
+        return {
+          status: 200,
+          body: { id: "txt-2", name: "a.txt", mimeType: "text/plain", size: "10" },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.update_text_file")!,
+      { fileId: "txt-2", mode: "replace", findText: "gamma", content: "delta" },
+      { actionId: "act-t4", workspaceId },
+    );
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.message).toContain("found nowhere");
+    expect(proxyState.calls.some((c) => c.method === "PATCH")).toBe(false);
+  });
+
+  it("moves a folder to the Trash with the marker in the same PATCH", async () => {
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("/drive/v3/files/folder-1")) {
+        return {
+          status: 200,
+          body: {
+            id: "folder-1",
+            name: "Old projects",
+            mimeType: "application/vnd.google-apps.folder",
+          },
+        };
+      }
+      if (call.method === "PATCH" && call.path.includes("/drive/v3/files/folder-1")) {
+        return { status: 200, body: { id: "folder-1", trashed: true } };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const outcome = await executeOperation(
+      findOperation("google_drive.trash_item")!,
+      { fileId: "folder-1" },
+      { actionId: "act-t5", workspaceId },
+    );
+    expect(outcome.ok).toBe(true);
+    expect(outcome.ok && outcome.summary).toContain("Trash");
+    expect(outcome.ok && outcome.summary).toContain("Everything inside the folder");
+    const patch = proxyState.calls.find((c) => c.method === "PATCH")!;
+    expect(patch.body).toEqual({
+      trashed: true,
+      appProperties: { homardclawActionId: "act-t5" },
+    });
+  });
+});
+
+describe("docs, slides, text-file, and trash crash recovery", () => {
+  it("requeues a fenced doc edit when the revision provably never moved", async () => {
+    const approvalId = await insertApproval();
+    const action = await insertExecutingAction({
+      operation: "google_drive.insert_doc_text",
+      app: "google_drive",
+      params: { fileId: "doc-1", revisionId: "rev-A", index: 3, text: "Hi" },
+      approvalId,
+      executingAt: new Date(), // freshness is irrelevant: the fence decides
+    });
+    proxyState.handler = (call) => {
+      if (call.connector === "docs" && call.method === "GET") {
+        return { status: 200, body: { revisionId: "rev-A" } };
+      }
+      if (call.connector === "docs" && call.path.includes(":batchUpdate")) {
+        return {
+          status: 200,
+          body: { writeControl: { requiredRevisionId: "rev-B" } },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    expect(resolved.resolution).toBe("requeued");
+    expect((await reloadAction(action.id)).status).toBe("approved");
+    // The retry carries the SAME fence, so even a lost race cannot double-apply.
+    const claimed = await claimApprovedAction(action.id);
+    const { action: finalized } = await executeClaimedAction(claimed!, "Tester", workspaceId);
+    expect(finalized.status).toBe("executed");
+    const batch = proxyState.calls.find((c) => c.path.includes(":batchUpdate"))!;
+    expect(
+      (batch.body as { writeControl: { requiredRevisionId: string } })
+        .writeControl.requiredRevisionId,
+    ).toBe("rev-A");
+  });
+
+  it("settles a doc edit as unknown once the revision has advanced — never a replay", async () => {
+    const approvalId = await insertApproval();
+    const action = await insertExecutingAction({
+      operation: "google_drive.replace_doc_text",
+      app: "google_drive",
+      params: { fileId: "doc-1", revisionId: "rev-A", findText: "a", replaceText: "b" },
+      approvalId,
+    });
+    proxyState.handler = (call) => {
+      if (call.connector === "docs" && call.method === "GET") {
+        return { status: 200, body: { revisionId: "rev-C" } };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    expect(resolved.resolution).toBe("unknown");
+    const row = await reloadAction(action.id);
+    expect(row.status).toBe("failed");
+    expect(row.errorMessage).toContain("not retried");
+    expect(proxyState.calls.every((c) => c.method === "GET")).toBe(true);
+  });
+
+  it("confirms a stranded add_slide by its action-pinned object id", async () => {
+    const approvalId = await insertApproval();
+    const action = await insertExecutingAction({
+      operation: "google_drive.add_slide",
+      app: "google_drive",
+      params: { fileId: "pres-1", revisionId: "rev-A", layout: "blank" },
+      approvalId,
+    });
+    proxyState.handler = (call) => {
+      if (call.connector === "slides" && call.method === "GET") {
+        return {
+          status: 200,
+          body: {
+            revisionId: "rev-B",
+            slides: [{ objectId: "p1" }, { objectId: `hc-${action.id}` }],
+          },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    expect(resolved.resolution).toBe("confirmed");
+    const row = await reloadAction(action.id);
+    expect(row.status).toBe("executed");
+    expect(row.resultSummary).toContain(`hc-${action.id}`);
+    expect(proxyState.calls.every((c) => c.method === "GET")).toBe(true);
+  });
+
+  it("requeues an absent add_slide only under an unmoved revision fence", async () => {
+    const approvalId = await insertApproval();
+    const action = await insertExecutingAction({
+      operation: "google_drive.add_slide",
+      app: "google_drive",
+      params: { fileId: "pres-1", revisionId: "rev-A", layout: "blank" },
+      approvalId,
+      executingAt: new Date(),
+    });
+    proxyState.handler = (call) => {
+      if (call.connector === "slides" && call.method === "GET") {
+        return {
+          status: 200,
+          body: { revisionId: "rev-A", slides: [{ objectId: "p1" }] },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    expect(resolved.resolution).toBe("requeued");
+    expect((await reloadAction(action.id)).status).toBe("approved");
+  });
+
+  it("requeues a crashed duplicate whose target was a page element, not a slide", async () => {
+    // The copy id is action-derived, so its absence under an unmoved
+    // revision proves the batch never landed — regardless of the bogus
+    // target. The requeued retry then hits the executor's slide-membership
+    // guard and fails cleanly instead of duplicating a text box.
+    const approvalId = await insertApproval();
+    const action = await insertExecutingAction({
+      operation: "google_drive.duplicate_slide",
+      app: "google_drive",
+      params: {
+        fileId: "pres-1",
+        revisionId: "rev-A",
+        slideObjectId: "title-box-3",
+      },
+      approvalId,
+      executingAt: new Date(),
+    });
+    proxyState.handler = (call) => {
+      if (call.connector === "slides" && call.method === "GET") {
+        return {
+          status: 200,
+          body: { revisionId: "rev-A", slides: [{ objectId: "p1" }] },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    expect(resolved.resolution).toBe("requeued");
+    expect((await reloadAction(action.id)).status).toBe("approved");
+    expect(proxyState.calls.every((c) => c.method === "GET")).toBe(true);
+  });
+
+  it("settles an absent add_slide as unknown when the revision moved on", async () => {
+    const approvalId = await insertApproval();
+    const action = await insertExecutingAction({
+      operation: "google_drive.duplicate_slide",
+      app: "google_drive",
+      params: { fileId: "pres-1", revisionId: "rev-A", slideObjectId: "p1" },
+      approvalId,
+    });
+    proxyState.handler = (call) => {
+      if (call.connector === "slides" && call.method === "GET") {
+        return {
+          status: 200,
+          body: { revisionId: "rev-D", slides: [{ objectId: "p1" }] },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    expect(resolved.resolution).toBe("unknown");
+    expect((await reloadAction(action.id)).status).toBe("failed");
+  });
+
+  it("confirms a stranded text-file edit by its embedded marker", async () => {
+    const approvalId = await insertApproval();
+    const action = await insertExecutingAction({
+      operation: "google_drive.update_text_file",
+      app: "google_drive",
+      params: { fileId: "txt-1", mode: "append", content: "more" },
+      approvalId,
+    });
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("/drive/v3/files/txt-1")) {
+        return {
+          status: 200,
+          body: {
+            id: "txt-1",
+            name: "notes.txt",
+            appProperties: { homardclawActionId: action.id },
+          },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    expect(resolved.resolution).toBe("confirmed");
+    expect((await reloadAction(action.id)).status).toBe("executed");
+  });
+
+  it("settles a marker-less text-file edit as unknown — the marker is mutable", async () => {
+    const action = await insertExecutingAction({
+      operation: "google_drive.update_text_file",
+      app: "google_drive",
+      params: { fileId: "txt-1", mode: "overwrite", content: "fresh" },
+    });
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("/drive/v3/files/txt-1")) {
+        return {
+          status: 200,
+          body: { id: "txt-1", name: "notes.txt", appProperties: {} },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    expect(resolved.resolution).toBe("unknown");
+    const row = await reloadAction(action.id);
+    expect(row.status).toBe("failed");
+    expect(row.errorMessage).toContain("not retried");
+  });
+
+  it("confirms a stranded trash by the item being in the Trash", async () => {
+    const approvalId = await insertApproval();
+    const action = await insertExecutingAction({
+      operation: "google_drive.trash_item",
+      app: "google_drive",
+      params: { fileId: "file-5" },
+      approvalId,
+    });
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("/drive/v3/files/file-5")) {
+        return {
+          status: 200,
+          // Marker overwritten by a later action, but the approved end
+          // state — the item is in the Trash — holds.
+          body: { id: "file-5", name: "Draft", trashed: true, appProperties: {} },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    expect(resolved.resolution).toBe("confirmed");
+    expect((await reloadAction(action.id)).status).toBe("executed");
+  });
+
+  it("never re-trashes an item that is out of the Trash without our marker", async () => {
+    const action = await insertExecutingAction({
+      operation: "google_drive.trash_item",
+      app: "google_drive",
+      params: { fileId: "file-6" },
+    });
+    proxyState.handler = (call) => {
+      if (call.method === "GET" && call.path.includes("/drive/v3/files/file-6")) {
+        return {
+          status: 200,
+          // Untrashed, no marker: the PATCH may have landed and the owner
+          // restored the item since. Re-trashing would override the owner.
+          body: { id: "file-6", name: "Draft", trashed: false, appProperties: {} },
+        };
+      }
+      throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+    };
+    const [resolved] = await reconcileStaleExecutingActions(taskId, "Tester", workspaceId);
+    expect(resolved.resolution).toBe("unknown");
+    const row = await reloadAction(action.id);
+    expect(row.status).toBe("failed");
+    expect(row.errorMessage).toContain("not retried");
     expect(proxyState.calls.every((c) => c.method === "GET")).toBe(true);
   });
 });

@@ -1,14 +1,40 @@
 import { type AppOperation, type ConnectedAppId } from "./catalog";
+import {
+  MAX_REPLACE_OCCURRENCES,
+  buildParagraphStyleRequests,
+  collectDocParagraphTexts,
+  countOccurrences,
+  docsTextStyle,
+  flattenDocTabs,
+  parseDocRange,
+  parseTextStyleFlags,
+  describeStyleFlags,
+  summarizeDocTabs,
+  type DocTab,
+} from "./docs";
 import { buildRfc822, sanitizeEmailHtml } from "./email-mime";
 import {
   MAX_APPEND_ROWS,
+  MAX_CLEAR_CELLS,
+  MAX_DELETE_COLUMNS,
+  MAX_DELETE_ROWS,
   MAX_MUTATION_CELLS,
   MAX_READ_CELLS,
+  columnToIndex,
   parseA1Range,
   parseSheetValues,
   quoteTab,
   rowsToRowData,
 } from "./sheets";
+import {
+  SLIDE_LAYOUTS,
+  collectSlidesTexts,
+  parseSlideTextRange,
+  slideObjectIdForAction,
+  slidesTextStyle,
+  summarizePresentation,
+  type SlidesSlide,
+} from "./slides";
 import {
   GoogleAuthError,
   driveAccessToken,
@@ -262,6 +288,12 @@ async function providerJson(input: {
   /** When set, a non-JSON body is sent verbatim with these headers. */
   rawBody?: boolean;
   /**
+   * When set, a successful response body is returned as verbatim text —
+   * never JSON.parsed. Editing a downloaded file requires the exact bytes;
+   * a parse/re-stringify round-trip would silently rewrite formatting.
+   */
+  rawResponse?: boolean;
+  /**
    * Provider-specific refusal mapping (given the status and response
    * headers, never the credential). Return null to fall back to the
    * generic mapping.
@@ -321,6 +353,7 @@ async function providerJson(input: {
       status: response.status,
     };
   }
+  if (input.rawResponse) return { ok: true, data: text };
   if (!text) return { ok: true, data: null };
   try {
     return { ok: true, data: JSON.parse(text) };
@@ -352,7 +385,12 @@ async function gmailJson(
 async function driveJson(
   workspaceId: string | null,
   path: string,
-  options?: { method?: string; body?: unknown; headers?: Record<string, string> },
+  options?: {
+    method?: string;
+    body?: unknown;
+    headers?: Record<string, string>;
+    rawResponse?: boolean;
+  },
 ): Promise<JsonResult> {
   return providerJson({
     workspaceId,
@@ -362,6 +400,7 @@ async function driveJson(
     path,
     options,
     rawBody: typeof options?.body === "string",
+    rawResponse: options?.rawResponse === true,
   });
 }
 
@@ -1169,7 +1208,7 @@ async function sheetsResolveTab(
   spreadsheetId: string,
   tabTitle: string,
 ): Promise<
-  | { ok: true; sheetId: number; title: string }
+  | { ok: true; sheetId: number; title: string; tabCount: number }
   | { ok: false; outcome: ExecutionOutcome }
 > {
   const fields = encodeURIComponent("sheets(properties(sheetId,title))");
@@ -1193,7 +1232,12 @@ async function sheetsResolveTab(
       ? exact
       : tabs.filter((p) => p.title.toLowerCase() === tabTitle.toLowerCase());
   if (relaxed.length === 1) {
-    return { ok: true, sheetId: relaxed[0].sheetId, title: relaxed[0].title };
+    return {
+      ok: true,
+      sheetId: relaxed[0].sheetId,
+      title: relaxed[0].title,
+      tabCount: tabs.length,
+    };
   }
   const listing = tabs.map((p) => `"${p.title}"`).join(", ") || "(none)";
   return {
@@ -1398,6 +1442,1309 @@ async function sheetsRenameTab(
   return {
     ok: true,
     summary: `Renamed tab "${tab.title}" to "${newTitle}" in spreadsheet ${id}. Its data is unchanged; formulas that referenced the old name now point at "${newTitle}" automatically inside this spreadsheet, but external references may break.`,
+  };
+}
+
+/* ------------- Sheets destructive edits (bounded, approved) ------------- */
+
+async function sheetsClearRange(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const parsed = parseA1Range(String(params.range));
+  if (!parsed.ok) return { ok: false, kind: "failed", message: parsed.error };
+  const range = parsed.range;
+  if (!range.tab) {
+    return {
+      ok: false,
+      kind: "failed",
+      message:
+        "Clears need the tab in the range, e.g. Sheet1!A2:D50 — never an implicit first tab.",
+    };
+  }
+  if (range.cellCount > MAX_CLEAR_CELLS) {
+    return {
+      ok: false,
+      kind: "failed",
+      message: `The range ${range.normalized} covers ${range.cellCount} cells; a single clear is limited to ${MAX_CLEAR_CELLS}. Clear a smaller range.`,
+    };
+  }
+  const id = String(params.spreadsheetId);
+  const tab = await sheetsResolveTab(ctx.workspaceId, id, range.tab);
+  if (!tab.ok) return tab.outcome;
+  const result = await sheetsBatchUpdate(
+    ctx.workspaceId,
+    id,
+    {
+      // updateCells with no rows and a values-only field mask erases the
+      // cell CONTENTS of exactly the approved rectangle; formatting and
+      // everything outside the range stay untouched.
+      updateCells: {
+        range: {
+          sheetId: tab.sheetId,
+          startRowIndex: range.startRowIndex,
+          endRowIndex: range.endRowIndex,
+          startColumnIndex: range.startColumnIndex,
+          endColumnIndex: range.endColumnIndex,
+        },
+        fields: "userEnteredValue",
+      },
+    },
+    ctx.actionId,
+  );
+  if (!result.ok) return result.outcome;
+  return {
+    ok: true,
+    summary: `Cleared the values of ${range.normalized} (${range.cellCount} cell(s)) in spreadsheet ${id}. Formatting was left in place; recovery is possible through the spreadsheet's version history.`,
+  };
+}
+
+async function sheetsDeleteRows(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const startRow = Number(params.startRow);
+  const endRow = Number(params.endRow);
+  if (!Number.isInteger(startRow) || !Number.isInteger(endRow) || startRow < 1) {
+    return {
+      ok: false,
+      kind: "failed",
+      message:
+        "startRow and endRow must be the 1-based row numbers shown in Sheets.",
+    };
+  }
+  if (endRow < startRow) {
+    return {
+      ok: false,
+      kind: "failed",
+      message: "endRow must be at least startRow (the rows are inclusive).",
+    };
+  }
+  const count = endRow - startRow + 1;
+  if (count > MAX_DELETE_ROWS) {
+    return {
+      ok: false,
+      kind: "failed",
+      message: `That would delete ${count} rows; a single call is limited to ${MAX_DELETE_ROWS}.`,
+    };
+  }
+  const id = String(params.spreadsheetId);
+  const tab = await sheetsResolveTab(
+    ctx.workspaceId,
+    id,
+    String(params.tabTitle),
+  );
+  if (!tab.ok) return tab.outcome;
+  const result = await sheetsBatchUpdate(
+    ctx.workspaceId,
+    id,
+    {
+      deleteDimension: {
+        range: {
+          sheetId: tab.sheetId,
+          dimension: "ROWS",
+          startIndex: startRow - 1,
+          endIndex: endRow,
+        },
+      },
+    },
+    ctx.actionId,
+  );
+  if (!result.ok) return result.outcome;
+  return {
+    ok: true,
+    summary: `Deleted rows ${startRow}-${endRow} (${count} row(s)) from tab "${tab.title}" of spreadsheet ${id}. Rows below shifted up; recovery is possible through the spreadsheet's version history.`,
+  };
+}
+
+async function sheetsDeleteColumns(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const startLetters = String(params.startColumn).trim().toUpperCase();
+  const endLetters = String(params.endColumn).trim().toUpperCase();
+  if (!/^[A-Z]{1,3}$/.test(startLetters) || !/^[A-Z]{1,3}$/.test(endLetters)) {
+    return {
+      ok: false,
+      kind: "failed",
+      message:
+        'startColumn and endColumn must be column letters like "B" or "AA".',
+    };
+  }
+  const startIndex = columnToIndex(startLetters);
+  const endIndex = columnToIndex(endLetters);
+  if (endIndex < startIndex) {
+    return {
+      ok: false,
+      kind: "failed",
+      message:
+        "endColumn must not be before startColumn (the columns are inclusive).",
+    };
+  }
+  const count = endIndex - startIndex + 1;
+  if (count > MAX_DELETE_COLUMNS) {
+    return {
+      ok: false,
+      kind: "failed",
+      message: `That would delete ${count} columns; a single call is limited to ${MAX_DELETE_COLUMNS}.`,
+    };
+  }
+  const id = String(params.spreadsheetId);
+  const tab = await sheetsResolveTab(
+    ctx.workspaceId,
+    id,
+    String(params.tabTitle),
+  );
+  if (!tab.ok) return tab.outcome;
+  const result = await sheetsBatchUpdate(
+    ctx.workspaceId,
+    id,
+    {
+      deleteDimension: {
+        range: {
+          sheetId: tab.sheetId,
+          dimension: "COLUMNS",
+          startIndex,
+          endIndex: endIndex + 1,
+        },
+      },
+    },
+    ctx.actionId,
+  );
+  if (!result.ok) return result.outcome;
+  return {
+    ok: true,
+    summary: `Deleted columns ${startLetters}-${endLetters} (${count} column(s)) from tab "${tab.title}" of spreadsheet ${id}. Columns to the right shifted left; recovery is possible through the spreadsheet's version history.`,
+  };
+}
+
+async function sheetsDeleteTab(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const id = String(params.spreadsheetId);
+  const tab = await sheetsResolveTab(
+    ctx.workspaceId,
+    id,
+    String(params.tabTitle),
+  );
+  if (!tab.ok) return tab.outcome;
+  // Refuse the last tab HERE, not by leaning on Google's own refusal: the
+  // rejection must be deterministic and phrased for the agent.
+  if (tab.tabCount <= 1) {
+    return {
+      ok: false,
+      kind: "failed",
+      message: `Tab "${tab.title}" is the only tab in spreadsheet ${id}, and a spreadsheet cannot lose its last tab. To discard the whole spreadsheet, use google_drive.trash_item instead.`,
+    };
+  }
+  const result = await sheetsBatchUpdate(
+    ctx.workspaceId,
+    id,
+    { deleteSheet: { sheetId: tab.sheetId } },
+    ctx.actionId,
+  );
+  if (!result.ok) return result.outcome;
+  return {
+    ok: true,
+    summary: `Deleted tab "${tab.title}" and all its data from spreadsheet ${id}. The spreadsheet itself still exists; the tab is recoverable only through the spreadsheet's version history. (Google refuses to delete a spreadsheet's last remaining tab.)`,
+  };
+}
+
+/* ----------------------------- Google Docs ------------------------------ */
+
+/**
+ * Call the Docs API as the workspace's own Google account. Docs rides on
+ * the SAME Drive consent as Sheets (documents.batchUpdate accepts the
+ * Drive scopes), on the BASELINE Drive token: connections that predate
+ * full Drive access keep editing the documents HomardClaw created; with
+ * full Drive granted, Google extends edits to any document the owner's
+ * account can edit.
+ */
+async function docsJson(
+  workspaceId: string | null,
+  path: string,
+  options?: { method?: string; body?: unknown },
+  mapFailure?: (refusal: {
+    status: number;
+    headers: Headers;
+    bodyText: string;
+  }) => ExecutionOutcome | null,
+): Promise<JsonResult> {
+  return providerJson({
+    workspaceId,
+    providerLabel: "Google Docs",
+    baseUrl: "https://docs.googleapis.com",
+    resolveToken: async (id) => (await driveAccessToken(id)).token,
+    path,
+    options,
+    mapFailure,
+  });
+}
+
+/**
+ * Same 403 translation as Sheets, for any Google-native editor: with full
+ * Drive granted, a 403 means the OWNER lacks edit rights on that item, or
+ * the connection predates full Drive access. Neither is fixed by retrying.
+ */
+function explainNativeEditDenied(
+  what: string,
+): (outcome: ExecutionOutcome) => ExecutionOutcome {
+  return (outcome) => {
+    if (
+      outcome.ok ||
+      outcome.kind !== "auth" ||
+      !outcome.message.includes("HTTP 403") ||
+      /insufficient|scope/i.test(outcome.message)
+    ) {
+      return outcome;
+    }
+    return {
+      ok: false,
+      kind: "failed",
+      message: `Google refused the edit (HTTP 403). Either the connected account does not have edit rights on this ${what} (it may be shared read-only), or the Drive connection predates full Drive access and can only edit files HomardClaw created — reconnecting Google Drive with full access fixes the latter.`,
+    };
+  };
+}
+
+const explainDocsEditDeniedOutcome = explainNativeEditDenied("document");
+const explainSlidesEditDeniedOutcome = explainNativeEditDenied("presentation");
+
+function staleRevisionOutcome(what: string): ExecutionOutcome {
+  return {
+    ok: false,
+    kind: "failed",
+    message: `The ${what} has changed since it was read — its revisionId is no longer current, so Google refused the edit and NOTHING was changed. Read the ${what} again, take the fresh revisionId, and re-check any indexes (they may have shifted).`,
+  };
+}
+
+/**
+ * One Docs or Slides batchUpdate fenced by writeControl.requiredRevisionId.
+ * Google applies ALL requests or NONE, and refuses the whole call with a
+ * 400 when the revision no longer matches — a stale read can never clobber
+ * a newer edit, and an interrupted edit can never be double-applied by a
+ * recovery retry (the retry carries the same fence, so if the original DID
+ * land, the revision has advanced and Google refuses the replay).
+ */
+async function revisionFencedBatchUpdate(input: {
+  transport: typeof docsJson;
+  workspaceId: string | null;
+  pathPrefix: string;
+  what: "document" | "presentation";
+  explainDenied: (outcome: ExecutionOutcome) => ExecutionOutcome;
+  requests: Record<string, unknown>[];
+  requiredRevisionId: string;
+}): Promise<JsonResult> {
+  const result = await input.transport(
+    input.workspaceId,
+    `${input.pathPrefix}:batchUpdate`,
+    {
+      method: "POST",
+      body: {
+        requests: input.requests,
+        writeControl: { requiredRevisionId: input.requiredRevisionId },
+      },
+    },
+    ({ status, bodyText }) =>
+      status === 400 && /revision/i.test(bodyText)
+        ? staleRevisionOutcome(input.what)
+        : null,
+  );
+  if (!result.ok) {
+    return { ok: false, outcome: input.explainDenied(result.outcome), status: result.status };
+  }
+  return result;
+}
+
+/** The post-edit revision a batchUpdate reports, for chained edits. */
+function revisionAfterEdit(data: unknown): string {
+  return (
+    (data as { writeControl?: { requiredRevisionId?: string } } | null)
+      ?.writeControl?.requiredRevisionId ?? "?"
+  );
+}
+
+async function docsBatchUpdate(
+  workspaceId: string | null,
+  documentId: string,
+  requests: Record<string, unknown>[],
+  requiredRevisionId: string,
+): Promise<JsonResult> {
+  return revisionFencedBatchUpdate({
+    transport: docsJson,
+    workspaceId,
+    pathPrefix: `/v1/documents/${encodeURIComponent(documentId)}`,
+    what: "document",
+    explainDenied: explainDocsEditDeniedOutcome,
+    requests,
+    requiredRevisionId,
+  });
+}
+
+/** An integer >= min, or null. */
+function intAtLeast(value: unknown, min: number): number | null {
+  const n = Number(value);
+  return Number.isInteger(n) && n >= min ? n : null;
+}
+
+/** The optional tabId param as a spreadable fragment for Docs locations/ranges. */
+function docTabId(params: Record<string, unknown>): { tabId?: string } {
+  return params.tabId ? { tabId: String(params.tabId) } : {};
+}
+
+async function docsReadDocument(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const id = String(params.fileId);
+  // includeTabsContent returns EVERY tab's body (multi-tab docs otherwise
+  // surface only their first tab), which is what makes the outline — and
+  // the replace-all occurrence bound below — cover the whole document.
+  const fields = encodeURIComponent("revisionId,title,tabs");
+  const result = await docsJson(
+    ctx.workspaceId,
+    `/v1/documents/${encodeURIComponent(id)}?includeTabsContent=true&fields=${fields}&suggestionsViewMode=PREVIEW_WITHOUT_SUGGESTIONS`,
+  );
+  if (!result.ok) return result.outcome;
+  const doc = result.data as {
+    revisionId?: string;
+    title?: string;
+    tabs?: DocTab[];
+  } | null;
+  const tabs = doc?.tabs ?? [];
+  const outline = summarizeDocTabs(tabs);
+  const tabCount = flattenDocTabs(tabs).length;
+  return {
+    ok: true,
+    summary: truncate(
+      `Google Doc "${doc?.title ?? id}" (documentId ${id}${tabCount > 1 ? `, ${tabCount} tabs` : ""}).\nrevisionId: ${doc?.revisionId ?? "?"} — pass it to every edit; if it goes stale, read again.\nEach line is [startIndex..endIndex) of one paragraph (indexes are UTF-16 positions for insert/delete/format; a paragraph's trailing newline is inside its range)${tabCount > 1 ? "; indexes are PER TAB — pass that tab's tabId with the edit" : ""}:\n${outline}`,
+    ),
+  };
+}
+
+async function docsInsertText(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const index = intAtLeast(params.index, 1);
+  if (index === null) {
+    return {
+      ok: false,
+      kind: "failed",
+      message:
+        "index must be an integer of at least 1, taken from a fresh read_doc.",
+    };
+  }
+  const text = String(params.text);
+  const result = await docsBatchUpdate(
+    ctx.workspaceId,
+    String(params.fileId),
+    [{ insertText: { location: { index, ...docTabId(params) }, text } }],
+    String(params.revisionId),
+  );
+  if (!result.ok) return result.outcome;
+  return {
+    ok: true,
+    summary: `Inserted ${text.length} character(s) into Google Doc ${params.fileId} at index ${index}. New revisionId: ${revisionAfterEdit(result.data)} (later indexes shifted by ${text.length}).`,
+  };
+}
+
+async function docsReplaceText(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const findText = String(params.findText);
+  const replaceText = params.replaceText == null ? "" : String(params.replaceText);
+  const id = String(params.fileId);
+  const revisionId = String(params.revisionId);
+  // Bound the blast radius BEFORE dispatch: count the occurrences against
+  // the same revision the edit is fenced to. If the document moves between
+  // this count and the batch, the fence rejects the batch — so the count
+  // the approval was judged by is exactly the count that gets applied.
+  // includeTabsContent matters: an unscoped replaceAllText spans EVERY tab
+  // of a multi-tab document, so the count must too.
+  const current = await docsJson(
+    ctx.workspaceId,
+    `/v1/documents/${encodeURIComponent(id)}?includeTabsContent=true`,
+  );
+  if (!current.ok) return current.outcome;
+  const currentRevision = (current.data as { revisionId?: string } | null)
+    ?.revisionId;
+  if (currentRevision !== revisionId) {
+    return {
+      ok: false,
+      kind: "failed",
+      message: `The document has changed since it was read — its revisionId is no longer current, so NOTHING was changed. Read the document again, take the fresh revisionId, and re-check the text to replace.`,
+    };
+  }
+  const occurrences = countOccurrences(
+    collectDocParagraphTexts(current.data),
+    findText,
+  );
+  if (occurrences === 0) {
+    return {
+      ok: true,
+      summary: `The exact text was found nowhere in Google Doc ${id}; nothing changed. (Matching is case-sensitive and exact — check the text with read_doc.)`,
+    };
+  }
+  if (occurrences > MAX_REPLACE_OCCURRENCES) {
+    return {
+      ok: false,
+      kind: "failed",
+      message: `The text occurs ${occurrences} times in Google Doc ${id}; one replace_doc_text is limited to ${MAX_REPLACE_OCCURRENCES} occurrences, and NOTHING was changed. Narrow the match (a longer, more specific findText) or edit bounded ranges instead.`,
+    };
+  }
+  // Name every tab explicitly in the mutation. The pre-count above walked
+  // every tab of this exact revision, so pinning tabsCriteria to the same
+  // flattened tab set makes the request scope provably identical to the
+  // counted scope — no reliance on the API's per-request tab defaults.
+  const tabIds = flattenDocTabs(
+    (current.data as { tabs?: DocTab[] } | null)?.tabs ?? [],
+  )
+    .map((tab) => tab.tabProperties?.tabId)
+    .filter((tabId): tabId is string => typeof tabId === "string");
+  const result = await docsBatchUpdate(
+    ctx.workspaceId,
+    id,
+    [
+      {
+        replaceAllText: {
+          containsText: { text: findText, matchCase: true },
+          replaceText,
+          ...(tabIds.length > 0 ? { tabsCriteria: { tabIds } } : {}),
+        },
+      },
+    ],
+    revisionId,
+  );
+  if (!result.ok) return result.outcome;
+  const replies =
+    (result.data as {
+      replies?: { replaceAllText?: { occurrencesChanged?: number } }[];
+    } | null)?.replies ?? [];
+  const changed = replies[0]?.replaceAllText?.occurrencesChanged ?? occurrences;
+  return {
+    ok: true,
+    summary: `Replaced ${changed} occurrence(s) in Google Doc ${id}. New revisionId: ${revisionAfterEdit(result.data)}.`,
+  };
+}
+
+async function docsDeleteRange(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const range = parseDocRange(params.startIndex, params.endIndex);
+  if (!range.ok) return { ok: false, kind: "failed", message: range.error };
+  const result = await docsBatchUpdate(
+    ctx.workspaceId,
+    String(params.fileId),
+    [
+      {
+        deleteContentRange: {
+          range: {
+            startIndex: range.startIndex,
+            endIndex: range.endIndex,
+            ...docTabId(params),
+          },
+        },
+      },
+    ],
+    String(params.revisionId),
+  );
+  if (!result.ok) return result.outcome;
+  return {
+    ok: true,
+    summary: `Deleted [${range.startIndex}..${range.endIndex}) (${range.endIndex - range.startIndex} character(s)) from Google Doc ${params.fileId}. New revisionId: ${revisionAfterEdit(result.data)} (later indexes shifted).`,
+  };
+}
+
+async function docsFormatRange(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const range = parseDocRange(params.startIndex, params.endIndex);
+  if (!range.ok) return { ok: false, kind: "failed", message: range.error };
+  const flags = parseTextStyleFlags(params);
+  if (!flags.ok) return { ok: false, kind: "failed", message: flags.error };
+  const { textStyle, fields } = docsTextStyle(flags.flags);
+  const result = await docsBatchUpdate(
+    ctx.workspaceId,
+    String(params.fileId),
+    [
+      {
+        updateTextStyle: {
+          range: {
+            startIndex: range.startIndex,
+            endIndex: range.endIndex,
+            ...docTabId(params),
+          },
+          textStyle,
+          fields,
+        },
+      },
+    ],
+    String(params.revisionId),
+  );
+  if (!result.ok) return result.outcome;
+  return {
+    ok: true,
+    summary: `Applied ${describeStyleFlags(flags.flags)} to [${range.startIndex}..${range.endIndex}) in Google Doc ${params.fileId}. New revisionId: ${revisionAfterEdit(result.data)}.`,
+  };
+}
+
+async function docsStyleParagraphs(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const range = parseDocRange(params.startIndex, params.endIndex);
+  if (!range.ok) return { ok: false, kind: "failed", message: range.error };
+  const built = buildParagraphStyleRequests(params, {
+    startIndex: range.startIndex,
+    endIndex: range.endIndex,
+    ...docTabId(params),
+  });
+  if (!built.ok) return { ok: false, kind: "failed", message: built.error };
+  const result = await docsBatchUpdate(
+    ctx.workspaceId,
+    String(params.fileId),
+    built.requests,
+    String(params.revisionId),
+  );
+  if (!result.ok) return result.outcome;
+  return {
+    ok: true,
+    summary: `Applied ${built.described} to the paragraphs overlapping [${range.startIndex}..${range.endIndex}) in Google Doc ${params.fileId}. New revisionId: ${revisionAfterEdit(result.data)}.`,
+  };
+}
+
+/* ---------------------------- Google Slides ----------------------------- */
+
+/** Call the Slides API — same consent and token policy as Docs above. */
+async function slidesJson(
+  workspaceId: string | null,
+  path: string,
+  options?: { method?: string; body?: unknown },
+  mapFailure?: (refusal: {
+    status: number;
+    headers: Headers;
+    bodyText: string;
+  }) => ExecutionOutcome | null,
+): Promise<JsonResult> {
+  return providerJson({
+    workspaceId,
+    providerLabel: "Google Slides",
+    baseUrl: "https://slides.googleapis.com",
+    resolveToken: async (id) => (await driveAccessToken(id)).token,
+    path,
+    options,
+    mapFailure,
+  });
+}
+
+const DRIVE_PRESENTATION_MIME = "application/vnd.google-apps.presentation";
+
+/** The stable link for a presentation id. */
+function presentationLink(id: string): string {
+  return `https://docs.google.com/presentation/d/${id}/edit`;
+}
+
+async function slidesBatchUpdate(
+  workspaceId: string | null,
+  presentationId: string,
+  requests: Record<string, unknown>[],
+  requiredRevisionId: string,
+): Promise<JsonResult> {
+  return revisionFencedBatchUpdate({
+    transport: slidesJson,
+    workspaceId,
+    pathPrefix: `/v1/presentations/${encodeURIComponent(presentationId)}`,
+    what: "presentation",
+    explainDenied: explainSlidesEditDeniedOutcome,
+    requests,
+    requiredRevisionId,
+  });
+}
+
+async function slidesCreatePresentation(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  // One atomic Drive call, exactly like create_spreadsheet: the action id
+  // rides along as an app property so recovery can ask Drive "does the
+  // presentation created by action X exist?".
+  const created = await driveJson(ctx.workspaceId, "/drive/v3/files", {
+    method: "POST",
+    body: {
+      name: String(params.name),
+      mimeType: DRIVE_PRESENTATION_MIME,
+      ...(ctx.actionId
+        ? { appProperties: { [DRIVE_ACTION_KEY]: ctx.actionId } }
+        : {}),
+    },
+  });
+  if (!created.ok) return created.outcome;
+  const file = created.data as { id?: string } | null;
+  if (!file?.id) {
+    return {
+      ok: false,
+      kind: "failed",
+      message: "Drive did not return a presentation id.",
+    };
+  }
+  return {
+    ok: true,
+    summary: `Created Google Slides presentation "${params.name}" (presentationId ${file.id}). It starts with one title slide. Link: ${presentationLink(file.id)}`,
+  };
+}
+
+async function slidesReadPresentation(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const id = String(params.fileId);
+  const fields = encodeURIComponent(
+    "revisionId,title,slides(objectId,slideProperties(notesPage(notesProperties(speakerNotesObjectId),pageElements(objectId,shape(text(textElements(textRun(content))))))),pageElements(objectId,shape(placeholder(type),text(textElements(textRun(content)))),table(rows,columns)))",
+  );
+  const result = await slidesJson(
+    ctx.workspaceId,
+    `/v1/presentations/${encodeURIComponent(id)}?fields=${fields}`,
+  );
+  if (!result.ok) return result.outcome;
+  const data = result.data as {
+    revisionId?: string;
+    title?: string;
+    slides?: SlidesSlide[];
+  } | null;
+  const slides = data?.slides ?? [];
+  return {
+    ok: true,
+    summary: truncate(
+      `Google Slides presentation "${data?.title ?? id}" (presentationId ${id}, ${slides.length} slide(s)).\nrevisionId: ${data?.revisionId ?? "?"} — pass it to every edit; if it goes stale, read again.\nText positions are UTF-16 indexes within one element ([0..length]):\n${summarizePresentation(slides)}`,
+    ),
+  };
+}
+
+async function slidesAddSlide(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const layoutKey = params.layout
+    ? String(params.layout).trim().toLowerCase()
+    : "blank";
+  const layout = SLIDE_LAYOUTS[layoutKey];
+  if (!layout) {
+    return {
+      ok: false,
+      kind: "failed",
+      message: `layout "${params.layout}" is not supported. Use one of: ${Object.keys(SLIDE_LAYOUTS).join(", ")}.`,
+    };
+  }
+  let insertionIndex: number | undefined;
+  if (params.insertAtIndex !== undefined && params.insertAtIndex !== null) {
+    const parsed = intAtLeast(params.insertAtIndex, 0);
+    if (parsed === null) {
+      return {
+        ok: false,
+        kind: "failed",
+        message: "insertAtIndex must be an integer of at least 0.",
+      };
+    }
+    insertionIndex = parsed;
+  }
+  const result = await slidesBatchUpdate(
+    ctx.workspaceId,
+    String(params.fileId),
+    [
+      {
+        createSlide: {
+          // Deterministic id derived from the action row: its presence in
+          // the presentation later is this creation's receipt in recovery.
+          ...(ctx.actionId
+            ? { objectId: slideObjectIdForAction(ctx.actionId) }
+            : {}),
+          ...(insertionIndex !== undefined ? { insertionIndex } : {}),
+          slideLayoutReference: { predefinedLayout: layout },
+        },
+      },
+    ],
+    String(params.revisionId),
+  );
+  if (!result.ok) return result.outcome;
+  const replies =
+    (result.data as {
+      replies?: { createSlide?: { objectId?: string } }[];
+    } | null)?.replies ?? [];
+  const objectId = replies[0]?.createSlide?.objectId;
+  return {
+    ok: true,
+    summary: `Added a ${layoutKey} slide (slideObjectId ${objectId ?? "?"}) to presentation ${params.fileId}${insertionIndex !== undefined ? ` at position ${insertionIndex}` : " at the end"}. New revisionId: ${revisionAfterEdit(result.data)}. Read the presentation to get the new slide's text-element ids before writing text into it.`,
+  };
+}
+
+async function slidesDuplicateSlide(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const slideId = String(params.slideObjectId);
+  // duplicateObject copies ANY object by id; guard so an approval that says
+  // "duplicate slide X" can never quietly copy a text box instead. (Recovery
+  // also depends on this: it looks for the action-derived copy id among the
+  // presentation's SLIDES, so a duplicated page element could never be
+  // confirmed.)
+  const listing = await slidesListSlideIds(
+    ctx.workspaceId,
+    String(params.fileId),
+  );
+  if (!listing.ok) return listing.outcome;
+  if (!listing.ids.includes(slideId)) {
+    return {
+      ok: false,
+      kind: "failed",
+      message: `"${slideId}" is not a slide in this presentation (it may be a text element id, or the slide is gone). duplicate_slide only duplicates whole slides, and NOTHING was changed — check read_presentation.`,
+    };
+  }
+  const result = await slidesBatchUpdate(
+    ctx.workspaceId,
+    String(params.fileId),
+    [
+      {
+        duplicateObject: {
+          objectId: slideId,
+          // Same deterministic-receipt trick as add_slide: pin the copy's
+          // id so recovery can prove whether the duplicate exists.
+          ...(ctx.actionId
+            ? { objectIds: { [slideId]: slideObjectIdForAction(ctx.actionId) } }
+            : {}),
+        },
+      },
+    ],
+    String(params.revisionId),
+  );
+  if (!result.ok) return result.outcome;
+  const replies =
+    (result.data as {
+      replies?: { duplicateObject?: { objectId?: string } }[];
+    } | null)?.replies ?? [];
+  const objectId = replies[0]?.duplicateObject?.objectId;
+  return {
+    ok: true,
+    summary: `Duplicated slide ${slideId} in presentation ${params.fileId}; the copy (slideObjectId ${objectId ?? "?"}) is right after the original. New revisionId: ${revisionAfterEdit(result.data)}. The copy's text elements have NEW ids — read the presentation before editing them.`,
+  };
+}
+
+/** The slide object ids a presentation currently has, for validation. */
+async function slidesListSlideIds(
+  workspaceId: string | null,
+  presentationId: string,
+): Promise<
+  | { ok: true; ids: string[]; revisionId: string | null }
+  | { ok: false; outcome: ExecutionOutcome }
+> {
+  const result = await slidesJson(
+    workspaceId,
+    `/v1/presentations/${encodeURIComponent(presentationId)}?fields=${encodeURIComponent("revisionId,slides.objectId")}`,
+  );
+  if (!result.ok) return { ok: false, outcome: result.outcome };
+  const data = result.data as {
+    revisionId?: string;
+    slides?: { objectId?: string }[];
+  } | null;
+  return {
+    ok: true,
+    ids: (data?.slides ?? [])
+      .map((s) => s.objectId)
+      .filter((id): id is string => typeof id === "string"),
+    revisionId: data?.revisionId ?? null,
+  };
+}
+
+async function slidesMoveSlide(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const newIndex = intAtLeast(params.newIndex, 0);
+  if (newIndex === null) {
+    return {
+      ok: false,
+      kind: "failed",
+      message: "newIndex must be an integer of at least 0.",
+    };
+  }
+  const slideId = String(params.slideObjectId);
+  const result = await slidesBatchUpdate(
+    ctx.workspaceId,
+    String(params.fileId),
+    [
+      {
+        updateSlidesPosition: {
+          slideObjectIds: [slideId],
+          insertionIndex: newIndex,
+        },
+      },
+    ],
+    String(params.revisionId),
+  );
+  if (!result.ok) return result.outcome;
+  return {
+    ok: true,
+    summary: `Moved slide ${slideId} to position ${newIndex} in presentation ${params.fileId}. New revisionId: ${revisionAfterEdit(result.data)}.`,
+  };
+}
+
+async function slidesDeleteSlide(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const slideId = String(params.slideObjectId);
+  // deleteObject removes ANY object by id; guard so an approval that says
+  // "delete slide X" can never quietly delete a text box instead.
+  const listing = await slidesListSlideIds(
+    ctx.workspaceId,
+    String(params.fileId),
+  );
+  if (!listing.ok) return listing.outcome;
+  if (!listing.ids.includes(slideId)) {
+    return {
+      ok: false,
+      kind: "failed",
+      message: `"${slideId}" is not a slide in this presentation (it may be a text element id, or the slide is already gone). delete_slide only deletes whole slides — check read_presentation.`,
+    };
+  }
+  const result = await slidesBatchUpdate(
+    ctx.workspaceId,
+    String(params.fileId),
+    [{ deleteObject: { objectId: slideId } }],
+    String(params.revisionId),
+  );
+  if (!result.ok) return result.outcome;
+  return {
+    ok: true,
+    summary: `Deleted slide ${slideId} (and everything on it) from presentation ${params.fileId}. New revisionId: ${revisionAfterEdit(result.data)}. Recovery is possible only through the presentation's version history.`,
+  };
+}
+
+async function slidesInsertText(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const insertionIndex = intAtLeast(params.insertAtIndex, 0);
+  if (insertionIndex === null) {
+    return {
+      ok: false,
+      kind: "failed",
+      message:
+        "insertAtIndex must be an integer of at least 0 (0 = the start of the element's text).",
+    };
+  }
+  const text = String(params.text);
+  const elementId = String(params.elementObjectId);
+  const result = await slidesBatchUpdate(
+    ctx.workspaceId,
+    String(params.fileId),
+    [
+      {
+        insertText: {
+          objectId: elementId,
+          insertionIndex,
+          text,
+        },
+      },
+    ],
+    String(params.revisionId),
+  );
+  if (!result.ok) return result.outcome;
+  return {
+    ok: true,
+    summary: `Inserted ${text.length} character(s) into element ${elementId} of presentation ${params.fileId} at index ${insertionIndex}. New revisionId: ${revisionAfterEdit(result.data)}.`,
+  };
+}
+
+async function slidesDeleteText(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const range = parseSlideTextRange(params.startIndex, params.endIndex);
+  if (!range.ok) return { ok: false, kind: "failed", message: range.error };
+  const elementId = String(params.elementObjectId);
+  const result = await slidesBatchUpdate(
+    ctx.workspaceId,
+    String(params.fileId),
+    [
+      {
+        deleteText: {
+          objectId: elementId,
+          textRange: {
+            type: "FIXED_RANGE",
+            startIndex: range.startIndex,
+            endIndex: range.endIndex,
+          },
+        },
+      },
+    ],
+    String(params.revisionId),
+  );
+  if (!result.ok) return result.outcome;
+  return {
+    ok: true,
+    summary: `Deleted [${range.startIndex}..${range.endIndex}) from element ${elementId} of presentation ${params.fileId}. New revisionId: ${revisionAfterEdit(result.data)}.`,
+  };
+}
+
+async function slidesReplaceText(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const findText = String(params.findText);
+  const replaceText =
+    params.replaceText == null ? "" : String(params.replaceText);
+  const slideId = params.slideObjectId ? String(params.slideObjectId) : null;
+  const id = String(params.fileId);
+  const revisionId = String(params.revisionId);
+  // Bound the blast radius BEFORE dispatch, against the fenced revision
+  // (same contract as replace_doc_text). A scoped count walks only that
+  // slide's subtree; unscoped walks the whole presentation.
+  const current = await slidesJson(
+    ctx.workspaceId,
+    `/v1/presentations/${encodeURIComponent(id)}`,
+  );
+  if (!current.ok) return current.outcome;
+  const presentation = current.data as {
+    revisionId?: string;
+    slides?: { objectId?: string }[];
+  } | null;
+  if (presentation?.revisionId !== revisionId) {
+    return {
+      ok: false,
+      kind: "failed",
+      message: `The presentation has changed since it was read — its revisionId is no longer current, so NOTHING was changed. Read the presentation again, take the fresh revisionId, and re-check the text to replace.`,
+    };
+  }
+  let countScope: unknown = current.data;
+  if (slideId) {
+    const slide = (presentation?.slides ?? []).find(
+      (s) => s.objectId === slideId,
+    );
+    if (!slide) {
+      return {
+        ok: false,
+        kind: "failed",
+        message: `No slide with objectId "${slideId}" exists in presentation ${id}; NOTHING was changed. Use read_presentation to list the slides.`,
+      };
+    }
+    countScope = slide;
+  }
+  const occurrences = countOccurrences(
+    collectSlidesTexts(countScope),
+    findText,
+  );
+  if (occurrences === 0) {
+    return {
+      ok: true,
+      summary: `The exact text was found nowhere in presentation ${id}${slideId ? ` (slide ${slideId})` : ""}; nothing changed. (Matching is case-sensitive and exact.)`,
+    };
+  }
+  if (occurrences > MAX_REPLACE_OCCURRENCES) {
+    return {
+      ok: false,
+      kind: "failed",
+      message: `The text occurs ${occurrences} times in presentation ${id}${slideId ? ` (slide ${slideId})` : ""}; one replace_slide_text is limited to ${MAX_REPLACE_OCCURRENCES} occurrences, and NOTHING was changed. Narrow the match or edit specific elements instead.`,
+    };
+  }
+  const result = await slidesBatchUpdate(
+    ctx.workspaceId,
+    id,
+    [
+      {
+        replaceAllText: {
+          containsText: { text: findText, matchCase: true },
+          replaceText,
+          ...(slideId ? { pageObjectIds: [slideId] } : {}),
+        },
+      },
+    ],
+    revisionId,
+  );
+  if (!result.ok) return result.outcome;
+  const replies =
+    (result.data as {
+      replies?: { replaceAllText?: { occurrencesChanged?: number } }[];
+    } | null)?.replies ?? [];
+  const changed = replies[0]?.replaceAllText?.occurrencesChanged ?? occurrences;
+  return {
+    ok: true,
+    summary: `Replaced ${changed} occurrence(s) in presentation ${id}${slideId ? ` (slide ${slideId} only)` : ""}. New revisionId: ${revisionAfterEdit(result.data)}.`,
+  };
+}
+
+async function slidesFormatText(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const range = parseSlideTextRange(params.startIndex, params.endIndex);
+  if (!range.ok) return { ok: false, kind: "failed", message: range.error };
+  const flags = parseTextStyleFlags(params);
+  if (!flags.ok) return { ok: false, kind: "failed", message: flags.error };
+  const { style, fields } = slidesTextStyle(flags.flags);
+  const elementId = String(params.elementObjectId);
+  const result = await slidesBatchUpdate(
+    ctx.workspaceId,
+    String(params.fileId),
+    [
+      {
+        updateTextStyle: {
+          objectId: elementId,
+          textRange: {
+            type: "FIXED_RANGE",
+            startIndex: range.startIndex,
+            endIndex: range.endIndex,
+          },
+          style,
+          fields,
+        },
+      },
+    ],
+    String(params.revisionId),
+  );
+  if (!result.ok) return result.outcome;
+  return {
+    ok: true,
+    summary: `Applied ${describeStyleFlags(flags.flags)} to [${range.startIndex}..${range.endIndex}) in element ${elementId} of presentation ${params.fileId}. New revisionId: ${revisionAfterEdit(result.data)}.`,
+  };
+}
+
+/* ------------- Plain-text file editing and the Drive Trash -------------- */
+
+/** Files bigger than this are refused for in-place editing. */
+const TEXT_FILE_MAX_BYTES = 400_000;
+
+/** Non-"text/*" MIME types that are still plain text in practice. */
+const TEXT_LIKE_MIMES = new Set([
+  "application/json",
+  "application/ld+json",
+  "application/xml",
+  "application/javascript",
+  "application/x-javascript",
+  "application/typescript",
+  "application/x-yaml",
+  "application/yaml",
+  "application/toml",
+  "application/csv",
+  "application/x-sh",
+  "application/sql",
+  "application/rtf",
+  "application/octet-stream", // Drive's fallback for extensionless text
+]);
+
+function isEditableTextMime(mime: string): boolean {
+  const bare = mime.split(";")[0].trim().toLowerCase();
+  return bare.startsWith("text/") || TEXT_LIKE_MIMES.has(bare);
+}
+
+const explainTextFileEditDenied = explainNativeEditDenied("file");
+
+async function driveUpdateTextFile(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const mode = String(params.mode).trim().toLowerCase();
+  if (mode !== "overwrite" && mode !== "append" && mode !== "replace") {
+    return {
+      ok: false,
+      kind: "failed",
+      message: 'mode must be "overwrite", "append", or "replace".',
+    };
+  }
+  const findText = params.findText == null ? "" : String(params.findText);
+  if (mode === "replace" && findText.length === 0) {
+    return {
+      ok: false,
+      kind: "failed",
+      message: "replace mode needs findText — the exact text to swap out.",
+    };
+  }
+  const fileId = String(params.fileId);
+  const encoded = encodeURIComponent(fileId);
+  const meta = await driveJson(
+    ctx.workspaceId,
+    `/drive/v3/files/${encoded}?fields=${encodeURIComponent("id,name,mimeType,size,headRevisionId")}&supportsAllDrives=true`,
+  );
+  if (!meta.ok) return meta.outcome;
+  const file = meta.data as {
+    name?: string;
+    mimeType?: string;
+    size?: string;
+    headRevisionId?: string;
+  } | null;
+  const mime = file?.mimeType ?? "";
+  if (mime.startsWith(DRIVE_EXPORTABLE_PREFIX)) {
+    return {
+      ok: false,
+      kind: "failed",
+      message: `"${file?.name ?? fileId}" is a native Google file (${mime}). Edit it with the Docs, Sheets, or Slides operations instead of update_text_file.`,
+    };
+  }
+  if (!isEditableTextMime(mime)) {
+    return {
+      ok: false,
+      kind: "failed",
+      message: `"${file?.name ?? fileId}" is ${mime || "of unknown type"} — not a plain-text file, so it cannot be edited this way.`,
+    };
+  }
+  if (Number(file?.size ?? 0) > TEXT_FILE_MAX_BYTES) {
+    return {
+      ok: false,
+      kind: "failed",
+      message: `"${file?.name ?? fileId}" is ${file?.size} bytes; in-place editing is limited to files up to ${TEXT_FILE_MAX_BYTES} bytes.`,
+    };
+  }
+
+  const content = String(params.content);
+  const isOctetStream =
+    mime.split(";")[0].trim().toLowerCase() === "application/octet-stream";
+  let updated: string;
+  let describeChange: string;
+  if (mode === "overwrite" && !isOctetStream) {
+    updated = content;
+    describeChange = `Overwrote the content (now ${content.length} character(s))`;
+  } else {
+    // append/replace need the exact current bytes — downloaded verbatim,
+    // never JSON-parsed and re-serialized. octet-stream files (Drive's
+    // fallback for extensionless uploads) are downloaded in EVERY mode:
+    // the label covers arbitrary binaries too, so the actual bytes must
+    // prove the file is text before we rewrite it as text.
+    const current = await driveJson(
+      ctx.workspaceId,
+      `/drive/v3/files/${encoded}?alt=media&supportsAllDrives=true`,
+      { rawResponse: true },
+    );
+    if (!current.ok) return current.outcome;
+    const existing = String(current.data ?? "");
+    if (isOctetStream && /[\u0000\uFFFD]/.test(existing)) {
+      return {
+        ok: false,
+        kind: "failed",
+        message: `"${file?.name ?? fileId}" is labeled ${mime} and its content is not valid text (it contains binary bytes), so it cannot be edited this way.`,
+      };
+    }
+    if (mode === "overwrite") {
+      updated = content;
+      describeChange = `Overwrote the content (now ${content.length} character(s))`;
+    } else if (mode === "append") {
+      updated = existing + content;
+      describeChange = `Appended ${content.length} character(s)`;
+    } else {
+      const occurrences = existing.split(findText).length - 1;
+      if (occurrences === 0) {
+        return {
+          ok: false,
+          kind: "failed",
+          message: `The exact findText was found nowhere in "${file?.name ?? fileId}"; nothing was changed. (Matching is case-sensitive and exact — read the file first.)`,
+        };
+      }
+      if (occurrences > MAX_REPLACE_OCCURRENCES) {
+        return {
+          ok: false,
+          kind: "failed",
+          message: `The findText occurs ${occurrences} times in "${file?.name ?? fileId}"; one replace edit is limited to ${MAX_REPLACE_OCCURRENCES} occurrences, and nothing was changed. Narrow the match (a longer, more specific findText) or overwrite the file with explicit content instead.`,
+        };
+      }
+      updated = existing.split(findText).join(content);
+      describeChange = `Replaced ${occurrences} occurrence(s) of the approved text`;
+    }
+  }
+  if (Buffer.byteLength(updated, "utf8") > TEXT_FILE_MAX_BYTES) {
+    return {
+      ok: false,
+      kind: "failed",
+      message: `The edit would make the file ${Buffer.byteLength(updated, "utf8")} bytes — over the ${TEXT_FILE_MAX_BYTES}-byte editing limit. Nothing was changed.`,
+    };
+  }
+
+  // Stale-write fence for content DERIVED from a read (append/replace):
+  // Drive v3 has no conditional upload, so re-check the head revision
+  // right before writing and refuse if the file changed under us. This
+  // narrows — it cannot eliminate — the race window; the last narrow
+  // sliver is why update_text_file settles as unknown in crash recovery
+  // rather than claiming a fence Docs/Slides actually have.
+  if (mode !== "overwrite" && file?.headRevisionId) {
+    const recheck = await driveJson(
+      ctx.workspaceId,
+      `/drive/v3/files/${encoded}?fields=headRevisionId&supportsAllDrives=true`,
+    );
+    if (!recheck.ok) return recheck.outcome;
+    const nowRevision = (recheck.data as { headRevisionId?: string } | null)
+      ?.headRevisionId;
+    if (nowRevision !== file.headRevisionId) {
+      return {
+        ok: false,
+        kind: "failed",
+        message: `"${file?.name ?? fileId}" changed while the edit was being prepared (its revision moved). Nothing was changed — read the file again and retry against its current content.`,
+      };
+    }
+  }
+
+  // Metadata (the action marker) and content travel in ONE multipart
+  // request, so the marker on the file is the edit's atomic receipt.
+  let boundary = `hc-${ctx.actionId ?? "edit"}-boundary`;
+  while (updated.includes(boundary)) boundary = `${boundary}-x`;
+  const metadata = ctx.actionId
+    ? { appProperties: { [DRIVE_ACTION_KEY]: ctx.actionId } }
+    : {};
+  const body = [
+    `--${boundary}`,
+    "Content-Type: application/json; charset=UTF-8",
+    "",
+    JSON.stringify(metadata),
+    `--${boundary}`,
+    `Content-Type: ${mime.split(";")[0].trim() || "text/plain"}; charset=UTF-8`,
+    "",
+    updated,
+    `--${boundary}--`,
+  ].join("\r\n");
+  const uploaded = await driveJson(
+    ctx.workspaceId,
+    `/upload/drive/v3/files/${encoded}?uploadType=multipart&supportsAllDrives=true`,
+    {
+      method: "PATCH",
+      body,
+      headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
+    },
+  );
+  if (!uploaded.ok) return explainTextFileEditDenied(uploaded.outcome);
+  return {
+    ok: true,
+    summary: `${describeChange} in Drive file "${file?.name ?? fileId}" (fileId ${fileId}). Earlier versions remain available in the file's Drive version history for a limited time.`,
+  };
+}
+
+async function driveTrashItem(
+  params: Record<string, unknown>,
+  ctx: ExecutionContext,
+): Promise<ExecutionOutcome> {
+  const fileId = String(params.fileId);
+  const meta = await driveItemMeta(ctx.workspaceId, fileId);
+  if (!meta.ok) return meta.outcome;
+  const isFolder = meta.item.mimeType === DRIVE_FOLDER_MIME;
+  const kindWord = isFolder ? "folder" : "file";
+  const trashed = await driveOrganizeJson(
+    ctx.workspaceId,
+    `/drive/v3/files/${encodeURIComponent(fileId)}?fields=${encodeURIComponent("id,name,trashed")}&supportsAllDrives=true`,
+    {
+      method: "PATCH",
+      body: {
+        trashed: true,
+        // The marker rides on the same PATCH: trashed=true plus this
+        // marker land atomically, making the receipt trustworthy.
+        ...(ctx.actionId
+          ? { appProperties: { [DRIVE_ACTION_KEY]: ctx.actionId } }
+          : {}),
+      },
+    },
+  );
+  if (!trashed.ok) return explainDriveEditDenied(trashed.outcome);
+  return {
+    ok: true,
+    summary: `Moved Drive ${kindWord} "${meta.item.name ?? fileId}" to the Trash (fileId ${fileId}).${isFolder ? " Everything inside the folder went to the Trash with it." : ""} The owner can restore it from the Trash at drive.google.com; Google removes trashed items permanently after 30 days.`,
   };
 }
 
@@ -1965,6 +3312,28 @@ const EXECUTORS: Record<
   "google_drive.append_sheet_rows": sheetsAppendRows,
   "google_drive.add_sheet_tab": sheetsAddTab,
   "google_drive.rename_sheet_tab": sheetsRenameTab,
+  "google_drive.clear_sheet_range": sheetsClearRange,
+  "google_drive.delete_sheet_rows": sheetsDeleteRows,
+  "google_drive.delete_sheet_columns": sheetsDeleteColumns,
+  "google_drive.delete_sheet_tab": sheetsDeleteTab,
+  "google_drive.read_doc": docsReadDocument,
+  "google_drive.insert_doc_text": docsInsertText,
+  "google_drive.replace_doc_text": docsReplaceText,
+  "google_drive.delete_doc_range": docsDeleteRange,
+  "google_drive.format_doc_range": docsFormatRange,
+  "google_drive.style_doc_paragraphs": docsStyleParagraphs,
+  "google_drive.create_presentation": slidesCreatePresentation,
+  "google_drive.read_presentation": slidesReadPresentation,
+  "google_drive.add_slide": slidesAddSlide,
+  "google_drive.duplicate_slide": slidesDuplicateSlide,
+  "google_drive.move_slide": slidesMoveSlide,
+  "google_drive.delete_slide": slidesDeleteSlide,
+  "google_drive.insert_slide_text": slidesInsertText,
+  "google_drive.delete_slide_text": slidesDeleteText,
+  "google_drive.replace_slide_text": slidesReplaceText,
+  "google_drive.format_slide_text": slidesFormatText,
+  "google_drive.update_text_file": driveUpdateTextFile,
+  "google_drive.trash_item": driveTrashItem,
   "github.list_repos": githubListRepos,
   "github.read_file": githubReadFile,
   "github.list_issues": githubListIssues,
@@ -2335,6 +3704,34 @@ async function verifyDriveCreateSpreadsheet(
   };
 }
 
+async function verifyDriveCreatePresentation(
+  params: Record<string, unknown>,
+  actionId: string,
+  workspaceId: string | null,
+): Promise<VerificationResult> {
+  // Same marker, same query as create_spreadsheet: one atomic Drive call,
+  // so a found marker means the presentation fully exists.
+  const q = encodeURIComponent(
+    `appProperties has { key='${DRIVE_ACTION_KEY}' and value='${actionId}' } and trashed = false`,
+  );
+  const result = await driveJson(
+    workspaceId,
+    `/drive/v3/files?q=${q}&pageSize=1&fields=${encodeURIComponent("files(id,name)")}`,
+  );
+  if (!result.ok) {
+    return { kind: "unknown", message: failureMessage(result.outcome) };
+  }
+  const files =
+    (result.data as { files?: { id: string; name: string }[] } | null)
+      ?.files ?? [];
+  if (files.length === 0) return { kind: "not_executed" };
+  const file = files[0];
+  return {
+    kind: "executed",
+    summary: `Created Google Slides presentation "${file.name}" (presentationId ${file.id}). Link: ${presentationLink(file.id)} — confirmed after an interrupted run.`,
+  };
+}
+
 async function verifyDriveCreateFolder(
   params: Record<string, unknown>,
   actionId: string,
@@ -2465,6 +3862,189 @@ function verifySheetsMutation(
 }
 
 /**
+ * Verifier for the revision-fenced Docs and Slides edits. Every such edit
+ * carries writeControl.requiredRevisionId = the revisionId param, so the
+ * provider's CURRENT revision answers the recovery question:
+ *
+ * - current === the fenced revision ⇒ the edit provably did NOT land (a
+ *   landed edit always advances the revision). Answering "not_executed" is
+ *   safe even against an original request still in flight inside Google:
+ *   whichever of the two fenced requests lands first advances the
+ *   revision, and Google then refuses the other one as stale — at most ONE
+ *   can ever apply, which is why this verifier is "strong" despite the
+ *   crash-timing ambiguity that forces Sheets to be "eventual".
+ * - current !== the fenced revision ⇒ someone advanced the document — our
+ *   interrupted edit, the owner, anyone. Impossible to attribute, so it
+ *   settles unknown (and a retry would be refused as stale anyway).
+ */
+function verifyRevisionFencedEdit(
+  fetchRevision: (
+    workspaceId: string | null,
+    params: Record<string, unknown>,
+  ) => Promise<JsonResult>,
+  what: "document" | "presentation",
+): (
+  params: Record<string, unknown>,
+  actionId: string,
+  workspaceId: string | null,
+) => Promise<VerificationResult> {
+  return async (params, _actionId, workspaceId) => {
+    const result = await fetchRevision(workspaceId, params);
+    if (!result.ok) {
+      return { kind: "unknown", message: failureMessage(result.outcome) };
+    }
+    const current = (result.data as { revisionId?: string } | null)
+      ?.revisionId;
+    if (!current) {
+      return {
+        kind: "unknown",
+        message: `Google did not report the ${what}'s current revision.`,
+      };
+    }
+    if (current === String(params.revisionId)) return { kind: "not_executed" };
+    return {
+      kind: "unknown",
+      message: `The ${what}'s revision advanced past the one this edit was fenced to, so it is impossible to tell whether the interrupted edit itself landed. It was not retried (Google would refuse the stale replay anyway); read the ${what} to check, and request the edit again if it is still wanted.`,
+    };
+  };
+}
+
+const fetchDocsRevision = (
+  workspaceId: string | null,
+  params: Record<string, unknown>,
+) =>
+  docsJson(
+    workspaceId,
+    `/v1/documents/${encodeURIComponent(String(params.fileId))}?fields=revisionId`,
+  );
+
+const fetchSlidesRevision = (
+  workspaceId: string | null,
+  params: Record<string, unknown>,
+) =>
+  slidesJson(
+    workspaceId,
+    `/v1/presentations/${encodeURIComponent(String(params.fileId))}?fields=revisionId`,
+  );
+
+const verifyDocsEdit = verifyRevisionFencedEdit(fetchDocsRevision, "document");
+const verifySlidesEdit = verifyRevisionFencedEdit(
+  fetchSlidesRevision,
+  "presentation",
+);
+
+/**
+ * Verifier for add_slide and duplicate_slide, which pin the new slide's
+ * object id to one derived from the action row: the id's presence in the
+ * presentation IS the creation's receipt (executed), and when it is absent
+ * the revision fence decides exactly like verifyRevisionFencedEdit.
+ */
+async function verifySlideCreation(
+  params: Record<string, unknown>,
+  actionId: string,
+  workspaceId: string | null,
+): Promise<VerificationResult> {
+  const expected = slideObjectIdForAction(actionId);
+  const listing = await slidesListSlideIds(
+    workspaceId,
+    String(params.fileId),
+  );
+  if (!listing.ok) {
+    return { kind: "unknown", message: failureMessage(listing.outcome) };
+  }
+  if (listing.ids.includes(expected)) {
+    return {
+      kind: "executed",
+      summary: `The slide (slideObjectId ${expected}) exists in presentation ${params.fileId} — confirmed by its action-derived object id after an interrupted run.`,
+    };
+  }
+  if (listing.revisionId === String(params.revisionId)) {
+    return { kind: "not_executed" };
+  }
+  return {
+    kind: "unknown",
+    message:
+      "The presentation's revision advanced and the action-pinned slide id is absent — the slide may have landed and been deleted since, or never landed at all. It was not retried; read the presentation and request the change again if it is still wanted.",
+  };
+}
+
+/**
+ * Verifier for update_text_file: metadata (the marker) and content land in
+ * ONE multipart PATCH, so a matching marker proves the edit. Absence
+ * settles unknown for the same reason as rename/move — the marker is a
+ * single mutable per-app key that any later approved action on the same
+ * file can overwrite, so absence never proves non-execution.
+ */
+async function verifyDriveTextFileUpdate(
+  params: Record<string, unknown>,
+  actionId: string,
+  workspaceId: string | null,
+): Promise<VerificationResult> {
+  const result = await driveJson(
+    workspaceId,
+    `/drive/v3/files/${encodeURIComponent(String(params.fileId))}?fields=${encodeURIComponent("id,name,appProperties")}&supportsAllDrives=true`,
+  );
+  if (!result.ok) {
+    return { kind: "unknown", message: failureMessage(result.outcome) };
+  }
+  const item = result.data as {
+    name?: string;
+    appProperties?: Record<string, string>;
+  } | null;
+  if (item?.appProperties?.[DRIVE_ACTION_KEY] === actionId) {
+    return {
+      kind: "executed",
+      summary: `Edited Drive file "${item?.name ?? params.fileId}" (fileId ${params.fileId}). Confirmed by the file's embedded action marker after an interrupted run.`,
+    };
+  }
+  return {
+    kind: "unknown",
+    message:
+      "The file does not carry this action's marker, so the edit cannot be confirmed — but a later change to the same file could have replaced the marker, so it cannot be ruled out either. It was not retried; check the file's content and version history, and approve the edit again if it is still wanted.",
+  };
+}
+
+/**
+ * Verifier for trash_item: trashed=true and the marker land in one atomic
+ * PATCH. Marker match ⇒ executed; the item simply BEING in the Trash also
+ * confirms the approved end state. Neither ⇒ unknown — the PATCH may have
+ * landed and the owner restored the item since, and re-trashing an item
+ * the owner deliberately restored would be a silent replay.
+ */
+async function verifyDriveTrash(
+  params: Record<string, unknown>,
+  actionId: string,
+  workspaceId: string | null,
+): Promise<VerificationResult> {
+  const result = await driveOrganizeJson(
+    workspaceId,
+    `/drive/v3/files/${encodeURIComponent(String(params.fileId))}?fields=${encodeURIComponent("id,name,trashed,appProperties")}&supportsAllDrives=true`,
+  );
+  if (!result.ok) {
+    return { kind: "unknown", message: failureMessage(result.outcome) };
+  }
+  const item = result.data as {
+    name?: string;
+    trashed?: boolean;
+    appProperties?: Record<string, string>;
+  } | null;
+  if (
+    item?.appProperties?.[DRIVE_ACTION_KEY] === actionId ||
+    item?.trashed === true
+  ) {
+    return {
+      kind: "executed",
+      summary: `Moved Drive item "${item?.name ?? params.fileId}" to the Trash (fileId ${params.fileId}). Confirmed after an interrupted run; the owner can restore it at drive.google.com.`,
+    };
+  }
+  return {
+    kind: "unknown",
+    message:
+      "The item is not in the Trash and carries no marker from this action — it may never have been trashed, or it was trashed and restored since. It was not retried; approve the change again if it is still wanted.",
+  };
+}
+
+/**
  * How trustworthy a verifier's "absent" answer is. GitHub's REST list
  * endpoints are read-after-write consistent, so absence there is proof.
  * Gmail search and Drive queries are eventually consistent indexes: absence
@@ -2575,6 +4155,104 @@ const VERIFIERS: Record<
       (p) =>
         `Renamed tab "${p.tabTitle}" to "${p.newTitle}" in spreadsheet ${p.spreadsheetId}.`,
     ),
+  },
+  "google_drive.clear_sheet_range": {
+    consistency: "eventual",
+    verify: verifySheetsMutation(
+      (p) =>
+        `Cleared the values of ${p.range} in spreadsheet ${p.spreadsheetId}.`,
+    ),
+  },
+  "google_drive.delete_sheet_rows": {
+    consistency: "eventual",
+    verify: verifySheetsMutation(
+      (p) =>
+        `Deleted rows ${p.startRow}-${p.endRow} from tab "${p.tabTitle}" of spreadsheet ${p.spreadsheetId}.`,
+    ),
+  },
+  "google_drive.delete_sheet_columns": {
+    consistency: "eventual",
+    verify: verifySheetsMutation(
+      (p) =>
+        `Deleted columns ${p.startColumn}-${p.endColumn} from tab "${p.tabTitle}" of spreadsheet ${p.spreadsheetId}.`,
+    ),
+  },
+  "google_drive.delete_sheet_tab": {
+    consistency: "eventual",
+    verify: verifySheetsMutation(
+      (p) =>
+        `Deleted tab "${p.tabTitle}" from spreadsheet ${p.spreadsheetId}.`,
+    ),
+  },
+  // Docs and Slides edits are fenced by requiredRevisionId, which lets the
+  // revision verifiers answer "not_executed" safely even seconds after a
+  // crash — see verifyRevisionFencedEdit for the argument. Hence "strong".
+  "google_drive.insert_doc_text": {
+    consistency: "strong",
+    verify: verifyDocsEdit,
+  },
+  "google_drive.replace_doc_text": {
+    consistency: "strong",
+    verify: verifyDocsEdit,
+  },
+  "google_drive.delete_doc_range": {
+    consistency: "strong",
+    verify: verifyDocsEdit,
+  },
+  "google_drive.format_doc_range": {
+    consistency: "strong",
+    verify: verifyDocsEdit,
+  },
+  "google_drive.style_doc_paragraphs": {
+    consistency: "strong",
+    verify: verifyDocsEdit,
+  },
+  "google_drive.create_presentation": {
+    consistency: "eventual",
+    verify: verifyDriveCreatePresentation,
+  },
+  "google_drive.add_slide": {
+    consistency: "strong",
+    verify: verifySlideCreation,
+  },
+  "google_drive.duplicate_slide": {
+    consistency: "strong",
+    verify: verifySlideCreation,
+  },
+  "google_drive.move_slide": {
+    consistency: "strong",
+    verify: verifySlidesEdit,
+  },
+  "google_drive.delete_slide": {
+    consistency: "strong",
+    verify: verifySlidesEdit,
+  },
+  "google_drive.insert_slide_text": {
+    consistency: "strong",
+    verify: verifySlidesEdit,
+  },
+  "google_drive.delete_slide_text": {
+    consistency: "strong",
+    verify: verifySlidesEdit,
+  },
+  "google_drive.replace_slide_text": {
+    consistency: "strong",
+    verify: verifySlidesEdit,
+  },
+  "google_drive.format_slide_text": {
+    consistency: "strong",
+    verify: verifySlidesEdit,
+  },
+  // The marker lands atomically with the content/trash flag, and the item
+  // is read back by id (read-after-write). Like rename/move, absence of
+  // the mutable marker never answers not_executed — only unknown.
+  "google_drive.update_text_file": {
+    consistency: "strong",
+    verify: verifyDriveTextFileUpdate,
+  },
+  "google_drive.trash_item": {
+    consistency: "strong",
+    verify: verifyDriveTrash,
   },
 };
 

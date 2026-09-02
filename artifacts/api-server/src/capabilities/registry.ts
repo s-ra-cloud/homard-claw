@@ -1,4 +1,5 @@
 import { APP_OPERATIONS, type AppOperation } from "../connected-apps/catalog";
+import { hasOutcomeVerifier } from "../connected-apps/connections";
 import {
   signManifest,
   verifyManifestSignature,
@@ -16,12 +17,18 @@ import {
  * into the server allowlist; the manifest itself never carries executable code.
  */
 
-/** Recovery classification for the built-in operations. Writes carry
- * idempotency markers and provider verifiers; reads are trivially safe. */
+/** Recovery classification for the built-in operations, derived from what
+ * is actually true at runtime: reads are trivially safe to retry, writes
+ * are "provider_verifiable" exactly when a provider verifier is registered
+ * for them, and any other write must settle unknown after a crash rather
+ * than falsely advertise a verifier it does not have. */
 function builtinRecovery(op: AppOperation): CapabilityRecoveryClass {
   if (op.level === "read") return "retry_safe";
-  // Drafts and writes all embed action-id markers with provider verifiers.
-  return "provider_verifiable";
+  // op.name is already the fully qualified operation id (e.g.
+  // "google_drive.insert_doc_text") — the same key the verifier map uses.
+  return hasOutcomeVerifier(op.name)
+    ? "provider_verifiable"
+    : "non_retryable";
 }
 
 function builtinTool(op: AppOperation): CapabilityToolDef {
@@ -76,7 +83,7 @@ const GMAIL_PACKAGE = builtinPackage(
 const DRIVE_PACKAGE = builtinPackage(
   "google_drive",
   "Google Drive",
-  "Find and read files, create text files, folders, and native Google Sheets spreadsheets, organize existing files and folders (rename, move), and edit spreadsheet tabs, ranges, and rows in the owner's Google Drive.",
+  "Find, read, create, and edit the owner's Google Drive: Docs (text and formatting), Sheets (including bounded clears and row/column/tab deletion), Slides (text, speaker-note reads, and slide structure), plain-text files in place, folders and organization (rename, move), and recoverable deletion to the Trash.",
   [
     {
       id: "drive-file-handling",
@@ -90,7 +97,28 @@ const DRIVE_PACKAGE = builtinPackage(
       title: "Organizing Drive files and folders",
       triggers: ["folder", "organize", "rename", "move", "tidy", "cleanup"],
       instructions:
-        "Never guess file or folder ids: find each item with google_drive.search first and use the exact id it returned. Plan the folder structure before moving anything, create the folders, then move files one by one — each rename and move is individually approved by the owner, so batch your proposals sensibly and explain the intended structure. move_item replaces the item's current location (it never ends up in two places); use destinationFolderId \"root\" for the top level of My Drive. Renaming or moving never changes sharing or breaks links. There is no delete and no sharing change — do not promise either.",
+        "Never guess file or folder ids: find each item with google_drive.search first and use the exact id it returned. Plan the folder structure before moving anything, create the folders, then move files one by one — each rename and move is individually approved by the owner, so batch your proposals sensibly and explain the intended structure. move_item replaces the item's current location (it never ends up in two places); use destinationFolderId \"root\" for the top level of My Drive. Renaming or moving never changes sharing or breaks links. To delete, use trash_item — it moves ONE exact file or folder to the Drive Trash, where the owner can restore it (Google purges the Trash after ~30 days); trashing a folder takes everything inside it. There is no permanent delete and no sharing change — do not promise either. For plain-text files (not Docs/Sheets/Slides), update_text_file edits content in place: read the file first, prefer targeted replace over overwrite, and know that overwrite discards the previous content.",
+    },
+    {
+      id: "drive-docs-editing",
+      title: "Working with Google Docs",
+      triggers: ["docs", "document", "doc", "text", "paragraph", "heading"],
+      instructions:
+        "Always read_doc immediately before editing: every edit needs the CURRENT revisionId, and insert/delete/format work on the exact UTF-16 indexes that read reports. If a revisionId has gone stale (the doc changed), the edit is refused with nothing applied — read again and rebuild the request. After each successful edit take the NEW revisionId from the result, and remember that indexes after the edited point shift; when making several index-based edits from one read, apply them back-to-front, or prefer replace_doc_text which needs no indexes. replace_doc_text is case-sensitive-exact and changes EVERY occurrence — check the read output for how many matches to expect. Afterwards report exactly what changed: document, what text, and where.",
+    },
+    {
+      id: "drive-slides-editing",
+      title: "Working with Google Slides",
+      triggers: [
+        "slides",
+        "presentation",
+        "slide",
+        "deck",
+        "pitch",
+        "speaker notes",
+      ],
+      instructions:
+        "Always read_presentation immediately before editing: it lists every slide's objectId, each text element's id and length, and speaker notes, plus the CURRENT revisionId that every edit requires — stale revisions are refused with nothing applied. Text edits target ONE element by its id with indexes in [0..length]; new or duplicated slides get NEW element ids, so read again before writing text into them. delete_slide removes a whole slide permanently (version history is the only recovery) and refuses ids that are not slides. Speaker notes are readable; editing them targets the notes element id like any text element. Afterwards report exactly what changed: presentation, slide, and element.",
     },
     {
       id: "drive-sheets-editing",
@@ -107,14 +135,17 @@ const DRIVE_PACKAGE = builtinPackage(
         "csv",
       ],
       instructions:
-        "Never guess spreadsheet or tab names: find the file with google_drive.search, then google_drive.list_sheet_tabs to confirm the exact tab before touching data. Inspect before editing — read the target range first so you know what is there. Always use explicit bounded ranges like Sheet1!A2:D20; open-ended ranges are refused. To add data, prefer append_sheet_rows, which never overwrites; write_sheet_range REPLACES every cell in its range. Strings starting with = are written as formulas — only pass formulas the owner asked for. Afterwards, report exactly what changed: spreadsheet, tab, range, and how many rows or cells you wrote.",
+        "Never guess spreadsheet or tab names: find the file with google_drive.search, then google_drive.list_sheet_tabs to confirm the exact tab before touching data. Inspect before editing — read the target range first so you know what is there. Always use explicit bounded ranges like Sheet1!A2:D20; open-ended ranges are refused. To add data, prefer append_sheet_rows, which never overwrites; write_sheet_range REPLACES every cell in its range. Strings starting with = are written as formulas — only pass formulas the owner asked for. The destructive edits are bounded and unforgiving: clear_sheet_range erases the values (not formatting) of exactly the approved range, delete_sheet_rows/columns remove whole rows or columns and shift the rest, and delete_sheet_tab removes a tab with all its data — read the data first and say what will be lost when proposing them; version history is the only recovery. Afterwards, report exactly what changed: spreadsheet, tab, range, and how many rows or cells you wrote or removed.",
     },
   ],
   // 1.1.0 added the bounded Google Sheets toolset (create spreadsheet,
   // list tabs, bounded reads, range writes, row appends, add/rename tab).
   // 1.2.0 added Drive organization (create folder, rename, move) over the
   // broad Drive scope the owner grants at connect time.
-  "1.2.0",
+  // 1.3.0 added Google Docs editing, Google Slides editing, destructive
+  // Sheets edits (clear/delete), in-place plain-text file editing, and
+  // recoverable deletion to the Drive Trash.
+  "1.3.0",
 );
 
 const GITHUB_PACKAGE = builtinPackage(

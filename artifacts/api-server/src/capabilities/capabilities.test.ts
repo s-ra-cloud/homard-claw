@@ -72,6 +72,7 @@ import {
   loadAgentAppAccess,
 } from "../connected-apps/authorize";
 import { buildAppsPromptSection } from "../connected-apps/catalog";
+import { hasOutcomeVerifier } from "../connected-apps/connections";
 
 const RUN_TAG = `HC Capabilities ${Date.now()}`;
 let workspaceId: string;
@@ -340,13 +341,13 @@ describe("registry", () => {
     );
   });
 
-  it("exposes the bounded Sheets toolset in the Drive package — and nothing destructive", () => {
+  it("exposes the full Drive editing toolset with exact risk levels", () => {
     const drive = listRegistryEntries().find(
       (e) => e.manifest.id === "google_drive",
     )!.manifest;
-    expect(drive.version).toBe("1.2.0");
+    expect(drive.version).toBe("1.3.0");
     const byName = new Map(drive.tools.map((t) => [t.name, t]));
-    // The seven Sheets operations, with their exact risk levels.
+    // The Sheets operations, with their exact risk levels.
     expect(byName.get("google_drive.create_spreadsheet")?.level).toBe("draft");
     expect(byName.get("google_drive.list_sheet_tabs")?.level).toBe("read");
     expect(byName.get("google_drive.read_sheet_range")?.level).toBe("read");
@@ -354,22 +355,100 @@ describe("registry", () => {
     expect(byName.get("google_drive.append_sheet_rows")?.level).toBe("write");
     expect(byName.get("google_drive.add_sheet_tab")?.level).toBe("write");
     expect(byName.get("google_drive.rename_sheet_tab")?.level).toBe("write");
+    expect(byName.get("google_drive.clear_sheet_range")?.level).toBe("write");
+    expect(byName.get("google_drive.delete_sheet_rows")?.level).toBe("write");
+    expect(byName.get("google_drive.delete_sheet_columns")?.level).toBe(
+      "write",
+    );
+    expect(byName.get("google_drive.delete_sheet_tab")?.level).toBe("write");
     // The organization tools, with their exact risk levels: folder creation
-    // is a draft (invisible until used), rename/move are approved writes.
+    // is a draft (invisible until used), rename/move/trash are approved
+    // writes.
     expect(byName.get("google_drive.create_folder")?.level).toBe("draft");
     expect(byName.get("google_drive.rename_item")?.level).toBe("write");
     expect(byName.get("google_drive.move_item")?.level).toBe("write");
-    // No delete, clear, share, or trash tool may ever appear. (Rename and
-    // move are deliberate additions — reversible organization, not
-    // destruction; delete and sharing changes remain excluded.)
+    expect(byName.get("google_drive.trash_item")?.level).toBe("write");
+    // The Docs operations.
+    expect(byName.get("google_drive.read_doc")?.level).toBe("read");
+    expect(byName.get("google_drive.insert_doc_text")?.level).toBe("write");
+    expect(byName.get("google_drive.replace_doc_text")?.level).toBe("write");
+    expect(byName.get("google_drive.delete_doc_range")?.level).toBe("write");
+    expect(byName.get("google_drive.format_doc_range")?.level).toBe("write");
+    expect(byName.get("google_drive.style_doc_paragraphs")?.level).toBe(
+      "write",
+    );
+    // The Slides operations.
+    expect(byName.get("google_drive.create_presentation")?.level).toBe(
+      "draft",
+    );
+    expect(byName.get("google_drive.read_presentation")?.level).toBe("read");
+    expect(byName.get("google_drive.add_slide")?.level).toBe("write");
+    expect(byName.get("google_drive.duplicate_slide")?.level).toBe("write");
+    expect(byName.get("google_drive.move_slide")?.level).toBe("write");
+    expect(byName.get("google_drive.delete_slide")?.level).toBe("write");
+    expect(byName.get("google_drive.insert_slide_text")?.level).toBe("write");
+    expect(byName.get("google_drive.delete_slide_text")?.level).toBe("write");
+    expect(byName.get("google_drive.replace_slide_text")?.level).toBe("write");
+    expect(byName.get("google_drive.format_slide_text")?.level).toBe("write");
+    // Plain-text editing.
+    expect(byName.get("google_drive.update_text_file")?.level).toBe("write");
+    // The hard lines that remain: no permanent deletion and no sharing or
+    // ownership changes, ever. Deletion is exclusively trash_item (the
+    // recoverable Drive Trash), and no tool name may suggest otherwise.
     for (const tool of drive.tools) {
-      expect(tool.name).not.toMatch(/delete|clear|share|trash/i);
+      expect(tool.name).not.toMatch(/share|permission|owner|purge|empty/i);
+      if (/delete/i.test(tool.name)) {
+        // Deletes are the bounded in-document edits only — never a Drive
+        // file/folder delete (that is what trash_item is for).
+        expect(tool.name).toMatch(
+          /^google_drive\.delete_(sheet_rows|sheet_columns|sheet_tab|doc_range|slide|slide_text)$/,
+        );
+      }
     }
-    // The teaching skills for spreadsheets and organizing ship with the
-    // package.
+    // The teaching skills ship with the package.
     const skillIds = drive.skills.map((s) => s.id);
     expect(skillIds).toContain("drive-sheets-editing");
     expect(skillIds).toContain("drive-organizing");
+    expect(skillIds).toContain("drive-docs-editing");
+    expect(skillIds).toContain("drive-slides-editing");
+  });
+
+  it("classifies recovery truthfully: reads retry_safe, verifier-backed writes provider_verifiable, the rest non_retryable", () => {
+    const manifests = listRegistryEntries()
+      .filter((e) => e.manifest.builtin)
+      .map((e) => e.manifest);
+    for (const manifest of manifests) {
+      for (const tool of manifest.tools) {
+        if (tool.level === "read") {
+          expect(tool.recovery).toBe("retry_safe");
+        } else {
+          expect(tool.recovery).toBe(
+            hasOutcomeVerifier(tool.name)
+              ? "provider_verifiable"
+              : "non_retryable",
+          );
+        }
+      }
+    }
+    // Spot checks pinning the intent: a draft without a verifier must not
+    // claim one; the revision-fenced Docs/Slides edits and the atomic
+    // marker writes are verifier-backed.
+    const byName = new Map(
+      manifests.flatMap((m) => m.tools).map((t) => [t.name, t]),
+    );
+    expect(byName.get("gmail.create_draft")?.recovery).toBe("non_retryable");
+    expect(byName.get("google_drive.insert_doc_text")?.recovery).toBe(
+      "provider_verifiable",
+    );
+    expect(byName.get("google_drive.add_slide")?.recovery).toBe(
+      "provider_verifiable",
+    );
+    expect(byName.get("google_drive.trash_item")?.recovery).toBe(
+      "provider_verifiable",
+    );
+    expect(byName.get("google_drive.update_text_file")?.recovery).toBe(
+      "provider_verifiable",
+    );
   });
 });
 

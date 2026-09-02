@@ -86,6 +86,27 @@ const sheetValues = (): ParamSpec => ({
   maxLength: 20000,
   multiline: true,
 });
+/**
+ * A text payload for document, slide, or file editing. Multiline is safe:
+ * it feeds a JSON request body or upload media — never a header, URL, or
+ * path — and the executor bounds it again before anything reaches Google.
+ */
+const editText = (
+  name: string,
+  required: boolean,
+  maxLength: number,
+): ParamSpec => ({
+  name,
+  required,
+  kind: "string",
+  maxLength,
+  multiline: true,
+});
+/** Bounded quote of agent-supplied text for approval targets. */
+const snip = (value: unknown, max = 80): string => {
+  const text = String(value ?? "").replace(/\s+/g, " ");
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+};
 
 export const APP_OPERATIONS: AppOperation[] = [
   {
@@ -161,11 +182,13 @@ export const APP_OPERATIONS: AppOperation[] = [
     params: [str("name", true, 300), str("content", true, 100000)],
     target: (p) => `Create Drive file "${p.name}"`,
   },
-  /* ----- Drive organization (folders, rename, move).
+  /* ----- Drive organization (folders, rename, move, trash).
    * These work on the owner's EXISTING files, so they run under the broad
-   * Drive scope the owner granted at connect time — and rename/move are
-   * externally visible writes, individually approved. There is deliberately
-   * NO delete and NO sharing/permission change in this catalog. */
+   * Drive scope the owner granted at connect time — and rename/move/trash
+   * are externally visible writes, individually approved. Deletion means
+   * moving ONE item to the recoverable Drive Trash (trash_item below);
+   * there is deliberately NO permanent delete and NO sharing/permission
+   * change in this catalog. */
   {
     name: "google_drive.create_folder",
     app: "google_drive",
@@ -201,7 +224,9 @@ export const APP_OPERATIONS: AppOperation[] = [
    * Mutations run on the baseline Drive token: with full Drive granted,
    * edits reach any spreadsheet the owner can edit; older grants stay
    * limited to spreadsheets this app created or was explicitly handed.
-   * There is deliberately NO delete, clear, or share. */
+   * Destructive edits exist only as the bounded, individually approved
+   * clear/delete operations below — recoverable through the spreadsheet's
+   * version history. Sharing changes stay out of the catalog entirely. */
   {
     name: "google_drive.create_spreadsheet",
     app: "google_drive",
@@ -280,6 +305,335 @@ export const APP_OPERATIONS: AppOperation[] = [
     ],
     target: (p) =>
       `Rename tab "${p.tabTitle}" to "${p.newTitle}" in spreadsheet ${p.spreadsheetId}`,
+  },
+  /* ----- Sheets destructive edits: bounded, individually approved, and
+   * recoverable through the spreadsheet's version history. */
+  {
+    name: "google_drive.clear_sheet_range",
+    app: "google_drive",
+    level: "write",
+    description:
+      "Clear the VALUES of an explicit A1 range — cell contents are erased, formatting and surrounding cells untouched (max 5000 cells); params: spreadsheetId, range (with tab, e.g. Sheet1!A2:D50)",
+    params: [str("spreadsheetId", true, 200), str("range", true, 200)],
+    target: (p) => `Clear range ${p.range} in spreadsheet ${p.spreadsheetId}`,
+  },
+  {
+    name: "google_drive.delete_sheet_rows",
+    app: "google_drive",
+    level: "write",
+    description:
+      "Delete whole rows from a tab — rows below shift up (max 100 rows per call); params: spreadsheetId, tabTitle, startRow, endRow (1-based, inclusive; matching the row numbers shown in Sheets)",
+    params: [
+      str("spreadsheetId", true, 200),
+      str("tabTitle", true, 100),
+      num("startRow"),
+      num("endRow"),
+    ],
+    target: (p) =>
+      `Delete rows ${p.startRow}-${p.endRow} from tab "${p.tabTitle}" of spreadsheet ${p.spreadsheetId}`,
+  },
+  {
+    name: "google_drive.delete_sheet_columns",
+    app: "google_drive",
+    level: "write",
+    description:
+      "Delete whole columns from a tab — columns to the right shift left (max 26 columns per call); params: spreadsheetId, tabTitle, startColumn, endColumn (letters, inclusive, e.g. B and D)",
+    params: [
+      str("spreadsheetId", true, 200),
+      str("tabTitle", true, 100),
+      str("startColumn", true, 3),
+      str("endColumn", true, 3),
+    ],
+    target: (p) =>
+      `Delete columns ${p.startColumn}-${p.endColumn} from tab "${p.tabTitle}" of spreadsheet ${p.spreadsheetId}`,
+  },
+  {
+    name: "google_drive.delete_sheet_tab",
+    app: "google_drive",
+    level: "write",
+    description:
+      "Delete an entire tab and ALL its data from a spreadsheet (the spreadsheet itself stays; recovery only via its version history); params: spreadsheetId, tabTitle",
+    params: [str("spreadsheetId", true, 200), str("tabTitle", true, 100)],
+    target: (p) =>
+      `Delete tab "${p.tabTitle}" (and all its data) from spreadsheet ${p.spreadsheetId}`,
+  },
+  /* ----- Google Docs (native documents, on the same Drive consent).
+   * Structure-aware editing: read_doc returns paragraph index ranges plus
+   * the revisionId every edit must echo back — Google rejects the edit if
+   * the document changed in between, so stale edits can never land. */
+  {
+    name: "google_drive.read_doc",
+    app: "google_drive",
+    level: "read",
+    description:
+      "Read a Google Doc's structure: each paragraph with its [startIndex..endIndex) positions — every tab of a multi-tab doc, each labeled with its tabId — plus the revisionId required by every edit; params: fileId",
+    params: [str("fileId", true, 200)],
+    target: (p) => `Read Google Doc ${p.fileId}`,
+  },
+  {
+    name: "google_drive.insert_doc_text",
+    app: "google_drive",
+    level: "write",
+    description:
+      "Insert text into a Google Doc at an exact index from read_doc (max 20000 chars); params: fileId, revisionId (from read_doc; the edit is rejected if the doc changed since), index, text, tabId (optional: required for any tab other than the first in a multi-tab doc)",
+    params: [
+      str("fileId", true, 200),
+      str("revisionId", true, 200),
+      num("index"),
+      editText("text", true, 20000),
+      str("tabId", false, 100),
+    ],
+    target: (p) =>
+      `Insert text "${snip(p.text)}" into Google Doc ${p.fileId} at index ${p.index}`,
+  },
+  {
+    name: "google_drive.replace_doc_text",
+    app: "google_drive",
+    level: "write",
+    description:
+      "Replace EVERY occurrence of an exact text (case-sensitive) throughout a Google Doc — all tabs included — up to 100 occurrences per call (more is refused with nothing changed); params: fileId, revisionId, findText, replaceText (may be empty to remove the text)",
+    params: [
+      str("fileId", true, 200),
+      str("revisionId", true, 200),
+      editText("findText", true, 1000),
+      editText("replaceText", false, 20000),
+    ],
+    target: (p) =>
+      `Replace every "${snip(p.findText)}" with "${snip(p.replaceText ?? "")}" in Google Doc ${p.fileId}`,
+  },
+  {
+    name: "google_drive.delete_doc_range",
+    app: "google_drive",
+    level: "write",
+    description:
+      "Delete the text in an exact [startIndex, endIndex) range of a Google Doc (max 50000 chars per call); params: fileId, revisionId, startIndex, endIndex — take indexes from a fresh read_doc — and tabId (optional: required for any tab other than the first)",
+    params: [
+      str("fileId", true, 200),
+      str("revisionId", true, 200),
+      num("startIndex"),
+      num("endIndex"),
+      str("tabId", false, 100),
+    ],
+    target: (p) =>
+      `Delete text [${p.startIndex}..${p.endIndex}) from Google Doc ${p.fileId}`,
+  },
+  {
+    name: "google_drive.format_doc_range",
+    app: "google_drive",
+    level: "write",
+    description:
+      'Format the text in an exact range of a Google Doc; params: fileId, revisionId, startIndex, endIndex, tabId (optional: required for any tab other than the first), then at least one of: bold/italic/underline/strikethrough ("true" applies, "false" removes), linkUrl (http/https), textColor (hex like #1A73E8)',
+    params: [
+      str("fileId", true, 200),
+      str("revisionId", true, 200),
+      num("startIndex"),
+      num("endIndex"),
+      str("tabId", false, 100),
+      str("bold", false, 10),
+      str("italic", false, 10),
+      str("underline", false, 10),
+      str("strikethrough", false, 10),
+      str("linkUrl", false, 2000),
+      str("textColor", false, 10),
+    ],
+    target: (p) =>
+      `Format text [${p.startIndex}..${p.endIndex}) in Google Doc ${p.fileId}`,
+  },
+  {
+    name: "google_drive.style_doc_paragraphs",
+    app: "google_drive",
+    level: "write",
+    description:
+      "Style the paragraphs overlapping an exact range of a Google Doc; params: fileId, revisionId, startIndex, endIndex, tabId (optional: required for any tab other than the first), then at least one of: namedStyle (normal, title, subtitle, heading1..heading6), alignment (start, center, end, justified), bullets (disc, decimal, none)",
+    params: [
+      str("fileId", true, 200),
+      str("revisionId", true, 200),
+      num("startIndex"),
+      num("endIndex"),
+      str("tabId", false, 100),
+      str("namedStyle", false, 20),
+      str("alignment", false, 20),
+      str("bullets", false, 20),
+    ],
+    target: (p) =>
+      `Style paragraphs [${p.startIndex}..${p.endIndex}) in Google Doc ${p.fileId}`,
+  },
+  /* ----- Google Slides (native presentations, on the same Drive consent).
+   * read_presentation returns slide and text-element object ids plus the
+   * revisionId every edit must echo back, exactly like Docs. Speaker notes
+   * are ordinary text elements (each slide's speakerNotesObjectId). */
+  {
+    name: "google_drive.create_presentation",
+    app: "google_drive",
+    level: "draft",
+    description:
+      "Create a new, empty native Google Slides presentation in the owner's Drive; params: name. Returns the presentationId and a stable link.",
+    params: [str("name", true, 300)],
+    target: (p) => `Create Google Slides presentation "${p.name}"`,
+  },
+  {
+    name: "google_drive.read_presentation",
+    app: "google_drive",
+    level: "read",
+    description:
+      "Read a Google Slides presentation's structure: every slide's objectId, its text elements (with ids, roles, current text), speaker-notes element ids, and the revisionId required by every edit; params: fileId",
+    params: [str("fileId", true, 200)],
+    target: (p) => `Read Google Slides presentation ${p.fileId}`,
+  },
+  {
+    name: "google_drive.add_slide",
+    app: "google_drive",
+    level: "write",
+    description:
+      "Add a new slide to a presentation; params: fileId, revisionId, layout (optional: blank, title, title_and_body, title_only, section_header, title_and_two_columns, one_column_text, main_point, big_number, caption_only; default blank), insertAtIndex (optional 0-based position; default at the end)",
+    params: [
+      str("fileId", true, 200),
+      str("revisionId", true, 200),
+      str("layout", false, 40),
+      num("insertAtIndex", false),
+    ],
+    target: (p) =>
+      `Add a ${p.layout || "blank"} slide to presentation ${p.fileId}`,
+  },
+  {
+    name: "google_drive.duplicate_slide",
+    app: "google_drive",
+    level: "write",
+    description:
+      "Duplicate an existing slide (the copy lands right after the original); params: fileId, revisionId, slideObjectId (from read_presentation)",
+    params: [
+      str("fileId", true, 200),
+      str("revisionId", true, 200),
+      str("slideObjectId", true, 100),
+    ],
+    target: (p) =>
+      `Duplicate slide ${p.slideObjectId} in presentation ${p.fileId}`,
+  },
+  {
+    name: "google_drive.move_slide",
+    app: "google_drive",
+    level: "write",
+    description:
+      "Move a slide to a new position; params: fileId, revisionId, slideObjectId, newIndex (0-based position counted BEFORE the slide is removed from its old spot)",
+    params: [
+      str("fileId", true, 200),
+      str("revisionId", true, 200),
+      str("slideObjectId", true, 100),
+      num("newIndex"),
+    ],
+    target: (p) =>
+      `Move slide ${p.slideObjectId} to position ${p.newIndex} in presentation ${p.fileId}`,
+  },
+  {
+    name: "google_drive.delete_slide",
+    app: "google_drive",
+    level: "write",
+    description:
+      "Delete ONE slide and everything on it from a presentation (recovery only via the presentation's version history); params: fileId, revisionId, slideObjectId",
+    params: [
+      str("fileId", true, 200),
+      str("revisionId", true, 200),
+      str("slideObjectId", true, 100),
+    ],
+    target: (p) =>
+      `Delete slide ${p.slideObjectId} from presentation ${p.fileId}`,
+  },
+  {
+    name: "google_drive.insert_slide_text",
+    app: "google_drive",
+    level: "write",
+    description:
+      "Insert text into one text element of a slide — including speaker notes via the slide's speakerNotesObjectId (max 10000 chars); params: fileId, revisionId, elementObjectId (from read_presentation), insertAtIndex (0 = start; the element's text length = end), text",
+    params: [
+      str("fileId", true, 200),
+      str("revisionId", true, 200),
+      str("elementObjectId", true, 100),
+      num("insertAtIndex"),
+      editText("text", true, 10000),
+    ],
+    target: (p) =>
+      `Insert text "${snip(p.text)}" into element ${p.elementObjectId} of presentation ${p.fileId}`,
+  },
+  {
+    name: "google_drive.delete_slide_text",
+    app: "google_drive",
+    level: "write",
+    description:
+      "Delete the text in an exact [startIndex, endIndex) range of one text element (max 20000 chars per call); params: fileId, revisionId, elementObjectId, startIndex, endIndex — take positions from a fresh read_presentation",
+    params: [
+      str("fileId", true, 200),
+      str("revisionId", true, 200),
+      str("elementObjectId", true, 100),
+      num("startIndex"),
+      num("endIndex"),
+    ],
+    target: (p) =>
+      `Delete text [${p.startIndex}..${p.endIndex}) from element ${p.elementObjectId} of presentation ${p.fileId}`,
+  },
+  {
+    name: "google_drive.replace_slide_text",
+    app: "google_drive",
+    level: "write",
+    description:
+      "Replace EVERY occurrence of an exact text (case-sensitive) in a presentation — optionally limited to one slide — up to 100 occurrences per call (more is refused with nothing changed); params: fileId, revisionId, findText, replaceText (may be empty), slideObjectId (optional: only that slide)",
+    params: [
+      str("fileId", true, 200),
+      str("revisionId", true, 200),
+      editText("findText", true, 1000),
+      editText("replaceText", false, 10000),
+      str("slideObjectId", false, 100),
+    ],
+    target: (p) =>
+      `Replace every "${snip(p.findText)}" with "${snip(p.replaceText ?? "")}" in presentation ${p.fileId}${p.slideObjectId ? ` (slide ${p.slideObjectId} only)` : ""}`,
+  },
+  {
+    name: "google_drive.format_slide_text",
+    app: "google_drive",
+    level: "write",
+    description:
+      'Format the text in an exact range of one text element; params: fileId, revisionId, elementObjectId, startIndex, endIndex, then at least one of: bold/italic/underline/strikethrough ("true"/"false"), linkUrl, textColor (hex)',
+    params: [
+      str("fileId", true, 200),
+      str("revisionId", true, 200),
+      str("elementObjectId", true, 100),
+      num("startIndex"),
+      num("endIndex"),
+      str("bold", false, 10),
+      str("italic", false, 10),
+      str("underline", false, 10),
+      str("strikethrough", false, 10),
+      str("linkUrl", false, 2000),
+      str("textColor", false, 10),
+    ],
+    target: (p) =>
+      `Format text [${p.startIndex}..${p.endIndex}) in element ${p.elementObjectId} of presentation ${p.fileId}`,
+  },
+  /* ----- Plain-text file editing and recoverable deletion. */
+  {
+    name: "google_drive.update_text_file",
+    app: "google_drive",
+    level: "write",
+    description:
+      'Edit an existing plain-text Drive file (not native Google Docs/Sheets/Slides — use their tools); params: fileId, mode ("overwrite" replaces the whole content, "append" adds content verbatim at the end, "replace" swaps every occurrence of findText for content — up to 100 occurrences per call, more is refused with nothing changed), content (max 100000 chars), findText (required for replace mode)',
+    params: [
+      str("fileId", true, 200),
+      str("mode", true, 20),
+      editText("content", true, 100000),
+      editText("findText", false, 1000),
+    ],
+    target: (p) =>
+      p.mode === "replace"
+        ? `Replace every "${snip(p.findText)}" in Drive text file ${p.fileId}`
+        : `${p.mode === "append" ? "Append to" : "Overwrite"} Drive text file ${p.fileId}`,
+  },
+  {
+    name: "google_drive.trash_item",
+    app: "google_drive",
+    level: "write",
+    description:
+      "Move ONE file or folder to the Google Drive Trash — the owner can restore it from drive.google.com for 30 days (trashing a folder trashes its contents; there is no permanent delete); params: fileId",
+    params: [str("fileId", true, 200)],
+    target: (p) => `Move Drive item ${p.fileId} to the Trash`,
   },
   {
     name: "github.list_repos",
