@@ -98,6 +98,7 @@ import {
 import { publish } from "./events";
 import { notifyTaskEvent } from "./notifications";
 import { runCodexHealthCheck, runDueSchedules } from "./scheduler";
+import { returnAgentsFromLeave } from "./leave";
 import { logger } from "./lib/logger";
 import {
   approvalReviewSnapshot,
@@ -3188,6 +3189,8 @@ export function startWorker(intervalMs = POLL_INTERVAL_MS): void {
       // Fire durable schedules before draining, so a task launched by a
       // just-due schedule runs in the same tick.
       await runDueSchedules();
+      // Bring back any Crustabot whose approved day off has ended.
+      await returnAgentsFromLeave();
       // Local, throttled, and self-disabling when Codex is off or has no
       // durable private home.
       await runCodexHealthCheck();

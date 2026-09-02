@@ -24,6 +24,7 @@ import type {
   AgentDetail,
   AgentInput,
   AgentMessage,
+  AgentOnLeave,
   AgentUpdate,
   Approval,
   ApprovalDecision,
@@ -1177,6 +1178,83 @@ export function useListRetiredAgents<TData = Awaited<ReturnType<typeof listRetir
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getListRetiredAgentsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListAgentsOnLeaveUrl = () => {
+
+
+
+
+  return `/api/island/leave`
+}
+
+/**
+ * @summary List Crustabots currently on an approved day off
+ */
+export const listAgentsOnLeave = async ( options?: Parameters<typeof customFetch>[1]): Promise<AgentOnLeave[]> => {
+
+  return customFetch<AgentOnLeave[]>(getListAgentsOnLeaveUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListAgentsOnLeaveQueryKey = () => {
+    return [
+    `/api/island/leave`
+    ] as const;
+    }
+
+
+export const getListAgentsOnLeaveQueryOptions = <TData = Awaited<ReturnType<typeof listAgentsOnLeave>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAgentsOnLeave>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListAgentsOnLeaveQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAgentsOnLeave>>> = ({ signal }) => listAgentsOnLeave({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listAgentsOnLeave>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListAgentsOnLeaveQueryResult = NonNullable<Awaited<ReturnType<typeof listAgentsOnLeave>>>
+export type ListAgentsOnLeaveQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List Crustabots currently on an approved day off
+ */
+
+export function useListAgentsOnLeave<TData = Awaited<ReturnType<typeof listAgentsOnLeave>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAgentsOnLeave>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListAgentsOnLeaveQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

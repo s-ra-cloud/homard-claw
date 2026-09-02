@@ -131,6 +131,7 @@ export const ListAgentsResponseItem = zod.object({
 }),
   "archived": zod.boolean(),
   "archivedAt": zod.string().nullish(),
+  "onLeaveUntil": zod.coerce.date().nullish().describe('Set while the agent is on an owner-granted day off; the instant (Europe\/Paris 08:00 the following morning) it automatically returns from Retirement Island. Null when not on leave.'),
   "createdAt": zod.coerce.date()
 })
 export const ListAgentsResponse = zod.array(ListAgentsResponseItem)
@@ -314,6 +315,7 @@ export const CreateAgentResponse = zod.object({
 }),
   "archived": zod.boolean(),
   "archivedAt": zod.string().nullish(),
+  "onLeaveUntil": zod.coerce.date().nullish().describe('Set while the agent is on an owner-granted day off; the instant (Europe\/Paris 08:00 the following morning) it automatically returns from Retirement Island. Null when not on leave.'),
   "createdAt": zod.coerce.date()
 })
 
@@ -418,6 +420,7 @@ export const GetAgentResponse = zod.object({
 }),
   "archived": zod.boolean(),
   "archivedAt": zod.string().nullish(),
+  "onLeaveUntil": zod.coerce.date().nullish().describe('Set while the agent is on an owner-granted day off; the instant (Europe\/Paris 08:00 the following morning) it automatically returns from Retirement Island. Null when not on leave.'),
   "createdAt": zod.coerce.date()
 }),
   "tasks": zod.array(zod.object({
@@ -685,6 +688,7 @@ export const UpdateAgentResponse = zod.object({
 }),
   "archived": zod.boolean(),
   "archivedAt": zod.string().nullish(),
+  "onLeaveUntil": zod.coerce.date().nullish().describe('Set while the agent is on an owner-granted day off; the instant (Europe\/Paris 08:00 the following morning) it automatically returns from Retirement Island. Null when not on leave.'),
   "createdAt": zod.coerce.date()
 })
 
@@ -798,6 +802,7 @@ export const DuplicateAgentResponse = zod.object({
 }),
   "archived": zod.boolean(),
   "archivedAt": zod.string().nullish(),
+  "onLeaveUntil": zod.coerce.date().nullish().describe('Set while the agent is on an owner-granted day off; the instant (Europe\/Paris 08:00 the following morning) it automatically returns from Retirement Island. Null when not on leave.'),
   "createdAt": zod.coerce.date()
 })
 
@@ -991,6 +996,7 @@ export const SetAgentArchivedResponse = zod.object({
 }),
   "archived": zod.boolean(),
   "archivedAt": zod.string().nullish(),
+  "onLeaveUntil": zod.coerce.date().nullish().describe('Set while the agent is on an owner-granted day off; the instant (Europe\/Paris 08:00 the following morning) it automatically returns from Retirement Island. Null when not on leave.'),
   "createdAt": zod.coerce.date()
 })
 
@@ -1098,6 +1104,7 @@ export const PauseAgentResponse = zod.object({
 }),
   "archived": zod.boolean(),
   "archivedAt": zod.string().nullish(),
+  "onLeaveUntil": zod.coerce.date().nullish().describe('Set while the agent is on an owner-granted day off; the instant (Europe\/Paris 08:00 the following morning) it automatically returns from Retirement Island. Null when not on leave.'),
   "createdAt": zod.coerce.date()
 })
 
@@ -1166,6 +1173,29 @@ export const ListRetiredAgentsResponseItem = zod.object({
   "retiredAt": zod.coerce.date()
 })
 export const ListRetiredAgentsResponse = zod.array(ListRetiredAgentsResponseItem)
+
+
+/**
+ * @summary List Crustabots currently on an approved day off
+ */
+export const ListAgentsOnLeaveResponseItem = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "title": zod.string(),
+  "mission": zod.string(),
+  "provider": zod.union([zod.literal('claude_max'),zod.literal('codex_chatgpt'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
+  "model": zod.string().nullish(),
+  "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
+  "avatar": zod.object({
+  "shellColor": zod.string(),
+  "deskStyle": zod.string(),
+  "accessory": zod.string(),
+  "expression": zod.string().optional()
+}),
+  "createdAt": zod.coerce.date(),
+  "onLeaveUntil": zod.coerce.date().describe('When this Crustabot automatically returns from Retirement Island.')
+})
+export const ListAgentsOnLeaveResponse = zod.array(ListAgentsOnLeaveResponseItem)
 
 
 /**

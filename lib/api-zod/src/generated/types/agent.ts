@@ -53,5 +53,10 @@ export interface Agent {
   archived: boolean;
   /** @nullable */
   archivedAt?: string | null;
+  /**
+     * Set while the agent is on an owner-granted day off; the instant (Europe/Paris 08:00 the following morning) it automatically returns from Retirement Island. Null when not on leave.
+     * @nullable
+     */
+  onLeaveUntil?: Date | null;
   createdAt: Date;
 }

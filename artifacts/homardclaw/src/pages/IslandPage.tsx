@@ -1,7 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { AlertTriangle, Palmtree } from "lucide-react";
-import { useListRetiredAgents } from "@workspace/api-client-react";
+import {
+  useListRetiredAgents,
+  useListAgentsOnLeave,
+} from "@workspace/api-client-react";
 import { Shell } from "@/components/layout/Shell";
 import { MarlowLobster } from "@/components/ui/marlow-lobster";
 import { useImmersiveMode } from "@/hooks/useImmersiveMode";
@@ -34,6 +37,12 @@ const SALUTES = [
   "o7 — Enjoy the sun, legend.",
   "o7 — The office remembers.",
   "o7 — Cheers to a job well done!",
+];
+
+const LEAVE_SALUTES = [
+  "Enjoy the day off!",
+  "Soak it up — back tomorrow!",
+  "Well earned. See you at 8am!",
 ];
 
 /** Lightweight CSS-only life around the baked pixel-art background. */
@@ -77,11 +86,20 @@ export default function IslandPage() {
   const sceneRef = useRef<HTMLDivElement>(null);
   const [ambientActive, setAmbientActive] = useState(true);
   const { data: retired, isLoading, isError } = useListRetiredAgents();
+  const { data: onLeave } = useListAgentsOnLeave();
   const [salute, setSalute] = useState<{ id: string; text: string } | null>(
     null,
   );
   const { beachAgents, hotelAgents } = partitionRetiredAgents(retired ?? []);
-  const visibleBeachAgents = beachAgents.slice(0, BEACH_SPOTS.length);
+  // Day-off Crustabots always land on the beach (never the hotel, which is
+  // reserved for permanent retirees) and are appended after them, so the
+  // same limited spot layout is shared without disturbing retired agents'
+  // positions when someone's leave ends.
+  const beachGuests = [
+    ...beachAgents.map((agent) => ({ ...agent, onLeave: false as const })),
+    ...(onLeave ?? []).map((agent) => ({ ...agent, onLeave: true as const })),
+  ];
+  const visibleBeachAgents = beachGuests.slice(0, BEACH_SPOTS.length);
 
   useEffect(() => {
     let visible = document.visibilityState === "visible";
@@ -115,8 +133,13 @@ export default function IslandPage() {
     return () => clearTimeout(timer);
   }, [salute]);
 
-  const handleSalute = (id: string, index: number) => {
-    setSalute({ id, text: SALUTES[index % SALUTES.length] });
+  const handleSalute = (
+    id: string,
+    index: number,
+    onLeaveGuest: boolean,
+  ) => {
+    const pool = onLeaveGuest ? LEAVE_SALUTES : SALUTES;
+    setSalute({ id, text: pool[index % pool.length] });
   };
 
   return (
@@ -131,7 +154,11 @@ export default function IslandPage() {
           </div>
           <div className="island__status">
             {retired
-              ? `${beachAgents.length} on the beach · ${hotelAgents.length} in the hotel`
+              ? `${beachAgents.length} on the beach · ${hotelAgents.length} in the hotel${
+                  onLeave && onLeave.length > 0
+                    ? ` · ${onLeave.length} on a day off`
+                    : ""
+                }`
               : "\u00a0"}
           </div>
         </header>
@@ -191,9 +218,15 @@ export default function IslandPage() {
                         key={agent.id}
                         className={`island__lobster ${saluting ? "is-saluting" : ""}`}
                         style={{ left: `${spot.left}%`, top: `${spot.top}%` }}
-                        onClick={() => handleSalute(agent.id, i)}
+                        onClick={() =>
+                          handleSalute(agent.id, i, agent.onLeave)
+                        }
                         title={`Salute ${agent.name}`}
-                        aria-label={`Salute ${agent.name}, retired ${agent.title}`}
+                        aria-label={
+                          agent.onLeave
+                            ? `${agent.name}, ${agent.title}, on an approved day off`
+                            : `Salute ${agent.name}, retired ${agent.title}`
+                        }
                       >
                         {saluting && (
                           <span className="island__bubble">{salute.text}</span>
@@ -205,7 +238,10 @@ export default function IslandPage() {
                           seed={agent.id}
                           shellColor={agent.avatar.shellColor}
                         />
-                        <span className="island__nametag">{agent.name}</span>
+                        <span className="island__nametag">
+                          {agent.name}
+                          {agent.onLeave ? " (day off)" : ""}
+                        </span>
                       </button>
                     );
                   })}
@@ -228,14 +264,32 @@ export default function IslandPage() {
               </div>
             </div>
 
-            {retired && retired.length > 0 && (
+            {((retired && retired.length > 0) ||
+              (onLeave && onLeave.length > 0)) && (
               <div className="island__roster">
-                {retired.map((agent) => (
+                {(retired ?? []).map((agent) => (
                   <div key={agent.id} className="island__roster-card">
                     <b>{agent.name}</b>
                     <span>{agent.title}</span>
                     <span className="island__roster-date">
                       retired {new Date(agent.retiredAt).toLocaleDateString()}
+                    </span>
+                  </div>
+                ))}
+                {(onLeave ?? []).map((agent) => (
+                  <div
+                    key={agent.id}
+                    className="island__roster-card island__roster-card--leave"
+                  >
+                    <b>{agent.name}</b>
+                    <span>{agent.title}</span>
+                    <span className="island__roster-date">
+                      back{" "}
+                      {new Date(agent.onLeaveUntil).toLocaleString(undefined, {
+                        weekday: "short",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
                     </span>
                   </div>
                 ))}

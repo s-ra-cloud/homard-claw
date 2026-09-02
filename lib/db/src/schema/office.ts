@@ -103,6 +103,13 @@ export const agentsTable = pgTable(
     archivedAt: timestamp("archived_at", { withTimezone: true }),
     retired: boolean("retired").notNull().default(false),
     retiredAt: timestamp("retired_at", { withTimezone: true }),
+    /**
+     * Set while an agent is on an owner-granted day off: the agent rests on
+     * Retirement Island until this instant, then the worker automatically
+     * returns it. Unlike `retired`, this is temporary and reversible — null
+     * means the agent is not currently on leave.
+     */
+    onLeaveUntil: timestamp("on_leave_until", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -114,6 +121,8 @@ export const agentsTable = pgTable(
       table.workspaceId,
       sql`lower(${table.name})`,
     ),
+    // The leave-return sweep scans for due agents by this column alone.
+    index("agents_leave_due_idx").on(table.onLeaveUntil),
   ],
 );
 
@@ -964,6 +973,7 @@ export const insertAgentSchema = createInsertSchema(agentsTable).omit({
   archivedAt: true,
   retired: true,
   retiredAt: true,
+  onLeaveUntil: true,
   createdAt: true,
 });
 export const insertTaskSchema = createInsertSchema(tasksTable).omit({

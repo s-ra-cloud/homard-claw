@@ -32,6 +32,7 @@ import {
   RecoverQueueResponse,
   GetTaskResponse,
   ListAgentsResponse,
+  ListAgentsOnLeaveResponse,
   ListApprovalsResponse,
   ListProviderModelsParams,
   ListProviderModelsResponse,
@@ -82,7 +83,17 @@ import {
   type AppAccessLevel,
   type ConnectedAppId,
 } from "@workspace/db";
-import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm";
 import { Router, type IRouter, type Request, type Response } from "express";
 import {
   getWorkspaceSetting,
@@ -354,6 +365,7 @@ function toAgent(
     avatar: agent.avatar,
     archived: agent.archived,
     archivedAt: agent.archivedAt ? agent.archivedAt.toISOString() : null,
+    onLeaveUntil: agent.onLeaveUntil ? agent.onLeaveUntil.toISOString() : null,
     createdAt: agent.createdAt.toISOString(),
   };
 }
@@ -537,6 +549,12 @@ router.get("/agents", async (req, res): Promise<void> => {
       and(
         eq(agentsTable.workspaceId, req.workspaceId!),
         eq(agentsTable.retired, false),
+        // An agent on an approved day off rests on Retirement Island until
+        // the worker returns it; hide it from the office roster meanwhile.
+        or(
+          isNull(agentsTable.onLeaveUntil),
+          lte(agentsTable.onLeaveUntil, new Date()),
+        ),
       ),
     )
     .orderBy(agentsTable.name);
@@ -1186,6 +1204,49 @@ router.get("/island/agents", async (req, res): Promise<void> => {
     )
     .orderBy(desc(agentsTable.retiredAt));
   res.json(ListRetiredAgentsResponse.parse(agents.map(toRetiredAgent)));
+});
+
+function toAgentOnLeave(
+  agent: typeof agentsTable.$inferSelect & { onLeaveUntil: Date },
+) {
+  return {
+    id: agent.id,
+    name: agent.name,
+    title: agent.title,
+    mission: agent.mission,
+    provider: agent.provider,
+    model: agent.model,
+    securityPreset: agent.securityPreset,
+    avatar: agent.avatar,
+    createdAt: agent.createdAt.toISOString(),
+    onLeaveUntil: agent.onLeaveUntil.toISOString(),
+  };
+}
+
+router.get("/island/leave", async (req, res): Promise<void> => {
+  const agents = await db
+    .select()
+    .from(agentsTable)
+    .where(
+      and(
+        eq(agentsTable.workspaceId, req.workspaceId!),
+        isNotNull(agentsTable.onLeaveUntil),
+        // A leave whose window already ended is about to be swept by the
+        // worker; treat it as already back rather than showing a stale card.
+        sql`${agentsTable.onLeaveUntil} > now()`,
+      ),
+    )
+    .orderBy(agentsTable.onLeaveUntil);
+  res.json(
+    ListAgentsOnLeaveResponse.parse(
+      agents
+        .filter(
+          (agent): agent is typeof agent & { onLeaveUntil: Date } =>
+            agent.onLeaveUntil !== null,
+        )
+        .map(toAgentOnLeave),
+    ),
+  );
 });
 
 router.get("/tasks", async (req, res): Promise<void> => {
