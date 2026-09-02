@@ -247,6 +247,11 @@ function ConnectActions({ app }: { app: ConnectedApp }) {
   const githubInfo = app.app === "github" ? githubConnection.data : undefined;
   const githubViaApp = githubInfo?.method === "github_app";
   const githubAppAvailable = Boolean(githubInfo?.appConfigured);
+  // The server HAS GitHub App settings but they are unusable (partial set
+  // or unreadable private key). Automatic token renewal and hands-free
+  // recovery cannot work until the server configuration is fixed — show
+  // that as the problem instead of quietly offering the OAuth path.
+  const githubAppMisconfigured = githubInfo?.appConfigStatus === "invalid";
 
   const start =
     app.app === "github"
@@ -329,16 +334,30 @@ function ConnectActions({ app }: { app: ConnectedApp }) {
           </Button>
         ) : null}
       </div>
+      {app.app === "github" && githubAppMisconfigured ? (
+        <p className="text-[10px] text-destructive uppercase font-bold max-w-xs">
+          Server problem: the GitHub App settings on this server are present
+          but unusable (unreadable private key or an incomplete set), so
+          automatic access renewal and hands-free recovery are disabled.
+          Fix GITHUB_APP_ID / GITHUB_APP_SLUG / GITHUB_APP_PRIVATE_KEY on the
+          server.
+          {githubViaApp
+            ? " The installed GitHub App cannot mint tokens until then."
+            : " The legacy sign-in below still works but can expire without warning."}
+        </p>
+      ) : null}
       {app.app === "github" ? (
         githubViaApp && githubInfo?.installation ? (
-          <p className="text-[10px] text-muted-foreground uppercase font-bold">
-            GitHub App installed on @{githubInfo.installation.accountLogin} (
-            {githubInfo.installation.repositorySelection === "all"
-              ? "all repositories"
-              : "selected repositories"}
-            ) — access renews automatically. Manage repositories from the
-            installation settings on GitHub.
-          </p>
+          githubAppMisconfigured ? null : (
+            <p className="text-[10px] text-muted-foreground uppercase font-bold">
+              GitHub App installed on @{githubInfo.installation.accountLogin} (
+              {githubInfo.installation.repositorySelection === "all"
+                ? "all repositories"
+                : "selected repositories"}
+              ) — access renews automatically. Manage repositories from the
+              installation settings on GitHub.
+            </p>
+          )
         ) : githubInfo?.method === "oauth" && githubAppAvailable ? (
           <p className="text-[10px] text-muted-foreground uppercase font-bold">
             This workspace still uses the legacy GitHub sign-in, which can

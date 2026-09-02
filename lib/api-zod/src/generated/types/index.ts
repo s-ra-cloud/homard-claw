@@ -110,6 +110,7 @@ export * from './emergencyStopInput';
 export * from './githubAppDisconnect';
 export * from './githubAppInstallStart';
 export * from './githubConnectionInfo';
+export * from './githubConnectionInfoAppConfigStatus';
 export * from './githubConnectionInfoInstallation';
 export * from './githubConnectionInfoMethod';
 export * from './githubOauthDisconnect';

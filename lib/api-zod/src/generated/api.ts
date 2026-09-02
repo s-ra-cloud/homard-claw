@@ -3979,6 +3979,7 @@ export const DisconnectGithubAccountResponse = zod.object({
 export const GetGithubConnectionResponse = zod.object({
   "method": zod.union([zod.literal('github_app'),zod.literal('oauth'),zod.literal(null)]).nullable().describe('How the workspace authenticates to GitHub right now. The GitHub App installation always wins when one is bound; null means no GitHub connection of any kind.'),
   "appConfigured": zod.boolean().describe('Whether this server offers the GitHub App install flow.'),
+  "appConfigStatus": zod.enum(['configured', 'invalid', 'absent']).describe('Three-way App configuration status. \"invalid\" means the server HAS GitHub App settings but they are unusable (partial set or an unreadable private key) — a server problem to fix, not a reason to fall back to the expiring OAuth path.'),
   "oauthConfigured": zod.boolean().describe('Whether this server offers the legacy OAuth flow.'),
   "installation": zod.object({
   "accountLogin": zod.string(),

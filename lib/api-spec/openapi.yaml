@@ -2286,7 +2286,14 @@ components:
     GithubConnectionInfo:
       type: object
       required:
-        [method, appConfigured, oauthConfigured, installation, oauthLogin]
+        [
+          method,
+          appConfigured,
+          appConfigStatus,
+          oauthConfigured,
+          installation,
+          oauthLogin,
+        ]
       properties:
         method:
           type: [string, "null"]
@@ -2298,6 +2305,14 @@ components:
         appConfigured:
           type: boolean
           description: Whether this server offers the GitHub App install flow.
+        appConfigStatus:
+          type: string
+          enum: [configured, invalid, absent]
+          description: >-
+            Three-way App configuration status. "invalid" means the server
+            HAS GitHub App settings but they are unusable (partial set or an
+            unreadable private key) — a server problem to fix, not a reason
+            to fall back to the expiring OAuth path.
         oauthConfigured:
           type: boolean
           description: Whether this server offers the legacy OAuth flow.

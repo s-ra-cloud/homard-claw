@@ -86,12 +86,22 @@ export function githubAppConfig(): GithubAppConfig | null {
 
 /** True when the GitHub App install flow can be offered at all. */
 export function githubAppConfigured(): boolean {
+  return githubAppConfigStatus() === "configured";
+}
+
+/**
+ * Three-way App configuration status for status pages and diagnostics.
+ * "invalid" (env vars present but unusable — partial set, or an unreadable
+ * private key) is deliberately distinct from "absent": it is a server
+ * configuration MISTAKE that silently downgrades every workspace to the
+ * expiring OAuth path, so it must be shown as a problem to fix, never as
+ * "the App feature just isn't offered here".
+ */
+export function githubAppConfigStatus(): "configured" | "invalid" | "absent" {
   try {
-    return githubAppConfig() !== null;
+    return githubAppConfig() !== null ? "configured" : "absent";
   } catch {
-    // Partially/badly configured: the flow cannot work, but callers asking
-    // "should I show the install button?" must not blow up a status page.
-    return false;
+    return "invalid";
   }
 }
 

@@ -428,11 +428,22 @@ async function requeueForApprovalRetry(
   });
 }
 
-/** Execute a claimed (status "executing") action and finalize its row. */
+/**
+ * Execute a claimed (status "executing") action and finalize its row.
+ *
+ * With `allowAuthPark`, an owner-approved action whose credential was
+ * refused PROVABLY before the provider did any work (revoked token,
+ * unresolvable credential) is preserved instead of failed: the row moves
+ * back to "approved" under the recoveryRequeuedAt single-retry fence, so
+ * one later attempt — after the connection recovers — re-runs it under the
+ * SAME action id (and idempotency marker) without a fresh approval. A row
+ * that already spent its fence finalizes as failed like any other refusal.
+ */
 export async function executeClaimedAction(
   action: AppActionRecord,
   agentName: string,
   workspaceId: string | null,
+  options?: { allowAuthPark?: boolean },
 ): Promise<{ action: AppActionRecord; outcome: ExecutionOutcome }> {
   const tool = await resolveTool(action.operation, workspaceId);
   const outcome: ExecutionOutcome = tool
@@ -448,8 +459,64 @@ export async function executeClaimedAction(
           : {}),
       })
     : { ok: false, kind: "failed", message: "Unknown operation." };
+  if (
+    options?.allowAuthPark === true &&
+    !outcome.ok &&
+    outcome.kind === "auth" &&
+    outcome.refusedBeforeExecution === true &&
+    action.approvalId &&
+    !action.recoveryRequeuedAt
+  ) {
+    const parked = await parkAuthRefusedAction(
+      action,
+      agentName,
+      outcome.message,
+      workspaceId,
+    );
+    if (parked) return { action: parked, outcome };
+  }
   const finalized = await finalizeAction(action.id, agentName, outcome, workspaceId);
   return { action: finalized, outcome };
+}
+
+/**
+ * Preserve an owner-approved action that a provider refused to authorize
+ * before doing any work. The row returns to "approved" with
+ * recoveryRequeuedAt set — the same durable single-retry fence crash
+ * recovery uses — so however the retry later goes, this action never loops.
+ * The approval itself is untouched: no re-approval, no approval bypass.
+ */
+async function parkAuthRefusedAction(
+  action: AppActionRecord,
+  agentName: string,
+  refusalMessage: string,
+  workspaceId: string | null,
+): Promise<AppActionRecord | null> {
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(appActionsTable)
+      .set({
+        status: "approved",
+        recoveryRequeuedAt: new Date(),
+        errorMessage: refusalMessage,
+      })
+      .where(
+        and(
+          eq(appActionsTable.id, action.id),
+          eq(appActionsTable.status, "executing"),
+        ),
+      )
+      .returning();
+    if (row) {
+      await recordAudit(
+        workspaceId,
+        "app_action.requeued",
+        `An approved action by ${agentName} (${action.operation}: ${action.targetSummary}) was refused before execution because the app's credential was rejected; it was preserved to retry once automatically after the connection recovers.`,
+        tx,
+      );
+    }
+    return row ?? null;
+  });
 }
 
 async function finalizeAction(

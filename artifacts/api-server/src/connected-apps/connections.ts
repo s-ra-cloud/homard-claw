@@ -142,6 +142,16 @@ export type ExecutionOutcome =
        */
       kind: "auth" | "failed";
       message: string;
+      /**
+       * True only when the refusal PROVABLY happened before the provider
+       * performed any work: the credential could not be resolved at all
+       * (no request was ever sent), or the provider rejected the request's
+       * authorization outright (GitHub 401/missing-scope refusals reject
+       * before executing anything). Such an action is safe to run again
+       * once the connection recovers — no write can have landed. Never set
+       * for refusals where partial execution is conceivable.
+       */
+      refusedBeforeExecution?: boolean;
     };
 
 function truncate(text: string): string {
@@ -220,12 +230,16 @@ function credentialFailure(
   error: unknown,
 ): { ok: false; outcome: ExecutionOutcome } | null {
   if (error instanceof GoogleAuthError || error instanceof GithubAuthError) {
+    const kind = error.kind === "unavailable" ? "failed" : "auth";
     return {
       ok: false,
       outcome: {
         ok: false,
-        kind: error.kind === "unavailable" ? "failed" : "auth",
+        kind,
         message: error.message,
+        // The credential never resolved, so no provider request was ever
+        // sent — this refusal provably preceded any execution.
+        ...(kind === "auth" ? { refusedBeforeExecution: true } : {}),
       },
     };
   }
@@ -425,7 +439,16 @@ async function githubJson(
         if (!described) return null;
         // The described message intentionally omits the raw response body.
         void bodyText;
-        return { ok: false, ...described };
+        // GitHub "auth" refusals (revoked token 401, missing OAuth scope)
+        // reject the request's authorization before performing any work —
+        // safe to run again once the connection recovers.
+        return {
+          ok: false,
+          ...described,
+          ...(described.kind === "auth"
+            ? { refusedBeforeExecution: true }
+            : {}),
+        };
       },
     });
 
@@ -436,7 +459,7 @@ async function githubJson(
     !first.ok &&
     first.status === 401 &&
     auth.source === "oauth" &&
-    (await recoverPersonalGithubAppBinding(workspaceId))
+    (await recoverPersonalGithubAppBinding(workspaceId)).recovered
   ) {
     // A 401 means GitHub rejected the OAuth request before performing any
     // work. If the owner's matching personal App installation was present

@@ -1,6 +1,7 @@
 import { pool } from "@workspace/db";
 import app from "./app";
 import { logGithubCredentialStartupHealth } from "./github/credentials";
+import { githubAppConfigStatus } from "./github/app-auth";
 import { logger } from "./lib/logger";
 import { abortAllInFlight, startWorker, stopWorker } from "./worker";
 import { ensureWorkspaceBackfill } from "./workspace";
@@ -67,6 +68,15 @@ const server = app.listen(port, (err) => {
   logGithubCredentialStartupHealth().catch((err) => {
     logger.warn({ err }, "GitHub credential startup check failed");
   });
+  // Same canary for the GitHub App identity: settings that are PRESENT but
+  // unusable silently downgrade every workspace to the expiring OAuth path
+  // and disable hands-free recovery — say so at boot, in deployment logs.
+  if (githubAppConfigStatus() === "invalid") {
+    logger.error(
+      { component: "github_app", failureClass: "app_config_invalid" },
+      "GitHub App settings are present but unusable (GITHUB_APP_ID, GITHUB_APP_SLUG, and GITHUB_APP_PRIVATE_KEY must all be set, and the key must be a readable PEM). Installation tokens and automatic GitHub recovery are DISABLED until this is fixed.",
+    );
+  }
 
   ensureWorkspaceBackfill()
     .catch((err) => {

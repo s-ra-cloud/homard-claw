@@ -87,6 +87,10 @@ import {
 } from "./connected-apps/actions";
 import { parseAppActions } from "./connected-apps/parser";
 import {
+  APP_AUTH_PARK_RETRY_DELAY_MS,
+  parkTaskForAppAuthRecovery,
+} from "./connected-apps/auth-parked-tasks";
+import {
   executeTaskResultRead,
   isTaskResultOperation,
   TASK_RESULTS_PROMPT_SECTION,
@@ -1159,6 +1163,14 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
   // is consulted again. claimApprovedAction is the exactly-once fence: only
   // one process ever moves a row approved → executing, so an approved email
   // cannot be sent twice however many workers race on the retry.
+  // When an approved action's credential is refused before the provider
+  // does any work (revoked GitHub token), the action is preserved instead
+  // of failed and the whole task parks to wait for the connection repair.
+  let parkedActionForAuthRecovery: {
+    targetSummary: string;
+    message: string;
+    refusedAt: Date;
+  } | null = null;
   try {
     // Any action still "executing" belongs to a crashed attempt. Each one
     // is verified against the provider via its idempotency marker: a write
@@ -1234,11 +1246,34 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         "info",
         `Running the approved action: ${claimed.targetSummary}.`,
       );
+      // Captured BEFORE the attempt: any credential repair with a newer
+      // row timestamp provably happened after this refusal and releases
+      // the park immediately (closes the reconnect-during-park race).
+      const attemptStartedAt = new Date();
       const { action } = await executeClaimedAction(
         claimed,
         agent.name,
         workspaceId,
+        // Preserving an auth-refused action only makes sense when the task
+        // still has an attempt left to actually run it later.
+        { allowAuthPark: task.attempts < maxAttempts },
       );
+      if (action.status === "approved") {
+        // Parked: the credential was refused before any work happened, and
+        // the action keeps its approval for ONE automatic retry after the
+        // connection recovers (recoveryRequeuedAt is the durable fence).
+        parkedActionForAuthRecovery = {
+          targetSummary: action.targetSummary,
+          message: action.errorMessage ?? "The app's credential was refused.",
+          refusedAt: attemptStartedAt,
+        };
+        await addTaskLog(
+          task.id,
+          "warn",
+          `The approved action was refused before execution (${action.errorMessage ?? "credential rejected"}). It stays approved and will run automatically once the connection is restored — no new approval needed.`,
+        );
+        continue;
+      }
       await addTaskLog(
         task.id,
         action.status === "executed" ? "info" : "warn",
@@ -1251,6 +1286,33 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     logger.warn(
       { taskId: task.id, error },
       "Could not run approved connected-app actions",
+    );
+  }
+  if (parkedActionForAuthRecovery) {
+    // Park the task itself instead of consulting the model against a broken
+    // connection: it re-queues with a generous delay, and a successful
+    // reconnect or App bind releases it immediately (resumeTasksParkedFor-
+    // AppAuth). The single-retry fence on the action bounds the loop.
+    const parked = await parkTaskForAppAuthRecovery({
+      taskId: task.id,
+      attempts: task.attempts,
+      workspaceId,
+      message: parkedActionForAuthRecovery.message,
+      refusedAt: parkedActionForAuthRecovery.refusedAt,
+    });
+    if (parked) {
+      await addTaskLog(
+        task.id,
+        "warn",
+        `Waiting for the connected app's access to be repaired before retrying the approved action (${parkedActionForAuthRecovery.targetSummary}). The task resumes automatically after a reconnect, or retries once on its own in ${Math.round(APP_AUTH_PARK_RETRY_DELAY_MS / 60000)} minutes.`,
+      );
+      publish(workspaceId, "tasks");
+      await settleAgentStatus(agent.id, workspaceId);
+      return;
+    }
+    logger.warn(
+      { taskId: task.id },
+      "An approved action was preserved for auth recovery but the task could not be re-queued (lease lost or task settled concurrently)",
     );
   }
 

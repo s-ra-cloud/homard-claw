@@ -309,6 +309,28 @@ export async function githubAuth(workspaceId: string): Promise<{
 }
 
 /**
+ * Why an automatic App-binding recovery could not (or did not need to)
+ * bind an installation. Structured so callers, logs, and diagnostics can
+ * tell a server configuration MISTAKE ("app_config_invalid" — fix the
+ * deployment) apart from a genuine absence ("no_matching_installation" —
+ * the owner never installed the App) instead of collapsing both into a
+ * silent false that reads as "recovery unavailable".
+ */
+export type GithubAppRecoveryOutcome =
+  | { recovered: true; via: "bound" | "already_bound" }
+  | {
+      recovered: false;
+      reason:
+        | "no_oauth_identity"
+        | "app_not_configured"
+        | "app_config_invalid"
+        | "no_matching_installation"
+        | "installation_unusable"
+        | "installation_claimed"
+        | "github_unavailable";
+    };
+
+/**
  * Repair the narrow case where the owner installed the GitHub App on their
  * personal account but GitHub's setup redirect never persisted the binding.
  *
@@ -319,7 +341,23 @@ export async function githubAuth(workspaceId: string): Promise<{
  */
 export async function recoverPersonalGithubAppBinding(
   workspaceId: string,
-): Promise<boolean> {
+): Promise<GithubAppRecoveryOutcome> {
+  const notRecovered = (
+    reason: Extract<GithubAppRecoveryOutcome, { recovered: false }>["reason"],
+    level: "info" | "warn" | "error" = "info",
+  ): GithubAppRecoveryOutcome => {
+    logger[level](
+      {
+        component: "github_app",
+        workspaceId,
+        recovery: "not_available",
+        failureClass: reason,
+      },
+      "Could not recover a missing GitHub App workspace binding",
+    );
+    return { recovered: false, reason };
+  };
+
   const [oauth] = await db
     .select({
       clerkUserId: githubAccountsTable.clerkUserId,
@@ -329,21 +367,30 @@ export async function recoverPersonalGithubAppBinding(
     .from(githubAccountsTable)
     .where(eq(githubAccountsTable.workspaceId, workspaceId))
     .limit(1);
-  if (!oauth) return false;
+  if (!oauth) return notRecovered("no_oauth_identity");
+
+  let config: ReturnType<typeof githubAppConfig>;
+  try {
+    config = githubAppConfig();
+  } catch {
+    // Env vars are PRESENT but unusable (partial set, unreadable key). This
+    // is the exact production failure that silently sent owners back
+    // through OAuth reconnects — log it loudly as a server problem.
+    return notRecovered("app_config_invalid", "error");
+  }
+  if (!config) return notRecovered("app_not_configured");
 
   try {
-    const config = githubAppConfig();
-    if (!config) return false;
     const installation = await findPersonalInstallationForGithubUser(
       config,
       oauth.githubUserId,
     );
+    if (!installation) return notRecovered("no_matching_installation");
     if (
-      !installation ||
       installation.suspended ||
       installation.accountLogin.toLowerCase() !== oauth.login.toLowerCase()
     ) {
-      return false;
+      return notRecovered("installation_unusable");
     }
     const now = new Date();
     const [inserted] = await db
@@ -363,7 +410,9 @@ export async function recoverPersonalGithubAppBinding(
       .onConflictDoNothing()
       .returning({ workspaceId: githubInstallationsTable.workspaceId });
     if (!inserted) {
-      return (await githubInstallationSummary(workspaceId)) !== null;
+      return (await githubInstallationSummary(workspaceId)) !== null
+        ? { recovered: true, via: "already_bound" }
+        : notRecovered("installation_claimed", "warn");
     }
     invalidateGithubInstallationToken(workspaceId);
     invalidateGithubHealth(workspaceId);
@@ -375,19 +424,12 @@ export async function recoverPersonalGithubAppBinding(
       },
       "Recovered a missing GitHub App workspace binding",
     );
-    return true;
+    return { recovered: true, via: "bound" };
   } catch (error) {
-    logger.info(
-      {
-        component: "github_app",
-        workspaceId,
-        recovery: "not_available",
-        failureClass:
-          error instanceof GithubAuthError ? error.kind : "unexpected",
-      },
-      "Could not recover a missing GitHub App workspace binding",
+    return notRecovered(
+      "github_unavailable",
+      error instanceof GithubAuthError ? "info" : "warn",
     );
-    return false;
   }
 }
 

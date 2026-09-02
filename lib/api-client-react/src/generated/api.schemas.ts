@@ -751,6 +751,18 @@ export const GithubConnectionInfoMethod = {
 } as const;
 
 /**
+ * Three-way App configuration status. "invalid" means the server HAS GitHub App settings but they are unusable (partial set or an unreadable private key) — a server problem to fix, not a reason to fall back to the expiring OAuth path.
+ */
+export type GithubConnectionInfoAppConfigStatus = typeof GithubConnectionInfoAppConfigStatus[keyof typeof GithubConnectionInfoAppConfigStatus];
+
+
+export const GithubConnectionInfoAppConfigStatus = {
+  configured: 'configured',
+  invalid: 'invalid',
+  absent: 'absent',
+} as const;
+
+/**
  * @nullable
  */
 export type GithubConnectionInfoInstallation = {
@@ -770,6 +782,8 @@ export interface GithubConnectionInfo {
   method: GithubConnectionInfoMethod;
   /** Whether this server offers the GitHub App install flow. */
   appConfigured: boolean;
+  /** Three-way App configuration status. "invalid" means the server HAS GitHub App settings but they are unusable (partial set or an unreadable private key) — a server problem to fix, not a reason to fall back to the expiring OAuth path. */
+  appConfigStatus: GithubConnectionInfoAppConfigStatus;
   /** Whether this server offers the legacy OAuth flow. */
   oauthConfigured: boolean;
   /** @nullable */

@@ -28,10 +28,11 @@ import {
   deleteInstallationAtGithub,
   fetchInstallation,
   githubAppConfig,
-  githubAppConfigured,
+  githubAppConfigStatus,
   invalidateGithubInstallationToken,
   githubInstallationSummary,
 } from "./app-auth";
+import { resumeTasksParkedForAppAuth } from "../connected-apps/auth-parked-tasks";
 import {
   deleteGithubAccount,
   githubAccountSummary,
@@ -62,9 +63,14 @@ router.get("/github/connection", async (req, res): Promise<void> => {
   ]);
   let oauthConfigured = true;
   if (!process.env.GITHUB_OAUTH_CLIENT_ID?.trim()) oauthConfigured = false;
+  const appConfigStatus = githubAppConfigStatus();
   res.json({
     method: installation ? "github_app" : oauth ? "oauth" : null,
-    appConfigured: githubAppConfigured(),
+    appConfigured: appConfigStatus === "configured",
+    // "invalid" is a server configuration MISTAKE (env vars present but
+    // unusable): the page must show it as a problem to fix, never quietly
+    // fall back to offering the expiring OAuth path as if it were normal.
+    appConfigStatus,
     oauthConfigured,
     installation: installation
       ? {
@@ -341,6 +347,9 @@ router.get("/github/app/setup", async (req, res): Promise<void> => {
       ? `The GitHub App was installed for this workspace (@${outcome.accountLogin}).`
       : `The GitHub App installation for this workspace was updated (@${outcome.accountLogin}).`,
   );
+  // A working App binding releases any task parked waiting for a repaired
+  // credential, so a preserved approved action resumes immediately.
+  await resumeTasksParkedForAppAuth(req.workspaceId!);
   publish(req.workspaceId!, "overview");
   res.redirect(
     connectedAppsUrl(

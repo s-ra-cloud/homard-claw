@@ -20,6 +20,7 @@ import { and, eq, gt, isNull, lt, ne, sql } from "drizzle-orm";
 import { requireWorkspace } from "../workspace";
 import { recordAudit } from "../audit";
 import { publish } from "../events";
+import { resumeTasksParkedForAppAuth } from "../connected-apps/auth-parked-tasks";
 import {
   GITHUB_SCOPES,
   GithubAuthError,
@@ -351,6 +352,9 @@ router.get("/github/oauth/callback", async (req, res): Promise<void> => {
       "connected_app.github_connected",
       `GitHub was connected for this workspace (@${user.login}).`,
     );
+    // A repaired credential releases any task parked waiting for it, so a
+    // preserved approved action resumes now instead of after the delay.
+    await resumeTasksParkedForAppAuth(row.workspaceId);
     publish(row.workspaceId, "overview");
     res.redirect(connectedAppsUrl("connected"));
   } finally {

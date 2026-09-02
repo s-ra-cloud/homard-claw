@@ -111,6 +111,11 @@ import {
   executeClaimedAction,
   reconcileStaleExecutingActions,
 } from "./actions";
+import {
+  APP_AUTH_PARK_ERROR_KIND,
+  parkTaskForAppAuthRecovery,
+  resumeTasksParkedForAppAuth,
+} from "./auth-parked-tasks";
 import { executeOperation } from "./connections";
 import { findOperation } from "./catalog";
 import {
@@ -2057,5 +2062,320 @@ describe("google sheets crash recovery", () => {
     );
     // Only the verification read hit the provider — nothing was created.
     expect(proxyState.calls.every((c) => c.method === "GET")).toBe(true);
+  });
+});
+
+describe("auth-refused approved actions are preserved, not failed", () => {
+  const commentCalls = () =>
+    proxyState.calls.filter(
+      (c) =>
+        c.connector === "github" &&
+        c.method === "POST" &&
+        c.path.includes("/comments"),
+    );
+
+  /** Force the GitHub App path off so a 401 refusal is a pure OAuth refusal
+   *  with no recovery side-channel: present-but-empty is "absent". */
+  function withoutGithubApp(): void {
+    vi.stubEnv("GITHUB_APP_ID", "");
+    vi.stubEnv("GITHUB_APP_SLUG", "");
+    vi.stubEnv("GITHUB_APP_PRIVATE_KEY", "");
+  }
+
+  const refuseThenAccept = (behavior: { refuse: boolean }) => {
+    proxyState.handler = (call) => {
+      if (call.connector !== "github") {
+        throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+      }
+      return behavior.refuse
+        ? { status: 401, body: { message: "Bad credentials" } }
+        : { status: 200, body: { html_url: "https://github.com/x/y/issues/1#c9" } };
+    };
+  };
+
+  it("parks the action on a pre-execution credential refusal and re-runs it exactly once with the SAME marker", async () => {
+    withoutGithubApp();
+    const behavior = { refuse: true };
+    refuseThenAccept(behavior);
+    const approvalId = await insertApproval();
+    const action = await insertExecutingAction({
+      operation: "github.comment_on_issue",
+      app: "github",
+      params: { owner: "x", repo: "y", issueNumber: 1, body: "LGTM" },
+      approvalId,
+      executingAt: new Date(),
+    });
+
+    const { action: parked, outcome } = await executeClaimedAction(
+      action,
+      "Tester",
+      workspaceId,
+      { allowAuthPark: true },
+    );
+    // Preserved: back to approved with the single-retry fence spent-able
+    // exactly once, the approval untouched, the refusal recorded.
+    expect(outcome.ok).toBe(false);
+    expect(parked.status).toBe("approved");
+    expect(parked.approvalId).toBe(approvalId);
+    expect(parked.recoveryRequeuedAt).not.toBeNull();
+    expect(parked.errorMessage).toMatch(/GitHub|credential|Reconnect/i);
+    expect(parked.executedAt).toBeNull();
+
+    // Connection repaired: the ordinary claim fence re-runs it exactly once.
+    behavior.refuse = false;
+    const claimed = await claimApprovedAction(action.id);
+    expect(claimed).not.toBeNull();
+    expect(await claimApprovedAction(action.id)).toBeNull();
+    const { action: finalized } = await executeClaimedAction(
+      claimed!,
+      "Tester",
+      workspaceId,
+      { allowAuthPark: true },
+    );
+    expect(finalized.status).toBe("executed");
+    const posts = commentCalls();
+    // One refused POST, one successful POST — and the retry carries the
+    // SAME idempotency marker derived from the original action id.
+    expect(posts).toHaveLength(2);
+    expect((posts[1].body as { body: string }).body).toContain(
+      `<!-- homardclaw-action:${action.id} -->`,
+    );
+  });
+
+  it("fails honestly when the retry fence is already spent", async () => {
+    withoutGithubApp();
+    refuseThenAccept({ refuse: true });
+    const approvalId = await insertApproval();
+    const action = await insertExecutingAction({
+      operation: "github.comment_on_issue",
+      app: "github",
+      params: { owner: "x", repo: "y", issueNumber: 2, body: "Again" },
+      approvalId,
+      executingAt: new Date(),
+      recoveryRequeuedAt: new Date(), // fence already spent
+    });
+    const { action: finalized } = await executeClaimedAction(
+      action,
+      "Tester",
+      workspaceId,
+      { allowAuthPark: true },
+    );
+    expect(finalized.status).toBe("failed");
+    expect(finalized.errorMessage).toBeTruthy();
+  });
+
+  it("never parks without opt-in or without an approval", async () => {
+    withoutGithubApp();
+    refuseThenAccept({ refuse: true });
+    const approvalId = await insertApproval();
+    const optedOut = await insertExecutingAction({
+      operation: "github.comment_on_issue",
+      app: "github",
+      params: { owner: "x", repo: "y", issueNumber: 3, body: "No park" },
+      approvalId,
+      executingAt: new Date(),
+    });
+    const { action: failedA } = await executeClaimedAction(
+      optedOut,
+      "Tester",
+      workspaceId,
+    );
+    expect(failedA.status).toBe("failed");
+
+    const unapproved = await insertExecutingAction({
+      operation: "github.comment_on_issue",
+      app: "github",
+      params: { owner: "x", repo: "y", issueNumber: 4, body: "No approval" },
+      approvalId: null,
+      executingAt: new Date(),
+    });
+    const { action: failedB } = await executeClaimedAction(
+      unapproved,
+      "Tester",
+      workspaceId,
+      { allowAuthPark: true },
+    );
+    expect(failedB.status).toBe("failed");
+  });
+
+  it("marks only pre-execution refusals parkable — a provider 401 mid-catalog write stays a refusal, an ambiguous 500 never parks", async () => {
+    withoutGithubApp();
+    proxyState.handler = () => ({ status: 500, body: { message: "boom" } });
+    const approvalId = await insertApproval();
+    const action = await insertExecutingAction({
+      operation: "github.comment_on_issue",
+      app: "github",
+      params: { owner: "x", repo: "y", issueNumber: 5, body: "Ambiguous" },
+      approvalId,
+      executingAt: new Date(),
+    });
+    const { action: finalized } = await executeClaimedAction(
+      action,
+      "Tester",
+      workspaceId,
+      { allowAuthPark: true },
+    );
+    // A 500 might have executed on the provider's side: it must finalize
+    // (failed), never park for an automatic re-send.
+    expect(finalized.status).toBe("failed");
+  });
+});
+
+describe("tasks parked for connected-app credential recovery", () => {
+  async function insertRunningTask(ws: string): Promise<{ id: string; attempts: number }> {
+    const [row] = await db
+      .insert(tasksTable)
+      .values({
+        agentId,
+        workspaceId: ws,
+        objective: `Auth-park fixture ${RUN_TAG}`,
+        status: "running",
+        attempts: 1,
+        provider: "claude_max",
+      })
+      .returning();
+    return { id: row.id, attempts: row.attempts };
+  }
+
+  async function taskRow(id: string) {
+    const [row] = await db
+      .select()
+      .from(tasksTable)
+      .where(eq(tasksTable.id, id));
+    return row;
+  }
+
+  it("parks a running task with a delayed retry and releases it when the workspace reconnects", async () => {
+    const task = await insertRunningTask(workspaceId);
+    try {
+      expect(
+        await parkTaskForAppAuthRecovery({
+          taskId: task.id,
+          attempts: task.attempts,
+          workspaceId,
+          message: "GitHub refused the stored credential.",
+          refusedAt: new Date(),
+        }),
+      ).toBe(true);
+      let row = await taskRow(task.id);
+      expect(row.status).toBe("queued");
+      expect(row.errorKind).toBe(APP_AUTH_PARK_ERROR_KIND);
+      // Not immediately claimable: the retry waits for the reconnect.
+      expect(row.notBefore!.getTime()).toBeGreaterThan(Date.now() + 60_000);
+
+      // The reconnect releases it right away…
+      expect(await resumeTasksParkedForAppAuth(workspaceId)).toBe(1);
+      row = await taskRow(task.id);
+      expect(row.notBefore!.getTime()).toBeLessThanOrEqual(Date.now());
+      // …and a second resume is a no-op (nothing still waiting).
+      expect(await resumeTasksParkedForAppAuth(workspaceId)).toBe(0);
+    } finally {
+      await db.delete(tasksTable).where(eq(tasksTable.id, task.id));
+    }
+  });
+
+  it("releases the park immediately when the reconnect raced ahead of the task-park", async () => {
+    // The race the code review flagged: the OAuth/App-setup callback lands
+    // BETWEEN the action being preserved and the task-park write. At that
+    // instant the task is still "running", so resumeTasksParkedForAppAuth
+    // finds nothing — the post-park recheck against the credential row's
+    // updatedAt must release it instead of stranding it for 30 minutes.
+    const task = await insertRunningTask(workspaceId);
+    try {
+      const refusedAt = new Date(Date.now() - 5_000);
+      // Reconnect already happened: credential row fresher than the refusal.
+      await db
+        .update(githubAccountsTable)
+        .set({ updatedAt: new Date() })
+        .where(eq(githubAccountsTable.workspaceId, workspaceId));
+      expect(
+        await parkTaskForAppAuthRecovery({
+          taskId: task.id,
+          attempts: task.attempts,
+          workspaceId,
+          message: "refused just before the reconnect landed",
+          refusedAt,
+        }),
+      ).toBe(true);
+      const row = await taskRow(task.id);
+      expect(row.status).toBe("queued");
+      // Immediately claimable — the reconnect was not missed.
+      expect(row.notBefore!.getTime()).toBeLessThanOrEqual(Date.now());
+    } finally {
+      await db.delete(tasksTable).where(eq(tasksTable.id, task.id));
+    }
+  });
+
+  it("parking is fenced on the exact running attempt — a settled or retried task is never overwritten", async () => {
+    const task = await insertRunningTask(workspaceId);
+    try {
+      await db
+        .update(tasksTable)
+        .set({ status: "done" })
+        .where(eq(tasksTable.id, task.id));
+      expect(
+        await parkTaskForAppAuthRecovery({
+          taskId: task.id,
+          attempts: task.attempts,
+          workspaceId,
+          message: "too late",
+          refusedAt: new Date(),
+        }),
+      ).toBe(false);
+      expect((await taskRow(task.id)).status).toBe("done");
+    } finally {
+      await db.delete(tasksTable).where(eq(tasksTable.id, task.id));
+    }
+  });
+
+  it("a reconnect never nudges a foreign workspace's parked tasks or ordinary scheduled tasks", async () => {
+    const [foreignWs] = await db
+      .insert(workspacesTable)
+      .values({ clerkUserId: `auth-park-foreign-${Date.now()}` })
+      .returning();
+    const foreign = await insertRunningTask(foreignWs.id);
+    const local = await insertRunningTask(workspaceId);
+    const scheduledNotBefore = new Date(Date.now() + 60 * 60 * 1000);
+    const [scheduled] = await db
+      .insert(tasksTable)
+      .values({
+        agentId,
+        workspaceId,
+        objective: `Ordinary scheduled fixture ${RUN_TAG}`,
+        status: "queued",
+        notBefore: scheduledNotBefore, // ordinary delay, NOT an auth park
+        provider: "claude_max",
+      })
+      .returning();
+    try {
+      await parkTaskForAppAuthRecovery({
+        taskId: foreign.id,
+        attempts: foreign.attempts,
+        workspaceId: foreignWs.id,
+        message: "foreign park",
+        refusedAt: new Date(),
+      });
+      await parkTaskForAppAuthRecovery({
+        taskId: local.id,
+        attempts: local.attempts,
+        workspaceId,
+        message: "local park",
+        refusedAt: new Date(),
+      });
+      expect(await resumeTasksParkedForAppAuth(workspaceId)).toBe(1);
+      // The foreign park still waits; the ordinary scheduled task kept its
+      // own notBefore untouched.
+      expect((await taskRow(foreign.id)).notBefore!.getTime()).toBeGreaterThan(
+        Date.now(),
+      );
+      expect((await taskRow(scheduled.id)).notBefore!.getTime()).toBe(
+        scheduledNotBefore.getTime(),
+      );
+    } finally {
+      await db.delete(tasksTable).where(eq(tasksTable.id, foreign.id));
+      await db.delete(tasksTable).where(eq(tasksTable.id, local.id));
+      await db.delete(tasksTable).where(eq(tasksTable.id, scheduled.id));
+      await db.delete(workspacesTable).where(eq(workspacesTable.id, foreignWs.id));
+    }
   });
 });

@@ -97,6 +97,7 @@ import {
   clearGithubInstallationTokenCache,
   fetchInstallation,
   githubAppConfig,
+  githubAppConfigStatus,
   githubInstallationToken,
   invalidateGithubInstallationToken,
 } from "./app-auth";
@@ -415,13 +416,45 @@ describe("lost setup-callback recovery", () => {
 
     expect(
       await recoverPersonalGithubAppBinding(oauthWorkspaceId),
-    ).toBe(false);
+    ).toEqual({ recovered: false, reason: "no_matching_installation" });
     const [binding] = await db
       .select()
       .from(githubInstallationsTable)
       .where(eq(githubInstallationsTable.workspaceId, oauthWorkspaceId))
       .limit(1);
     expect(binding).toBeUndefined();
+  });
+
+  it("reports an unusable App configuration as a server problem, distinct from absence", async () => {
+    githubState.handler = () => {
+      throw new Error("no GitHub call may happen with a broken app config");
+    };
+    const saved = process.env.GITHUB_APP_PRIVATE_KEY;
+    try {
+      process.env.GITHUB_APP_PRIVATE_KEY = "not a pem at all";
+      expect(githubAppConfigStatus()).toBe("invalid");
+      expect(
+        await recoverPersonalGithubAppBinding(oauthWorkspaceId),
+      ).toEqual({ recovered: false, reason: "app_config_invalid" });
+
+      delete process.env.GITHUB_APP_ID;
+      delete process.env.GITHUB_APP_SLUG;
+      delete process.env.GITHUB_APP_PRIVATE_KEY;
+      expect(githubAppConfigStatus()).toBe("absent");
+      expect(
+        await recoverPersonalGithubAppBinding(oauthWorkspaceId),
+      ).toEqual({ recovered: false, reason: "app_not_configured" });
+
+      // A partial set is also "invalid": present but unusable.
+      process.env.GITHUB_APP_ID = "31337";
+      expect(githubAppConfigStatus()).toBe("invalid");
+    } finally {
+      process.env.GITHUB_APP_ID = "31337";
+      process.env.GITHUB_APP_SLUG = "homardclaw-test";
+      if (saved === undefined) delete process.env.GITHUB_APP_PRIVATE_KEY;
+      else process.env.GITHUB_APP_PRIVATE_KEY = saved;
+    }
+    expect(githubAppConfigStatus()).toBe("configured");
   });
 });
 

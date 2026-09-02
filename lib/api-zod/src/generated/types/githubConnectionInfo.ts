@@ -5,6 +5,7 @@
  * Crustabox private Crustabot office API
  * OpenAPI spec version: 0.1.0
  */
+import type { GithubConnectionInfoAppConfigStatus } from './githubConnectionInfoAppConfigStatus';
 import type { GithubConnectionInfoInstallation } from './githubConnectionInfoInstallation';
 import type { GithubConnectionInfoMethod } from './githubConnectionInfoMethod';
 
@@ -16,6 +17,8 @@ export interface GithubConnectionInfo {
   method: GithubConnectionInfoMethod;
   /** Whether this server offers the GitHub App install flow. */
   appConfigured: boolean;
+  /** Three-way App configuration status. "invalid" means the server HAS GitHub App settings but they are unusable (partial set or an unreadable private key) — a server problem to fix, not a reason to fall back to the expiring OAuth path. */
+  appConfigStatus: GithubConnectionInfoAppConfigStatus;
   /** Whether this server offers the legacy OAuth flow. */
   oauthConfigured: boolean;
   /** @nullable */
