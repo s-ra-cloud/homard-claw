@@ -216,7 +216,33 @@ export function CallView({
   const [phase, setPhase] = useState<Phase>("idle");
   const [micError, setMicError] = useState<string | null>(null);
   const [flowError, setFlowError] = useState<string | null>(null);
-  const [textDraft, setTextDraft] = useState("");
+  // Persisted to sessionStorage (not just component state): the office's
+  // responsive layout unmounts this component's whole iframe when the
+  // window shrinks below desktop width, which would otherwise silently
+  // drop whatever the user was composing. sessionStorage survives that
+  // teardown/remount because the iframe is same-origin.
+  const draftStorageKey = `talk-draft:${agentId}`;
+  const [textDraft, setTextDraft] = useState(() => {
+    if (typeof window === "undefined") return "";
+    try {
+      return window.sessionStorage.getItem(draftStorageKey) ?? "";
+    } catch {
+      return "";
+    }
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (textDraft) {
+        window.sessionStorage.setItem(draftStorageKey, textDraft);
+      } else {
+        window.sessionStorage.removeItem(draftStorageKey);
+      }
+    } catch {
+      // sessionStorage unavailable (e.g. private browsing) — draft just
+      // won't survive a remount.
+    }
+  }, [draftStorageKey, textDraft]);
   const [attachments, setAttachments] = useState<InputAttachment[]>([]);
   const [proposedTask, setProposedTask] = useState<string | null>(null);
   const [proposedDelegation, setProposedDelegation] =
