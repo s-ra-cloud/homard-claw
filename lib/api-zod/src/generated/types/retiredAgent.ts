@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { AvatarConfig } from './avatarConfig';
+import type { RetiredAgentGender } from './retiredAgentGender';
 import type { RetiredAgentProvider } from './retiredAgentProvider';
 import type { RetiredAgentSecurityPreset } from './retiredAgentSecurityPreset';
 
@@ -19,6 +20,7 @@ export interface RetiredAgent {
   /** @nullable */
   model?: string | null;
   securityPreset: RetiredAgentSecurityPreset;
+  gender: RetiredAgentGender;
   avatar: AvatarConfig;
   createdAt: Date;
   retiredAt: Date;

@@ -69,6 +69,15 @@ export const AgentAutonomy = {
   autonomous: 'autonomous',
 } as const;
 
+export type AgentGender = typeof AgentGender[keyof typeof AgentGender];
+
+
+export const AgentGender = {
+  male: 'male',
+  female: 'female',
+  unspecified: 'unspecified',
+} as const;
+
 /**
  * Effective budgets and limits after overrides are applied. Null means no limit.
  */
@@ -227,6 +236,7 @@ export interface Agent {
   status: AgentStatus;
   securityPreset: AgentSecurityPreset;
   autonomy: AgentAutonomy;
+  gender: AgentGender;
   permissions: AgentPermissions;
   permissionOverrides?: AgentPermissionOverrides | null;
   appGrants: AppGrant[];
@@ -495,6 +505,15 @@ export const RetiredAgentSecurityPreset = {
   operator: 'operator',
 } as const;
 
+export type RetiredAgentGender = typeof RetiredAgentGender[keyof typeof RetiredAgentGender];
+
+
+export const RetiredAgentGender = {
+  male: 'male',
+  female: 'female',
+  unspecified: 'unspecified',
+} as const;
+
 export interface RetiredAgent {
   id: string;
   name: string;
@@ -505,6 +524,7 @@ export interface RetiredAgent {
   /** @nullable */
   model?: string | null;
   securityPreset: RetiredAgentSecurityPreset;
+  gender: RetiredAgentGender;
   avatar: AvatarConfig;
   createdAt: string;
   retiredAt: string;
@@ -531,6 +551,15 @@ export const AgentOnLeaveSecurityPreset = {
   operator: 'operator',
 } as const;
 
+export type AgentOnLeaveGender = typeof AgentOnLeaveGender[keyof typeof AgentOnLeaveGender];
+
+
+export const AgentOnLeaveGender = {
+  male: 'male',
+  female: 'female',
+  unspecified: 'unspecified',
+} as const;
+
 export interface AgentOnLeave {
   id: string;
   name: string;
@@ -541,6 +570,7 @@ export interface AgentOnLeave {
   /** @nullable */
   model?: string | null;
   securityPreset: AgentOnLeaveSecurityPreset;
+  gender: AgentOnLeaveGender;
   avatar: AvatarConfig;
   createdAt: string;
   /** When this Crustabot automatically returns from Retirement Island. */
@@ -593,6 +623,15 @@ export const AgentInputAutonomy = {
   autonomous: 'autonomous',
 } as const;
 
+export type AgentInputGender = typeof AgentInputGender[keyof typeof AgentInputGender];
+
+
+export const AgentInputGender = {
+  male: 'male',
+  female: 'female',
+  unspecified: 'unspecified',
+} as const;
+
 export interface AgentInput {
   /**
      * @minLength 2
@@ -632,6 +671,7 @@ export interface AgentInput {
   voiceStyle?: string;
   securityPreset: AgentInputSecurityPreset;
   autonomy?: AgentInputAutonomy;
+  gender?: AgentInputGender;
   permissionOverrides?: AgentPermissionOverrides | null;
   appGrants?: AppGrant[];
   sensitiveDataSandbox?: boolean;
@@ -682,6 +722,15 @@ export const AgentUpdateAutonomy = {
   supervised: 'supervised',
   limited: 'limited',
   autonomous: 'autonomous',
+} as const;
+
+export type AgentUpdateGender = typeof AgentUpdateGender[keyof typeof AgentUpdateGender];
+
+
+export const AgentUpdateGender = {
+  male: 'male',
+  female: 'female',
+  unspecified: 'unspecified',
 } as const;
 
 export interface AgentUpdate {
@@ -741,6 +790,7 @@ export interface AgentUpdate {
   voiceStyle?: string | null;
   securityPreset?: AgentUpdateSecurityPreset;
   autonomy?: AgentUpdateAutonomy;
+  gender?: AgentUpdateGender;
   permissionOverrides?: AgentPermissionOverrides | null;
   appGrants?: AppGrant[];
   sensitiveDataSandbox?: boolean;

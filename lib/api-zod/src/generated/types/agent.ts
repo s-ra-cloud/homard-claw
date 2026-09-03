@@ -7,6 +7,7 @@
  */
 import type { AgentAutonomy } from './agentAutonomy';
 import type { AgentCodexReasoning } from './agentCodexReasoning';
+import type { AgentGender } from './agentGender';
 import type { AgentPermissionOverrides } from './agentPermissionOverrides';
 import type { AgentPermissions } from './agentPermissions';
 import type { AgentProvider } from './agentProvider';
@@ -44,6 +45,7 @@ export interface Agent {
   status: AgentStatus;
   securityPreset: AgentSecurityPreset;
   autonomy: AgentAutonomy;
+  gender: AgentGender;
   permissions: AgentPermissions;
   permissionOverrides?: AgentPermissionOverrides | null;
   appGrants: AppGrant[];

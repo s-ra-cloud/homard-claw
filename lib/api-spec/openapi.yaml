@@ -2042,6 +2042,7 @@ components:
           status,
           securityPreset,
           autonomy,
+          gender,
           permissions,
           appGrants,
           sensitiveDataSandbox,
@@ -2088,6 +2089,7 @@ components:
           }
         securityPreset: { type: string, enum: [observer, assistant, operator] }
         autonomy: { type: string, enum: [supervised, limited, autonomous] }
+        gender: { type: string, enum: [male, female, unspecified] }
         permissions: { $ref: "#/components/schemas/AgentPermissions" }
         permissionOverrides:
           oneOf:
@@ -2189,6 +2191,7 @@ components:
           mission,
           provider,
           securityPreset,
+          gender,
           avatar,
           createdAt,
           retiredAt,
@@ -2205,6 +2208,7 @@ components:
           }
         model: { type: ["string", "null"] }
         securityPreset: { type: string, enum: [observer, assistant, operator] }
+        gender: { type: string, enum: [male, female, unspecified] }
         avatar: { $ref: "#/components/schemas/AvatarConfig" }
         createdAt: { type: string, format: date-time }
         retiredAt: { type: string, format: date-time }
@@ -2218,6 +2222,7 @@ components:
           mission,
           provider,
           securityPreset,
+          gender,
           avatar,
           createdAt,
           onLeaveUntil,
@@ -2234,6 +2239,7 @@ components:
           }
         model: { type: ["string", "null"] }
         securityPreset: { type: string, enum: [observer, assistant, operator] }
+        gender: { type: string, enum: [male, female, unspecified] }
         avatar: { $ref: "#/components/schemas/AvatarConfig" }
         createdAt: { type: string, format: date-time }
         onLeaveUntil:
@@ -2272,6 +2278,7 @@ components:
         voiceStyle: { type: string, maxLength: 60 }
         securityPreset: { type: string, enum: [observer, assistant, operator] }
         autonomy: { type: string, enum: [supervised, limited, autonomous] }
+        gender: { type: string, enum: [male, female, unspecified] }
         permissionOverrides:
           oneOf:
             - $ref: "#/components/schemas/AgentPermissionOverrides"
@@ -2304,6 +2311,7 @@ components:
         voiceStyle: { type: ["string", "null"], maxLength: 60 }
         securityPreset: { type: string, enum: [observer, assistant, operator] }
         autonomy: { type: string, enum: [supervised, limited, autonomous] }
+        gender: { type: string, enum: [male, female, unspecified] }
         permissionOverrides:
           oneOf:
             - $ref: "#/components/schemas/AgentPermissionOverrides"

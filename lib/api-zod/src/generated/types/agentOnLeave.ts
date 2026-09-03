@@ -5,6 +5,7 @@
  * Crustabox private Crustabot office API
  * OpenAPI spec version: 0.1.0
  */
+import type { AgentOnLeaveGender } from './agentOnLeaveGender';
 import type { AgentOnLeaveProvider } from './agentOnLeaveProvider';
 import type { AgentOnLeaveSecurityPreset } from './agentOnLeaveSecurityPreset';
 import type { AvatarConfig } from './avatarConfig';
@@ -19,6 +20,7 @@ export interface AgentOnLeave {
   /** @nullable */
   model?: string | null;
   securityPreset: AgentOnLeaveSecurityPreset;
+  gender: AgentOnLeaveGender;
   avatar: AvatarConfig;
   createdAt: Date;
   /** When this Crustabot automatically returns from Retirement Island. */

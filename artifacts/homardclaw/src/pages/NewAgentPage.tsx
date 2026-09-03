@@ -3,6 +3,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   useCreateAgent,
+  AgentGender,
   AgentProvider,
   AgentSecurityPreset,
 } from "@workspace/api-client-react";
@@ -47,6 +48,7 @@ export default function NewAgentPage() {
       voiceStyle: "none",
       securityPreset: AgentSecurityPreset.assistant,
       autonomy: "limited",
+      gender: AgentGender.unspecified,
       maxTaskBudgetCents: "",
       dailyBudgetCents: "",
       maxTasksPerDay: "",
@@ -114,6 +116,7 @@ export default function NewAgentPage() {
           : {}),
         securityPreset: data.securityPreset,
         autonomy: data.autonomy,
+        gender: data.gender,
         ...(permissionOverridesPayload(data)
           ? { permissionOverrides: permissionOverridesPayload(data) }
           : {}),

@@ -7,6 +7,7 @@
  */
 import type { AgentInputAutonomy } from './agentInputAutonomy';
 import type { AgentInputCodexReasoning } from './agentInputCodexReasoning';
+import type { AgentInputGender } from './agentInputGender';
 import type { AgentInputProvider } from './agentInputProvider';
 import type { AgentInputSecurityPreset } from './agentInputSecurityPreset';
 import type { AgentPermissionOverrides } from './agentPermissionOverrides';
@@ -52,6 +53,7 @@ export interface AgentInput {
   voiceStyle?: string;
   securityPreset: AgentInputSecurityPreset;
   autonomy?: AgentInputAutonomy;
+  gender?: AgentInputGender;
   permissionOverrides?: AgentPermissionOverrides | null;
   appGrants?: AppGrant[];
   sensitiveDataSandbox?: boolean;
