@@ -23,6 +23,15 @@ describe("office role placements", () => {
       top: 69.2,
       pose: "memory-cables",
     });
+    // The inspector reuses the "approval guy" seated-at-the-controls sprite,
+    // placed beside the Inbox navigation console on the port side.
+    expect(OFFICE_ROLE_SEATS.inspector).toMatchObject({
+      left: 30.4,
+      top: 47.2,
+      pose: "working",
+      status: "working",
+      mirrorX: true,
+    });
   });
 
   it("places separately assigned Crustabots at their dedicated stations", () => {
@@ -31,8 +40,9 @@ describe("office role placements", () => {
         documentationAgentId: "docs",
         approvalAgentId: "reviewer",
         memoryAgentId: "compressor",
+        inspectorAgentId: "inspector",
       },
-      new Set(["docs", "reviewer", "compressor"]),
+      new Set(["docs", "reviewer", "compressor", "inspector"]),
       "load-a",
     );
 
@@ -40,6 +50,7 @@ describe("office role placements", () => {
       ["docs", "documentation"],
       ["reviewer", "approval"],
       ["compressor", "memory"],
+      ["inspector", "inspector"],
     ]);
   });
 

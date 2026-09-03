@@ -1,6 +1,10 @@
 import type { LobsterPose } from "@/components/ui/marlow-lobster";
 
-export type OfficeRole = "documentation" | "approval" | "memory";
+export type OfficeRole =
+  | "documentation"
+  | "approval"
+  | "memory"
+  | "inspector";
 
 export type OfficeRoleSeat = {
   left: number;
@@ -44,12 +48,25 @@ export const OFFICE_ROLE_SEATS: Record<OfficeRole, OfficeRoleSeat> = {
     pose: "memory-cables",
     status: "working",
   },
+  inspector: {
+    // Just to the right of the blue Inbox navigation console (hotspot at
+    // ~25.8/44.6), still on the port side of the submarine. Uses the same
+    // seated-at-the-controls "approval guy" sprite, mirrored to face the
+    // console it is reviewing completed work beside.
+    left: 30.4,
+    top: 47.2,
+    label: "inbox inspection station",
+    pose: "working",
+    status: "working",
+    mirrorX: true,
+  },
 };
 
 export type OfficeRoleAssignments = {
   documentationAgentId?: string | null;
   approvalAgentId?: string | null;
   memoryAgentId?: string | null;
+  inspectorAgentId?: string | null;
 };
 
 export type OfficeRolePlacement = {
@@ -86,6 +103,7 @@ export function chooseOfficeRolePlacements(
   add(assignments.documentationAgentId, "documentation");
   add(assignments.approvalAgentId, "approval");
   add(assignments.memoryAgentId, "memory");
+  add(assignments.inspectorAgentId, "inspector");
 
   return [...rolesByAgent].map(([agentId, roles]) => {
     const role = roles[stableIndex(`${loadSeed}:${agentId}`, roles.length)];

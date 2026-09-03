@@ -1449,6 +1449,43 @@ export const UpdateApprovalSettingsResponse = zod.object({
 
 
 /**
+ * @summary Read the completed-work inspector selection
+ */
+export const getInspectorSettingsResponseInspectionRetryLimitMax = 3;
+
+
+
+export const GetInspectorSettingsResponse = zod.object({
+  "inspectorAgentId": zod.string().nullable(),
+  "inspectorAgentName": zod.string().nullable(),
+  "inspectionRetryLimit": zod.number().min(1).max(getInspectorSettingsResponseInspectionRetryLimitMax)
+})
+
+
+/**
+ * @summary Select or disable the completed-work inspector
+ */
+export const updateInspectorSettingsBodyInspectionRetryLimitMax = 3;
+
+
+
+export const UpdateInspectorSettingsBody = zod.object({
+  "inspectorAgentId": zod.string().nullable(),
+  "inspectionRetryLimit": zod.number().min(1).max(updateInspectorSettingsBodyInspectionRetryLimitMax).optional()
+})
+
+export const updateInspectorSettingsResponseInspectionRetryLimitMax = 3;
+
+
+
+export const UpdateInspectorSettingsResponse = zod.object({
+  "inspectorAgentId": zod.string().nullable(),
+  "inspectorAgentName": zod.string().nullable(),
+  "inspectionRetryLimit": zod.number().min(1).max(updateInspectorSettingsResponseInspectionRetryLimitMax)
+})
+
+
+/**
  * @summary Approve or reject an approval request
  */
 export const DecideApprovalParams = zod.object({

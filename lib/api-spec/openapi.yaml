@@ -373,6 +373,35 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApprovalSettings"
+  /inspector/settings:
+    get:
+      operationId: getInspectorSettings
+      tags: [office]
+      summary: Read the completed-work inspector selection
+      responses:
+        "200":
+          description: Inspector settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InspectorSettings"
+    put:
+      operationId: updateInspectorSettings
+      tags: [office]
+      summary: Select or disable the completed-work inspector
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InspectorSettingsInput"
+      responses:
+        "200":
+          description: Updated inspector settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InspectorSettings"
   /approvals/{approvalId}:
     patch:
       operationId: decideApproval
@@ -3529,6 +3558,19 @@ components:
         reviewerAgentId: { type: [string, "null"] }
         alwaysApproveEverything: { type: boolean }
         failedTaskRetryLimit: { type: number, minimum: 1, maximum: 3 }
+    InspectorSettings:
+      type: object
+      required: [inspectorAgentId, inspectorAgentName, inspectionRetryLimit]
+      properties:
+        inspectorAgentId: { type: [string, "null"] }
+        inspectorAgentName: { type: [string, "null"] }
+        inspectionRetryLimit: { type: number, minimum: 1, maximum: 3 }
+    InspectorSettingsInput:
+      type: object
+      required: [inspectorAgentId]
+      properties:
+        inspectorAgentId: { type: [string, "null"] }
+        inspectionRetryLimit: { type: number, minimum: 1, maximum: 3 }
     ProviderStatus:
       type: object
       required:

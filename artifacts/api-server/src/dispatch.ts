@@ -62,6 +62,14 @@ export type DispatchInput = {
   scheduleId?: string | null;
   /** Set only by the Talk task-confirmation flow. */
   talkMode?: boolean;
+  /** Delegation/correction lineage: the task that spawned this one. */
+  parentTaskId?: string | null;
+  /** Top of the lineage tree; defaults to the task itself when unset. */
+  rootTaskId?: string | null;
+  /** The completed task a corrective retry was created to fix. */
+  correctionOfTaskId?: string | null;
+  /** How many corrective retries deep this run is (0 for normal tasks). */
+  correctionAttempt?: number;
 };
 
 export type DispatchOutcome =
@@ -225,6 +233,10 @@ export async function dispatchTask(
             ? estimate.estimatedCostCents
             : null,
           scheduleId: input.scheduleId ?? null,
+          parentTaskId: input.parentTaskId ?? null,
+          rootTaskId: input.rootTaskId ?? null,
+          correctionOfTaskId: input.correctionOfTaskId ?? null,
+          correctionAttempt: input.correctionAttempt ?? 0,
           talkMode: input.talkMode === true,
           talkAutoApprove,
           status: blockReason ? "blocked" : "queued",
