@@ -1,7 +1,11 @@
 import React from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useGetAgent, useUpdateAgent } from "@workspace/api-client-react";
+import {
+  ApiError,
+  useGetAgent,
+  useUpdateAgent,
+} from "@workspace/api-client-react";
 import { Shell } from "@/components/layout/Shell";
 import { AppActionList } from "@/components/app-action-list";
 import { PixelCard } from "@/components/ui/pixel-card";
@@ -12,6 +16,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Form } from "@/components/ui/form";
 import { ArrowLeft } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { apiErrorMessage } from "@/lib/api-error";
 import {
   AgentFormFields,
   AgentPreviewCard,
@@ -59,6 +64,13 @@ export default function EditAgentPage() {
     query: { queryKey: [`/api/agents/${agentId}`], enabled: Boolean(agentId) },
   });
   const agent = detail?.agent;
+  const agentMissing = error instanceof ApiError && error.status === 404;
+  const loadErrorMessage = error
+    ? apiErrorMessage(
+        error,
+        "The personnel file could not be loaded. Wait a moment and try again.",
+      )
+    : null;
 
   const form = useForm<AgentFormValues>({
     resolver: zodResolver(agentFormSchema),
@@ -200,14 +212,27 @@ export default function EditAgentPage() {
         ) : error || !agent ? (
           <PixelCard className="text-center p-6 sm:p-12">
             <h3 className="font-display text-lg uppercase mb-2">
-              Crustabot Not Found
+              {agentMissing ? "Crustabot Not Found" : "Personnel File Unavailable"}
             </h3>
             <p className="text-muted-foreground mb-6">
-              This personnel file does not exist or could not be loaded.
+              {agentMissing
+                ? "This personnel file does not exist."
+                : (loadErrorMessage ??
+                  "The personnel file could not be loaded. Wait a moment and try again.")}
             </p>
-            <Button variant="primary" onClick={() => setLocation("/agents")}>
-              Back to Roster
-            </Button>
+            <div className="flex flex-wrap justify-center gap-3">
+              {!agentMissing && (
+                <Button variant="primary" onClick={() => window.location.reload()}>
+                  Try Again
+                </Button>
+              )}
+              <Button
+                variant={agentMissing ? "primary" : "outline"}
+                onClick={() => setLocation("/agents")}
+              >
+                Back to Roster
+              </Button>
+            </div>
           </PixelCard>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
