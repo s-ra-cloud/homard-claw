@@ -94,6 +94,7 @@ export const ListAgentsResponseItem = zod.object({
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
   "autonomy": zod.enum(['supervised', 'limited', 'autonomous']),
+  "gender": zod.enum(['male', 'female', 'unspecified']),
   "permissions": zod.object({
   "maxTaskBudgetCents": zod.number().min(listAgentsResponsePermissionsMaxTaskBudgetCentsMin).nullable(),
   "dailyBudgetCents": zod.number().min(listAgentsResponsePermissionsDailyBudgetCentsMin).nullable(),
@@ -198,6 +199,7 @@ export const CreateAgentBody = zod.object({
   "voiceStyle": zod.string().max(createAgentBodyVoiceStyleMax).optional(),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
   "autonomy": zod.enum(['supervised', 'limited', 'autonomous']).optional(),
+  "gender": zod.enum(['male', 'female', 'unspecified']).optional(),
   "permissionOverrides": zod.union([zod.object({
   "maxTaskBudgetCents": zod.number().min(createAgentBodyPermissionOverridesOneMaxTaskBudgetCentsMin).nullish(),
   "dailyBudgetCents": zod.number().min(createAgentBodyPermissionOverridesOneDailyBudgetCentsMin).nullish(),
@@ -278,6 +280,7 @@ export const CreateAgentResponse = zod.object({
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
   "autonomy": zod.enum(['supervised', 'limited', 'autonomous']),
+  "gender": zod.enum(['male', 'female', 'unspecified']),
   "permissions": zod.object({
   "maxTaskBudgetCents": zod.number().min(createAgentResponsePermissionsMaxTaskBudgetCentsMin).nullable(),
   "dailyBudgetCents": zod.number().min(createAgentResponsePermissionsDailyBudgetCentsMin).nullable(),
@@ -383,6 +386,7 @@ export const GetAgentResponse = zod.object({
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
   "autonomy": zod.enum(['supervised', 'limited', 'autonomous']),
+  "gender": zod.enum(['male', 'female', 'unspecified']),
   "permissions": zod.object({
   "maxTaskBudgetCents": zod.number().min(getAgentResponseAgentPermissionsMaxTaskBudgetCentsMin).nullable(),
   "dailyBudgetCents": zod.number().min(getAgentResponseAgentPermissionsDailyBudgetCentsMin).nullable(),
@@ -571,6 +575,7 @@ export const UpdateAgentBody = zod.object({
   "voiceStyle": zod.string().max(updateAgentBodyVoiceStyleMax).nullish(),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']).optional(),
   "autonomy": zod.enum(['supervised', 'limited', 'autonomous']).optional(),
+  "gender": zod.enum(['male', 'female', 'unspecified']).optional(),
   "permissionOverrides": zod.union([zod.object({
   "maxTaskBudgetCents": zod.number().min(updateAgentBodyPermissionOverridesOneMaxTaskBudgetCentsMin).nullish(),
   "dailyBudgetCents": zod.number().min(updateAgentBodyPermissionOverridesOneDailyBudgetCentsMin).nullish(),
@@ -651,6 +656,7 @@ export const UpdateAgentResponse = zod.object({
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
   "autonomy": zod.enum(['supervised', 'limited', 'autonomous']),
+  "gender": zod.enum(['male', 'female', 'unspecified']),
   "permissions": zod.object({
   "maxTaskBudgetCents": zod.number().min(updateAgentResponsePermissionsMaxTaskBudgetCentsMin).nullable(),
   "dailyBudgetCents": zod.number().min(updateAgentResponsePermissionsDailyBudgetCentsMin).nullable(),
@@ -765,6 +771,7 @@ export const DuplicateAgentResponse = zod.object({
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
   "autonomy": zod.enum(['supervised', 'limited', 'autonomous']),
+  "gender": zod.enum(['male', 'female', 'unspecified']),
   "permissions": zod.object({
   "maxTaskBudgetCents": zod.number().min(duplicateAgentResponsePermissionsMaxTaskBudgetCentsMin).nullable(),
   "dailyBudgetCents": zod.number().min(duplicateAgentResponsePermissionsDailyBudgetCentsMin).nullable(),
@@ -959,6 +966,7 @@ export const SetAgentArchivedResponse = zod.object({
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
   "autonomy": zod.enum(['supervised', 'limited', 'autonomous']),
+  "gender": zod.enum(['male', 'female', 'unspecified']),
   "permissions": zod.object({
   "maxTaskBudgetCents": zod.number().min(setAgentArchivedResponsePermissionsMaxTaskBudgetCentsMin).nullable(),
   "dailyBudgetCents": zod.number().min(setAgentArchivedResponsePermissionsDailyBudgetCentsMin).nullable(),
@@ -1067,6 +1075,7 @@ export const PauseAgentResponse = zod.object({
   "status": zod.enum(['idle', 'working', 'researching', 'waiting', 'paused', 'error', 'queued', 'complete']),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
   "autonomy": zod.enum(['supervised', 'limited', 'autonomous']),
+  "gender": zod.enum(['male', 'female', 'unspecified']),
   "permissions": zod.object({
   "maxTaskBudgetCents": zod.number().min(pauseAgentResponsePermissionsMaxTaskBudgetCentsMin).nullable(),
   "dailyBudgetCents": zod.number().min(pauseAgentResponsePermissionsDailyBudgetCentsMin).nullable(),
@@ -1124,6 +1133,7 @@ export const RetireAgentResponse = zod.object({
   "provider": zod.union([zod.literal('claude_max'),zod.literal('codex_chatgpt'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
   "model": zod.string().nullish(),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
+  "gender": zod.enum(['male', 'female', 'unspecified']),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),
@@ -1163,6 +1173,7 @@ export const ListRetiredAgentsResponseItem = zod.object({
   "provider": zod.union([zod.literal('claude_max'),zod.literal('codex_chatgpt'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
   "model": zod.string().nullish(),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
+  "gender": zod.enum(['male', 'female', 'unspecified']),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),
@@ -1186,6 +1197,7 @@ export const ListAgentsOnLeaveResponseItem = zod.object({
   "provider": zod.union([zod.literal('claude_max'),zod.literal('codex_chatgpt'),zod.literal('openrouter'),zod.literal(null)]).nullable(),
   "model": zod.string().nullish(),
   "securityPreset": zod.enum(['observer', 'assistant', 'operator']),
+  "gender": zod.enum(['male', 'female', 'unspecified']),
   "avatar": zod.object({
   "shellColor": zod.string(),
   "deskStyle": zod.string(),

@@ -8,6 +8,7 @@
 import type { AgentPermissionOverrides } from './agentPermissionOverrides';
 import type { AgentUpdateAutonomy } from './agentUpdateAutonomy';
 import type { AgentUpdateCodexReasoning } from './agentUpdateCodexReasoning';
+import type { AgentUpdateGender } from './agentUpdateGender';
 import type { AgentUpdateProvider } from './agentUpdateProvider';
 import type { AgentUpdateSecurityPreset } from './agentUpdateSecurityPreset';
 import type { AppGrant } from './appGrant';
@@ -70,6 +71,7 @@ export interface AgentUpdate {
   voiceStyle?: string | null;
   securityPreset?: AgentUpdateSecurityPreset;
   autonomy?: AgentUpdateAutonomy;
+  gender?: AgentUpdateGender;
   permissionOverrides?: AgentPermissionOverrides | null;
   appGrants?: AppGrant[];
   sensitiveDataSandbox?: boolean;

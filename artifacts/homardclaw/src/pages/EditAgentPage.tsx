@@ -82,6 +82,7 @@ export default function EditAgentPage() {
           voiceStyle: agent.voiceStyle ?? "none",
           securityPreset: agent.securityPreset,
           autonomy: agent.autonomy,
+          gender: agent.gender,
           maxTaskBudgetCents:
             agent.permissionOverrides?.maxTaskBudgetCents != null
               ? String(agent.permissionOverrides.maxTaskBudgetCents)
@@ -157,6 +158,7 @@ export default function EditAgentPage() {
             : null,
         securityPreset: data.securityPreset,
         autonomy: data.autonomy,
+        gender: data.gender,
         permissionOverrides: permissionOverridesPayload(data),
         // Always sent: the payload is the complete grant set, so clearing
         // every app back to "No Access" revokes everything.

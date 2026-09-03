@@ -154,6 +154,44 @@ describe("agent lifecycle", () => {
     expect(dup.body.sensitiveDataSandbox).toBe(false);
   });
 
+  it("persists gender across create, update, and duplicate, defaulting existing and new agents to unspecified", async () => {
+    const plain = await createAgent(`${RUN_TAG} Gender Default`);
+    expect(plain.status).toBe(201);
+    expect(plain.body.gender).toBe("unspecified");
+
+    const created = await createAgent(`${RUN_TAG} Gender Set`, {
+      gender: "female",
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.gender).toBe("female");
+
+    const detail = await request(app).get(`/api/agents/${created.body.id}`);
+    expect(detail.status).toBe(200);
+    expect(detail.body.agent.gender).toBe("female");
+
+    const list = await request(app).get("/api/agents");
+    const listed = (list.body as { id: string; gender: string }[]).find(
+      (a) => a.id === created.body.id,
+    );
+    expect(listed?.gender).toBe("female");
+
+    const updated = await request(app)
+      .patch(`/api/agents/${created.body.id}`)
+      .send({ gender: "male" });
+    expect(updated.status).toBe(200);
+    expect(updated.body.gender).toBe("male");
+
+    const dup = await request(app).post(`/api/agents/${created.body.id}/duplicate`);
+    expect(dup.status).toBe(201);
+    createdAgentIds.push(dup.body.id);
+    expect(dup.body.gender).toBe("male");
+
+    const invalid = await createAgent(`${RUN_TAG} Gender Invalid`, {
+      gender: "nonbinary",
+    });
+    expect(invalid.status).toBe(400);
+  });
+
   it("rejects duplicate names case-insensitively", async () => {
     const res = await createAgent(`${RUN_TAG.toUpperCase()} ALPHA`);
     expect(res.status).toBe(409);

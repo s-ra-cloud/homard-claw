@@ -85,6 +85,7 @@ export const agentsTable = pgTable(
     // approval threshold (or with unknown cost) need approval. autonomous:
     // runs anything within its hard budget limits.
     autonomy: text("autonomy").notNull().default("limited"),
+    gender: text("gender").notNull().default("unspecified"),
     // Custom budgets/limits overriding the securityPreset profile.
     permissionOverrides: jsonb(
       "permission_overrides",

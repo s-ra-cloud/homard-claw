@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  GENDER_OPTIONS,
   SUPPORTED_CONNECTED_APPS,
   agentFormSchema,
   appGrantsFormValue,
@@ -82,5 +83,43 @@ describe("connected-app form state", () => {
       "google_drive",
       "github",
     ]);
+  });
+});
+
+describe("gender form state", () => {
+  it("defaults blank forms to unspecified", () => {
+    expect(emptyAgentFormValues.gender).toBe("unspecified");
+  });
+
+  it("offers exactly male, female, and unspecified", () => {
+    expect(GENDER_OPTIONS.map((option) => option.value)).toEqual([
+      "male",
+      "female",
+      "unspecified",
+    ]);
+  });
+
+  it("accepts each supported gender value", () => {
+    for (const gender of ["male", "female", "unspecified"] as const) {
+      const result = agentFormSchema.safeParse({
+        ...emptyAgentFormValues,
+        name: "Test Agent",
+        title: "Analyst",
+        mission: "Do useful analysis.",
+        gender,
+      });
+      expect(result.success).toBe(true);
+    }
+  });
+
+  it("rejects a gender value outside the supported set", () => {
+    const result = agentFormSchema.safeParse({
+      ...emptyAgentFormValues,
+      name: "Test Agent",
+      title: "Analyst",
+      mission: "Do useful analysis.",
+      gender: "nonbinary",
+    });
+    expect(result.success).toBe(false);
   });
 });

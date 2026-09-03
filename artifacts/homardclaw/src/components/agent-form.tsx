@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import type { UseFormReturn } from "react-hook-form";
 import * as z from "zod";
 import {
+  AgentGender,
   AgentProvider,
   AgentSecurityPreset,
   useGetProviderSettings,
@@ -39,6 +40,12 @@ export const VOICE_OPTIONS = [
   { value: "crisp", label: "Crisp" },
   { value: "deep", label: "Deep" },
   { value: "bubbly", label: "Bubbly" },
+] as const;
+
+export const GENDER_OPTIONS = [
+  { value: AgentGender.male, label: "Male" },
+  { value: AgentGender.female, label: "Female" },
+  { value: AgentGender.unspecified, label: "Unspecified" },
 ] as const;
 
 export const AUTONOMY_OPTIONS = [
@@ -122,6 +129,11 @@ export const agentFormSchema = z.object({
     AgentSecurityPreset.operator,
   ]),
   autonomy: z.enum(["supervised", "limited", "autonomous"]),
+  gender: z.enum([
+    AgentGender.male,
+    AgentGender.female,
+    AgentGender.unspecified,
+  ]),
   maxTaskBudgetCents: limitField,
   dailyBudgetCents: limitField,
   maxTasksPerDay: limitField,
@@ -186,6 +198,7 @@ export const emptyAgentFormValues: AgentFormValues = {
   voiceStyle: "none",
   securityPreset: AgentSecurityPreset.assistant,
   autonomy: "limited",
+  gender: AgentGender.unspecified,
   maxTaskBudgetCents: "",
   dailyBudgetCents: "",
   maxTasksPerDay: "",
@@ -548,6 +561,37 @@ export function AgentFormFields({
           )}
         />
       </div>
+
+      <FormField
+        control={form.control}
+        name="gender"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel className="uppercase font-bold text-xs">
+              Gender
+            </FormLabel>
+            <Select onValueChange={field.onChange} value={field.value}>
+              <FormControl>
+                <SelectTrigger className={selectTriggerClass}>
+                  <SelectValue placeholder="Select gender" />
+                </SelectTrigger>
+              </FormControl>
+              <SelectContent className={selectContentClass}>
+                {GENDER_OPTIONS.map((option) => (
+                  <SelectItem
+                    key={option.value}
+                    value={option.value}
+                    className={selectItemClass}
+                  >
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <FormMessage className={messageClass} />
+          </FormItem>
+        )}
+      />
 
       <FormField
         control={form.control}
@@ -1294,6 +1338,12 @@ export function AgentPreviewCard({
                 ? "default"
                 : form.watch("provider")}
             </Badge>
+          </div>
+          <div>
+            <div className="text-[10px] text-muted-foreground uppercase font-bold mb-1">
+              Gender
+            </div>
+            <Badge variant="outline">{form.watch("gender")}</Badge>
           </div>
         </div>
       </div>

@@ -18,6 +18,7 @@ import {
   Plus,
   Server,
   Shield,
+  UserRound,
 } from "lucide-react";
 import { Link, useLocation, useSearch } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
@@ -227,6 +228,10 @@ export default function AgentsPage() {
                     <div className="flex items-center gap-1 text-[10px] bg-muted px-2 py-1 uppercase font-bold text-muted-foreground border-2 border-border/50">
                       <Shield className="w-3 h-3" />
                       {agent.securityPreset}
+                    </div>
+                    <div className="flex items-center gap-1 text-[10px] bg-muted px-2 py-1 uppercase font-bold text-muted-foreground border-2 border-border/50">
+                      <UserRound className="w-3 h-3" />
+                      {agent.gender}
                     </div>
                     {agent.specialization && (
                       <div className="flex items-center gap-1 text-[10px] bg-muted px-2 py-1 uppercase font-bold text-muted-foreground border-2 border-border/50">
