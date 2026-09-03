@@ -24,10 +24,10 @@ describe("office role placements", () => {
       pose: "memory-cables",
     });
     // The inspector reuses the "approval guy" seated-at-the-controls sprite,
-    // placed beside the Inbox navigation console on the port side.
+    // raised onto the Inbox navigation console on the port side.
     expect(OFFICE_ROLE_SEATS.inspector).toMatchObject({
       left: 30.4,
-      top: 47.2,
+      top: 45.2,
       pose: "working",
       status: "working",
       mirrorX: true,

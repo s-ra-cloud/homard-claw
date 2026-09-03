@@ -50,11 +50,11 @@ export const OFFICE_ROLE_SEATS: Record<OfficeRole, OfficeRoleSeat> = {
   },
   inspector: {
     // Just to the right of the blue Inbox navigation console (hotspot at
-    // ~25.8/44.6), still on the port side of the submarine. Uses the same
-    // seated-at-the-controls "approval guy" sprite, mirrored to face the
-    // console it is reviewing completed work beside.
+    // ~25.8/44.6), still on the port side of the submarine. The raised anchor
+    // puts the working claws on the controls while the wheelbase stays below
+    // the console front. The mirrored pose faces the console it reviews.
     left: 30.4,
-    top: 47.2,
+    top: 45.2,
     label: "inbox inspection station",
     pose: "working",
     status: "working",
