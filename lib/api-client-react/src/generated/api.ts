@@ -74,6 +74,8 @@ import type {
   GoogleOauthStart,
   GoogleOauthStartRequest,
   HealthStatus,
+  InspectorSettings,
+  InspectorSettingsInput,
   KnowledgeAssignmentsInput,
   KnowledgeFile,
   KnowledgeFileInput,
@@ -1709,6 +1711,154 @@ export const useUpdateApprovalSettings = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getUpdateApprovalSettingsMutationOptions(options));
+    }
+
+export const getGetInspectorSettingsUrl = () => {
+
+
+
+
+  return `/api/inspector/settings`
+}
+
+/**
+ * @summary Read the completed-work inspector selection
+ */
+export const getInspectorSettings = async ( options?: Parameters<typeof customFetch>[1]): Promise<InspectorSettings> => {
+
+  return customFetch<InspectorSettings>(getGetInspectorSettingsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetInspectorSettingsQueryKey = () => {
+    return [
+    `/api/inspector/settings`
+    ] as const;
+    }
+
+
+export const getGetInspectorSettingsQueryOptions = <TData = Awaited<ReturnType<typeof getInspectorSettings>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getInspectorSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetInspectorSettingsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getInspectorSettings>>> = ({ signal }) => getInspectorSettings({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getInspectorSettings>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetInspectorSettingsQueryResult = NonNullable<Awaited<ReturnType<typeof getInspectorSettings>>>
+export type GetInspectorSettingsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Read the completed-work inspector selection
+ */
+
+export function useGetInspectorSettings<TData = Awaited<ReturnType<typeof getInspectorSettings>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getInspectorSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetInspectorSettingsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateInspectorSettingsUrl = () => {
+
+
+
+
+  return `/api/inspector/settings`
+}
+
+/**
+ * @summary Select or disable the completed-work inspector
+ */
+export const updateInspectorSettings = async (inspectorSettingsInput: InspectorSettingsInput, options?: Parameters<typeof customFetch>[1]): Promise<InspectorSettings> => {
+
+  return customFetch<InspectorSettings>(getUpdateInspectorSettingsUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(inspectorSettingsInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateInspectorSettingsMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateInspectorSettings>>, TError,{data: BodyType<InspectorSettingsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateInspectorSettings>>, TError,{data: BodyType<InspectorSettingsInput>}, TContext> => {
+
+const mutationKey = ['updateInspectorSettings'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateInspectorSettings>>, {data: BodyType<InspectorSettingsInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateInspectorSettings(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateInspectorSettingsMutationResult = NonNullable<Awaited<ReturnType<typeof updateInspectorSettings>>>
+    export type UpdateInspectorSettingsMutationBody = BodyType<InspectorSettingsInput>
+    export type UpdateInspectorSettingsMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Select or disable the completed-work inspector
+ */
+export const useUpdateInspectorSettings = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateInspectorSettings>>, TError,{data: BodyType<InspectorSettingsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateInspectorSettings>>,
+        TError,
+        {data: BodyType<InspectorSettingsInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateInspectorSettingsMutationOptions(options));
     }
 
 export const getDecideApprovalUrl = (approvalId: string,) => {

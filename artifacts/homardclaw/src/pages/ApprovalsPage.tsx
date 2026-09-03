@@ -6,6 +6,9 @@ import {
   useGetApprovalSettings,
   useUpdateApprovalSettings,
   getGetApprovalSettingsQueryKey,
+  useGetInspectorSettings,
+  useUpdateInspectorSettings,
+  getGetInspectorSettingsQueryKey,
   useSearchAudit,
   useVerifyAudit,
   ApprovalDecisionDecision,
@@ -35,6 +38,7 @@ import {
   ShieldCheck,
   ShieldAlert,
   UserCheck,
+  SearchCheck,
   BellRing,
 } from "lucide-react";
 import { Link } from "wouter";
@@ -43,6 +47,8 @@ import { formatDistanceToNow } from "date-fns";
 import { approvalKindLabel } from "@/lib/continuation";
 
 const MANUAL_REVIEW = "__manual_review__";
+const NO_INSPECTOR = "__no_inspector__";
+const INSPECTION_RETRY_OPTIONS = [1, 2, 3] as const;
 
 function apiErrorMessage(error: unknown, fallback: string): string {
   return (
@@ -58,12 +64,16 @@ export default function ApprovalsPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
+  const { data: inspectorSettings } = useGetInspectorSettings();
+
   const eligibleReviewers = (agents ?? []).filter(
     (agent) =>
       !agent.archived &&
       agent.status !== "paused" &&
       !agent.sensitiveDataSandbox,
   );
+  // The inspector reads completed work, so the same eligibility applies.
+  const eligibleInspectors = eligibleReviewers;
 
   const updateApprovalSettings = useUpdateApprovalSettings({
     mutation: {
@@ -83,6 +93,29 @@ export default function ApprovalsPage() {
         toast({
           variant: "destructive",
           title: "Could not change the approval reviewer",
+          description: apiErrorMessage(error, "Try again."),
+        });
+      },
+    },
+  });
+
+  const updateInspectorSettings = useUpdateInspectorSettings({
+    mutation: {
+      onSuccess: (settings) => {
+        queryClient.setQueryData(getGetInspectorSettingsQueryKey(), settings);
+        toast({
+          title: settings.inspectorAgentName
+            ? `${settings.inspectorAgentName} is on inspection duty`
+            : "Completed-work inspection disabled",
+          description: settings.inspectorAgentName
+            ? "Completed tasks are checked against their outputs; needs-fix results get a corrective retry."
+            : "Completed tasks will no longer be inspected automatically.",
+        });
+      },
+      onError: (error) => {
+        toast({
+          variant: "destructive",
+          title: "Could not change the inspector",
           description: apiErrorMessage(error, "Try again."),
         });
       },
@@ -206,6 +239,121 @@ export default function ApprovalsPage() {
                 is unavailable or cannot safely decide, Crustabox switches this
                 request to notification mode.
               </p>
+            </div>
+          </div>
+        </PixelCard>
+
+        <PixelCard className="border-accent/50">
+          <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)] md:items-center">
+            <div className="flex items-start gap-3">
+              <div className="shrink-0 border-2 border-border bg-accent/15 p-2 text-accent pixel-shadow">
+                <SearchCheck className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="font-display text-sm uppercase">
+                  Completed-work inspector
+                </h2>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  This Crustabot reviews each completed task against its actual
+                  outputs — including external ones like Google Drive — and
+                  records a pass, needs-fix, or cannot-verify verdict. A
+                  needs-fix result queues a corrective retry for the original
+                  Crustabot, up to the retry cap.
+                </p>
+                <p className="mt-2 text-[10px] font-mono uppercase text-muted-foreground">
+                  No self-inspection · read-only review · bounded retries
+                </p>
+              </div>
+            </div>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase text-muted-foreground">
+                  Crustabot on duty
+                </label>
+                <Select
+                  value={inspectorSettings?.inspectorAgentId ?? NO_INSPECTOR}
+                  onValueChange={(value) =>
+                    updateInspectorSettings.mutate({
+                      data: {
+                        inspectorAgentId:
+                          value === NO_INSPECTOR ? null : value,
+                      },
+                    })
+                  }
+                  disabled={updateInspectorSettings.isPending}
+                >
+                  <SelectTrigger
+                    className="rounded-none border-4 border-border bg-background font-mono text-xs uppercase focus:ring-0"
+                    aria-label="Choose the completed-work inspector"
+                  >
+                    <SelectValue placeholder="Inspection disabled" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-72 rounded-none border-4 border-border bg-card">
+                    <SelectItem
+                      value={NO_INSPECTOR}
+                      className="font-mono text-xs uppercase"
+                    >
+                      Inspection disabled
+                    </SelectItem>
+                    {eligibleInspectors.map((agent) => (
+                      <SelectItem
+                        key={agent.id}
+                        value={agent.id}
+                        className="font-mono text-xs uppercase"
+                      >
+                        {agent.name} — {agent.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {inspectorSettings?.inspectorAgentId && (
+                <div className="flex items-start justify-between gap-3">
+                  <label
+                    htmlFor="inspector-retry-limit"
+                    className="text-[10px] font-mono uppercase text-muted-foreground"
+                  >
+                    Corrective-retry cap
+                    <span className="block normal-case text-muted-foreground/80">
+                      Corrective retries a task lineage may spawn before the
+                      inspector stops.
+                    </span>
+                  </label>
+                  <Select
+                    value={String(
+                      inspectorSettings?.inspectionRetryLimit ?? 1,
+                    )}
+                    onValueChange={(value) =>
+                      updateInspectorSettings.mutate({
+                        data: {
+                          inspectorAgentId:
+                            inspectorSettings?.inspectorAgentId ?? null,
+                          inspectionRetryLimit: Number(value),
+                        },
+                      })
+                    }
+                    disabled={updateInspectorSettings.isPending}
+                  >
+                    <SelectTrigger
+                      id="inspector-retry-limit"
+                      className="w-20 rounded-none border-4 border-border bg-background font-mono text-xs uppercase focus:ring-0"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="rounded-none border-4 border-border bg-card">
+                      {INSPECTION_RETRY_OPTIONS.map((limit) => (
+                        <SelectItem
+                          key={limit}
+                          value={String(limit)}
+                          className="font-mono text-xs uppercase"
+                        >
+                          {limit}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
           </div>
         </PixelCard>

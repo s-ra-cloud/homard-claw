@@ -106,6 +106,10 @@ import {
   workspaceAlwaysApproves,
 } from "./approval-reviewer";
 import { ApprovalDecisionError, decideApproval } from "./approvals";
+import {
+  inspectCompletedTasks,
+  queueInspectionIfConfigured,
+} from "./task-inspector";
 import { getFailedTaskRetryLimit } from "./workspace";
 
 /**
@@ -597,6 +601,10 @@ async function finishIfStillRunning(
     // here, so this is the single notification hook for worker outcomes.
     if (set.status === "completed") {
       await notifyTaskEvent("task_completed", task);
+      // Mark the finished work for the completed-work inspector, but only
+      // when one is configured. A stamp that never lands simply means the
+      // task is never inspected — historical work is left untouched.
+      await queueInspectionIfConfigured(task);
     } else if (set.status === "failed") {
       await notifyTaskEvent("task_failed", task, task.errorMessage);
     } else if (set.status === "blocked") {
@@ -3186,6 +3194,8 @@ export function startWorker(intervalMs = POLL_INTERVAL_MS): void {
       await runOwnershipRecoveryOnce();
       await expireStaleApprovals();
       await reviewPendingApprovals();
+      // Inspect newly completed work and queue bounded corrective retries.
+      await inspectCompletedTasks();
       // Fire durable schedules before draining, so a task launched by a
       // just-due schedule runs in the same tick.
       await runDueSchedules();

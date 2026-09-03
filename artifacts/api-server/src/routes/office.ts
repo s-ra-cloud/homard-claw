@@ -14,6 +14,8 @@ import {
   DecideApprovalParams,
   DecideApprovalResponse,
   GetApprovalSettingsResponse,
+  GetInspectorSettingsResponse,
+  UpdateInspectorSettingsBody,
   DecideTaskFallbackBody,
   DecideTaskFallbackParams,
   DecideTaskFallbackResponse,
@@ -161,6 +163,11 @@ import {
   getApprovalSettings,
   updateApprovalSettings,
 } from "../approval-reviewer";
+import {
+  InspectorSettingsError,
+  getInspectorSettings,
+  updateInspectorSettings,
+} from "../task-inspector";
 import { findRegistryEntry } from "../capabilities/registry";
 import connectedAppsRouter from "./connected-apps";
 import capabilitiesRouter from "./capabilities";
@@ -1806,6 +1813,32 @@ router.put("/approvals/settings", async (req, res): Promise<void> => {
     res.json(UpdateApprovalSettingsResponse.parse(settings));
   } catch (error) {
     if (error instanceof ApprovalReviewerSettingsError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
+    throw error;
+  }
+});
+
+router.get("/inspector/settings", async (req, res): Promise<void> => {
+  res.json(
+    GetInspectorSettingsResponse.parse(
+      await getInspectorSettings(req.workspaceId!),
+    ),
+  );
+});
+
+router.put("/inspector/settings", async (req, res): Promise<void> => {
+  const body = UpdateInspectorSettingsBody.safeParse(req.body);
+  if (!body.success) {
+    res.status(400).json({ error: "Choose a valid inspector." });
+    return;
+  }
+  try {
+    const settings = await updateInspectorSettings(req.workspaceId!, body.data);
+    res.json(GetInspectorSettingsResponse.parse(settings));
+  } catch (error) {
+    if (error instanceof InspectorSettingsError) {
       res.status(error.status).json({ error: error.message });
       return;
     }

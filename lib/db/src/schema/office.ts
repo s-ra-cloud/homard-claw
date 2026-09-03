@@ -289,6 +289,26 @@ export const tasksTable = pgTable("tasks", {
    * across segments). Owner retries reset it with the rest of run state.
    */
   continuationSegments: integer("continuation_segments").notNull().default(0),
+  /**
+   * Completed-work inspection lifecycle: null (never queued) | queued |
+   * inspecting | done. A task is stamped "queued" only when it completes
+   * with output while a workspace inspector is configured, so historical or
+   * unwitnessed work is never inspected retroactively.
+   */
+  inspectionStatus: text("inspection_status"),
+  /** When the inspector claimed this task; lets a crashed review recover. */
+  inspectionClaimedAt: timestamp("inspection_claimed_at", {
+    withTimezone: true,
+  }),
+  /**
+   * Corrective-retry lineage. `correctionOfTaskId` points at the completed
+   * task this run was created to fix; `correctionAttempt` is how many
+   * corrective retries deep this run is (owner/normal tasks are 0). The
+   * inspector caps new corrections against this counter so a needs-fix loop
+   * is bounded.
+   */
+  correctionOfTaskId: uuid("correction_of_task_id"),
+  correctionAttempt: integer("correction_attempt").notNull().default(0),
   // Which memories/knowledge files were injected into the prompt, so the
   // UI can show where the result drew from ([M1]/[F1] citations).
   contextSources: jsonb("context_sources").$type<TaskSource[]>(),
@@ -964,6 +984,42 @@ export const appActionsTable = pgTable(
       .defaultNow(),
   },
   (table) => [index("app_actions_task_idx").on(table.taskId)],
+);
+
+/**
+ * One recorded verdict from the completed-work inspector: the outcome it
+ * reached for a finished task and why. A needs-fix verdict may also carry the
+ * corrective retry it spawned. Read-only history the owner can browse.
+ */
+export const taskInspectionsTable = pgTable(
+  "task_inspections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id").references(() => workspacesTable.id, {
+      onDelete: "cascade",
+    }),
+    // The completed task that was inspected.
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasksTable.id, { onDelete: "cascade" }),
+    // The Crustabot that carried out the inspection; null once it is removed.
+    inspectorAgentId: uuid("inspector_agent_id").references(
+      () => agentsTable.id,
+      { onDelete: "set null" },
+    ),
+    // pass | needs_fix | cannot_verify
+    outcome: text("outcome").notNull(),
+    reason: text("reason").notNull(),
+    // The corrective retry created for a needs_fix outcome, when one was.
+    correctionTaskId: uuid("correction_task_id").references(
+      () => tasksTable.id,
+      { onDelete: "set null" },
+    ),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("task_inspections_task_idx").on(table.taskId)],
 );
 
 export const insertAgentSchema = createInsertSchema(agentsTable).omit({

@@ -1986,6 +1986,28 @@ export interface ApprovalSettingsInput {
   failedTaskRetryLimit?: number;
 }
 
+export interface InspectorSettings {
+  /** @nullable */
+  inspectorAgentId: string | null;
+  /** @nullable */
+  inspectorAgentName: string | null;
+  /**
+     * @minimum 1
+     * @maximum 3
+     */
+  inspectionRetryLimit: number;
+}
+
+export interface InspectorSettingsInput {
+  /** @nullable */
+  inspectorAgentId: string | null;
+  /**
+     * @minimum 1
+     * @maximum 3
+     */
+  inspectionRetryLimit?: number;
+}
+
 export type ProviderStatusProvider = typeof ProviderStatusProvider[keyof typeof ProviderStatusProvider];
 
 

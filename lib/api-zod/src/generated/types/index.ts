@@ -125,6 +125,8 @@ export * from './googleOauthStartRequestService';
 export * from './healthStatus';
 export * from './inputAttachment';
 export * from './inputAttachmentEncoding';
+export * from './inspectorSettings';
+export * from './inspectorSettingsInput';
 export * from './knowledgeAssignmentsInput';
 export * from './knowledgeFile';
 export * from './knowledgeFileInput';

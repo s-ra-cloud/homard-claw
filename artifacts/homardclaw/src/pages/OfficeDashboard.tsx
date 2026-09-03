@@ -9,6 +9,7 @@ import {
   useSetEmergencyStop,
   useGetRuntimeHealth,
   useGetApprovalSettings,
+  useGetInspectorSettings,
   useGetDocumentation,
   useGetMemorySettings,
   ApprovalDecisionDecision,
@@ -317,6 +318,8 @@ export default function OfficeDashboard() {
     useGetDocumentation();
   const { data: memorySettings, isLoading: memorySettingsLoading } =
     useGetMemorySettings();
+  const { data: inspectorSettings, isLoading: inspectorSettingsLoading } =
+    useGetInspectorSettings();
   // Polls so a stalled queue or a lost worker lease surfaces on its own.
   const { data: runtimeHealth } = useGetRuntimeHealth({
     query: { queryKey: ["/api/runtime/health"], refetchInterval: 10000 },
@@ -450,7 +453,8 @@ export default function OfficeDashboard() {
     agentsLoading ||
     approvalSettingsLoading ||
     documentationLoading ||
-    memorySettingsLoading
+    memorySettingsLoading ||
+    inspectorSettingsLoading
   ) {
     return (
       <Shell>
@@ -521,6 +525,7 @@ export default function OfficeDashboard() {
       documentationAgentId: documentation?.assistantAgentId,
       approvalAgentId: approvalSettings?.reviewerAgentId,
       memoryAgentId: memorySettings?.compressionAgentId,
+      inspectorAgentId: inspectorSettings?.inspectorAgentId,
     },
     new Set(officeAgents.map((agent) => agent.id)),
     roleLoadSeed,
