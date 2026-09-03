@@ -628,6 +628,63 @@ export default function OfficeDashboard() {
         )}
 
         <main className="iso-office__layout">
+          <section className="quiet-card approval approval--expanded">
+            <h2>One thing needs you</h2>
+            {nextApproval ? (
+              <>
+                <p>
+                  <b>{nextApproval.agentName}</b> wants to{" "}
+                  {nextApproval.action}
+                  {nextApproval.details ? ` — ${nextApproval.details}` : ""}
+                </p>
+                <div className="approval-actions">
+                  <button
+                    onClick={() =>
+                      decideApproval.mutate({
+                        approvalId: nextApproval.id,
+                        data: { decision: ApprovalDecisionDecision.approved },
+                      })
+                    }
+                    disabled={decideApproval.isPending}
+                  >
+                    APPROVE
+                  </button>
+                  <button
+                    className="hold"
+                    onClick={() =>
+                      decideApproval.mutate({
+                        approvalId: nextApproval.id,
+                        data: { decision: ApprovalDecisionDecision.rejected },
+                      })
+                    }
+                    disabled={decideApproval.isPending}
+                  >
+                    HOLD
+                  </button>
+                </div>
+              </>
+            ) : justDecided ? (
+              <div className="approved">
+                {justDecided.data.decision === "approved"
+                  ? "CLEARED — the Crustabot has the go-ahead."
+                  : "HELD — the request was declined."}
+              </div>
+            ) : (
+              <p className="approval-empty">
+                Nothing is waiting on your review.
+              </p>
+            )}
+            <Link
+              className="approval-link"
+              href="/approvals"
+              onClick={(event) =>
+                openOfficeWindow(event, "/approvals", "Approvals")
+              }
+            >
+              <ShieldCheck size={12} /> full approval desk
+            </Link>
+          </section>
+
           <section
             ref={roomRef}
             className={`room-wrap ${stopped ? "is-paused" : ""}${ambientActive ? "" : " is-ambient-paused"}`}
@@ -901,63 +958,6 @@ export default function OfficeDashboard() {
                   <span>{runtime.status.replace(/_/g, " ")}</span>
                 </div>
               ))}
-            </section>
-
-            <section className="quiet-card approval">
-              <h2>One thing needs you</h2>
-              {nextApproval ? (
-                <>
-                  <p>
-                    <b>{nextApproval.agentName}</b> wants to{" "}
-                    {nextApproval.action}
-                    {nextApproval.details ? ` — ${nextApproval.details}` : ""}
-                  </p>
-                  <div className="approval-actions">
-                    <button
-                      onClick={() =>
-                        decideApproval.mutate({
-                          approvalId: nextApproval.id,
-                          data: { decision: ApprovalDecisionDecision.approved },
-                        })
-                      }
-                      disabled={decideApproval.isPending}
-                    >
-                      APPROVE
-                    </button>
-                    <button
-                      className="hold"
-                      onClick={() =>
-                        decideApproval.mutate({
-                          approvalId: nextApproval.id,
-                          data: { decision: ApprovalDecisionDecision.rejected },
-                        })
-                      }
-                      disabled={decideApproval.isPending}
-                    >
-                      HOLD
-                    </button>
-                  </div>
-                </>
-              ) : justDecided ? (
-                <div className="approved">
-                  {justDecided.data.decision === "approved"
-                    ? "CLEARED — the Crustabot has the go-ahead."
-                    : "HELD — the request was declined."}
-                </div>
-              ) : (
-                <p className="approval-empty">
-                  Nothing is waiting on your review.
-                </p>
-              )}
-              <Link
-                className="approval-link"
-                href="/approvals"
-                onClick={(event) =>
-                  openOfficeWindow(event, "/approvals", "Approvals")
-                }
-              >
-                <ShieldCheck size={12} /> full approval desk
-              </Link>
             </section>
           </aside>
         </main>
