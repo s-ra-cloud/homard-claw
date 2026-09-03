@@ -3354,6 +3354,73 @@ describe("auth-refused approved actions are preserved, not failed", () => {
     );
   });
 
+  it("parks a create_issue action on a pre-execution credential refusal, never reports success on the 401, and re-runs it exactly once with the SAME marker", async () => {
+    withoutGithubApp();
+    const behavior = { refuse: true };
+    proxyState.handler = (call) => {
+      if (call.connector !== "github") {
+        throw new Error(`unexpected provider call: ${call.method} ${call.path}`);
+      }
+      return behavior.refuse
+        ? { status: 401, body: { message: "Bad credentials" } }
+        : {
+            status: 201,
+            body: { number: 9, html_url: "https://github.com/x/y/issues/9" },
+          };
+    };
+    const approvalId = await insertApproval();
+    const action = await insertExecutingAction({
+      operation: "github.create_issue",
+      app: "github",
+      params: { owner: "x", repo: "y", title: "Bug", body: "It broke" },
+      approvalId,
+      executingAt: new Date(),
+    });
+
+    const { action: parked, outcome } = await executeClaimedAction(
+      action,
+      "Tester",
+      workspaceId,
+      { allowAuthPark: true },
+    );
+    // The 401 must never be reported as success: the action is preserved
+    // (approved, not executed) with the single-retry fence spent-able
+    // exactly once, the original approval untouched.
+    expect(outcome.ok).toBe(false);
+    expect(parked.status).toBe("approved");
+    expect(parked.approvalId).toBe(approvalId);
+    expect(parked.recoveryRequeuedAt).not.toBeNull();
+    expect(parked.errorMessage).toMatch(/GitHub|credential|Reconnect/i);
+    expect(parked.executedAt).toBeNull();
+    expect(parked.resultSummary).toBeNull();
+
+    // Connection repaired: the ordinary claim fence re-runs it exactly once.
+    behavior.refuse = false;
+    const claimed = await claimApprovedAction(action.id);
+    expect(claimed).not.toBeNull();
+    expect(await claimApprovedAction(action.id)).toBeNull();
+    const { action: finalized } = await executeClaimedAction(
+      claimed!,
+      "Tester",
+      workspaceId,
+      { allowAuthPark: true },
+    );
+    expect(finalized.status).toBe("executed");
+    expect(finalized.resultSummary).toContain("#9");
+    const posts = proxyState.calls.filter(
+      (c) =>
+        c.connector === "github" &&
+        c.method === "POST" &&
+        c.path === "/repos/x/y/issues",
+    );
+    // One refused POST, one successful POST — and the retry carries the
+    // SAME idempotency marker derived from the original action id.
+    expect(posts).toHaveLength(2);
+    expect((posts[1].body as { body: string }).body).toContain(
+      `<!-- homardclaw-action:${action.id} -->`,
+    );
+  });
+
   it("fails honestly when the retry fence is already spent", async () => {
     withoutGithubApp();
     refuseThenAccept({ refuse: true });
