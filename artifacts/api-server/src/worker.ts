@@ -65,7 +65,12 @@ import {
   resolveConversation,
   touchConversation,
 } from "./provider-conversations";
-import { buildTaskContext, saveTaskOutcomeMemory } from "./memory-context";
+import {
+  buildPinnedInstructions,
+  buildTaskContext,
+  saveTaskOutcomeMemory,
+} from "./memory-context";
+import { checkPinnedCompliance } from "./pinned-compliance";
 import {
   authorizeAppAction,
   loadAgentAppAccess,
@@ -1396,11 +1401,35 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
   const taskRecordReadsAvailable = () =>
     Boolean(workspaceId) && !appAccess.sensitiveDataSandbox;
 
+  // Pinned memories, injected as explicit high-priority instructions rather
+  // than citable reference material. Refetched before every provider round
+  // below (never carried over from an earlier round) so a mid-run pin,
+  // unpin, or edit by the owner applies to the very next turn and no stale
+  // or cross-agent pinned memory ever reaches the model.
+  let pinnedInstructions: string | null = null;
+  const refreshPinnedInstructions = async (): Promise<void> => {
+    try {
+      pinnedInstructions = await buildPinnedInstructions(
+        agent.id,
+        workspaceId,
+        { sensitiveDataSandbox: appAccess.sensitiveDataSandbox },
+      );
+    } catch (error) {
+      logger.warn(
+        { taskId: task.id, error },
+        "Pinned instruction retrieval failed; running this round without them",
+      );
+      pinnedInstructions = null;
+    }
+  };
+  await refreshPinnedInstructions();
+
   // Rebuilt whenever grants/sandbox state is refreshed mid-run, so every
   // provider round is prompted with the access it actually has.
   const buildSystem = () =>
     [
       buildSystemPrompt(agent),
+      pinnedInstructions,
       appAccess.sensitiveDataSandbox ? null : handoffPromptSection,
       context.promptSection,
       appAccess.promptSection,
@@ -1904,6 +1933,11 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
       const maxProviderCalls =
         MAX_ACTION_ROUNDS + MAX_MALFORMED_RECOVERY_ROUNDS + 1;
       for (let call = 1; call <= maxProviderCalls; call += 1) {
+        // Refreshed at the top of every round — never the value cached from
+        // an earlier round or from before the loop — so this turn always
+        // carries the agent's current pinned memories, not a stale copy.
+        await refreshPinnedInstructions();
+        system = buildSystem();
         // Snapshot what this dispatch's prompt replays, so a provider that
         // retains the thread server-side is never re-sent these entries.
         const promptHistoryLength = actionHistory.length;
@@ -2400,6 +2434,102 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
           workspaceId,
           "task.failed",
           `A task for ${agent.name} failed: every connected-app request it produced was malformed, so no action ran.`,
+        );
+      } else {
+        // Cancelled (or stopped) while the call was in flight; keep that
+        // status but still record what the attempt consumed.
+        await db
+          .update(tasksTable)
+          .set(usage)
+          .where(
+            and(
+              eq(tasksTable.id, task.id),
+              eq(tasksTable.attempts, task.attempts),
+            ),
+          );
+        await setTaskPhase(task.id, task.attempts, "cancelled", workspaceId);
+      }
+      return;
+    }
+    // Pre-reply compliance check: whenever this turn carried pinned
+    // instructions, verify the reply actually followed them before it is
+    // ever recorded as complete. A checker that fails to run (provider
+    // error, etc.) must not itself sink the task — it fails open, the same
+    // way a memory-retrieval failure does above — but a checker that DID
+    // run and found a violation follows the same retry-then-fail error path
+    // as a self-reported failure below.
+    let pinnedComplianceFailure: string | null = null;
+    if (pinnedInstructions) {
+      try {
+        const verdict = await checkPinnedCompliance({
+          runtime,
+          request: {
+            workspaceId,
+            clerkUserId: codexClerkUserId,
+            provider,
+            model: task.model ?? "",
+            signal: new AbortController().signal,
+            workingDirectory,
+          },
+          pinnedInstructions,
+          draft: finalOutput,
+        });
+        if (!verdict.compliant) {
+          pinnedComplianceFailure =
+            verdict.reason ??
+            "The draft reply did not follow a pinned instruction.";
+        }
+      } catch (error) {
+        logger.warn(
+          { taskId: task.id, error },
+          "Pinned instruction compliance check failed to run; proceeding without it",
+        );
+      }
+    }
+    if (pinnedComplianceFailure) {
+      const failureMessage = `The reply did not comply with a pinned instruction, so it was withheld instead of being marked complete: ${pinnedComplianceFailure}`;
+      if (task.attempts < maxAttempts) {
+        const backoffMs = RETRY_BACKOFF_MS * task.attempts;
+        await db
+          .update(tasksTable)
+          .set({
+            ...usage,
+            status: "queued",
+            notBefore: new Date(Date.now() + backoffMs),
+            errorKind: "pinned_compliance_failed",
+            errorMessage: failureMessage,
+            output: finalOutput,
+          })
+          .where(
+            and(
+              eq(tasksTable.id, task.id),
+              eq(tasksTable.status, "running"),
+              eq(tasksTable.attempts, task.attempts),
+            ),
+          );
+        await setTaskPhase(task.id, task.attempts, "failed", workspaceId);
+        await addTaskLog(
+          task.id,
+          "warn",
+          `${failureMessage} Retrying in ${Math.round(backoffMs / 1000)}s (attempt ${task.attempts} of ${maxAttempts}).`,
+        );
+        publish(workspaceId, "tasks");
+        return;
+      }
+      const failed = await finishIfStillRunning(task.id, task.attempts, {
+        ...usage,
+        status: "failed",
+        errorKind: "pinned_compliance_failed",
+        errorMessage: failureMessage,
+        output: finalOutput,
+      });
+      if (failed) {
+        await setTaskPhase(task.id, task.attempts, "failed", workspaceId);
+        await addTaskLog(task.id, "error", `Failed: ${failureMessage}`);
+        await recordAudit(
+          workspaceId,
+          "task.failed",
+          `A task for ${agent.name} failed the pinned-instruction compliance check.`,
         );
       } else {
         // Cancelled (or stopped) while the call was in flight; keep that
