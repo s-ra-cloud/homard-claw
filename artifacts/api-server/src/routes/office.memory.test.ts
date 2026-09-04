@@ -28,6 +28,7 @@ vi.stubGlobal("fetch", fetchMock);
 import officeRouter from "./office";
 import { runTask } from "../worker";
 import {
+  buildPinnedInstructions,
   buildTaskContext,
   MAX_MEMORIES,
   saveTaskOutcomeMemory,
@@ -620,6 +621,11 @@ describe("task context retrieval", () => {
       pinned: true,
     });
 
+    // The pinned memory above means every completion round also triggers a
+    // follow-up pinned-instruction compliance check (see checkPinnedCompliance
+    // in pinned-compliance.ts): the first chat/completions call is the
+    // agent's draft, the second is that compliance verdict.
+    let completionCalls = 0;
     fetchMock.mockImplementation(async (url: unknown) => {
       if (String(url).includes("/models")) {
         return new Response(
@@ -636,9 +642,12 @@ describe("task context retrieval", () => {
           { status: 200, headers: { "content-type": "application/json" } },
         );
       }
+      completionCalls += 1;
+      const content =
+        completionCalls === 1 ? "Tide-touched haiku done. [M1]" : "COMPLIANT";
       return new Response(
         JSON.stringify({
-          choices: [{ message: { content: "Tide-touched haiku done. [M1]" } }],
+          choices: [{ message: { content } }],
           usage: { prompt_tokens: 500, completion_tokens: 40 },
         }),
         { status: 200, headers: { "content-type": "application/json" } },
@@ -687,6 +696,36 @@ describe("task context retrieval", () => {
     );
     expect(systemMessage.content).toContain("mention the tide");
     expect(systemMessage.content).toContain("[M1]");
+    // The pinned memory is also injected as an explicit high-priority
+    // instruction, distinct from the citable reference-material section.
+    expect(systemMessage.content).toContain("ACTIVE PINNED INSTRUCTIONS");
+    expect(systemMessage.content).toContain(
+      "===== BEGIN PINNED INSTRUCTIONS =====",
+    );
+
+    // A second, isolated provider turn checked the draft against the
+    // pinned instruction before the task was allowed to complete.
+    const completionCallCount = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes("chat/completions"),
+    ).length;
+    expect(completionCallCount).toBe(2);
+    const complianceCall = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes("chat/completions"),
+    )[1];
+    const complianceBody = JSON.parse(
+      (complianceCall![1] as { body: string }).body,
+    );
+    const complianceSystemMessage = complianceBody.messages.find(
+      (m: { role: string }) => m.role === "system",
+    );
+    expect(complianceSystemMessage.content).toContain("compliance checker");
+    const compliancePromptMessage = complianceBody.messages.find(
+      (m: { role: string }) => m.role === "user",
+    );
+    expect(compliancePromptMessage.content).toContain("mention the tide");
+    expect(compliancePromptMessage.content).toContain(
+      "Tide-touched haiku done.",
+    );
 
     // A task outcome memory was captured for the agent.
     const outcomes = await db
@@ -701,6 +740,191 @@ describe("task context retrieval", () => {
         ),
       );
     expect(outcomes).toHaveLength(1);
+
+    await db.delete(taskLogsTable).where(eq(taskLogsTable.taskId, task.id));
+  });
+});
+
+describe("pinned instruction enforcement", () => {
+  it("refreshes pinned instructions on every call — no stale snapshot across consecutive turns", async () => {
+    const agent = await createAgent(`${RUN_TAG} Pin Refresher`);
+    // Sandboxed and privately scoped so this test's result depends only on
+    // this agent's own memory, never on shared pinned memories other tests
+    // in this file leave behind in the same workspace.
+    await db
+      .update(agentsTable)
+      .set({ sensitiveDataSandbox: true })
+      .where(eq(agentsTable.id, agent.id));
+    const [memory] = await db
+      .insert(memoriesTable)
+      .values({
+        kind: "decision",
+        workspaceId: wsId,
+        agentId: agent.id,
+        content: taggedMemory("Always sign off as The Claw Office."),
+        pinned: true,
+      })
+      .returning();
+    const sandboxed = { sensitiveDataSandbox: true };
+
+    const first = await buildPinnedInstructions(agent.id, wsId, sandboxed);
+    expect(first).not.toBeNull();
+    expect(first).toContain("Always sign off as The Claw Office.");
+    expect(first).toContain("ACTIVE PINNED INSTRUCTIONS");
+
+    // The owner edits the pinned memory between turns.
+    await db
+      .update(memoriesTable)
+      .set({ content: taggedMemory("Always sign off as The Tide Desk.") })
+      .where(eq(memoriesTable.id, memory.id));
+
+    const second = await buildPinnedInstructions(agent.id, wsId, sandboxed);
+    expect(second).not.toBeNull();
+    expect(second).toContain("Always sign off as The Tide Desk.");
+    expect(second).not.toContain("The Claw Office.");
+
+    // The owner unpins it entirely; the very next turn sees nothing pinned.
+    await db
+      .update(memoriesTable)
+      .set({ pinned: false })
+      .where(eq(memoriesTable.id, memory.id));
+    const third = await buildPinnedInstructions(agent.id, wsId, sandboxed);
+    expect(third).toBeNull();
+  });
+
+  it("keeps pinned instructions isolated per agent — never a cross-agent leak", async () => {
+    const agentA = await createAgent(`${RUN_TAG} Isolated A`);
+    const agentB = await createAgent(`${RUN_TAG} Isolated B`);
+    await db.insert(memoriesTable).values({
+      kind: "decision",
+      workspaceId: wsId,
+      agentId: agentA.id,
+      content: taggedMemory("Agent A private directive: never quote prices."),
+      pinned: true,
+    });
+    await db.insert(memoriesTable).values({
+      kind: "decision",
+      workspaceId: wsId,
+      agentId: agentB.id,
+      content: taggedMemory("Agent B private directive: always ask for a PO number."),
+      pinned: true,
+    });
+
+    const forA = await buildPinnedInstructions(agentA.id, wsId);
+    expect(forA).toContain("never quote prices");
+    expect(forA).not.toContain("PO number");
+
+    const forB = await buildPinnedInstructions(agentB.id, wsId);
+    expect(forB).toContain("PO number");
+    expect(forB).not.toContain("never quote prices");
+
+    // A sandboxed agent's own pinned memory still applies, but an office-wide
+    // shared pinned memory must not reach it — the same leak path the
+    // sandboxed buildTaskContext test above guards against.
+    await db
+      .update(agentsTable)
+      .set({ sensitiveDataSandbox: true })
+      .where(eq(agentsTable.id, agentA.id));
+    await db.insert(memoriesTable).values({
+      kind: "decision",
+      workspaceId: wsId,
+      content: taggedMemory("Office-wide pinned directive everyone gets."),
+      pinned: true,
+    });
+    const sandboxed = await buildPinnedInstructions(agentA.id, wsId, {
+      sensitiveDataSandbox: true,
+    });
+    expect(sandboxed).toContain("never quote prices");
+    expect(sandboxed).not.toContain("Office-wide pinned directive");
+  });
+
+  it("withholds a reply that fails the pre-reply pinned-instruction compliance check", async () => {
+    const agent = await createAgent(`${RUN_TAG} Noncompliant`);
+    await db.insert(memoriesTable).values({
+      kind: "decision",
+      workspaceId: wsId,
+      content: taggedMemory("Never mention competitor products by name."),
+      pinned: true,
+    });
+
+    let completionCalls = 0;
+    fetchMock.mockImplementation(async (url: unknown) => {
+      if (String(url).includes("/models")) {
+        return new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: "test-vendor/test-model",
+                name: "Test Model",
+                context_length: 8192,
+                pricing: { prompt: "0.000001", completion: "0.00001" },
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      completionCalls += 1;
+      // Round 1: the draft violates the pinned instruction. Round 2: the
+      // compliance check correctly flags it.
+      const content =
+        completionCalls === 1
+          ? "You should switch to CompetitorCo instead."
+          : "NON-COMPLIANT: mentioned a competitor product by name.";
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content } }],
+          usage: { prompt_tokens: 500, completion_tokens: 40 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+
+    const [task] = await db
+      .insert(tasksTable)
+      .values({
+        agentId: agent.id,
+        workspaceId: wsId,
+        objective: `${RUN_TAG} recommend a product`,
+        provider: "openrouter",
+        model: "test-vendor/test-model",
+        status: "running",
+        // At the attempt ceiling: the failed check must fail the task
+        // outright rather than queue a retry, so the outcome is
+        // deterministic in this test.
+        attempts: 3,
+        startedAt: new Date(),
+        estimatedCostCents: 1,
+      })
+      .returning();
+    const [agentRow] = await db
+      .select()
+      .from(agentsTable)
+      .where(eq(agentsTable.id, agent.id));
+
+    await runTask({ task, agent: agentRow });
+
+    const [finished] = await db
+      .select()
+      .from(tasksTable)
+      .where(eq(tasksTable.id, task.id));
+    expect(finished.status).toBe("failed");
+    expect(finished.errorKind).toBe("pinned_compliance_failed");
+    expect(finished.errorMessage).toContain("competitor product");
+
+    // The non-compliant draft was never persisted as a task outcome memory.
+    const outcomes = await db
+      .select()
+      .from(memoriesTable)
+      .where(
+        and(
+          eq(memoriesTable.agentId, agent.id),
+          eq(memoriesTable.workspaceId, wsId),
+          eq(memoriesTable.kind, "task_outcome"),
+          eq(memoriesTable.sourceTaskId, task.id),
+        ),
+      );
+    expect(outcomes).toHaveLength(0);
 
     await db.delete(taskLogsTable).where(eq(taskLogsTable.taskId, task.id));
   });

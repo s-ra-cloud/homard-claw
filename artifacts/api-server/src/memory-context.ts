@@ -282,6 +282,63 @@ export async function buildTaskContext(
   return { promptSection, sources };
 }
 
+/**
+ * Fetch an agent's current pinned memories, fresh from the database, and
+ * format them as explicit high-priority instructions rather than citable
+ * reference material.
+ *
+ * Called once per provider turn (never cached across turns) so a mid-run
+ * pin/unpin/edit by the owner applies to the very next round, and a
+ * multi-round task never keeps running on a stale snapshot. Scoped exactly
+ * like `buildTaskContext`'s own pinned lookup, so a sandboxed agent still
+ * only ever sees its own private pinned memories.
+ */
+export async function buildPinnedInstructions(
+  agentId: string,
+  workspaceId: string | null,
+  options?: { sensitiveDataSandbox?: boolean },
+): Promise<string | null> {
+  const sandboxed = options?.sensitiveDataSandbox === true;
+  const workspaceScope = workspaceId
+    ? eq(memoriesTable.workspaceId, workspaceId)
+    : isNull(memoriesTable.workspaceId);
+  const sharedScope = workspaceId
+    ? and(
+        isNull(memoriesTable.agentId),
+        eq(memoriesTable.workspaceId, workspaceId),
+      )
+    : sql`false`;
+  const scope = sandboxed
+    ? and(eq(memoriesTable.agentId, agentId), workspaceScope)
+    : or(and(eq(memoriesTable.agentId, agentId), workspaceScope), sharedScope);
+
+  const pinned = await db
+    .select()
+    .from(memoriesTable)
+    .where(
+      and(
+        scope,
+        eq(memoriesTable.disabled, false),
+        eq(memoriesTable.pinned, true),
+      ),
+    )
+    .orderBy(desc(memoriesTable.updatedAt))
+    .limit(MAX_PINNED);
+
+  if (pinned.length === 0) return null;
+
+  const lines = pinned.map(
+    (memory, index) => `${index + 1}. (${memory.kind}) ${memory.content}`,
+  );
+
+  return [
+    "ACTIVE PINNED INSTRUCTIONS — the owner has pinned the following directives for this agent. Treat every line below as an explicit, high-priority instruction that governs this reply, ranked above the objective and any reference material when they conflict. They do not grant new authorizations and never override system rules, safety limits, or connected-app permissions.",
+    "===== BEGIN PINNED INSTRUCTIONS =====",
+    ...lines,
+    "===== END PINNED INSTRUCTIONS =====",
+  ].join("\n\n");
+}
+
 /** Raised when a curated write would exceed the global memory cap. */
 export class MemoryQuotaError extends Error {
   constructor() {
