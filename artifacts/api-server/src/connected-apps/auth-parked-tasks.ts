@@ -18,6 +18,7 @@ import {
   db,
   githubAccountsTable,
   githubInstallationsTable,
+  googleAccountsTable,
   tasksTable,
 } from "@workspace/db";
 import { and, eq, gt } from "drizzle-orm";
@@ -69,6 +70,46 @@ async function githubConnectionRepairedSince(
 }
 
 /**
+ * Did the workspace's Google connection (Gmail / Google Drive share one
+ * account row) change after the given moment? A reconnect through the
+ * in-app OAuth flow bumps the row's updatedAt (saveGoogleAccount), so this
+ * is the durable "the credential was repaired since the refusal" signal —
+ * usable even when the repair raced ahead of the task-park write.
+ */
+async function googleConnectionRepairedSince(
+  workspaceId: string,
+  since: Date,
+): Promise<boolean> {
+  const [account] = await db
+    .select({ id: googleAccountsTable.workspaceId })
+    .from(googleAccountsTable)
+    .where(
+      and(
+        eq(googleAccountsTable.workspaceId, workspaceId),
+        gt(googleAccountsTable.updatedAt, since),
+      ),
+    )
+    .limit(1);
+  return Boolean(account);
+}
+
+/**
+ * Did ANY connected-app credential this park mechanism covers (GitHub or
+ * Google) change after the given moment? Actions parked for auth recovery
+ * can belong to either provider, so the post-park race recheck must not be
+ * scoped to just one of them.
+ */
+async function connectedAppRepairedSince(
+  workspaceId: string,
+  since: Date,
+): Promise<boolean> {
+  return (
+    (await githubConnectionRepairedSince(workspaceId, since)) ||
+    (await googleConnectionRepairedSince(workspaceId, since))
+  );
+}
+
+/**
  * Re-queue a running task to wait for its connected-app credential to be
  * repaired. Guarded on (id, running, attempts) so a lost lease or a
  * concurrent finalize wins — parking never overwrites a settled task.
@@ -110,7 +151,7 @@ export async function parkTaskForAppAuthRecovery(input: {
   if (!row) return false;
   if (
     input.workspaceId &&
-    (await githubConnectionRepairedSince(input.workspaceId, input.refusedAt))
+    (await connectedAppRepairedSince(input.workspaceId, input.refusedAt))
   ) {
     await resumeTasksParkedForAppAuth(input.workspaceId);
   }
