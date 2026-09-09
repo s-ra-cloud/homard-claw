@@ -395,6 +395,60 @@ export const schedulesTable = pgTable(
 );
 
 /**
+ * Durable schedules for a Crustabot to proactively ask a question in chat,
+ * separate from task schedules: firing never dispatches a task, only sends
+ * a message and leaves the conversation open for the owner's reply. Shares
+ * `schedulesTable`'s one-time/recurring cadence shape and the same
+ * claim/finalize firing discipline (see `.agents/memory/durable-scheduling.md`),
+ * as a sibling table so task-schedule behavior is untouched.
+ */
+export const chatQuestionSchedulesTable = pgTable(
+  "chat_question_schedules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id").references(() => workspacesTable.id, {
+      onDelete: "cascade",
+    }),
+    name: text("name").notNull(),
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => agentsTable.id, { onDelete: "cascade" }),
+    question: text("question").notNull(),
+    // once | daily | weekly | monthly
+    cadence: text("cadence").notNull(),
+    /** IANA timezone the wall-clock fields below are interpreted in. */
+    timezone: text("timezone").notNull().default("UTC"),
+    /** For `once`: the absolute UTC instant to fire. */
+    runAt: timestamp("run_at", { withTimezone: true }),
+    /** For recurring cadences: "HH:MM" wall time in `timezone`. */
+    timeOfDay: text("time_of_day"),
+    /** For `weekly`: days 0 (Sunday) – 6 (Saturday). */
+    daysOfWeek: jsonb("days_of_week").$type<number[]>(),
+    /** For `monthly`: 1–31, clamped to the month's last day. */
+    dayOfMonth: integer("day_of_month"),
+    enabled: boolean("enabled").notNull().default(true),
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }),
+    /**
+     * Two-phase firing marker: set when an occurrence is claimed, cleared
+     * when the send is finalized. A stale claim (crash between the two) is
+     * recovered by checking whether the chat message row exists.
+     */
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    lastMessageId: uuid("last_message_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("chat_question_schedules_due_idx").on(
+      table.enabled,
+      table.nextRunAt,
+    ),
+  ],
+);
+
+/**
  * In-app notification feed. Rows are written by the worker on task
  * lifecycle transitions (completed/failed/blocked/approval-needed);
  * schedule-launched tasks honor their schedule's notify preferences.
@@ -650,9 +704,15 @@ export const agentMessagesTable = pgTable(
     taskId: uuid("task_id").references(() => tasksTable.id, {
       onDelete: "cascade",
     }),
-    // delegation | result | note | voice
+    // delegation | result | note | voice | chat_question
     kind: text("kind").notNull().default("note"),
     body: text("body").notNull(),
+    // Set on a "chat_question" row: the schedule whose occurrence sent it,
+    // used as claim/finalize evidence by the chat-question scheduler.
+    chatQuestionScheduleId: uuid("chat_question_schedule_id").references(
+      () => chatQuestionSchedulesTable.id,
+      { onDelete: "set null" },
+    ),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -1054,6 +1114,8 @@ export const insertTeamSchema = createInsertSchema(teamsTable).omit({
 });
 
 export type ScheduleRecord = typeof schedulesTable.$inferSelect;
+export type ChatQuestionScheduleRecord =
+  typeof chatQuestionSchedulesTable.$inferSelect;
 export type NotificationRecord = typeof notificationsTable.$inferSelect;
 export type TeamRecord = typeof teamsTable.$inferSelect;
 export type TeamMemberRecord = typeof teamMembersTable.$inferSelect;

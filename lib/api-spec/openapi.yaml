@@ -1504,6 +1504,72 @@ paths:
       responses:
         "204":
           description: Deleted
+  /chat-question-schedules:
+    get:
+      operationId: listChatQuestionSchedules
+      tags: [office]
+      summary: List durable chat-question schedules
+      responses:
+        "200":
+          description: Chat question schedules
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChatQuestionSchedule"
+    post:
+      operationId: createChatQuestionSchedule
+      tags: [office]
+      summary: Create a one-time or recurring chat-question schedule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatQuestionScheduleInput"
+      responses:
+        "201":
+          description: Created chat question schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatQuestionSchedule"
+  /chat-question-schedules/{scheduleId}:
+    patch:
+      operationId: updateChatQuestionSchedule
+      tags: [office]
+      summary: Update or enable/disable a chat-question schedule
+      parameters:
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatQuestionScheduleUpdate"
+      responses:
+        "200":
+          description: Updated chat question schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatQuestionSchedule"
+    delete:
+      operationId: deleteChatQuestionSchedule
+      tags: [office]
+      summary: Delete a chat-question schedule (already-sent messages are kept)
+      parameters:
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: Deleted
   /notifications:
     get:
       operationId: listNotifications
@@ -4043,6 +4109,69 @@ components:
         lastRunAt: { type: [string, "null"], format: date-time }
         lastTaskId: { type: [string, "null"] }
         lastTaskStatus: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+    ChatQuestionScheduleInput:
+      type: object
+      required: [name, agentId, question, cadence, timezone]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80 }
+        agentId: { type: string }
+        question: { type: string, minLength: 3, maxLength: 2000 }
+        cadence: { type: string, enum: [once, daily, weekly, monthly] }
+        timezone: { type: string, minLength: 1, maxLength: 60 }
+        runAt: { type: string, format: date-time }
+        timeOfDay: { type: string, pattern: "^([01]?\\d|2[0-3]):[0-5]\\d$" }
+        daysOfWeek:
+          type: array
+          items: { type: number, minimum: 0, maximum: 6 }
+        dayOfMonth: { type: number, minimum: 1, maximum: 31 }
+    ChatQuestionScheduleUpdate:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80 }
+        question: { type: string, minLength: 3, maxLength: 2000 }
+        cadence: { type: string, enum: [once, daily, weekly, monthly] }
+        timezone: { type: string, minLength: 1, maxLength: 60 }
+        runAt: { type: string, format: date-time }
+        timeOfDay: { type: string, pattern: "^([01]?\\d|2[0-3]):[0-5]\\d$" }
+        daysOfWeek:
+          type: array
+          items: { type: number, minimum: 0, maximum: 6 }
+        dayOfMonth: { type: number, minimum: 1, maximum: 31 }
+        enabled: { type: boolean }
+    ChatQuestionSchedule:
+      type: object
+      required:
+        [
+          id,
+          name,
+          agentId,
+          agentName,
+          question,
+          cadence,
+          timezone,
+          enabled,
+          createdAt,
+        ]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        agentId: { type: string }
+        agentName: { type: string }
+        question: { type: string }
+        cadence: { type: string, enum: [once, daily, weekly, monthly] }
+        timezone: { type: string }
+        runAt: { type: [string, "null"], format: date-time }
+        timeOfDay: { type: [string, "null"] }
+        daysOfWeek:
+          type: [array, "null"]
+          items: { type: number }
+        dayOfMonth: { type: [number, "null"] }
+        enabled: { type: boolean }
+        nextRunAt: { type: [string, "null"], format: date-time }
+        lastRunAt: { type: [string, "null"], format: date-time }
+        lastMessageId: { type: [string, "null"] }
+        awaitingResponse: { type: boolean }
         createdAt: { type: string, format: date-time }
     Notification:
       type: object

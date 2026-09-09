@@ -3363,6 +3363,147 @@ export const DeleteScheduleResponse = zod.void()
 
 
 /**
+ * @summary List durable chat-question schedules
+ */
+export const ListChatQuestionSchedulesResponseItem = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "agentId": zod.string(),
+  "agentName": zod.string(),
+  "question": zod.string(),
+  "cadence": zod.enum(['once', 'daily', 'weekly', 'monthly']),
+  "timezone": zod.string(),
+  "runAt": zod.coerce.date().nullish(),
+  "timeOfDay": zod.string().nullish(),
+  "daysOfWeek": zod.array(zod.number()).nullish(),
+  "dayOfMonth": zod.number().nullish(),
+  "enabled": zod.boolean(),
+  "nextRunAt": zod.coerce.date().nullish(),
+  "lastRunAt": zod.coerce.date().nullish(),
+  "lastMessageId": zod.string().nullish(),
+  "awaitingResponse": zod.boolean().optional(),
+  "createdAt": zod.coerce.date()
+})
+export const ListChatQuestionSchedulesResponse = zod.array(ListChatQuestionSchedulesResponseItem)
+
+
+/**
+ * @summary Create a one-time or recurring chat-question schedule
+ */
+export const createChatQuestionScheduleBodyNameMax = 80;
+
+export const createChatQuestionScheduleBodyQuestionMin = 3;
+export const createChatQuestionScheduleBodyQuestionMax = 2000;
+
+export const createChatQuestionScheduleBodyTimezoneMax = 60;
+
+export const createChatQuestionScheduleBodyTimeOfDayRegExp = new RegExp('^([01]?\\d|2[0-3]):[0-5]\\d$');
+export const createChatQuestionScheduleBodyDaysOfWeekItemMin = 0;
+export const createChatQuestionScheduleBodyDaysOfWeekItemMax = 6;
+
+export const createChatQuestionScheduleBodyDayOfMonthMax = 31;
+
+
+
+export const CreateChatQuestionScheduleBody = zod.object({
+  "name": zod.string().min(1).max(createChatQuestionScheduleBodyNameMax),
+  "agentId": zod.string(),
+  "question": zod.string().min(createChatQuestionScheduleBodyQuestionMin).max(createChatQuestionScheduleBodyQuestionMax),
+  "cadence": zod.enum(['once', 'daily', 'weekly', 'monthly']),
+  "timezone": zod.string().min(1).max(createChatQuestionScheduleBodyTimezoneMax),
+  "runAt": zod.coerce.date().optional(),
+  "timeOfDay": zod.string().regex(createChatQuestionScheduleBodyTimeOfDayRegExp).optional(),
+  "daysOfWeek": zod.array(zod.number().min(createChatQuestionScheduleBodyDaysOfWeekItemMin).max(createChatQuestionScheduleBodyDaysOfWeekItemMax)).optional(),
+  "dayOfMonth": zod.number().min(1).max(createChatQuestionScheduleBodyDayOfMonthMax).optional()
+})
+
+export const CreateChatQuestionScheduleResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "agentId": zod.string(),
+  "agentName": zod.string(),
+  "question": zod.string(),
+  "cadence": zod.enum(['once', 'daily', 'weekly', 'monthly']),
+  "timezone": zod.string(),
+  "runAt": zod.coerce.date().nullish(),
+  "timeOfDay": zod.string().nullish(),
+  "daysOfWeek": zod.array(zod.number()).nullish(),
+  "dayOfMonth": zod.number().nullish(),
+  "enabled": zod.boolean(),
+  "nextRunAt": zod.coerce.date().nullish(),
+  "lastRunAt": zod.coerce.date().nullish(),
+  "lastMessageId": zod.string().nullish(),
+  "awaitingResponse": zod.boolean().optional(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Update or enable/disable a chat-question schedule
+ */
+export const UpdateChatQuestionScheduleParams = zod.object({
+  "scheduleId": zod.coerce.string()
+})
+
+export const updateChatQuestionScheduleBodyNameMax = 80;
+
+export const updateChatQuestionScheduleBodyQuestionMin = 3;
+export const updateChatQuestionScheduleBodyQuestionMax = 2000;
+
+export const updateChatQuestionScheduleBodyTimezoneMax = 60;
+
+export const updateChatQuestionScheduleBodyTimeOfDayRegExp = new RegExp('^([01]?\\d|2[0-3]):[0-5]\\d$');
+export const updateChatQuestionScheduleBodyDaysOfWeekItemMin = 0;
+export const updateChatQuestionScheduleBodyDaysOfWeekItemMax = 6;
+
+export const updateChatQuestionScheduleBodyDayOfMonthMax = 31;
+
+
+
+export const UpdateChatQuestionScheduleBody = zod.object({
+  "name": zod.string().min(1).max(updateChatQuestionScheduleBodyNameMax).optional(),
+  "question": zod.string().min(updateChatQuestionScheduleBodyQuestionMin).max(updateChatQuestionScheduleBodyQuestionMax).optional(),
+  "cadence": zod.enum(['once', 'daily', 'weekly', 'monthly']).optional(),
+  "timezone": zod.string().min(1).max(updateChatQuestionScheduleBodyTimezoneMax).optional(),
+  "runAt": zod.coerce.date().optional(),
+  "timeOfDay": zod.string().regex(updateChatQuestionScheduleBodyTimeOfDayRegExp).optional(),
+  "daysOfWeek": zod.array(zod.number().min(updateChatQuestionScheduleBodyDaysOfWeekItemMin).max(updateChatQuestionScheduleBodyDaysOfWeekItemMax)).optional(),
+  "dayOfMonth": zod.number().min(1).max(updateChatQuestionScheduleBodyDayOfMonthMax).optional(),
+  "enabled": zod.boolean().optional()
+})
+
+export const UpdateChatQuestionScheduleResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "agentId": zod.string(),
+  "agentName": zod.string(),
+  "question": zod.string(),
+  "cadence": zod.enum(['once', 'daily', 'weekly', 'monthly']),
+  "timezone": zod.string(),
+  "runAt": zod.coerce.date().nullish(),
+  "timeOfDay": zod.string().nullish(),
+  "daysOfWeek": zod.array(zod.number()).nullish(),
+  "dayOfMonth": zod.number().nullish(),
+  "enabled": zod.boolean(),
+  "nextRunAt": zod.coerce.date().nullish(),
+  "lastRunAt": zod.coerce.date().nullish(),
+  "lastMessageId": zod.string().nullish(),
+  "awaitingResponse": zod.boolean().optional(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Delete a chat-question schedule (already-sent messages are kept)
+ */
+export const DeleteChatQuestionScheduleParams = zod.object({
+  "scheduleId": zod.coerce.string()
+})
+
+export const DeleteChatQuestionScheduleResponse = zod.void()
+
+
+/**
  * @summary List in-app notifications with the unread count
  */
 export const listNotificationsQueryLimitMax = 200;

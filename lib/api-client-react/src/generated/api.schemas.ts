@@ -2720,6 +2720,129 @@ export interface Schedule {
   createdAt: string;
 }
 
+export type ChatQuestionScheduleInputCadence = typeof ChatQuestionScheduleInputCadence[keyof typeof ChatQuestionScheduleInputCadence];
+
+
+export const ChatQuestionScheduleInputCadence = {
+  once: 'once',
+  daily: 'daily',
+  weekly: 'weekly',
+  monthly: 'monthly',
+} as const;
+
+export interface ChatQuestionScheduleInput {
+  /**
+     * @minLength 1
+     * @maxLength 80
+     */
+  name: string;
+  agentId: string;
+  /**
+     * @minLength 3
+     * @maxLength 2000
+     */
+  question: string;
+  cadence: ChatQuestionScheduleInputCadence;
+  /**
+     * @minLength 1
+     * @maxLength 60
+     */
+  timezone: string;
+  runAt?: string;
+  /** @pattern ^([01]?\d|2[0-3]):[0-5]\d$ */
+  timeOfDay?: string;
+  /**
+     * @items.minimum 0
+     * @items.maximum 6
+     */
+  daysOfWeek?: number[];
+  /**
+     * @minimum 1
+     * @maximum 31
+     */
+  dayOfMonth?: number;
+}
+
+export type ChatQuestionScheduleUpdateCadence = typeof ChatQuestionScheduleUpdateCadence[keyof typeof ChatQuestionScheduleUpdateCadence];
+
+
+export const ChatQuestionScheduleUpdateCadence = {
+  once: 'once',
+  daily: 'daily',
+  weekly: 'weekly',
+  monthly: 'monthly',
+} as const;
+
+export interface ChatQuestionScheduleUpdate {
+  /**
+     * @minLength 1
+     * @maxLength 80
+     */
+  name?: string;
+  /**
+     * @minLength 3
+     * @maxLength 2000
+     */
+  question?: string;
+  cadence?: ChatQuestionScheduleUpdateCadence;
+  /**
+     * @minLength 1
+     * @maxLength 60
+     */
+  timezone?: string;
+  runAt?: string;
+  /** @pattern ^([01]?\d|2[0-3]):[0-5]\d$ */
+  timeOfDay?: string;
+  /**
+     * @items.minimum 0
+     * @items.maximum 6
+     */
+  daysOfWeek?: number[];
+  /**
+     * @minimum 1
+     * @maximum 31
+     */
+  dayOfMonth?: number;
+  enabled?: boolean;
+}
+
+export type ChatQuestionScheduleCadence = typeof ChatQuestionScheduleCadence[keyof typeof ChatQuestionScheduleCadence];
+
+
+export const ChatQuestionScheduleCadence = {
+  once: 'once',
+  daily: 'daily',
+  weekly: 'weekly',
+  monthly: 'monthly',
+} as const;
+
+export interface ChatQuestionSchedule {
+  id: string;
+  name: string;
+  agentId: string;
+  agentName: string;
+  question: string;
+  cadence: ChatQuestionScheduleCadence;
+  timezone: string;
+  /** @nullable */
+  runAt?: string | null;
+  /** @nullable */
+  timeOfDay?: string | null;
+  /** @nullable */
+  daysOfWeek?: number[] | null;
+  /** @nullable */
+  dayOfMonth?: number | null;
+  enabled: boolean;
+  /** @nullable */
+  nextRunAt?: string | null;
+  /** @nullable */
+  lastRunAt?: string | null;
+  /** @nullable */
+  lastMessageId?: string | null;
+  awaitingResponse?: boolean;
+  createdAt: string;
+}
+
 export interface Notification {
   id: string;
   kind: string;

@@ -13,6 +13,8 @@ import { PixelCard } from "@/components/ui/pixel-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ChatQuestionsPanel } from "@/components/schedules/chat-questions-panel";
 import { useToast } from "@/hooks/use-toast";
 import {
   CalendarClock,
@@ -77,6 +79,9 @@ function statusBadge(status: string | null | undefined) {
 export default function SchedulesPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const [activeTab, setActiveTab] = useState<"tasks" | "chat-questions">(
+    "tasks",
+  );
   const { data: schedules, isLoading } = useListSchedules({
     query: { queryKey: ["/api/schedules"], refetchInterval: 30_000 },
   });
@@ -250,34 +255,60 @@ export default function SchedulesPage() {
   return (
     <Shell>
       <div className="p-4 sm:p-6 lg:p-8 max-w-5xl mx-auto space-y-6 sm:space-y-8">
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b-4 border-border pb-6">
-          <div>
-            <h1 className="font-display text-lg sm:text-2xl text-foreground uppercase mb-2">
-              Duty Roster
-            </h1>
-            <p className="text-muted-foreground text-sm">
-              Put agents on a clock: one-time and recurring work, fired on
-              schedule even after a restart.
-            </p>
+        <div className="space-y-4 border-b-4 border-border pb-6">
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+            <div>
+              <h1 className="font-display text-lg sm:text-2xl text-foreground uppercase mb-2">
+                Duty Roster
+              </h1>
+              <p className="text-muted-foreground text-sm">
+                Put agents on a clock: recurring work and chat questions,
+                fired on schedule even after a restart.
+              </p>
+            </div>
+            {activeTab === "tasks" && (
+              <Button
+                onClick={() => {
+                  if (showForm && !editingId) {
+                    closeForm();
+                  } else {
+                    setEditingId(null);
+                    setForm(emptyForm());
+                    setShowForm(true);
+                  }
+                }}
+                className="pixel-shadow uppercase text-xs font-bold"
+                data-testid="button-new-schedule"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                {showForm && !editingId ? "Close" : "New Schedule"}
+              </Button>
+            )}
           </div>
-          <Button
-            onClick={() => {
-              if (showForm && !editingId) {
-                closeForm();
-              } else {
-                setEditingId(null);
-                setForm(emptyForm());
-                setShowForm(true);
-              }
-            }}
-            className="pixel-shadow uppercase text-xs font-bold"
-            data-testid="button-new-schedule"
+          <Tabs
+            value={activeTab}
+            onValueChange={(value) =>
+              setActiveTab(value as "tasks" | "chat-questions")
+            }
           >
-            <Plus className="w-4 h-4 mr-2" />
-            {showForm && !editingId ? "Close" : "New Schedule"}
-          </Button>
+            <TabsList>
+              <TabsTrigger value="tasks" data-testid="tab-task-schedules">
+                Task Schedules
+              </TabsTrigger>
+              <TabsTrigger
+                value="chat-questions"
+                data-testid="tab-chat-question-schedules"
+              >
+                Chat Questions
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
         </div>
 
+        {activeTab === "chat-questions" ? (
+          <ChatQuestionsPanel />
+        ) : (
+          <>
         {showForm && (
           <PixelCard className="p-4 sm:p-6 space-y-4">
             {editingId && (
@@ -678,6 +709,8 @@ export default function SchedulesPage() {
               </PixelCard>
             ))}
           </div>
+        )}
+          </>
         )}
       </div>
     </Shell>

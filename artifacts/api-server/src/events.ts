@@ -20,6 +20,7 @@ export type LiveTopic =
   | "notifications"
   | "agents"
   | "schedules"
+  | "chat-question-schedules"
   | "talk"
   | "messages"
   | "overview";
