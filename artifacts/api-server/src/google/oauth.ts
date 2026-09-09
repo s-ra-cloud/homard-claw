@@ -17,6 +17,7 @@ import { and, eq, isNull, lt } from "drizzle-orm";
 import { requireWorkspace } from "../workspace";
 import { recordAudit } from "../audit";
 import { publish } from "../events";
+import { resumeTasksParkedForAppAuth } from "../connected-apps/auth-parked-tasks";
 import {
   GoogleAuthError,
   REQUESTED_SCOPES,
@@ -287,6 +288,10 @@ router.get("/google/oauth/callback", async (req, res): Promise<void> => {
       : "connected_app.google_drive_connected",
     `${displayName} was connected for this workspace (${email || "address withheld"}).`,
   );
+  // A repaired credential releases any task parked waiting for it, so a
+  // preserved approved action (e.g. a pending google_drive.create_file)
+  // resumes now instead of after the delay.
+  await resumeTasksParkedForAppAuth(row.workspaceId);
   publish(row.workspaceId, "overview");
   res.redirect(connectedAppsUrl(service, "connected"));
 });

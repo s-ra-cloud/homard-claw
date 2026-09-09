@@ -3585,6 +3585,69 @@ describe("tasks parked for connected-app credential recovery", () => {
     }
   });
 
+  it("releases the park immediately when a Google reconnect raced ahead of the task-park", async () => {
+    // Same race as the GitHub case above, but for the Google (Gmail /
+    // Google Drive) credential row: a parked google_drive.create_file (or
+    // any Google-backed action) must resume from the Google account's
+    // updatedAt, not just GitHub's.
+    const task = await insertRunningTask(workspaceId);
+    try {
+      const refusedAt = new Date(Date.now() - 5_000);
+      // Reconnect already happened: credential row fresher than the refusal.
+      await db
+        .update(googleAccountsTable)
+        .set({ updatedAt: new Date() })
+        .where(eq(googleAccountsTable.workspaceId, workspaceId));
+      expect(
+        await parkTaskForAppAuthRecovery({
+          taskId: task.id,
+          attempts: task.attempts,
+          workspaceId,
+          message: "Google refused the stored credential just before the reconnect landed.",
+          refusedAt,
+        }),
+      ).toBe(true);
+      const row = await taskRow(task.id);
+      expect(row.status).toBe("queued");
+      // Immediately claimable — the Google reconnect was not missed.
+      expect(row.notBefore!.getTime()).toBeLessThanOrEqual(Date.now());
+    } finally {
+      await db.delete(tasksTable).where(eq(tasksTable.id, task.id));
+    }
+  });
+
+  it("a Google reconnect resumes tasks parked for a Google credential refusal", async () => {
+    const task = await insertRunningTask(workspaceId);
+    try {
+      expect(
+        await parkTaskForAppAuthRecovery({
+          taskId: task.id,
+          attempts: task.attempts,
+          workspaceId,
+          message: "Google Drive refused the stored credential.",
+          refusedAt: new Date(),
+        }),
+      ).toBe(true);
+      let row = await taskRow(task.id);
+      expect(row.status).toBe("queued");
+      // Not immediately claimable: the retry waits for the reconnect.
+      expect(row.notBefore!.getTime()).toBeGreaterThan(Date.now() + 60_000);
+
+      // Simulate the Google OAuth callback repairing the credential, then
+      // resuming — exactly what google/oauth.ts now does after saving the
+      // reconnected account.
+      await db
+        .update(googleAccountsTable)
+        .set({ updatedAt: new Date() })
+        .where(eq(googleAccountsTable.workspaceId, workspaceId));
+      expect(await resumeTasksParkedForAppAuth(workspaceId)).toBe(1);
+      row = await taskRow(task.id);
+      expect(row.notBefore!.getTime()).toBeLessThanOrEqual(Date.now());
+    } finally {
+      await db.delete(tasksTable).where(eq(tasksTable.id, task.id));
+    }
+  });
+
   it("parking is fenced on the exact running attempt — a settled or retried task is never overwritten", async () => {
     const task = await insertRunningTask(workspaceId);
     try {
