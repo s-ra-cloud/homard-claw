@@ -3,6 +3,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   ApiError,
+  useAssignAgentFirstDesk,
   useGetAgent,
   useUpdateAgent,
 } from "@workspace/api-client-react";
@@ -16,6 +17,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Form } from "@/components/ui/form";
 import { ArrowLeft } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useOfficeSeating } from "@/hooks/useOfficeSeating";
 import { apiErrorMessage } from "@/lib/api-error";
 import {
   AgentFormFields,
@@ -65,6 +67,39 @@ export default function EditAgentPage() {
   });
   const agent = detail?.agent;
   const agentMissing = error instanceof ApiError && error.status === 404;
+
+  const seating = useOfficeSeating();
+  const isFloorSeated =
+    agent !== undefined &&
+    seating.officeAgents.some((candidate) => candidate.id === agent.id) &&
+    !seating.roleAgentIds.has(agent.id) &&
+    !seating.deskAgents.some((candidate) => candidate.id === agent.id);
+
+  const assignFirstDesk = useAssignAgentFirstDesk({
+    mutation: {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: ["/api/agents"] });
+        queryClient.invalidateQueries({
+          queryKey: ["/api/office/desk-order"],
+        });
+        queryClient.invalidateQueries({ queryKey: ["/api/office/overview"] });
+        toast({
+          title: "Desk assigned",
+          description: `${agent?.name ?? "The Crustabot"} took the first desk.`,
+        });
+      },
+      onError: (mutationError) => {
+        toast({
+          variant: "destructive",
+          title: "Could not assign a desk",
+          description: apiErrorMessage(
+            mutationError,
+            "That Crustabot could not be seated at a desk right now.",
+          ),
+        });
+      },
+    },
+  });
   const loadErrorMessage = error
     ? apiErrorMessage(
         error,
@@ -237,6 +272,29 @@ export default function EditAgentPage() {
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
             <div className="lg:col-span-2 space-y-6">
+              {isFloorSeated && (
+                <PixelCard title="Office Seating">
+                  <div className="flex items-center justify-between gap-4">
+                    <p className="text-muted-foreground text-sm">
+                      {agent.name} is sitting on the floor. Seat it at the
+                      first desk; the current desk occupants shift right.
+                    </p>
+                    <Button
+                      type="button"
+                      variant="primary"
+                      disabled={assignFirstDesk.isPending}
+                      onClick={() =>
+                        assignFirstDesk.mutate({ agentId: agent.id })
+                      }
+                    >
+                      {assignFirstDesk.isPending
+                        ? "SEATING..."
+                        : "SEAT AT FIRST DESK"}
+                    </Button>
+                  </div>
+                </PixelCard>
+              )}
+
               <PixelCard title="Configuration">
                 <Form {...form}>
                   <form

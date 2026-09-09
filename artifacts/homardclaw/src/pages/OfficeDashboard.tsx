@@ -12,8 +12,10 @@ import {
   useGetInspectorSettings,
   useGetDocumentation,
   useGetMemorySettings,
+  useGetOfficeDeskOrder,
   ApprovalDecisionDecision,
 } from "@workspace/api-client-react";
+import { reorderByExplicitOrder } from "@/hooks/useOfficeSeating";
 import { Shell } from "@/components/layout/Shell";
 import {
   MarlowLobster,
@@ -320,6 +322,7 @@ export default function OfficeDashboard() {
     useGetMemorySettings();
   const { data: inspectorSettings, isLoading: inspectorSettingsLoading } =
     useGetInspectorSettings();
+  const { data: deskOrder } = useGetOfficeDeskOrder();
   // Polls so a stalled queue or a lost worker lease surfaces on its own.
   const { data: runtimeHealth } = useGetRuntimeHealth({
     query: { queryKey: ["/api/runtime/health"], refetchInterval: 10000 },
@@ -533,8 +536,9 @@ export default function OfficeDashboard() {
   const roleAgentIds = new Set(
     rolePlacements.map((placement) => placement.agentId),
   );
-  const unassignedOfficeAgents = officeAgents.filter(
-    (agent) => !roleAgentIds.has(agent.id),
+  const unassignedOfficeAgents = reorderByExplicitOrder(
+    officeAgents.filter((agent) => !roleAgentIds.has(agent.id)),
+    deskOrder?.agentIds ?? [],
   );
   const exteriorAgents = sandboxedAgents.slice(0, EXTERIOR_SEATS.length);
   const deskAgents = unassignedOfficeAgents.slice(0, DESK_SEATS.length);
