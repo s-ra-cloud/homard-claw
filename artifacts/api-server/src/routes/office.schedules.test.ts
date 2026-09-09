@@ -267,6 +267,76 @@ describe("schedule CRUD", () => {
   });
 });
 
+describe("run now", () => {
+  it("launches a task immediately without touching the saved cadence", async () => {
+    const agent = await createAgent(`${RUN_TAG} RunNow`);
+    const created = await request(app)
+      .post("/api/schedules")
+      .send(scheduleBody(agent.id, { name: `${RUN_TAG} run now roster` }));
+    expect(created.status).toBe(201);
+    const nextRunAtBefore = created.body.nextRunAt;
+
+    const ran = await request(app).post(
+      `/api/schedules/${created.body.id}/run`,
+    );
+    expect(ran.status).toBe(200);
+    expect(ran.body.lastTaskId).toBeTruthy();
+    expect(ran.body.lastRunAt).toBeTruthy();
+    // Cadence bookkeeping is untouched by a manual run.
+    expect(ran.body.nextRunAt).toBe(nextRunAtBefore);
+    expect(ran.body.enabled).toBe(true);
+
+    const tasks = await db
+      .select()
+      .from(tasksTable)
+      .where(eq(tasksTable.scheduleId, created.body.id));
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].objective).toContain(RUN_TAG);
+    expect(tasks[0].id).toBe(ran.body.lastTaskId);
+
+    // Calling it again launches a second task; the schedule keeps firing on
+    // its own cadence regardless of how many manual runs happen in between.
+    const ranAgain = await request(app).post(
+      `/api/schedules/${created.body.id}/run`,
+    );
+    expect(ranAgain.status).toBe(200);
+    const tasksAfter = await db
+      .select()
+      .from(tasksTable)
+      .where(eq(tasksTable.scheduleId, created.body.id));
+    expect(tasksAfter).toHaveLength(2);
+  });
+
+  it("404s for an unknown schedule", async () => {
+    const res = await request(app).post(
+      "/api/schedules/00000000-0000-0000-0000-000000000000/run",
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("409s when the schedule's agent is retired", async () => {
+    const agent = await createAgent(`${RUN_TAG} RunNowRetired`);
+    const created = await request(app)
+      .post("/api/schedules")
+      .send(scheduleBody(agent.id));
+    await db
+      .update(agentsTable)
+      .set({ retired: true, retiredAt: new Date() })
+      .where(eq(agentsTable.id, agent.id));
+
+    const ran = await request(app).post(
+      `/api/schedules/${created.body.id}/run`,
+    );
+    expect(ran.status).toBe(409);
+
+    const tasks = await db
+      .select()
+      .from(tasksTable)
+      .where(eq(tasksTable.scheduleId, created.body.id));
+    expect(tasks).toHaveLength(0);
+  });
+});
+
 describe("schedule firing", () => {
   it("fires a due one-time schedule exactly once and links the task", async () => {
     const agent = await createAgent(`${RUN_TAG} FireOnce`);

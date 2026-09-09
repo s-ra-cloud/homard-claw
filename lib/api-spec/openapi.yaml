@@ -1504,6 +1504,31 @@ paths:
       responses:
         "204":
           description: Deleted
+  /schedules/{scheduleId}/run:
+    post:
+      operationId: runScheduleNow
+      tags: [office]
+      summary: Run a schedule immediately, once, without changing its saved cadence
+      parameters:
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Schedule with the newly launched task recorded as its last run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+        "404":
+          description: Schedule or its agent not found
+        "409":
+          description: The schedule's agent is retired or archived
+        "422":
+          description: The schedule's provider/model override is not allowed
+        "503":
+          description: The agent's configuration is changing; retry
   /chat-question-schedules:
     get:
       operationId: listChatQuestionSchedules

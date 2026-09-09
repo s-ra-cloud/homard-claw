@@ -5,6 +5,7 @@ import {
   useCreateSchedule,
   useUpdateSchedule,
   useDeleteSchedule,
+  useRunScheduleNow,
   type Schedule,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -24,6 +25,7 @@ import {
   Clock,
   AlertTriangle,
   Pencil,
+  Play,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
@@ -187,6 +189,20 @@ export default function SchedulesPage() {
       onError: (error) =>
         toast({
           title: "Could not delete schedule",
+          description: error.message,
+          variant: "destructive",
+        }),
+    },
+  });
+  const runScheduleNow = useRunScheduleNow({
+    mutation: {
+      onSuccess: () => {
+        invalidate();
+        toast({ title: "Run started" });
+      },
+      onError: (error) =>
+        toast({
+          title: "Could not start run",
           description: error.message,
           variant: "destructive",
         }),
@@ -663,6 +679,25 @@ export default function SchedulesPage() {
                     >
                       <Pencil className="w-3 h-3 mr-1" />
                       Edit
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="uppercase text-[10px] font-bold"
+                      disabled={
+                        runScheduleNow.isPending &&
+                        runScheduleNow.variables?.scheduleId === schedule.id
+                      }
+                      onClick={() =>
+                        runScheduleNow.mutate({ scheduleId: schedule.id })
+                      }
+                      data-testid={`button-run-now-${schedule.id}`}
+                    >
+                      <Play className="w-3 h-3 mr-1" />
+                      {runScheduleNow.isPending &&
+                      runScheduleNow.variables?.scheduleId === schedule.id
+                        ? "Starting…"
+                        : "Run Now"}
                     </Button>
                     <Button
                       variant="outline"

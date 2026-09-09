@@ -3363,6 +3363,44 @@ export const DeleteScheduleResponse = zod.void()
 
 
 /**
+ * @summary Run a schedule immediately, once, without changing its saved cadence
+ */
+export const RunScheduleNowParams = zod.object({
+  "scheduleId": zod.coerce.string()
+})
+
+export const RunScheduleNowResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "agentId": zod.string(),
+  "agentName": zod.string(),
+  "objective": zod.string(),
+  "priority": zod.string(),
+  "providerOverride": zod.string().nullish(),
+  "modelOverride": zod.string().nullish(),
+  "budgetCents": zod.number().nullish(),
+  "cadence": zod.enum(['once', 'daily', 'weekly', 'monthly']),
+  "timezone": zod.string(),
+  "runAt": zod.coerce.date().nullish(),
+  "timeOfDay": zod.string().nullish(),
+  "daysOfWeek": zod.array(zod.number()).nullish(),
+  "dayOfMonth": zod.number().nullish(),
+  "notify": zod.object({
+  "onCompleted": zod.boolean(),
+  "onFailed": zod.boolean(),
+  "onBlocked": zod.boolean(),
+  "onApprovalNeeded": zod.boolean()
+}),
+  "enabled": zod.boolean(),
+  "nextRunAt": zod.coerce.date().nullish(),
+  "lastRunAt": zod.coerce.date().nullish(),
+  "lastTaskId": zod.string().nullish(),
+  "lastTaskStatus": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
  * @summary List durable chat-question schedules
  */
 export const ListChatQuestionSchedulesResponseItem = zod.object({

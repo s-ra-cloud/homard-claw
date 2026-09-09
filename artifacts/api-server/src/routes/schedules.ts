@@ -3,6 +3,8 @@ import {
   CreateScheduleResponse,
   DeleteScheduleParams,
   ListSchedulesResponse,
+  RunScheduleNowParams,
+  RunScheduleNowResponse,
   UpdateScheduleBody,
   UpdateScheduleParams,
   UpdateScheduleResponse,
@@ -17,7 +19,9 @@ import {
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { Router, type IRouter } from "express";
 import { recordAudit } from "../audit";
+import { dispatchTask } from "../dispatch";
 import { publish } from "../events";
+import type { ProviderId } from "../providers";
 import { computeNextRunAt, validateRecurrence, type RecurrenceSpec } from "../recurrence";
 
 const router: IRouter = Router();
@@ -307,6 +311,79 @@ router.patch("/schedules/:scheduleId", async (req, res): Promise<void> => {
   res.json(
     UpdateScheduleResponse.parse(
       toScheduleJson(schedule, agent?.name ?? "Unknown", lastTaskStatus),
+    ),
+  );
+});
+
+router.post("/schedules/:scheduleId/run", async (req, res): Promise<void> => {
+  const params = RunScheduleNowParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: "Invalid schedule id" });
+    return;
+  }
+  const [row] = await db
+    .select({ schedule: schedulesTable, agentName: agentsTable.name })
+    .from(schedulesTable)
+    .innerJoin(agentsTable, eq(schedulesTable.agentId, agentsTable.id))
+    .where(
+      and(
+        eq(schedulesTable.id, params.data.scheduleId),
+        eq(schedulesTable.workspaceId, req.workspaceId!),
+      ),
+    )
+    .limit(1);
+  if (!row) {
+    res.status(404).json({ error: "Schedule not found" });
+    return;
+  }
+  const { schedule, agentName } = row;
+  const outcome = await dispatchTask({
+    agentId: schedule.agentId,
+    workspaceId: req.workspaceId!,
+    objective: schedule.objective,
+    priority: schedule.priority,
+    budgetCents: schedule.budgetCents,
+    providerOverride: (schedule.providerOverride as ProviderId | null) ?? undefined,
+    modelOverride: schedule.modelOverride ?? undefined,
+    scheduleId: schedule.id,
+  });
+  if (outcome.status === 404) {
+    res.status(404).json({ error: "Agent not found" });
+    return;
+  }
+  if (outcome.status === 409) {
+    res
+      .status(409)
+      .json({ error: "This agent is retired or archived and cannot run now" });
+    return;
+  }
+  if (outcome.status === 422) {
+    res.status(422).json({ error: outcome.message });
+    return;
+  }
+  if (outcome.status === 425) {
+    res.status(503).json({
+      error: "Agent configuration is changing; please retry",
+    });
+    return;
+  }
+  // A manual run only records the launch on the schedule (for the UI's
+  // "last run" display); it never touches nextRunAt or enabled, which are
+  // the cadence's own bookkeeping and stay exactly as saved.
+  const [updated] = await db
+    .update(schedulesTable)
+    .set({ lastRunAt: new Date(), lastTaskId: outcome.task.id })
+    .where(eq(schedulesTable.id, schedule.id))
+    .returning();
+  await recordAudit(
+    req.workspaceId!,
+    "schedule.run_now",
+    `Schedule "${schedule.name}" was run immediately for ${agentName}.`,
+  );
+  publish(req.workspaceId!, "schedules", "tasks", "overview");
+  res.json(
+    RunScheduleNowResponse.parse(
+      toScheduleJson(updated, agentName, outcome.task.status),
     ),
   );
 });
