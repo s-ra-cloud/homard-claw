@@ -171,6 +171,7 @@ import {
 import { findRegistryEntry } from "../capabilities/registry";
 import connectedAppsRouter from "./connected-apps";
 import capabilitiesRouter from "./capabilities";
+import chatQuestionSchedulesRouter from "./chat-question-schedules";
 import documentationRouter from "./documentation";
 import eventsRouter from "./events";
 import memoryRouter from "./memory";
@@ -198,6 +199,7 @@ router.use(teamsRouter);
 router.use(telegramRouter);
 router.use(voiceRouter);
 router.use(schedulesRouter);
+router.use(chatQuestionSchedulesRouter);
 router.use(notificationsRouter);
 router.use(reportsRouter);
 router.use(eventsRouter);

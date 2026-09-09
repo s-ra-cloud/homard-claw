@@ -7,7 +7,7 @@ import {
   telegramLinkCodesTable,
   telegramLinksTable,
 } from "@workspace/db";
-import { and, desc, eq, gt, isNull, lt, ne, or } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, lt, ne, or } from "drizzle-orm";
 import { recordAudit } from "../audit";
 import type { ConverseTurn } from "../routes/voice";
 import {
@@ -246,7 +246,7 @@ export async function telegramTalkHistory(
     .from(agentMessagesTable)
     .where(
       and(
-        eq(agentMessagesTable.kind, "voice"),
+        inArray(agentMessagesTable.kind, ["voice", "chat_question"]),
         or(
           eq(agentMessagesTable.fromAgentId, agentId),
           eq(agentMessagesTable.toAgentId, agentId),

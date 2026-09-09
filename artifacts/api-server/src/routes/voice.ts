@@ -24,7 +24,7 @@ import {
   teamsTable,
   workspaceSettingsTable,
 } from "@workspace/db";
-import { and, desc, eq, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { recordAudit } from "../audit";
 import { logger } from "../lib/logger";
@@ -1481,7 +1481,7 @@ router.get(
       .from(agentMessagesTable)
       .where(
         and(
-          eq(agentMessagesTable.kind, "voice"),
+          inArray(agentMessagesTable.kind, ["voice", "chat_question"]),
           or(
             eq(agentMessagesTable.fromAgentId, agentId),
             eq(agentMessagesTable.toAgentId, agentId),
@@ -1566,7 +1566,7 @@ router.delete(
         .delete(agentMessagesTable)
         .where(
           and(
-            eq(agentMessagesTable.kind, "voice"),
+            inArray(agentMessagesTable.kind, ["voice", "chat_question"]),
             or(
               eq(agentMessagesTable.fromAgentId, agentId),
               eq(agentMessagesTable.toAgentId, agentId),

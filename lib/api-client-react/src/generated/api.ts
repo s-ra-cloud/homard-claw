@@ -39,6 +39,9 @@ import type {
   CapabilityUninstallResult,
   CapabilityUpdate,
   CapabilityUpdateResult,
+  ChatQuestionSchedule,
+  ChatQuestionScheduleInput,
+  ChatQuestionScheduleUpdate,
   ClearMemoriesParams,
   ClearMemoriesResult,
   ClearTalkHistoryResult,
@@ -6418,6 +6421,297 @@ export const useDeleteSchedule = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getDeleteScheduleMutationOptions(options));
+    }
+
+export const getListChatQuestionSchedulesUrl = () => {
+
+
+
+
+  return `/api/chat-question-schedules`
+}
+
+/**
+ * @summary List durable chat-question schedules
+ */
+export const listChatQuestionSchedules = async ( options?: Parameters<typeof customFetch>[1]): Promise<ChatQuestionSchedule[]> => {
+
+  return customFetch<ChatQuestionSchedule[]>(getListChatQuestionSchedulesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListChatQuestionSchedulesQueryKey = () => {
+    return [
+    `/api/chat-question-schedules`
+    ] as const;
+    }
+
+
+export const getListChatQuestionSchedulesQueryOptions = <TData = Awaited<ReturnType<typeof listChatQuestionSchedules>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listChatQuestionSchedules>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListChatQuestionSchedulesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listChatQuestionSchedules>>> = ({ signal }) => listChatQuestionSchedules({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listChatQuestionSchedules>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListChatQuestionSchedulesQueryResult = NonNullable<Awaited<ReturnType<typeof listChatQuestionSchedules>>>
+export type ListChatQuestionSchedulesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List durable chat-question schedules
+ */
+
+export function useListChatQuestionSchedules<TData = Awaited<ReturnType<typeof listChatQuestionSchedules>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listChatQuestionSchedules>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListChatQuestionSchedulesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateChatQuestionScheduleUrl = () => {
+
+
+
+
+  return `/api/chat-question-schedules`
+}
+
+/**
+ * @summary Create a one-time or recurring chat-question schedule
+ */
+export const createChatQuestionSchedule = async (chatQuestionScheduleInput: ChatQuestionScheduleInput, options?: Parameters<typeof customFetch>[1]): Promise<ChatQuestionSchedule> => {
+
+  return customFetch<ChatQuestionSchedule>(getCreateChatQuestionScheduleUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(chatQuestionScheduleInput)
+  }
+);}
+
+
+
+
+
+export const getCreateChatQuestionScheduleMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createChatQuestionSchedule>>, TError,{data: BodyType<ChatQuestionScheduleInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createChatQuestionSchedule>>, TError,{data: BodyType<ChatQuestionScheduleInput>}, TContext> => {
+
+const mutationKey = ['createChatQuestionSchedule'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createChatQuestionSchedule>>, {data: BodyType<ChatQuestionScheduleInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createChatQuestionSchedule(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateChatQuestionScheduleMutationResult = NonNullable<Awaited<ReturnType<typeof createChatQuestionSchedule>>>
+    export type CreateChatQuestionScheduleMutationBody = BodyType<ChatQuestionScheduleInput>
+    export type CreateChatQuestionScheduleMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Create a one-time or recurring chat-question schedule
+ */
+export const useCreateChatQuestionSchedule = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createChatQuestionSchedule>>, TError,{data: BodyType<ChatQuestionScheduleInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createChatQuestionSchedule>>,
+        TError,
+        {data: BodyType<ChatQuestionScheduleInput>},
+        TContext
+      > => {
+      return useMutation(getCreateChatQuestionScheduleMutationOptions(options));
+    }
+
+export const getUpdateChatQuestionScheduleUrl = (scheduleId: string,) => {
+
+
+
+
+  return `/api/chat-question-schedules/${scheduleId}`
+}
+
+/**
+ * @summary Update or enable/disable a chat-question schedule
+ */
+export const updateChatQuestionSchedule = async (scheduleId: string,
+    chatQuestionScheduleUpdate: ChatQuestionScheduleUpdate, options?: Parameters<typeof customFetch>[1]): Promise<ChatQuestionSchedule> => {
+
+  return customFetch<ChatQuestionSchedule>(getUpdateChatQuestionScheduleUrl(scheduleId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(chatQuestionScheduleUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdateChatQuestionScheduleMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateChatQuestionSchedule>>, TError,{scheduleId: string;data: BodyType<ChatQuestionScheduleUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateChatQuestionSchedule>>, TError,{scheduleId: string;data: BodyType<ChatQuestionScheduleUpdate>}, TContext> => {
+
+const mutationKey = ['updateChatQuestionSchedule'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateChatQuestionSchedule>>, {scheduleId: string;data: BodyType<ChatQuestionScheduleUpdate>}> = (props) => {
+          const {scheduleId,data} = props ?? {};
+
+          return  updateChatQuestionSchedule(scheduleId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateChatQuestionScheduleMutationResult = NonNullable<Awaited<ReturnType<typeof updateChatQuestionSchedule>>>
+    export type UpdateChatQuestionScheduleMutationBody = BodyType<ChatQuestionScheduleUpdate>
+    export type UpdateChatQuestionScheduleMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Update or enable/disable a chat-question schedule
+ */
+export const useUpdateChatQuestionSchedule = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateChatQuestionSchedule>>, TError,{scheduleId: string;data: BodyType<ChatQuestionScheduleUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateChatQuestionSchedule>>,
+        TError,
+        {scheduleId: string;data: BodyType<ChatQuestionScheduleUpdate>},
+        TContext
+      > => {
+      return useMutation(getUpdateChatQuestionScheduleMutationOptions(options));
+    }
+
+export const getDeleteChatQuestionScheduleUrl = (scheduleId: string,) => {
+
+
+
+
+  return `/api/chat-question-schedules/${scheduleId}`
+}
+
+/**
+ * @summary Delete a chat-question schedule (already-sent messages are kept)
+ */
+export const deleteChatQuestionSchedule = async (scheduleId: string, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+  return customFetch<void>(getDeleteChatQuestionScheduleUrl(scheduleId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteChatQuestionScheduleMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteChatQuestionSchedule>>, TError,{scheduleId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteChatQuestionSchedule>>, TError,{scheduleId: string}, TContext> => {
+
+const mutationKey = ['deleteChatQuestionSchedule'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteChatQuestionSchedule>>, {scheduleId: string}> = (props) => {
+          const {scheduleId} = props ?? {};
+
+          return  deleteChatQuestionSchedule(scheduleId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteChatQuestionScheduleMutationResult = NonNullable<Awaited<ReturnType<typeof deleteChatQuestionSchedule>>>
+
+    export type DeleteChatQuestionScheduleMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Delete a chat-question schedule (already-sent messages are kept)
+ */
+export const useDeleteChatQuestionSchedule = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteChatQuestionSchedule>>, TError,{scheduleId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteChatQuestionSchedule>>,
+        TError,
+        {scheduleId: string},
+        TContext
+      > => {
+      return useMutation(getDeleteChatQuestionScheduleMutationOptions(options));
     }
 
 export const getListNotificationsUrl = (params?: ListNotificationsParams,) => {
