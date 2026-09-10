@@ -57,6 +57,8 @@ export * from './bugReport';
 export * from './bugReportContext';
 export * from './bugReportCreateInput';
 export * from './bugReportList';
+export * from './bugReportTalkMessage';
+export * from './bugReportTalkMessageRole';
 export * from './capabilityInstallResult';
 export * from './capabilityList';
 export * from './capabilityPackage';

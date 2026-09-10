@@ -3667,7 +3667,12 @@ export const ListBugReportsResponse = zod.object({
   "model": zod.string().nullish(),
   "errorKind": zod.string().nullish(),
   "errorMessage": zod.string().nullish(),
-  "agentName": zod.string().nullish()
+  "agentName": zod.string().nullish(),
+  "talkMessages": zod.array(zod.object({
+  "role": zod.enum(['user', 'agent']),
+  "text": zod.string(),
+  "createdAt": zod.coerce.date().nullish()
+})).optional().describe('Recent Talk turns, oldest first, attached when the report was filed from the Talk window.')
 }),
   "createdAt": zod.coerce.date()
 }))
@@ -3675,16 +3680,22 @@ export const ListBugReportsResponse = zod.object({
 
 
 /**
- * @summary File a bug report from a task's detail view (office owner only)
+ * @summary File a bug report from a task's detail view, or from the Talk window (office owner only)
  */
 export const createBugReportBodyDescriptionMax = 4000;
 
 
 
 export const CreateBugReportBody = zod.object({
-  "taskId": zod.string(),
-  "description": zod.string().max(createBugReportBodyDescriptionMax).optional()
-})
+  "taskId": zod.string().optional(),
+  "agentId": zod.string().optional(),
+  "description": zod.string().max(createBugReportBodyDescriptionMax).optional(),
+  "talkMessages": zod.array(zod.object({
+  "role": zod.enum(['user', 'agent']),
+  "text": zod.string(),
+  "createdAt": zod.coerce.date().nullish()
+})).optional().describe('Recent Talk turns, oldest first. Only meaningful alongside agentId; ignored for task reports.')
+}).describe('Either taskId (a task\'s detail view) or agentId (the Talk window) must be provided.')
 
 export const CreateBugReportResponse = zod.object({
   "id": zod.string(),
@@ -3698,7 +3709,12 @@ export const CreateBugReportResponse = zod.object({
   "model": zod.string().nullish(),
   "errorKind": zod.string().nullish(),
   "errorMessage": zod.string().nullish(),
-  "agentName": zod.string().nullish()
+  "agentName": zod.string().nullish(),
+  "talkMessages": zod.array(zod.object({
+  "role": zod.enum(['user', 'agent']),
+  "text": zod.string(),
+  "createdAt": zod.coerce.date().nullish()
+})).optional().describe('Recent Talk turns, oldest first, attached when the report was filed from the Talk window.')
 }),
   "createdAt": zod.coerce.date()
 })

@@ -2899,6 +2899,21 @@ export interface Me {
   isOwner: boolean;
 }
 
+export type BugReportTalkMessageRole = typeof BugReportTalkMessageRole[keyof typeof BugReportTalkMessageRole];
+
+
+export const BugReportTalkMessageRole = {
+  user: 'user',
+  agent: 'agent',
+} as const;
+
+export interface BugReportTalkMessage {
+  role: BugReportTalkMessageRole;
+  text: string;
+  /** @nullable */
+  createdAt?: string | null;
+}
+
 export interface BugReportContext {
   /** @nullable */
   taskObjective?: string | null;
@@ -2914,6 +2929,8 @@ export interface BugReportContext {
   errorMessage?: string | null;
   /** @nullable */
   agentName?: string | null;
+  /** Recent Talk turns, oldest first, attached when the report was filed from the Talk window. */
+  talkMessages?: BugReportTalkMessage[];
 }
 
 export interface BugReport {
@@ -2931,10 +2948,16 @@ export interface BugReportList {
   reports: BugReport[];
 }
 
+/**
+ * Either taskId (a task's detail view) or agentId (the Talk window) must be provided.
+ */
 export interface BugReportCreateInput {
-  taskId: string;
+  taskId?: string;
+  agentId?: string;
   /** @maxLength 4000 */
   description?: string;
+  /** Recent Talk turns, oldest first. Only meaningful alongside agentId; ignored for task reports. */
+  talkMessages?: BugReportTalkMessage[];
 }
 
 export type UsageReportTotals = {

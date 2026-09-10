@@ -1734,7 +1734,9 @@ paths:
     post:
       operationId: createBugReport
       tags: [office]
-      summary: File a bug report from a task's detail view (office owner only)
+      summary: >-
+        File a bug report from a task's detail view, or from the Talk window
+        (office owner only)
       requestBody:
         required: true
         content:
@@ -1748,10 +1750,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/BugReport"
+        "400":
+          description: Either taskId or agentId is required
         "403":
           description: Only the office owner can file bug reports
         "404":
-          description: Task not found
+          description: Task or agent not found
   /reports/usage:
     get:
       operationId: getUsageReport
@@ -4396,6 +4400,20 @@ components:
         errorKind: { type: [string, "null"] }
         errorMessage: { type: [string, "null"] }
         agentName: { type: [string, "null"] }
+        talkMessages:
+          type: array
+          description: >-
+            Recent Talk turns, oldest first, attached when the report was
+            filed from the Talk window.
+          items:
+            $ref: "#/components/schemas/BugReportTalkMessage"
+    BugReportTalkMessage:
+      type: object
+      required: [role, text]
+      properties:
+        role: { type: string, enum: [user, agent] }
+        text: { type: string }
+        createdAt: { type: [string, "null"], format: date-time }
     BugReport:
       type: object
       required: [id, description, taskId, agentId, context, createdAt]
@@ -4417,10 +4435,20 @@ components:
             $ref: "#/components/schemas/BugReport"
     BugReportCreateInput:
       type: object
-      required: [taskId]
+      description: >-
+        Either taskId (a task's detail view) or agentId (the Talk window)
+        must be provided.
       properties:
         taskId: { type: string }
+        agentId: { type: string }
         description: { type: string, maxLength: 4000 }
+        talkMessages:
+          type: array
+          description: >-
+            Recent Talk turns, oldest first. Only meaningful alongside
+            agentId; ignored for task reports.
+          items:
+            $ref: "#/components/schemas/BugReportTalkMessage"
     UsageReport:
       type: object
       required: [totals, outcomes, agents, providers, blockers]
