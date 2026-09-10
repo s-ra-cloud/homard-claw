@@ -1146,6 +1146,34 @@ export const RetireAgentResponse = zod.object({
 
 
 /**
+ * @summary Seat a floor-sitting Crustabot at the first desk, shifting the current desk occupants one seat to the right
+ */
+export const AssignAgentFirstDeskParams = zod.object({
+  "agentId": zod.coerce.string()
+})
+
+export const assignAgentFirstDeskResponseAgentIdsMax = 4;
+
+
+
+export const AssignAgentFirstDeskResponse = zod.object({
+  "agentIds": zod.array(zod.string()).max(assignAgentFirstDeskResponseAgentIdsMax).describe('Desk-seat occupants, left to right. Agents not listed here fill the remaining desk and floor seats in their usual alphabetical order, exactly as before this explicit order existed.')
+})
+
+
+/**
+ * @summary Read the explicit desk-seat occupant order
+ */
+export const getOfficeDeskOrderResponseAgentIdsMax = 4;
+
+
+
+export const GetOfficeDeskOrderResponse = zod.object({
+  "agentIds": zod.array(zod.string()).max(getOfficeDeskOrderResponseAgentIdsMax).describe('Desk-seat occupants, left to right. Agents not listed here fill the remaining desk and floor seats in their usual alphabetical order, exactly as before this explicit order existed.')
+})
+
+
+/**
  * @summary Review and refresh one Crustabot's durable memories now
  */
 export const RefreshAgentMemoryParams = zod.object({

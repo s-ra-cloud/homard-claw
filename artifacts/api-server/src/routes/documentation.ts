@@ -21,7 +21,7 @@ import {
 import { getWorkspaceSetting, setWorkspaceSetting } from "../workspace";
 
 const router: IRouter = Router();
-const DOCUMENTATION_AGENT_KEY = "documentation_agent_id";
+export const DOCUMENTATION_AGENT_KEY = "documentation_agent_id";
 
 type Guide = { id: string; name: string };
 

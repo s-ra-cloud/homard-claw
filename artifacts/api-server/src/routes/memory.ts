@@ -48,7 +48,7 @@ import {
  * every route here is already owner-only.
  */
 const router: IRouter = Router();
-const MEMORY_COMPRESSION_AGENT_KEY = "memory_compression_agent_id";
+export const MEMORY_COMPRESSION_AGENT_KEY = "memory_compression_agent_id";
 
 async function configuredMemoryCompressionAgent(workspaceId: string) {
   const [setting] = await db

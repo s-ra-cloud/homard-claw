@@ -2058,6 +2058,14 @@ export interface InspectorSettingsInput {
   inspectionRetryLimit?: number;
 }
 
+export interface OfficeDeskOrder {
+  /**
+     * Desk-seat occupants, left to right. Agents not listed here fill the remaining desk and floor seats in their usual alphabetical order, exactly as before this explicit order existed.
+     * @maxItems 4
+     */
+  agentIds: string[];
+}
+
 export type ProviderStatusProvider = typeof ProviderStatusProvider[keyof typeof ProviderStatusProvider];
 
 

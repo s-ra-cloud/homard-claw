@@ -225,6 +225,40 @@ paths:
           description: Agent not found
         "409":
           description: Agent already retired
+  /agents/{agentId}/assign-first-desk:
+    post:
+      operationId: assignAgentFirstDesk
+      tags: [office]
+      summary: >-
+        Seat a floor-sitting Crustabot at the first desk, shifting the
+        current desk occupants one seat to the right
+      parameters:
+        - $ref: "#/components/parameters/AgentId"
+      responses:
+        "200":
+          description: Updated desk order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfficeDeskOrder"
+        "404":
+          description: Agent not found
+        "409":
+          description: >-
+            Agent is archived, retired, on leave, sandboxed, on duty at its
+            own station, or already seated at a desk
+  /office/desk-order:
+    get:
+      operationId: getOfficeDeskOrder
+      tags: [office]
+      summary: Read the explicit desk-seat occupant order
+      responses:
+        "200":
+          description: Desk order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfficeDeskOrder"
   /agents/{agentId}/memory/refresh:
     post:
       operationId: refreshAgentMemory
@@ -3670,6 +3704,18 @@ components:
       properties:
         inspectorAgentId: { type: [string, "null"] }
         inspectionRetryLimit: { type: number, minimum: 1, maximum: 3 }
+    OfficeDeskOrder:
+      type: object
+      required: [agentIds]
+      properties:
+        agentIds:
+          type: array
+          items: { type: string }
+          maxItems: 4
+          description: >-
+            Desk-seat occupants, left to right. Agents not listed here fill
+            the remaining desk and floor seats in their usual alphabetical
+            order, exactly as before this explicit order existed.
     ProviderStatus:
       type: object
       required:

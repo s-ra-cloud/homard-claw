@@ -95,6 +95,7 @@ import type {
   MemorySettingsInput,
   MemoryUpdate,
   NotificationList,
+  OfficeDeskOrder,
   OfficeOverview,
   ParsedCustomApiSpec,
   PauseInput,
@@ -1046,6 +1047,154 @@ export const useRetireAgent = <TError = ErrorType<void>,
       > => {
       return useMutation(getRetireAgentMutationOptions(options));
     }
+
+export const getAssignAgentFirstDeskUrl = (agentId: string,) => {
+
+
+
+
+  return `/api/agents/${agentId}/assign-first-desk`
+}
+
+/**
+ * @summary Seat a floor-sitting Crustabot at the first desk, shifting the current desk occupants one seat to the right
+ */
+export const assignAgentFirstDesk = async (agentId: string, options?: Parameters<typeof customFetch>[1]): Promise<OfficeDeskOrder> => {
+
+  return customFetch<OfficeDeskOrder>(getAssignAgentFirstDeskUrl(agentId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getAssignAgentFirstDeskMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof assignAgentFirstDesk>>, TError,{agentId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof assignAgentFirstDesk>>, TError,{agentId: string}, TContext> => {
+
+const mutationKey = ['assignAgentFirstDesk'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof assignAgentFirstDesk>>, {agentId: string}> = (props) => {
+          const {agentId} = props ?? {};
+
+          return  assignAgentFirstDesk(agentId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AssignAgentFirstDeskMutationResult = NonNullable<Awaited<ReturnType<typeof assignAgentFirstDesk>>>
+
+    export type AssignAgentFirstDeskMutationError = ErrorType<void>
+
+    /**
+ * @summary Seat a floor-sitting Crustabot at the first desk, shifting the current desk occupants one seat to the right
+ */
+export const useAssignAgentFirstDesk = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof assignAgentFirstDesk>>, TError,{agentId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof assignAgentFirstDesk>>,
+        TError,
+        {agentId: string},
+        TContext
+      > => {
+      return useMutation(getAssignAgentFirstDeskMutationOptions(options));
+    }
+
+export const getGetOfficeDeskOrderUrl = () => {
+
+
+
+
+  return `/api/office/desk-order`
+}
+
+/**
+ * @summary Read the explicit desk-seat occupant order
+ */
+export const getOfficeDeskOrder = async ( options?: Parameters<typeof customFetch>[1]): Promise<OfficeDeskOrder> => {
+
+  return customFetch<OfficeDeskOrder>(getGetOfficeDeskOrderUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOfficeDeskOrderQueryKey = () => {
+    return [
+    `/api/office/desk-order`
+    ] as const;
+    }
+
+
+export const getGetOfficeDeskOrderQueryOptions = <TData = Awaited<ReturnType<typeof getOfficeDeskOrder>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOfficeDeskOrder>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOfficeDeskOrderQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOfficeDeskOrder>>> = ({ signal }) => getOfficeDeskOrder({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOfficeDeskOrder>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetOfficeDeskOrderQueryResult = NonNullable<Awaited<ReturnType<typeof getOfficeDeskOrder>>>
+export type GetOfficeDeskOrderQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Read the explicit desk-seat occupant order
+ */
+
+export function useGetOfficeDeskOrder<TData = Awaited<ReturnType<typeof getOfficeDeskOrder>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOfficeDeskOrder>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetOfficeDeskOrderQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getRefreshAgentMemoryUrl = (agentId: string,) => {
 

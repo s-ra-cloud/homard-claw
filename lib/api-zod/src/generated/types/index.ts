@@ -159,6 +159,7 @@ export * from './memoryUpdateKind';
 export * from './notification';
 export * from './notificationList';
 export * from './notifyPrefs';
+export * from './officeDeskOrder';
 export * from './officeOverview';
 export * from './parsedCustomApiSpec';
 export * from './pauseInput';

@@ -1,5 +1,7 @@
 import { getAuth } from "@clerk/express";
 import {
+  AssignAgentFirstDeskParams,
+  AssignAgentFirstDeskResponse,
   CancelTaskParams,
   CancelTaskResponse,
   CreateAgentBody,
@@ -14,6 +16,7 @@ import {
   DecideApprovalParams,
   DecideApprovalResponse,
   GetApprovalSettingsResponse,
+  GetOfficeDeskOrderResponse,
   GetInspectorSettingsResponse,
   UpdateInspectorSettingsBody,
   DecideTaskFallbackBody,
@@ -168,6 +171,10 @@ import {
   getInspectorSettings,
   updateInspectorSettings,
 } from "../task-inspector";
+import {
+  assignAgentToFirstDesk,
+  getOfficeDeskOrder,
+} from "../office-desk-order";
 import { findRegistryEntry } from "../capabilities/registry";
 import connectedAppsRouter from "./connected-apps";
 import capabilitiesRouter from "./capabilities";
@@ -1202,6 +1209,37 @@ router.post("/agents/:agentId/retire", async (req, res): Promise<void> => {
     return;
   }
   res.json(RetireAgentResponse.parse(toRetiredAgent(outcome.agent)));
+});
+
+router.post(
+  "/agents/:agentId/assign-first-desk",
+  async (req, res): Promise<void> => {
+    const params = AssignAgentFirstDeskParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: "Invalid agent id" });
+      return;
+    }
+    const outcome = await assignAgentToFirstDesk(
+      req.workspaceId!,
+      params.data.agentId,
+    );
+    if (outcome.status === 404) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+    if (outcome.status === 409) {
+      res.status(409).json({ error: outcome.error });
+      return;
+    }
+    res.json(
+      AssignAgentFirstDeskResponse.parse({ agentIds: outcome.agentIds }),
+    );
+  },
+);
+
+router.get("/office/desk-order", async (req, res): Promise<void> => {
+  const agentIds = await getOfficeDeskOrder(req.workspaceId!);
+  res.json(GetOfficeDeskOrderResponse.parse({ agentIds }));
 });
 
 router.get("/island/agents", async (req, res): Promise<void> => {
