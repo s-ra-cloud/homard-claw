@@ -1323,7 +1323,7 @@ export const createTaskBodyAttachmentsItemNameMax = 160;
 
 export const createTaskBodyAttachmentsItemMimeTypeMax = 100;
 
-export const createTaskBodyAttachmentsItemContentMax = 3000000;
+export const createTaskBodyAttachmentsItemContentMax = 34000000;
 
 export const createTaskBodyAttachmentsMax = 4;
 
@@ -2054,7 +2054,7 @@ export const converseWithAgentBodyAttachmentsItemNameMax = 160;
 
 export const converseWithAgentBodyAttachmentsItemMimeTypeMax = 100;
 
-export const converseWithAgentBodyAttachmentsItemContentMax = 3000000;
+export const converseWithAgentBodyAttachmentsItemContentMax = 34000000;
 
 export const converseWithAgentBodyAttachmentsMax = 4;
 

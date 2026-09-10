@@ -73,8 +73,9 @@ app.use(
     },
   }),
 );
-// Voice recordings arrive as base64 JSON; allow a few minutes of audio.
-app.use(express.json({ limit: "25mb" }));
+// Voice recordings and task attachments arrive as base64 JSON. Up to
+// MAX_ATTACHMENTS (4) files at 25 MB each, base64-expanded, plus margin.
+app.use(express.json({ limit: "140mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(
   clerkMiddleware((req) => ({

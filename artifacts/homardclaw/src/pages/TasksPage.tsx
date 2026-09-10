@@ -1541,7 +1541,7 @@ export default function TasksPage() {
                       <Paperclip className="w-3.5 h-3.5 mr-1" /> Attach files
                     </Button>
                     <span className="text-[10px] text-muted-foreground uppercase font-mono">
-                      Images, PDF, or text · 2 MB each
+                      Images, PDF, or text · 25 MB each
                     </span>
                   </div>
                   {taskAttachments.length > 0 && (

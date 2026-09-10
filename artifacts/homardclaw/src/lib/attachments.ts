@@ -4,7 +4,7 @@ export const ATTACHMENT_ACCEPT =
   "image/png,image/jpeg,image/webp,image/gif,application/pdf,.txt,.md,.markdown,.csv,.json,.yaml,.yml,.xml,.html,.js,.ts,.py,.sql,.toml,text/*";
 
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-const MAX_FILE_BYTES = 2_000_000;
+const MAX_FILE_BYTES = 25_000_000;
 export const MAX_ATTACHMENTS = 4;
 
 function base64(file: File): Promise<string> {
@@ -17,7 +17,7 @@ function base64(file: File): Promise<string> {
 }
 
 export async function readAttachment(file: File): Promise<InputAttachment> {
-  if (file.size > MAX_FILE_BYTES) throw new Error(`${file.name} is larger than 2 MB.`);
+  if (file.size > MAX_FILE_BYTES) throw new Error(`${file.name} is larger than 25 MB.`);
   const mimeType = file.type || "text/plain";
   if (IMAGE_TYPES.has(mimeType) || mimeType === "application/pdf") {
     return { name: file.name, mimeType, encoding: "base64", content: await base64(file) };
