@@ -147,10 +147,7 @@ import {
   queueHealth,
 } from "../runtime";
 import { abortRunningTask, getWorkerStatus, recoverQueueNow } from "../worker";
-import {
-  QUEUE_OWNERSHIP_KEY,
-  getOwnershipSnapshot,
-} from "../worker-ownership";
+import { QUEUE_OWNERSHIP_KEY, getOwnershipSnapshot } from "../worker-ownership";
 import {
   listRecentAgentActions,
   listTaskActions,
@@ -177,10 +174,12 @@ import {
 } from "../office-desk-order";
 import { findRegistryEntry } from "../capabilities/registry";
 import connectedAppsRouter from "./connected-apps";
+import bugReportsRouter from "./bug-reports";
 import capabilitiesRouter from "./capabilities";
 import chatQuestionSchedulesRouter from "./chat-question-schedules";
 import documentationRouter from "./documentation";
 import eventsRouter from "./events";
+import meRouter from "./me";
 import memoryRouter from "./memory";
 import notificationsRouter from "./notifications";
 import reportsRouter from "./reports";
@@ -208,6 +207,8 @@ router.use(voiceRouter);
 router.use(schedulesRouter);
 router.use(chatQuestionSchedulesRouter);
 router.use(notificationsRouter);
+router.use(meRouter);
+router.use(bugReportsRouter);
 router.use(reportsRouter);
 router.use(eventsRouter);
 router.use(connectedAppsRouter);
@@ -225,8 +226,7 @@ router.get("/runtime/health", async (req: Request, res: Response) => {
   ]);
   const worker = getWorkerStatus();
   const processingStalled =
-    !owner?.stale &&
-    isQueueProcessingStalled(queue, globalQueue.running);
+    !owner?.stale && isQueueProcessingStalled(queue, globalQueue.running);
   res.json(
     GetRuntimeHealthResponse.parse({
       activeRuntime: DEFAULT_RUNTIME,
@@ -249,7 +249,7 @@ router.get("/runtime/health", async (req: Request, res: Response) => {
         renewalFailures: worker.renewalFailures,
         ownershipLosses: worker.ownershipLosses,
         takeovers: worker.takeovers,
-         processingStalled,
+        processingStalled,
         // The durable ownership row itself — whichever instance serves this
         // request. `stale: true` means heartbeats stopped (or no owner
         // exists) and the next healthy poller will take over.
@@ -284,12 +284,12 @@ router.post("/runtime/recover-queue", async (req, res): Promise<void> => {
     result.outcome === "stalled_elsewhere"
       ? "The worker is still heartbeating but has stopped claiming runnable tasks. It was not forcibly replaced because that could duplicate in-flight external actions. Republish this app on Reserved VM to restart it safely."
       : result.outcome === "healthy_elsewhere"
-      ? "The queue worker is healthy on another server instance; nothing was reset."
-      : result.outcome === "already_active"
-        ? "This server already runs the queue and its heartbeat is fresh; nothing was reset."
-        : result.recoveredTasks > 0
-          ? `Took over the stalled queue worker and requeued ${result.recoveredTasks} of your orphaned task${result.recoveredTasks === 1 ? "" : "s"}.`
-          : "Took over the stalled queue worker; none of your tasks needed requeuing.";
+        ? "The queue worker is healthy on another server instance; nothing was reset."
+        : result.outcome === "already_active"
+          ? "This server already runs the queue and its heartbeat is fresh; nothing was reset."
+          : result.recoveredTasks > 0
+            ? `Took over the stalled queue worker and requeued ${result.recoveredTasks} of your orphaned task${result.recoveredTasks === 1 ? "" : "s"}.`
+            : "Took over the stalled queue worker; none of your tasks needed requeuing.";
   await recordAudit(
     req.workspaceId!,
     result.ownershipChanged ? "queue.recovered" : "queue.recovery_noop",

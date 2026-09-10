@@ -63,7 +63,7 @@ const DENIAL_TTL_MS = 60_000;
 const DENIAL_LIMIT = 500;
 const denials = new Map<string, { at: number }>();
 
-async function verifiedEmail(
+export async function verifiedEmail(
   req: Request,
   userId: string,
 ): Promise<string | null> {
@@ -228,6 +228,38 @@ export async function requireWorkspace(
     req.workspaceId = workspaceId;
     req.workspaceUserId = userId;
     next();
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * True only for the single account whose *verified* Clerk email matches
+ * OWNER_EMAIL. Used to gate features meant for the office owner alone
+ * (e.g. bug reports) — distinct from `requireWorkspace`, which every
+ * signed-in account passes for its own isolated data.
+ */
+export async function isOwnerRequest(req: Request): Promise<boolean> {
+  const ownerEmail = configuredOwnerEmail();
+  if (!ownerEmail) return false;
+  const userId = req.workspaceUserId;
+  if (!userId) return false;
+  const email = await verifiedEmail(req, userId);
+  return email === ownerEmail;
+}
+
+/** Route guard for owner-only endpoints. Must run after `requireWorkspace`. */
+export async function requireOwner(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    if (await isOwnerRequest(req)) {
+      next();
+      return;
+    }
+    res.status(403).json({ error: "Forbidden" });
   } catch (error) {
     next(error);
   }

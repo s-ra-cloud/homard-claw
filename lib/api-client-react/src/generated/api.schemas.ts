@@ -2874,6 +2874,48 @@ export interface MarkNotificationsReadInput {
   ids?: string[];
 }
 
+export interface Me {
+  isOwner: boolean;
+}
+
+export interface BugReportContext {
+  /** @nullable */
+  taskObjective?: string | null;
+  /** @nullable */
+  taskStatus?: string | null;
+  /** @nullable */
+  provider?: string | null;
+  /** @nullable */
+  model?: string | null;
+  /** @nullable */
+  errorKind?: string | null;
+  /** @nullable */
+  errorMessage?: string | null;
+  /** @nullable */
+  agentName?: string | null;
+}
+
+export interface BugReport {
+  id: string;
+  description: string;
+  /** @nullable */
+  taskId: string | null;
+  /** @nullable */
+  agentId: string | null;
+  context: BugReportContext;
+  createdAt: string;
+}
+
+export interface BugReportList {
+  reports: BugReport[];
+}
+
+export interface BugReportCreateInput {
+  taskId: string;
+  /** @maxLength 4000 */
+  description?: string;
+}
+
 export type UsageReportTotals = {
   todayCostCents: number;
   last7dCostCents: number;

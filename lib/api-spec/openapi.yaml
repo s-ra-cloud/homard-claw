@@ -1671,6 +1671,53 @@ paths:
                 required: [updated]
                 properties:
                   updated: { type: number }
+  /me:
+    get:
+      operationId: getMe
+      tags: [office]
+      summary: Privileged flags for the current signed-in account
+      responses:
+        "200":
+          description: Caller identity flags
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+  /bug-reports:
+    get:
+      operationId: listBugReports
+      tags: [office]
+      summary: List bug reports, newest first (office owner only)
+      responses:
+        "200":
+          description: Bug reports
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BugReportList"
+        "403":
+          description: Only the office owner can view bug reports
+    post:
+      operationId: createBugReport
+      tags: [office]
+      summary: File a bug report from a task's detail view (office owner only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BugReportCreateInput"
+      responses:
+        "201":
+          description: Bug report created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BugReport"
+        "403":
+          description: Only the office owner can file bug reports
+        "404":
+          description: Task not found
   /reports/usage:
     get:
       operationId: getUsageReport
@@ -4273,6 +4320,46 @@ components:
           type: array
           items: { type: string }
           maxItems: 500
+    Me:
+      type: object
+      required: [isOwner]
+      properties:
+        isOwner: { type: boolean }
+    BugReportContext:
+      type: object
+      properties:
+        taskObjective: { type: [string, "null"] }
+        taskStatus: { type: [string, "null"] }
+        provider: { type: [string, "null"] }
+        model: { type: [string, "null"] }
+        errorKind: { type: [string, "null"] }
+        errorMessage: { type: [string, "null"] }
+        agentName: { type: [string, "null"] }
+    BugReport:
+      type: object
+      required: [id, description, taskId, agentId, context, createdAt]
+      properties:
+        id: { type: string }
+        description: { type: string }
+        taskId: { type: [string, "null"] }
+        agentId: { type: [string, "null"] }
+        context:
+          $ref: "#/components/schemas/BugReportContext"
+        createdAt: { type: string, format: date-time }
+    BugReportList:
+      type: object
+      required: [reports]
+      properties:
+        reports:
+          type: array
+          items:
+            $ref: "#/components/schemas/BugReport"
+    BugReportCreateInput:
+      type: object
+      required: [taskId]
+      properties:
+        taskId: { type: string }
+        description: { type: string, maxLength: 4000 }
     UsageReport:
       type: object
       required: [totals, outcomes, agents, providers, blockers]
