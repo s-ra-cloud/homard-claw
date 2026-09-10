@@ -7408,7 +7408,7 @@ export const getCreateBugReportUrl = () => {
 }
 
 /**
- * @summary File a bug report from a task's detail view (office owner only)
+ * @summary File a bug report from a task's detail view, or from the Talk window (office owner only)
  */
 export const createBugReport = async (bugReportCreateInput: BugReportCreateInput, options?: Parameters<typeof customFetch>[1]): Promise<BugReport> => {
 
@@ -7457,7 +7457,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CreateBugReportMutationError = ErrorType<void>
 
     /**
- * @summary File a bug report from a task's detail view (office owner only)
+ * @summary File a bug report from a task's detail view, or from the Talk window (office owner only)
  */
 export const useCreateBugReport = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createBugReport>>, TError,{data: BodyType<BugReportCreateInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
