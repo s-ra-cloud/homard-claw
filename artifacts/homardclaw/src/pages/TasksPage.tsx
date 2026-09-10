@@ -270,6 +270,8 @@ const LOG_LEVEL_CLASS: Record<string, string> = {
   error: "text-destructive",
 };
 
+export const TASK_DETAIL_TEXT_CLASS =
+  "min-w-0 max-w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere]";
 function TaskLogList({ logs }: { logs: TaskLog[] }) {
   if (logs.length === 0) {
     return (
@@ -279,17 +281,19 @@ function TaskLogList({ logs }: { logs: TaskLog[] }) {
     );
   }
   return (
-    <div className="space-y-1 max-h-56 overflow-y-auto bg-background border-2 border-border/50 p-3">
+    <div className="min-w-0 max-w-full space-y-1 max-h-56 overflow-x-hidden overflow-y-auto bg-background border-2 border-border/50 p-3">
       {logs.map((log) => (
         <div
           key={log.id}
-          className="font-mono text-[11px] leading-relaxed flex gap-2"
+          className="min-w-0 max-w-full font-mono text-[11px] leading-relaxed flex items-start gap-2"
         >
           <span className="text-muted-foreground shrink-0">
             {new Date(log.createdAt).toLocaleTimeString()}
           </span>
           <span
-            className={LOG_LEVEL_CLASS[log.level] ?? "text-muted-foreground"}
+            className={`${TASK_DETAIL_TEXT_CLASS} flex-1 ${
+              LOG_LEVEL_CLASS[log.level] ?? "text-muted-foreground"
+            }`}
           >
             {log.message}
           </span>
@@ -373,14 +377,16 @@ function DelegationSection({ task }: { task: Task }) {
   if (!hasTree && !hasMessages && !canDelegate) return null;
 
   return (
-    <div className="space-y-4 border-t-4 border-border pt-4">
+    <div className="min-w-0 max-w-full space-y-4 border-t-4 border-border pt-4">
       <div className="flex items-center gap-2 text-[10px] font-bold uppercase text-muted-foreground">
         <Network className="w-3 h-3" />
         Delegation
       </div>
 
       {task.delegatedByAgentName && (
-        <p className="font-mono text-xs text-muted-foreground">
+        <p
+          className={`${TASK_DETAIL_TEXT_CLASS} font-mono text-xs text-muted-foreground`}
+        >
           Handed over by{" "}
           <span className="text-accent font-bold">
             {task.delegatedByAgentName}
@@ -394,7 +400,7 @@ function DelegationSection({ task }: { task: Task }) {
           {nodes.map((node) => (
             <div
               key={node.id}
-              className={`flex items-start gap-2 border-2 p-2 font-mono text-xs ${
+              className={`min-w-0 max-w-full flex items-start gap-2 border-2 p-2 font-mono text-xs ${
                 node.id === task.id
                   ? "border-primary bg-primary/10"
                   : "border-border/50 bg-muted/20"
@@ -403,8 +409,10 @@ function DelegationSection({ task }: { task: Task }) {
             >
               <TaskStatusBadge status={node.status} />
               <div className="min-w-0 flex-1">
-                <div className="truncate">{node.objective}</div>
-                <div className="text-[10px] uppercase text-muted-foreground">
+                <div className={TASK_DETAIL_TEXT_CLASS}>{node.objective}</div>
+                <div
+                  className={`${TASK_DETAIL_TEXT_CLASS} text-[10px] uppercase text-muted-foreground`}
+                >
                   {node.agentName}
                   {node.delegatedByAgentName
                     ? ` ← ${node.delegatedByAgentName}`
@@ -427,13 +435,15 @@ function DelegationSection({ task }: { task: Task }) {
           {messages!.map((message) => (
             <div
               key={message.id}
-              className="border-2 border-border/50 bg-background p-2 font-mono text-xs"
+              className="min-w-0 max-w-full border-2 border-border/50 bg-background p-2 font-mono text-xs"
             >
-              <div className="text-[10px] uppercase text-muted-foreground">
+              <div
+                className={`${TASK_DETAIL_TEXT_CLASS} text-[10px] uppercase text-muted-foreground`}
+              >
                 {message.fromAgentName ?? "Office"} →{" "}
                 {message.toAgentName ?? "Office"} · {message.kind}
               </div>
-              <p className="whitespace-pre-wrap">{message.body}</p>
+              <p className={TASK_DETAIL_TEXT_CLASS}>{message.body}</p>
             </div>
           ))}
         </div>
@@ -550,14 +560,14 @@ function ContinuationApprovalPanel({
   });
   return (
     <div
-      className="border-4 border-accent bg-accent/10 p-3 space-y-3"
+      className="min-w-0 max-w-full border-4 border-accent bg-accent/10 p-3 space-y-3"
       data-testid="panel-continuation-approval"
     >
       <div className="flex items-center gap-2 text-[10px] font-bold uppercase text-accent">
         <RotateCcw className="w-3 h-3" />
         Approval needed to continue
       </div>
-      <p className="font-mono text-xs whitespace-pre-wrap">
+      <p className={`${TASK_DETAIL_TEXT_CLASS} font-mono text-xs`}>
         {approval.details}
       </p>
       <div className="flex flex-wrap gap-2">
@@ -624,8 +634,10 @@ function TaskDetailDialog({
   const task = detail?.task;
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="border-4 border-border bg-card p-0 rounded-none max-w-2xl max-h-[90vh] overflow-y-auto">
-        <div className="border-b-4 border-border p-4 bg-muted/30 flex items-center justify-between gap-3">
+      <DialogContent
+        className={`${TASK_DETAIL_DIALOG_CLASS} border-4 border-border bg-card p-0 rounded-none`}
+      >
+        <div className="min-w-0 border-b-4 border-border p-4 bg-muted/30 flex items-center justify-between gap-3">
           <DialogTitle className="font-display uppercase text-lg truncate">
             Task Detail
           </DialogTitle>
@@ -635,7 +647,7 @@ function TaskDetailDialog({
             Loading task...
           </div>
         ) : (
-          <div className="p-6 space-y-5">
+          <div className="min-w-0 max-w-full p-4 sm:p-6 space-y-5 overflow-x-hidden">
             <div className="flex flex-wrap items-center gap-2">
               <TaskStatusBadge status={task.status} />
               <Badge variant="outline">{task.priority} priority</Badge>
@@ -669,17 +681,23 @@ function TaskDetailDialog({
               <div className="text-[10px] font-bold uppercase text-muted-foreground mb-1">
                 Objective — {task.agentName}
               </div>
-              <p className="font-mono text-sm bg-muted/30 border-2 border-border/50 p-3 whitespace-pre-wrap">
+              <p
+                className={`${TASK_DETAIL_TEXT_CLASS} font-mono text-sm bg-muted/30 border-2 border-border/50 p-3`}
+              >
                 {task.objective}
               </p>
             </div>
 
             {task.errorMessage && (
-              <div className="border-4 border-destructive/60 bg-destructive/10 p-3">
+              <div className="min-w-0 max-w-full border-4 border-destructive/60 bg-destructive/10 p-3">
                 <div className="text-[10px] font-bold uppercase text-destructive mb-1">
                   {task.errorKind ? task.errorKind.replace(/_/g, " ") : "Error"}
                 </div>
-                <p className="font-mono text-xs">{task.errorMessage}</p>
+                <p
+                  className={`${TASK_DETAIL_TEXT_CLASS} font-mono text-xs`}
+                >
+                  {task.errorMessage}
+                </p>
               </div>
             )}
 
@@ -725,7 +743,9 @@ function TaskDetailDialog({
                 <div className="text-[10px] font-bold uppercase text-muted-foreground mb-1">
                   Result
                 </div>
-                <pre className="font-mono text-xs bg-background border-2 border-border/50 p-3 whitespace-pre-wrap max-h-72 overflow-y-auto">
+                <pre
+                  className={`${TASK_DETAIL_TEXT_CLASS} font-mono text-xs bg-background border-2 border-border/50 p-3 max-h-72 overflow-x-hidden overflow-y-auto`}
+                >
                   {task.output}
                 </pre>
               </div>
@@ -740,12 +760,16 @@ function TaskDetailDialog({
                   {task.files.map((file) => (
                     <details
                       key={file.name}
-                      className="border-2 border-border/50"
+                      className="min-w-0 max-w-full border-2 border-border/50"
                     >
-                      <summary className="font-mono text-xs px-3 py-2 cursor-pointer uppercase">
+                      <summary
+                        className={`${TASK_DETAIL_TEXT_CLASS} font-mono text-xs px-3 py-2 cursor-pointer uppercase`}
+                      >
                         {file.name}
                       </summary>
-                      <pre className="font-mono text-xs p-3 whitespace-pre-wrap max-h-48 overflow-y-auto border-t-2 border-border/50">
+                      <pre
+                        className={`${TASK_DETAIL_TEXT_CLASS} font-mono text-xs p-3 max-h-48 overflow-x-hidden overflow-y-auto border-t-2 border-border/50`}
+                      >
                         {file.content}
                       </pre>
                     </details>
@@ -778,14 +802,14 @@ function TaskDetailDialog({
               <TaskLogList logs={detail?.logs ?? []} />
             </div>
 
-            <div className="pt-2 border-t-4 border-border flex justify-between items-center gap-3">
-              <div className="text-[10px] font-mono text-muted-foreground uppercase">
+            <div className="min-w-0 pt-2 border-t-4 border-border flex flex-wrap justify-between items-center gap-3">
+              <div className="min-w-0 text-[10px] font-mono text-muted-foreground uppercase">
                 Created{" "}
                 {formatDistanceToNow(new Date(task.createdAt), {
                   addSuffix: true,
                 })}
               </div>
-              <div className="flex gap-2">
+              <div className="flex min-w-0 flex-wrap gap-2">
                 <SendBugReportButton task={task} />
                 <TaskActions task={task} onReplicate={onReplicate} />
               </div>
@@ -2046,3 +2070,6 @@ export default function TasksPage() {
     </Shell>
   );
 }
+
+export const TASK_DETAIL_DIALOG_CLASS =
+  "w-[calc(100vw-2rem)] min-w-0 max-w-2xl max-h-[90vh] overflow-x-hidden overflow-y-auto";
