@@ -30,3 +30,4 @@
 - [Publish schema readiness](publish-schema-readiness.md) — sync Drizzle schema to development before publishing; otherwise production diff can omit new columns and live routes fail.
 - [Pinned compliance verdicts](pinned-compliance-verdicts.md) — judge instructions against the objective; only exact verdict forms may withhold a task, and malformed output fails open.
 - [Talk read cursors](talk-read-cursors.md) — unread state uses history’s exact timestamp, user-before-agent, then UUID ordering.
+- [Daily proactive Talk](daily-proactive-talk.md) — one random agent checks in daily via retained occurrence rows, exact message evidence, bounded calls, and fail-closed retries.

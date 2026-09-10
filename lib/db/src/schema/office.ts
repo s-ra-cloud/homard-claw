@@ -445,6 +445,36 @@ export const chatQuestionSchedulesTable = pgTable(
   ],
 );
 
+/** One durable, workspace-scoped proactive Talk check-in per UTC day. */
+export const dailyTalkCheckinsTable = pgTable(
+  "daily_talk_checkins",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspacesTable.id, { onDelete: "cascade" }),
+    dayKey: text("day_key").notNull(),
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull(),
+    agentId: uuid("agent_id").references(() => agentsTable.id, {
+      onDelete: "set null",
+    }),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("daily_talk_checkins_workspace_day_idx").on(
+      table.workspaceId,
+      table.dayKey,
+    ),
+    index("daily_talk_checkins_due_idx").on(table.nextRunAt),
+  ],
+);
+
 /**
  * In-app notification feed. Rows are written by the worker on task
  * lifecycle transitions (completed/failed/blocked/approval-needed);
@@ -710,11 +740,22 @@ export const agentMessagesTable = pgTable(
       () => chatQuestionSchedulesTable.id,
       { onDelete: "set null" },
     ),
+    // Set on a proactive daily Talk row and used as exact crash-recovery
+    // evidence. The unique index guarantees one visible message per occurrence.
+    dailyTalkCheckinId: uuid("daily_talk_checkin_id").references(
+      () => dailyTalkCheckinsTable.id,
+      { onDelete: "set null" },
+    ),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
   },
-  (table) => [index("agent_messages_task_idx").on(table.taskId)],
+  (table) => [
+    index("agent_messages_task_idx").on(table.taskId),
+    uniqueIndex("agent_messages_daily_checkin_unique").on(
+      table.dailyTalkCheckinId,
+    ),
+  ],
 );
 
 /** Stable per-workspace cursor through each agent's Talk transcript. */

@@ -147,6 +147,7 @@ import {
   queueHealth,
 } from "../runtime";
 import { abortRunningTask, getWorkerStatus, recoverQueueNow } from "../worker";
+import { abortProactiveTalk } from "../proactive-talk-runtime";
 import { QUEUE_OWNERSHIP_KEY, getOwnershipSnapshot } from "../worker-ownership";
 import {
   listRecentAgentActions,
@@ -1776,6 +1777,7 @@ router.post("/emergency-stop", async (req, res): Promise<void> => {
       )
       .returning({ id: tasksTable.id });
     for (const task of interrupted) abortRunningTask(task.id);
+    abortProactiveTalk(wsId);
   }
   await recordAudit(
     wsId,

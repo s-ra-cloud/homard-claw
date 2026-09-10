@@ -104,6 +104,7 @@ import { publish } from "./events";
 import { notifyTaskEvent } from "./notifications";
 import { runCodexHealthCheck, runDueSchedules } from "./scheduler";
 import { runDueChatQuestionSchedules } from "./chat-question-scheduler";
+import { runDueDailyTalkCheckins } from "./daily-talk-checkin-scheduler";
 import { returnAgentsFromLeave } from "./leave";
 import { logger } from "./lib/logger";
 import {
@@ -3334,6 +3335,7 @@ export function startWorker(intervalMs = POLL_INTERVAL_MS): void {
       // Chat-question schedules never dispatch a task, only a chat message;
       // firing them is independent of the task-schedule shape above.
       await runDueChatQuestionSchedules();
+      await runDueDailyTalkCheckins();
       // Bring back any Crustabot whose approved day off has ended.
       await returnAgentsFromLeave();
       // Local, throttled, and self-disabling when Codex is off or has no
