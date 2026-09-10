@@ -21,7 +21,7 @@ export interface InputAttachment {
   encoding: InputAttachmentEncoding;
   /**
      * @minLength 1
-     * @maxLength 3000000
+     * @maxLength 34000000
      */
   content: string;
 }

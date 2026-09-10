@@ -1331,7 +1331,7 @@ export function CallView({
               phase === "recording" || attachments.length >= MAX_ATTACHMENTS
             }
             aria-label="Attach images or documents"
-            title="Attach images, PDF, or text files (2 MB each)"
+            title="Attach images, PDF, or text files (25 MB each)"
           >
             <Paperclip className="w-4 h-4" aria-hidden="true" />
           </Button>
