@@ -724,6 +724,9 @@ describe("task context retrieval", () => {
     );
     expect(compliancePromptMessage.content).toContain("mention the tide");
     expect(compliancePromptMessage.content).toContain(
+      `${RUN_TAG} write a haiku about the tide`,
+    );
+    expect(compliancePromptMessage.content).toContain(
       "Tide-touched haiku done.",
     );
 
@@ -925,6 +928,79 @@ describe("pinned instruction enforcement", () => {
         ),
       );
     expect(outcomes).toHaveLength(0);
+
+    await db.delete(taskLogsTable).where(eq(taskLogsTable.taskId, task.id));
+  });
+
+  it("does not fail or retry a task when the checker returns a malformed verdict", async () => {
+    const agent = await createAgent(`${RUN_TAG} Inconclusive Compliance`);
+    await db.insert(memoriesTable).values({
+      kind: "decision",
+      workspaceId: wsId,
+      content: taggedMemory("Confirm sent emails after sending them."),
+      pinned: true,
+    });
+
+    let completionCalls = 0;
+    fetchMock.mockImplementation(async (url: unknown) => {
+      if (String(url).includes("/models")) {
+        return new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: "test-vendor/test-model",
+                name: "Test Model",
+                context_length: 8192,
+                pricing: { prompt: "0.000001", completion: "0.00001" },
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      completionCalls += 1;
+      const content =
+        completionCalls === 1
+          ? "The file is a short quarterly summary."
+          : "The instruction seems important, but no email was sent.";
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content } }],
+          usage: { prompt_tokens: 500, completion_tokens: 40 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+
+    const [task] = await db
+      .insert(tasksTable)
+      .values({
+        agentId: agent.id,
+        workspaceId: wsId,
+        objective: `${RUN_TAG} summarize the attached file`,
+        provider: "openrouter",
+        model: "test-vendor/test-model",
+        status: "running",
+        attempts: 1,
+        startedAt: new Date(),
+        estimatedCostCents: 1,
+      })
+      .returning();
+    const [agentRow] = await db
+      .select()
+      .from(agentsTable)
+      .where(eq(agentsTable.id, agent.id));
+
+    await runTask({ task, agent: agentRow });
+
+    const [finished] = await db
+      .select()
+      .from(tasksTable)
+      .where(eq(tasksTable.id, task.id));
+    expect(finished.status).toBe("completed");
+    expect(finished.attempts).toBe(1);
+    expect(finished.errorKind).not.toBe("pinned_compliance_failed");
+    expect(completionCalls).toBe(2);
 
     await db.delete(taskLogsTable).where(eq(taskLogsTable.taskId, task.id));
   });

@@ -28,3 +28,4 @@
 - [Inline provider calls](inline-provider-calls.md) — synchronous model calls from routes branch codex→runCodexTalkTurn (strict profile) else callProvider; whole-reply rejection, never a hidden task.
 - [Web client API error shape](web-api-error-shape.md) — toasts must read ApiError.data.error via the shared api-error helper; axios-style error.response reads silently collapse to the generic fallback.
 - [Publish schema readiness](publish-schema-readiness.md) — sync Drizzle schema to development before publishing; otherwise production diff can omit new columns and live routes fail.
+- [Pinned compliance verdicts](pinned-compliance-verdicts.md) — judge instructions against the objective; only exact verdict forms may withhold a task, and malformed output fails open.

@@ -2472,6 +2472,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
             signal: new AbortController().signal,
             workingDirectory,
           },
+          objective: task.objective,
           pinnedInstructions,
           draft: finalOutput,
         });
