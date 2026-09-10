@@ -441,10 +441,7 @@ export const chatQuestionSchedulesTable = pgTable(
       .defaultNow(),
   },
   (table) => [
-    index("chat_question_schedules_due_idx").on(
-      table.enabled,
-      table.nextRunAt,
-    ),
+    index("chat_question_schedules_due_idx").on(table.enabled, table.nextRunAt),
   ],
 );
 
@@ -1487,7 +1484,9 @@ export const customApiConnectionsTable = pgTable(
     /** AES-256-GCM ciphertext of the API key/token. Never logged/returned. */
     credentialEnc: text("credential_enc"),
     /** The closed operation catalog (bounded, validated JSON). */
-    operations: jsonb("operations").$type<Record<string, unknown>[]>().notNull(),
+    operations: jsonb("operations")
+      .$type<Record<string, unknown>[]>()
+      .notNull(),
     /**
      * Definition revision: bumped on every change to the displayable
      * definition (base URL, operations, auth shape). Credential rotation
@@ -1524,3 +1523,33 @@ export type WorkspaceConnectedAppRecord =
 
 export type CustomApiConnectionRecord =
   typeof customApiConnectionsTable.$inferSelect;
+
+/**
+ * Owner-only diagnostics: a bug report filed from a task's detail view.
+ * `context` snapshots the task's state at report time (status, objective,
+ * provider, error) so the record stays useful even after the task changes
+ * or is deleted.
+ */
+export const bugReportsTable = pgTable(
+  "bug_reports",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id").references(() => workspacesTable.id, {
+      onDelete: "cascade",
+    }),
+    taskId: uuid("task_id").references(() => tasksTable.id, {
+      onDelete: "set null",
+    }),
+    agentId: uuid("agent_id").references(() => agentsTable.id, {
+      onDelete: "set null",
+    }),
+    reporterClerkUserId: text("reporter_clerk_user_id").notNull(),
+    description: text("description").notNull().default(""),
+    context: jsonb("context").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("bug_reports_created_idx").on(table.createdAt)],
+);
+export type BugReportRecord = typeof bugReportsTable.$inferSelect;

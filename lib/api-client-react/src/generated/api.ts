@@ -33,6 +33,9 @@ import type {
   ArchiveInput,
   AuditPage,
   AuditVerification,
+  BugReport,
+  BugReportCreateInput,
+  BugReportList,
   CapabilityInstallResult,
   CapabilityList,
   CapabilitySwitch,
@@ -87,6 +90,7 @@ import type {
   ListNotificationsParams,
   MarkNotificationsRead200,
   MarkNotificationsReadInput,
+  Me,
   Memory,
   MemoryInput,
   MemoryList,
@@ -7087,6 +7091,231 @@ export const useMarkNotificationsRead = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getMarkNotificationsReadMutationOptions(options));
+    }
+
+export const getGetMeUrl = () => {
+
+
+
+
+  return `/api/me`
+}
+
+/**
+ * @summary Privileged flags for the current signed-in account
+ */
+export const getMe = async ( options?: Parameters<typeof customFetch>[1]): Promise<Me> => {
+
+  return customFetch<Me>(getGetMeUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMeQueryKey = () => {
+    return [
+    `/api/me`
+    ] as const;
+    }
+
+
+export const getGetMeQueryOptions = <TData = Awaited<ReturnType<typeof getMe>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMe>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMeQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMe>>> = ({ signal }) => getMe({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMe>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMeQueryResult = NonNullable<Awaited<ReturnType<typeof getMe>>>
+export type GetMeQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Privileged flags for the current signed-in account
+ */
+
+export function useGetMe<TData = Awaited<ReturnType<typeof getMe>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMe>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMeQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListBugReportsUrl = () => {
+
+
+
+
+  return `/api/bug-reports`
+}
+
+/**
+ * @summary List bug reports, newest first (office owner only)
+ */
+export const listBugReports = async ( options?: Parameters<typeof customFetch>[1]): Promise<BugReportList> => {
+
+  return customFetch<BugReportList>(getListBugReportsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListBugReportsQueryKey = () => {
+    return [
+    `/api/bug-reports`
+    ] as const;
+    }
+
+
+export const getListBugReportsQueryOptions = <TData = Awaited<ReturnType<typeof listBugReports>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listBugReports>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListBugReportsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listBugReports>>> = ({ signal }) => listBugReports({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listBugReports>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListBugReportsQueryResult = NonNullable<Awaited<ReturnType<typeof listBugReports>>>
+export type ListBugReportsQueryError = ErrorType<void>
+
+
+/**
+ * @summary List bug reports, newest first (office owner only)
+ */
+
+export function useListBugReports<TData = Awaited<ReturnType<typeof listBugReports>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listBugReports>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListBugReportsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateBugReportUrl = () => {
+
+
+
+
+  return `/api/bug-reports`
+}
+
+/**
+ * @summary File a bug report from a task's detail view (office owner only)
+ */
+export const createBugReport = async (bugReportCreateInput: BugReportCreateInput, options?: Parameters<typeof customFetch>[1]): Promise<BugReport> => {
+
+  return customFetch<BugReport>(getCreateBugReportUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(bugReportCreateInput)
+  }
+);}
+
+
+
+
+
+export const getCreateBugReportMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createBugReport>>, TError,{data: BodyType<BugReportCreateInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createBugReport>>, TError,{data: BodyType<BugReportCreateInput>}, TContext> => {
+
+const mutationKey = ['createBugReport'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createBugReport>>, {data: BodyType<BugReportCreateInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createBugReport(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateBugReportMutationResult = NonNullable<Awaited<ReturnType<typeof createBugReport>>>
+    export type CreateBugReportMutationBody = BodyType<BugReportCreateInput>
+    export type CreateBugReportMutationError = ErrorType<void>
+
+    /**
+ * @summary File a bug report from a task's detail view (office owner only)
+ */
+export const useCreateBugReport = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createBugReport>>, TError,{data: BodyType<BugReportCreateInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createBugReport>>,
+        TError,
+        {data: BodyType<BugReportCreateInput>},
+        TContext
+      > => {
+      return useMutation(getCreateBugReportMutationOptions(options));
     }
 
 export const getGetUsageReportUrl = () => {

@@ -3613,6 +3613,67 @@ export const MarkNotificationsReadResponse = zod.object({
 
 
 /**
+ * @summary Privileged flags for the current signed-in account
+ */
+export const GetMeResponse = zod.object({
+  "isOwner": zod.boolean()
+})
+
+
+/**
+ * @summary List bug reports, newest first (office owner only)
+ */
+export const ListBugReportsResponse = zod.object({
+  "reports": zod.array(zod.object({
+  "id": zod.string(),
+  "description": zod.string(),
+  "taskId": zod.string().nullable(),
+  "agentId": zod.string().nullable(),
+  "context": zod.object({
+  "taskObjective": zod.string().nullish(),
+  "taskStatus": zod.string().nullish(),
+  "provider": zod.string().nullish(),
+  "model": zod.string().nullish(),
+  "errorKind": zod.string().nullish(),
+  "errorMessage": zod.string().nullish(),
+  "agentName": zod.string().nullish()
+}),
+  "createdAt": zod.coerce.date()
+}))
+})
+
+
+/**
+ * @summary File a bug report from a task's detail view (office owner only)
+ */
+export const createBugReportBodyDescriptionMax = 4000;
+
+
+
+export const CreateBugReportBody = zod.object({
+  "taskId": zod.string(),
+  "description": zod.string().max(createBugReportBodyDescriptionMax).optional()
+})
+
+export const CreateBugReportResponse = zod.object({
+  "id": zod.string(),
+  "description": zod.string(),
+  "taskId": zod.string().nullable(),
+  "agentId": zod.string().nullable(),
+  "context": zod.object({
+  "taskObjective": zod.string().nullish(),
+  "taskStatus": zod.string().nullish(),
+  "provider": zod.string().nullish(),
+  "model": zod.string().nullish(),
+  "errorKind": zod.string().nullish(),
+  "errorMessage": zod.string().nullish(),
+  "agentName": zod.string().nullish()
+}),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
  * @summary Real usage, cost, outcome, and health reporting
  */
 export const GetUsageReportResponse = zod.object({

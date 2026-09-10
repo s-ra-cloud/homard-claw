@@ -18,6 +18,8 @@ import {
   useRetryTask,
   useDecideApproval,
   useDecideTaskFallback,
+  useGetMe,
+  useCreateBugReport,
   ApprovalDecisionDecision,
   TaskFallbackInputAction,
   TaskStatus,
@@ -57,6 +59,7 @@ import {
   X,
   HeartPulse,
   Wrench,
+  Bug,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
@@ -526,8 +529,7 @@ function ContinuationApprovalPanel({
               }
             : {
                 title: "Continuation rejected",
-                description:
-                  "The task ended with the work completed so far.",
+                description: "The task ended with the work completed so far.",
               },
         );
       },
@@ -782,10 +784,103 @@ function TaskDetailDialog({
                   addSuffix: true,
                 })}
               </div>
-              <TaskActions task={task} onReplicate={onReplicate} />
+              <div className="flex gap-2">
+                <SendBugReportButton task={task} />
+                <TaskActions task={task} onReplicate={onReplicate} />
+              </div>
             </div>
           </div>
         )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Owner-only diagnostics action: files a bug report tied to this task, with
+ * the task's current state (objective, status, provider, error) captured
+ * server-side. Hidden entirely for every other signed-in account.
+ */
+function SendBugReportButton({ task }: { task: Task }) {
+  const { data: me } = useGetMe();
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [description, setDescription] = useState("");
+  const createBugReport = useCreateBugReport({
+    mutation: {
+      onSuccess: () => {
+        toast({
+          title: "Bug report sent",
+          description: "Saved to Providers → Bug Reports.",
+        });
+        setOpen(false);
+        setDescription("");
+      },
+      onError: (error) => {
+        const message =
+          (error as { response?: { data?: { error?: string } } })?.response
+            ?.data?.error ?? "The bug report could not be sent.";
+        toast({
+          title: "Bug report failed",
+          description: message,
+          variant: "destructive",
+        });
+      },
+    },
+  });
+
+  if (!me?.isOwner) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button
+          size="sm"
+          variant="outline"
+          data-testid="button-send-bug-report"
+        >
+          <Bug className="w-3 h-3 mr-1" />
+          REPORT BUG
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="border-4 border-border bg-card rounded-none max-w-md">
+        <DialogTitle className="font-display uppercase text-sm">
+          Send bug report
+        </DialogTitle>
+        <div className="space-y-3">
+          <p className="text-[10px] font-mono text-muted-foreground uppercase">
+            The task's current state is attached automatically.
+          </p>
+          <Textarea
+            placeholder="What went wrong? (optional)"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            maxLength={4000}
+            className="min-h-24"
+          />
+          <div className="flex justify-end gap-2">
+            <Button size="sm" variant="outline" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={createBugReport.isPending}
+              data-testid="button-confirm-send-bug-report"
+              onClick={() =>
+                createBugReport.mutate({
+                  data: {
+                    taskId: task.id,
+                    ...(description.trim()
+                      ? { description: description.trim() }
+                      : {}),
+                  },
+                })
+              }
+            >
+              {createBugReport.isPending ? "SENDING..." : "SEND"}
+            </Button>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );
@@ -1158,7 +1253,7 @@ function QueueHealthPanel() {
               ? "Queue recovered"
               : report.outcome === "stalled_elsewhere"
                 ? "Queue is stalled"
-              : "Queue already healthy",
+                : "Queue already healthy",
           description: report.message,
         });
         queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
@@ -1243,9 +1338,9 @@ function QueueHealthPanel() {
               This checks both the queue worker&apos;s heartbeat and whether it
               is claiming runnable work. If it has gone silent, this server
               safely takes over and requeues abandoned tasks. A worker that is
-              still heartbeating but not processing is reported as stalled,
-              but never forcibly replaced because that could duplicate an
-              in-flight external action.
+              still heartbeating but not processing is reported as stalled, but
+              never forcibly replaced because that could duplicate an in-flight
+              external action.
             </p>
             <div className="flex justify-end gap-4 pt-2 border-t-4 border-border">
               <Button

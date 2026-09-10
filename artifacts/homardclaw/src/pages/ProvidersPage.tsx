@@ -9,6 +9,7 @@ import {
   useDisconnectCodex,
   useSetProviderCredential,
   useDeleteProviderCredential,
+  useGetMe,
   getGetProvidersQueryKey,
   getGetProviderSettingsQueryKey,
   ProviderSettingsDefaultProvider,
@@ -16,6 +17,7 @@ import {
   type ProviderStatus,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { Link } from "wouter";
 import { Shell } from "@/components/layout/Shell";
 import { PixelCard } from "@/components/ui/pixel-card";
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +39,8 @@ import {
   Network,
   Route,
   CreditCard,
+  Bug,
+  ChevronRight,
 } from "lucide-react";
 
 const selectTriggerClass =
@@ -604,13 +608,13 @@ function ProviderCredentialActions({ provider }: { provider: ProviderStatus }) {
               On a machine where Claude Code is signed in, run{" "}
               <span className="text-foreground">claude setup-token</span> and
               paste the long-lived token it prints. The token is long and can
-              wrap across terminal lines — copy the entire value as one line.
-              It is encrypted before it is stored and is never shown again.
+              wrap across terminal lines — copy the entire value as one line. It
+              is encrypted before it is stored and is never shown again.
             </>
           ) : (
             <>
-              Paste an API key from your own OpenRouter account. It is
-              encrypted before it is stored and is never shown again.
+              Paste an API key from your own OpenRouter account. It is encrypted
+              before it is stored and is never shown again.
             </>
           )}
         </p>
@@ -619,7 +623,9 @@ function ProviderCredentialActions({ provider }: { provider: ProviderStatus }) {
           type="password"
           value={credential}
           onChange={(event) => setCredential(event.target.value)}
-          placeholder={isClaude ? "Claude Code setup token" : "OpenRouter API key"}
+          placeholder={
+            isClaude ? "Claude Code setup token" : "OpenRouter API key"
+          }
           spellCheck={false}
           autoComplete="off"
           className="font-mono bg-background border-4 border-border rounded-none focus-visible:ring-0 focus-visible:border-primary text-xs"
@@ -707,6 +713,31 @@ function CodexStatusRows({ provider }: { provider: ProviderStatus }) {
         </div>
       ) : null}
     </>
+  );
+}
+
+/** Owner-only menu entry into the Bug Reports list. Hidden for everyone else. */
+function BugReportsMenuCard() {
+  const { data: me } = useGetMe();
+  if (!me?.isOwner) return null;
+
+  return (
+    <Link href="/providers/bug-reports" data-testid="link-bug-reports">
+      <PixelCard className="flex items-center justify-between gap-4 p-4 hover:bg-muted/30 transition-colors cursor-pointer">
+        <div className="flex items-center gap-3">
+          <div className="p-2 border-2 border-border pixel-shadow bg-destructive/10 text-destructive">
+            <Bug className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="font-display text-sm uppercase">Bug Reports</h3>
+            <p className="text-xs text-muted-foreground">
+              Reports filed from task details.
+            </p>
+          </div>
+        </div>
+        <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+      </PixelCard>
+    </Link>
   );
 }
 
@@ -841,6 +872,7 @@ export default function ProvidersPage() {
         )}
 
         <RoutingDefaultsCard />
+        <BugReportsMenuCard />
       </div>
     </Shell>
   );

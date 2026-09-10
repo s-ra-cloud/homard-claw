@@ -25,6 +25,7 @@ import TasksPage from "@/pages/TasksPage";
 import TalkPage from "@/pages/TalkPage";
 import ApprovalsPage from "@/pages/ApprovalsPage";
 import ProvidersPage from "@/pages/ProvidersPage";
+import BugReportsPage from "@/pages/BugReportsPage";
 import ConnectedAppsPage from "@/pages/ConnectedAppsPage";
 import IslandPage from "@/pages/IslandPage";
 import IslandHotelPage from "@/pages/IslandHotelPage";
@@ -264,6 +265,10 @@ function ClerkProviderWithRoutes() {
 
             <Route path="/providers">
               <ProtectedRoute component={ProvidersPage} />
+            </Route>
+
+            <Route path="/providers/bug-reports">
+              <ProtectedRoute component={BugReportsPage} />
             </Route>
 
             <Route path="/connected-apps">
