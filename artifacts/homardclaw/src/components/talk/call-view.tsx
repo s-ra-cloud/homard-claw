@@ -24,6 +24,13 @@ import {
   useCreateTask,
   useGetProviderSettings,
   useGetTalkHistory,
+  useGetGithubConnection,
+  useListConnectedApps,
+  useStartGithubAppInstall,
+  useStartGithubOauth,
+  useStartGoogleOauth,
+  getGetGithubConnectionQueryKey,
+  getListConnectedAppsQueryKey,
 } from "@workspace/api-client-react";
 import {
   AlertDialog,
@@ -47,6 +54,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle2,
+  AlertTriangle,
   ChevronLeft,
   Loader2,
   Mic,
@@ -64,6 +72,8 @@ import {
 } from "lucide-react";
 import { presenceForStatus } from "./agent-presence";
 import { agentRuntimeSummary } from "./agent-runtime-summary";
+import { agentReconnectWarnings } from "./agent-runtime-summary";
+import { navigateToExternal } from "@/lib/office-window";
 import {
   ATTACHMENT_ACCEPT,
   MAX_ATTACHMENTS,
@@ -211,6 +221,79 @@ export function CallView({
   const queryClient = useQueryClient();
   const agentId = agent.id;
   const { data: providerSettings } = useGetProviderSettings();
+  const connectedApps = useListConnectedApps({
+    query: {
+      queryKey: getListConnectedAppsQueryKey(),
+      refetchOnMount: "always",
+      staleTime: 15_000,
+    },
+  });
+  const reconnectWarnings = agentReconnectWarnings(
+    agent,
+    connectedApps.data?.apps ?? [],
+  );
+  const needsGithub = reconnectWarnings.some(
+    (warning) => warning.connection === "github",
+  );
+  const githubConnection = useGetGithubConnection({
+    query: {
+      queryKey: getGetGithubConnectionQueryKey(),
+      enabled: needsGithub,
+    },
+  });
+  const [reconnectError, setReconnectError] = useState<string | null>(null);
+  const onReconnectSuccess = (data: { authUrl: string }) => {
+    setReconnectError(null);
+    navigateToExternal(data.authUrl);
+  };
+  const onReconnectError = () =>
+    setReconnectError("Could not start sign-in. Try again in a moment.");
+  const startGoogle = useStartGoogleOauth({
+    mutation: {
+      onSuccess: onReconnectSuccess,
+      onError: onReconnectError,
+    },
+  });
+  const startGithubOauth = useStartGithubOauth({
+    mutation: {
+      onSuccess: onReconnectSuccess,
+      onError: onReconnectError,
+    },
+  });
+  const startGithubApp = useStartGithubAppInstall({
+    mutation: {
+      onSuccess: (data: { installUrl: string }) => {
+        setReconnectError(null);
+        navigateToExternal(data.installUrl);
+      },
+      onError: onReconnectError,
+    },
+  });
+  const reconnectPending =
+    startGoogle.isPending ||
+    startGithubOauth.isPending ||
+    startGithubApp.isPending;
+  const beginReconnect = (
+    warning: ReturnType<typeof agentReconnectWarnings>[number],
+  ) => {
+    setReconnectError(null);
+    if (warning.connection === "google") {
+      startGoogle.mutate({
+        data: {
+          service:
+            warning.service === "google"
+              ? "google"
+              : warning.service === "google_drive"
+                ? "google_drive"
+                : "gmail",
+        },
+      });
+    } else if (githubConnection.data?.appConfigured) {
+      startGithubApp.mutate();
+    } else {
+      startGithubOauth.mutate();
+    }
+  };
 
   const [turns, setTurns] = useState<Turn[]>([]);
   const [phase, setPhase] = useState<Phase>("idle");
@@ -1319,6 +1402,67 @@ export function CallView({
                 </button>
               </span>
             ))}
+          </div>
+        )}
+        {reconnectWarnings.length > 0 && (
+          <div
+            className="border-4 border-amber-700 bg-amber-100 px-3 py-2 text-amber-950"
+            role="alert"
+            aria-label="Connected app sign-in required"
+          >
+            <div className="flex items-start gap-2">
+              <AlertTriangle
+                className="mt-0.5 h-4 w-4 shrink-0"
+                aria-hidden="true"
+              />
+              <div className="min-w-0 flex-1">
+                <p className="font-display text-[10px] uppercase">
+                  App sign-in needed
+                </p>
+                <div className="mt-2 flex flex-col gap-2">
+                  {reconnectWarnings.map((warning) => {
+                    const githubLoading =
+                      warning.connection === "github" &&
+                      githubConnection.isLoading;
+                    return (
+                      <div
+                        key={warning.connection}
+                        className="flex flex-wrap items-center justify-between gap-2"
+                      >
+                        <span className="min-w-0 text-xs font-mono">
+                          {warning.label} access needs to be reconnected.
+                        </span>
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="min-h-10 shrink-0"
+                          disabled={reconnectPending || githubLoading}
+                          onClick={() => beginReconnect(warning)}
+                          aria-label={`Reconnect ${warning.label}`}
+                        >
+                          {reconnectPending || githubLoading ? (
+                            <>
+                              <Loader2
+                                className="mr-1 h-3 w-3 animate-spin"
+                                aria-hidden="true"
+                              />
+                              Connecting…
+                            </>
+                          ) : (
+                            "Reconnect"
+                          )}
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+                {reconnectError ? (
+                  <p className="mt-2 text-[10px] font-bold" role="status">
+                    {reconnectError}
+                  </p>
+                ) : null}
+              </div>
+            </div>
           </div>
         )}
         <form onSubmit={sendText} className="flex gap-2">

@@ -1,4 +1,8 @@
-import type { Agent, ProviderSettings } from "@workspace/api-client-react";
+import type {
+  Agent,
+  ConnectedApp,
+  ProviderSettings,
+} from "@workspace/api-client-react";
 
 const PROVIDER_LABELS = {
   claude_max: "Claude Code",
@@ -25,6 +29,56 @@ export interface AgentRuntimeSummary {
   provider: string;
   model: string;
   apps: Array<{ app: string; accessLevel: string }>;
+}
+
+export interface AgentReconnectWarning {
+  connection: "google" | "github";
+  service: "gmail" | "google_drive" | "google" | "github";
+  label: string;
+}
+
+/**
+ * Match this agent's grants to live authorization failures. Gmail and Drive
+ * share one Google credential, so they are presented as one recovery action.
+ * An unavailable inventory entry is deliberately ignored: it says nothing
+ * about whether the owner's authorization was lost.
+ */
+export function agentReconnectWarnings(
+  agent: Agent,
+  apps: ConnectedApp[],
+): AgentReconnectWarning[] {
+  const granted = new Set(agent.appGrants.map((grant) => grant.app));
+  const needsReconnect = (app: ConnectedApp | undefined) =>
+    app?.enabled === true &&
+    (app.status === "expired" || app.status === "not_connected");
+  const byId = new Map(apps.map((app) => [app.app, app]));
+  const affectedGoogle = (["gmail", "google_drive"] as const).filter(
+    (app) => granted.has(app) && needsReconnect(byId.get(app)),
+  );
+  const warnings: AgentReconnectWarning[] = [];
+
+  if (affectedGoogle.length > 0) {
+    warnings.push({
+      connection: "google",
+      service:
+        affectedGoogle.length === 2
+          ? "google"
+          : affectedGoogle.includes("google_drive")
+            ? "google_drive"
+            : "gmail",
+      label: affectedGoogle
+        .map((app) => APP_LABELS[app])
+        .join(" and "),
+    });
+  }
+  if (granted.has("github") && needsReconnect(byId.get("github"))) {
+    warnings.push({
+      connection: "github",
+      service: "github",
+      label: APP_LABELS.github,
+    });
+  }
+  return warnings;
 }
 
 /**

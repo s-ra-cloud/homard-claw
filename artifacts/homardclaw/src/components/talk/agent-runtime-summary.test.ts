@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type { Agent, ProviderSettings } from "@workspace/api-client-react";
-import { agentRuntimeSummary } from "./agent-runtime-summary";
+import type {
+  Agent,
+  ConnectedApp,
+  ProviderSettings,
+} from "@workspace/api-client-react";
+import {
+  agentReconnectWarnings,
+  agentRuntimeSummary,
+} from "./agent-runtime-summary";
 
 const agent = {
   provider: "claude_max",
@@ -67,5 +74,82 @@ describe("Talk Crustabot runtime summary", () => {
         appGrants: [{ app: "custom_research-tool", accessLevel: "draft" }],
       }).apps,
     ).toEqual([{ app: "Custom Research Tool", accessLevel: "draft" }]);
+  });
+});
+
+const connectedApp = (
+  app: ConnectedApp["app"],
+  status: ConnectedApp["status"],
+): ConnectedApp => ({
+  app,
+  status,
+  displayName:
+    app === "google_drive"
+      ? "Google Drive"
+      : app === "gmail"
+        ? "Gmail"
+        : "GitHub",
+  enabled: true,
+  statusDetail: null,
+  accountLabel: null,
+  grantedAgents: 1,
+});
+
+describe("Talk app reconnection warnings", () => {
+  it("deduplicates broken Gmail and Drive grants into one Google action", () => {
+    expect(
+      agentReconnectWarnings(agent, [
+        connectedApp("gmail", "expired"),
+        connectedApp("google_drive", "not_connected"),
+        connectedApp("github", "not_connected"),
+      ]),
+    ).toEqual([
+      {
+        connection: "google",
+        service: "google",
+        label: "Gmail and Google Drive",
+      },
+    ]);
+  });
+
+  it("shows independent Google and GitHub recovery actions when granted", () => {
+    expect(
+      agentReconnectWarnings(
+        {
+          ...agent,
+          appGrants: [
+            { app: "gmail", accessLevel: "read" },
+            { app: "github", accessLevel: "write" },
+          ],
+        },
+        [
+          connectedApp("gmail", "not_connected"),
+          connectedApp("google_drive", "connected"),
+          connectedApp("github", "expired"),
+        ],
+      ),
+    ).toEqual([
+      { connection: "google", service: "gmail", label: "Gmail" },
+      { connection: "github", service: "github", label: "GitHub" },
+    ]);
+  });
+
+  it("ignores connected, unavailable, and ungranted services", () => {
+    expect(
+      agentReconnectWarnings(agent, [
+        connectedApp("gmail", "connected"),
+        connectedApp("google_drive", "unavailable"),
+        connectedApp("github", "expired"),
+      ]),
+    ).toEqual([]);
+  });
+
+  it("ignores retained grants for apps disabled across the workspace", () => {
+    expect(
+      agentReconnectWarnings(agent, [
+        { ...connectedApp("gmail", "expired"), enabled: false },
+        { ...connectedApp("google_drive", "not_connected"), enabled: false },
+      ]),
+    ).toEqual([]);
   });
 });

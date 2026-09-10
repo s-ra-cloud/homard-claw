@@ -217,6 +217,22 @@ describe("start", () => {
     const authUrl = new URL(res.body.authUrl);
     expect(authUrl.searchParams.get("include_granted_scopes")).toBe("true");
   });
+
+  it("requests Gmail and Drive together when repairing the shared account", async () => {
+    const res = await request(app)
+      .post("/api/google/oauth/start")
+      .set("x-forwarded-proto", "https")
+      .set("x-forwarded-host", "test.homardclaw.example")
+      .send({ service: "google" });
+    expect(res.status).toBe(200);
+    const scope = new URL(res.body.authUrl).searchParams.get("scope")!;
+    expect(scope).toContain("gmail.readonly");
+    expect(scope).toContain("gmail.send");
+    expect(scope).toContain("drive.readonly");
+    expect(scope.split(" ")).toContain(
+      "https://www.googleapis.com/auth/drive",
+    );
+  });
 });
 
 function res_urlHasVerifier(url: URL, verifier: string): boolean {

@@ -803,10 +803,11 @@ export type GoogleOauthStartRequestService = typeof GoogleOauthStartRequestServi
 export const GoogleOauthStartRequestService = {
   gmail: 'gmail',
   google_drive: 'google_drive',
+  google: 'google',
 } as const;
 
 /**
- * Which Google-backed app to request consent for. Omitting the body (or the service) starts a Gmail flow; google_drive runs an incremental consent that adds Drive scopes to the same account — including full Google Drive access, so agents can organize existing files (create folders, rename, move) with per-action owner approval. Deleting files and changing sharing are never offered.
+ * Which Google-backed app to request consent for. Omitting the body (or the service) starts a Gmail flow; google_drive runs an incremental consent that adds Drive scopes to the same account — including full Google Drive access, so agents can organize existing files (create folders, rename, move) with per-action owner approval. google requests the union of Gmail and Drive scopes in one consent flow when a shared Google credential must be fully reconnected. Deleting files and changing sharing are never offered.
  */
 export interface GoogleOauthStartRequest {
   service?: GoogleOauthStartRequestService;

@@ -2518,9 +2518,11 @@ components:
         incremental consent that adds Drive scopes to the same account —
         including full Google Drive access, so agents can organize existing
         files (create folders, rename, move) with per-action owner approval.
+        google requests the union of Gmail and Drive scopes in one consent
+        flow when a shared Google credential must be fully reconnected.
         Deleting files and changing sharing are never offered.
       properties:
-        service: { type: string, enum: [gmail, google_drive] }
+        service: { type: string, enum: [gmail, google_drive, google] }
     GoogleOauthStart:
       type: object
       required: [authUrl]

@@ -868,6 +868,7 @@ export default function ConnectedAppsPage() {
   React.useEffect(() => {
     const url = new URL(window.location.href);
     const params: { key: string; appName: string }[] = [
+      { key: "google", appName: "Google account" },
       { key: "gmail", appName: "Gmail" },
       { key: "google_drive", appName: "Google Drive" },
       { key: "github", appName: "GitHub" },

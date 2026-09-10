@@ -12,4 +12,5 @@ export type GoogleOauthStartRequestService = typeof GoogleOauthStartRequestServi
 export const GoogleOauthStartRequestService = {
   gmail: 'gmail',
   google_drive: 'google_drive',
+  google: 'google',
 } as const;

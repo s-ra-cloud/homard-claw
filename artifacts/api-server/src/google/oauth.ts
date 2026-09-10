@@ -30,10 +30,10 @@ import {
 } from "./credentials";
 
 /** The Google-backed apps a consent flow can be started for. */
-type GoogleService = "gmail" | "google_drive";
+type GoogleService = "gmail" | "google_drive" | "google";
 
 function parseService(value: unknown): GoogleService {
-  return value === "google_drive" ? "google_drive" : "gmail";
+  return value === "google" || value === "google_drive" ? value : "gmail";
 }
 
 const SERVICE_CONFIG: Record<
@@ -53,6 +53,14 @@ const SERVICE_CONFIG: Record<
     scopes: DRIVE_REQUESTED_SCOPES,
     missing: missingDriveScopes,
     displayName: "Google Drive",
+  },
+  google: {
+    scopes: [...new Set([...REQUESTED_SCOPES, ...DRIVE_REQUESTED_SCOPES])],
+    missing: (granted) => [
+      ...missingGmailScopes(granted),
+      ...missingDriveScopes(granted),
+    ],
+    displayName: "Google account",
   },
 };
 

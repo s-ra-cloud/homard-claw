@@ -4288,8 +4288,8 @@ export const UninstallCapabilityResponse = zod.object({
  * @summary Begin the in-app Google OAuth consent flow for Gmail or Google Drive
  */
 export const StartGoogleOauthBody = zod.object({
-  "service": zod.enum(['gmail', 'google_drive']).optional()
-}).describe('Which Google-backed app to request consent for. Omitting the body (or the service) starts a Gmail flow; google_drive runs an incremental consent that adds Drive scopes to the same account — including full Google Drive access, so agents can organize existing files (create folders, rename, move) with per-action owner approval. Deleting files and changing sharing are never offered.\n')
+  "service": zod.enum(['gmail', 'google_drive', 'google']).optional()
+}).describe('Which Google-backed app to request consent for. Omitting the body (or the service) starts a Gmail flow; google_drive runs an incremental consent that adds Drive scopes to the same account — including full Google Drive access, so agents can organize existing files (create folders, rename, move) with per-action owner approval. google requests the union of Gmail and Drive scopes in one consent flow when a shared Google credential must be fully reconnected. Deleting files and changing sharing are never offered.\n')
 
 export const StartGoogleOauthResponse = zod.object({
   "authUrl": zod.string().describe('Google consent URL the browser should navigate to.')
