@@ -63,6 +63,7 @@ import {
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
+import { apiErrorMessage } from "@/lib/api-error";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Dialog,
@@ -817,9 +818,10 @@ function SendBugReportButton({ task }: { task: Task }) {
         setDescription("");
       },
       onError: (error) => {
-        const message =
-          (error as { response?: { data?: { error?: string } } })?.response
-            ?.data?.error ?? "The bug report could not be sent.";
+        const message = apiErrorMessage(
+          error,
+          "The bug report could not be sent.",
+        );
         toast({
           title: "Bug report failed",
           description: message,
