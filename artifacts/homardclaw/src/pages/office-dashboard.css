@@ -398,6 +398,35 @@
   color: inherit;
   cursor: pointer;
 }
+.room-agent__unread-bubble {
+  position: absolute;
+  z-index: 3;
+  top: -8%;
+  right: -4%;
+  display: grid;
+  place-items: center;
+  min-width: 22px;
+  height: 17px;
+  padding: 0 4px 3px;
+  border: 2px solid #2b2733;
+  background: #fff7df;
+  color: #2b2733;
+  font: 900 14px/1 "Space Mono", monospace;
+  pointer-events: none;
+  box-shadow: 2px 2px 0 rgba(43, 39, 51, 0.55);
+}
+.room-agent__unread-bubble::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  bottom: -6px;
+  width: 6px;
+  height: 6px;
+  border-right: 2px solid #2b2733;
+  border-bottom: 2px solid #2b2733;
+  background: #fff7df;
+  transform: skewY(35deg);
+}
 .room-agent__link:focus-visible {
   outline: 2px dashed rgba(255, 247, 223, 0.9);
   outline-offset: 3px;

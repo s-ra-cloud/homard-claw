@@ -10,6 +10,7 @@
  */
 import {
   ConverseWithAgentBody,
+  AcknowledgeTalkReadBody,
   SetVoiceCredentialBody,
   TranscribeAudioBody,
   UpdateVoiceSettingsBody,
@@ -20,6 +21,7 @@ import {
   agentsTable,
   db,
   talkExchangesTable,
+  talkReadCursorsTable,
   teamMembersTable,
   teamsTable,
   workspaceSettingsTable,
@@ -1506,7 +1508,110 @@ router.get(
         taskId: row.taskId,
         createdAt: row.createdAt.toISOString(),
       }));
-    res.json({ turns });
+    res.json({ turns, latestCursor: turns.at(-1)?.id ?? null });
+  },
+);
+
+router.get("/talk-unread", async (req: Request, res: Response) => {
+  const rows = await db.execute<{
+    agent_id: string;
+    unread_count: string;
+  }>(sql`
+    SELECT a.id AS agent_id, count(m.id)::text AS unread_count
+    FROM ${agentsTable} a
+    JOIN ${agentMessagesTable} m
+      ON m.from_agent_id = a.id
+     AND m.kind IN ('voice', 'chat_question')
+    LEFT JOIN ${talkReadCursorsTable} r
+      ON r.workspace_id = a.workspace_id AND r.agent_id = a.id
+    LEFT JOIN ${agentMessagesTable} cursor ON cursor.id = r.last_read_message_id
+    WHERE a.workspace_id = ${req.workspaceId!}
+      AND a.archived = false
+      AND (
+        cursor.id IS NULL
+        OR (
+          m.created_at,
+          CASE WHEN m.from_agent_id IS NULL THEN 0 ELSE 1 END,
+          m.id::text
+        ) > (
+          cursor.created_at,
+          CASE WHEN cursor.from_agent_id IS NULL THEN 0 ELSE 1 END,
+          cursor.id::text
+        )
+      )
+    GROUP BY a.id
+  `);
+  res.json({
+    agents: rows.rows.map((row) => ({
+      agentId: row.agent_id,
+      unreadCount: Number(row.unread_count),
+    })),
+  });
+});
+
+router.post(
+  "/agents/:agentId/talk-read",
+  async (req: Request, res: Response) => {
+    const agentId = String(req.params.agentId);
+    const parsed = AcknowledgeTalkReadBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "A valid Talk cursor is required." });
+      return;
+    }
+    const [cursor] = await db
+      .select({ id: agentMessagesTable.id })
+      .from(agentMessagesTable)
+      .innerJoin(
+        agentsTable,
+        and(
+          eq(agentsTable.id, agentId),
+          eq(agentsTable.workspaceId, req.workspaceId!),
+          eq(agentsTable.archived, false),
+        ),
+      )
+      .where(
+        and(
+          eq(agentMessagesTable.id, parsed.data.cursor),
+          inArray(agentMessagesTable.kind, ["voice", "chat_question"]),
+          or(
+            eq(agentMessagesTable.fromAgentId, agentId),
+            eq(agentMessagesTable.toAgentId, agentId),
+          ),
+        ),
+      )
+      .limit(1);
+    if (!cursor) {
+      res.status(404).json({ error: "Agent or Talk cursor not found." });
+      return;
+    }
+    // Never move a cursor backwards if two open Talk views acknowledge in a
+    // different order. This tuple exactly matches Talk history ordering:
+    // timestamp, user-before-agent role, then UUID for a deterministic tie.
+    await db.execute(sql`
+      INSERT INTO ${talkReadCursorsTable}
+        (workspace_id, agent_id, last_read_message_id, updated_at)
+      VALUES (${req.workspaceId!}, ${agentId}, ${cursor.id}, now())
+      ON CONFLICT (workspace_id, agent_id) DO UPDATE
+      SET last_read_message_id = EXCLUDED.last_read_message_id,
+          updated_at = now()
+      WHERE (
+        SELECT (
+                 incoming.created_at,
+                 CASE WHEN incoming.from_agent_id IS NULL THEN 0 ELSE 1 END,
+                 incoming.id::text
+               ) > (
+                 current_message.created_at,
+                 CASE WHEN current_message.from_agent_id IS NULL THEN 0 ELSE 1 END,
+                 current_message.id::text
+               )
+        FROM ${agentMessagesTable} incoming,
+             ${agentMessagesTable} current_message
+        WHERE incoming.id = EXCLUDED.last_read_message_id
+          AND current_message.id = ${talkReadCursorsTable.lastReadMessageId}
+      )
+    `);
+    publish(req.workspaceId!, "talk");
+    res.json({ cursor: cursor.id });
   },
 );
 
@@ -1916,6 +2021,7 @@ export async function converseWithAgent(input: {
       "voice.converse",
       `${agent.name} chatted with the owner (text mode).`,
     );
+    publish(input.workspaceId, "talk");
     if (exchange) publish(input.workspaceId, "messages");
     return payload;
   } catch (error) {
@@ -2131,6 +2237,7 @@ router.post(
         "voice.converse",
         `${agent.name} spoke with the owner (voice mode).`,
       );
+      publish(req.workspaceId!, "talk");
       if (exchange) publish(req.workspaceId!, "messages");
 
       if (voice && !controller.signal.aborted) {

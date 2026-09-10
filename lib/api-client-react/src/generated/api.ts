@@ -117,6 +117,9 @@ import type {
   SearchAuditParams,
   TalkDelegationInput,
   TalkHistory,
+  TalkReadInput,
+  TalkReadResult,
+  TalkUnreadSummary,
   Task,
   TaskDetail,
   TaskEstimate,
@@ -3718,6 +3721,155 @@ export const useClearTalkHistory = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getClearTalkHistoryMutationOptions(options));
+    }
+
+export const getGetTalkUnreadUrl = () => {
+
+
+
+
+  return `/api/talk-unread`
+}
+
+/**
+ * @summary Get unread agent-authored Talk messages by agent
+ */
+export const getTalkUnread = async ( options?: Parameters<typeof customFetch>[1]): Promise<TalkUnreadSummary> => {
+
+  return customFetch<TalkUnreadSummary>(getGetTalkUnreadUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetTalkUnreadQueryKey = () => {
+    return [
+    `/api/talk-unread`
+    ] as const;
+    }
+
+
+export const getGetTalkUnreadQueryOptions = <TData = Awaited<ReturnType<typeof getTalkUnread>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTalkUnread>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetTalkUnreadQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getTalkUnread>>> = ({ signal }) => getTalkUnread({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getTalkUnread>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetTalkUnreadQueryResult = NonNullable<Awaited<ReturnType<typeof getTalkUnread>>>
+export type GetTalkUnreadQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get unread agent-authored Talk messages by agent
+ */
+
+export function useGetTalkUnread<TData = Awaited<ReturnType<typeof getTalkUnread>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTalkUnread>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetTalkUnreadQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getAcknowledgeTalkReadUrl = (agentId: string,) => {
+
+
+
+
+  return `/api/agents/${agentId}/talk-read`
+}
+
+/**
+ * @summary Mark Talk messages through a stable cursor as read
+ */
+export const acknowledgeTalkRead = async (agentId: string,
+    talkReadInput: TalkReadInput, options?: Parameters<typeof customFetch>[1]): Promise<TalkReadResult> => {
+
+  return customFetch<TalkReadResult>(getAcknowledgeTalkReadUrl(agentId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(talkReadInput)
+  }
+);}
+
+
+
+
+
+export const getAcknowledgeTalkReadMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acknowledgeTalkRead>>, TError,{agentId: string;data: BodyType<TalkReadInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof acknowledgeTalkRead>>, TError,{agentId: string;data: BodyType<TalkReadInput>}, TContext> => {
+
+const mutationKey = ['acknowledgeTalkRead'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof acknowledgeTalkRead>>, {agentId: string;data: BodyType<TalkReadInput>}> = (props) => {
+          const {agentId,data} = props ?? {};
+
+          return  acknowledgeTalkRead(agentId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AcknowledgeTalkReadMutationResult = NonNullable<Awaited<ReturnType<typeof acknowledgeTalkRead>>>
+    export type AcknowledgeTalkReadMutationBody = BodyType<TalkReadInput>
+    export type AcknowledgeTalkReadMutationError = ErrorType<void>
+
+    /**
+ * @summary Mark Talk messages through a stable cursor as read
+ */
+export const useAcknowledgeTalkRead = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acknowledgeTalkRead>>, TError,{agentId: string;data: BodyType<TalkReadInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof acknowledgeTalkRead>>,
+        TError,
+        {agentId: string;data: BodyType<TalkReadInput>},
+        TContext
+      > => {
+      return useMutation(getAcknowledgeTalkReadMutationOptions(options));
     }
 
 export const getGetDocumentationUrl = () => {

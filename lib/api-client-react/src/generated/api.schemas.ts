@@ -1538,6 +1538,26 @@ export interface TalkHistoryTurn {
 
 export interface TalkHistory {
   turns: TalkHistoryTurn[];
+  /** @nullable */
+  latestCursor: string | null;
+}
+
+export interface TalkUnreadAgent {
+  agentId: string;
+  unreadCount: number;
+}
+
+export interface TalkUnreadSummary {
+  agents: TalkUnreadAgent[];
+}
+
+export interface TalkReadInput {
+  /** @minLength 1 */
+  cursor: string;
+}
+
+export interface TalkReadResult {
+  cursor: string;
 }
 
 export interface ClearTalkHistoryResult {

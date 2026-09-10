@@ -9,4 +9,6 @@ import type { TalkHistoryTurn } from './talkHistoryTurn';
 
 export interface TalkHistory {
   turns: TalkHistoryTurn[];
+  /** @nullable */
+  latestCursor: string | null;
 }

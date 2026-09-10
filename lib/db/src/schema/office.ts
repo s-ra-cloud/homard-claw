@@ -717,6 +717,27 @@ export const agentMessagesTable = pgTable(
   (table) => [index("agent_messages_task_idx").on(table.taskId)],
 );
 
+/** Stable per-workspace cursor through each agent's Talk transcript. */
+export const talkReadCursorsTable = pgTable(
+  "talk_read_cursors",
+  {
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspacesTable.id, { onDelete: "cascade" }),
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => agentsTable.id, { onDelete: "cascade" }),
+    lastReadMessageId: uuid("last_read_message_id")
+      .notNull()
+      .references(() => agentMessagesTable.id, { onDelete: "cascade" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [primaryKey({ columns: [table.workspaceId, table.agentId] })],
+);
+
 /**
  * Durable idempotency for Talk text messages: each client-generated message
  * id maps to at most one exchange per workspace/agent. A row is claimed

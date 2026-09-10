@@ -865,6 +865,40 @@ paths:
                 $ref: "#/components/schemas/ClearTalkHistoryResult"
         "404":
           description: Agent not found
+  /talk-unread:
+    get:
+      operationId: getTalkUnread
+      tags: [office]
+      summary: Get unread agent-authored Talk messages by agent
+      responses:
+        "200":
+          description: Workspace-scoped unread Talk summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TalkUnreadSummary"
+  /agents/{agentId}/talk-read:
+    post:
+      operationId: acknowledgeTalkRead
+      tags: [office]
+      summary: Mark Talk messages through a stable cursor as read
+      parameters:
+        - $ref: "#/components/parameters/AgentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TalkReadInput"
+      responses:
+        "200":
+          description: The acknowledged cursor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TalkReadResult"
+        "404":
+          description: Agent or cursor not found
   /documentation:
     get:
       operationId: getDocumentation
@@ -3230,12 +3264,37 @@ components:
         createdAt: { type: string, format: date-time }
     TalkHistory:
       type: object
-      required: [turns]
+      required: [turns, latestCursor]
       properties:
         turns:
           type: array
           items:
             $ref: "#/components/schemas/TalkHistoryTurn"
+        latestCursor: { type: [string, "null"] }
+    TalkUnreadAgent:
+      type: object
+      required: [agentId, unreadCount]
+      properties:
+        agentId: { type: string }
+        unreadCount: { type: number }
+    TalkUnreadSummary:
+      type: object
+      required: [agents]
+      properties:
+        agents:
+          type: array
+          items:
+            $ref: "#/components/schemas/TalkUnreadAgent"
+    TalkReadInput:
+      type: object
+      required: [cursor]
+      properties:
+        cursor: { type: string, minLength: 1 }
+    TalkReadResult:
+      type: object
+      required: [cursor]
+      properties:
+        cursor: { type: string }
     ClearTalkHistoryResult:
       type: object
       required: [deleted]

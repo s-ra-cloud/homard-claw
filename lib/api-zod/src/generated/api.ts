@@ -2138,7 +2138,8 @@ export const GetTalkHistoryResponse = zod.object({
   "text": zod.string(),
   "taskId": zod.string().nullable(),
   "createdAt": zod.coerce.date()
-}))
+})),
+  "latestCursor": zod.string().nullable()
 })
 
 
@@ -2151,6 +2152,36 @@ export const ClearTalkHistoryParams = zod.object({
 
 export const ClearTalkHistoryResponse = zod.object({
   "deleted": zod.number()
+})
+
+
+/**
+ * @summary Get unread agent-authored Talk messages by agent
+ */
+export const GetTalkUnreadResponse = zod.object({
+  "agents": zod.array(zod.object({
+  "agentId": zod.string(),
+  "unreadCount": zod.number()
+}))
+})
+
+
+/**
+ * @summary Mark Talk messages through a stable cursor as read
+ */
+export const AcknowledgeTalkReadParams = zod.object({
+  "agentId": zod.coerce.string()
+})
+
+
+
+
+export const AcknowledgeTalkReadBody = zod.object({
+  "cursor": zod.string().min(1)
+})
+
+export const AcknowledgeTalkReadResponse = zod.object({
+  "cursor": zod.string()
 })
 
 

@@ -17,6 +17,8 @@ import type {
 } from "@workspace/api-client-react";
 import {
   useDelegateFromTalk,
+  useAcknowledgeTalkRead,
+  getGetTalkUnreadQueryKey,
   getGetTalkHistoryQueryKey,
   transcribeAudio,
   useClearTalkHistory,
@@ -429,6 +431,16 @@ export function CallView({
     talkHistory.isError || (talkHistory.isFetched && !talkHistory.isFetching);
   const hydratedRef = useRef(false);
   const storedTurnIdsRef = useRef(new Set<string>());
+  const acknowledgedCursorRef = useRef<string | null>(null);
+  const acknowledgeRead = useAcknowledgeTalkRead({
+    mutation: {
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: getGetTalkUnreadQueryKey(),
+        });
+      },
+    },
+  });
   useEffect(() => {
     if (!historyReady || !talkHistory.data) return;
     if (!hydratedRef.current) {
@@ -451,6 +463,13 @@ export function CallView({
       });
     if (recaps.length > 0) setTurns((prev) => [...prev, ...recaps]);
   }, [historyReady, talkHistory.data]);
+  useEffect(() => {
+    const cursor = talkHistory.data?.latestCursor;
+    if (!historyReady || !cursor || acknowledgedCursorRef.current === cursor)
+      return;
+    acknowledgedCursorRef.current = cursor;
+    acknowledgeRead.mutate({ agentId, data: { cursor } });
+  }, [acknowledgeRead, agentId, historyReady, talkHistory.data?.latestCursor]);
 
   /** Context sent to the agent: recent settled turns, without failed sends. */
   const contextTurns = useCallback(
@@ -663,6 +682,9 @@ export function CallView({
         setFlowError(null);
         queryClient.invalidateQueries({
           queryKey: getGetTalkHistoryQueryKey(agentId),
+        });
+        queryClient.invalidateQueries({
+          queryKey: getGetTalkUnreadQueryKey(),
         });
         toast({
           title: "History cleared",

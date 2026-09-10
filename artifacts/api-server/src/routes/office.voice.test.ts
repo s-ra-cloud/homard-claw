@@ -24,6 +24,7 @@ import {
   pool,
   systemStateTable,
   talkExchangesTable,
+  talkReadCursorsTable,
   tasksTable,
   teamMembersTable,
   teamsTable,
@@ -885,6 +886,7 @@ describe("text conversations", () => {
       ["agent", "Second answer."],
     ]);
     expect(new Set(turns.map((t) => t.id)).size).toBe(4);
+    expect(res.body.latestCursor).toBe(turns.at(-1)?.id);
   });
 
   it("keeps Talk history readable for retired agents but 404s unknown ones", async () => {
@@ -938,6 +940,104 @@ describe("text conversations", () => {
     }
   });
 
+  it("counts only unread agent-authored Talk rows and acknowledges a stable cursor", async () => {
+    const agent = await createAgent(`${RUN_TAG} Unread`);
+    const [userTurn, firstReply, ignoredNote] = await db
+      .insert(agentMessagesTable)
+      .values([
+        {
+          fromAgentId: null,
+          toAgentId: agent.id,
+          kind: "voice",
+          body: "User turn does not count",
+        },
+        {
+          fromAgentId: agent.id,
+          toAgentId: null,
+          kind: "voice",
+          body: "Unread reply",
+        },
+        {
+          fromAgentId: agent.id,
+          toAgentId: null,
+          kind: "note",
+          body: "Non-Talk message does not count",
+        },
+      ])
+      .returning({ id: agentMessagesTable.id });
+
+    const unread = await request(app).get("/api/talk-unread");
+    expect(unread.status).toBe(200);
+    expect(unread.body.agents).toContainEqual({
+      agentId: agent.id,
+      unreadCount: 1,
+    });
+
+    const acknowledged = await request(app)
+      .post(`/api/agents/${agent.id}/talk-read`)
+      .send({ cursor: firstReply.id });
+    expect(acknowledged.status).toBe(200);
+    expect(acknowledged.body.cursor).toBe(firstReply.id);
+
+    // A reply arriving after the loaded cursor must remain unread.
+    await db.insert(agentMessagesTable).values({
+      fromAgentId: agent.id,
+      toAgentId: null,
+      kind: "chat_question",
+      body: "Concurrent task recap",
+      createdAt: new Date(Date.now() + 10),
+    });
+    const after = await request(app).get("/api/talk-unread");
+    expect(after.body.agents).toContainEqual({
+      agentId: agent.id,
+      unreadCount: 1,
+    });
+
+    // A stale acknowledgement cannot move the cursor backwards.
+    const stale = await request(app)
+      .post(`/api/agents/${agent.id}/talk-read`)
+      .send({ cursor: userTurn.id });
+    expect(stale.status).toBe(200);
+    const [saved] = await db
+      .select()
+      .from(talkReadCursorsTable)
+      .where(eq(talkReadCursorsTable.agentId, agent.id));
+    expect(saved.lastReadMessageId).toBe(firstReply.id);
+    expect(ignoredNote.id).toBeTruthy();
+  });
+
+  it("keeps unread summaries and read acknowledgements workspace isolated", async () => {
+    const agent = await createAgent(`${RUN_TAG} Unread Private`);
+    const [reply] = await db
+      .insert(agentMessagesTable)
+      .values({
+        fromAgentId: agent.id,
+        toAgentId: null,
+        kind: "voice",
+        body: "Private unread reply",
+      })
+      .returning({ id: agentMessagesTable.id });
+
+    const originalUser = authState.userId;
+    const outsider = `hc-unread-test-outsider-${Date.now()}`;
+    authState.userId = outsider;
+    try {
+      await request(app).get("/api/agents");
+      const summary = await request(app).get("/api/talk-unread");
+      expect(summary.status).toBe(200);
+      expect(summary.body.agents).toEqual([]);
+      const acknowledgement = await request(app)
+        .post(`/api/agents/${agent.id}/talk-read`)
+        .send({ cursor: reply.id });
+      expect(acknowledgement.status).toBe(404);
+    } finally {
+      authState.userId = originalUser;
+      await db
+        .delete(workspacesTable)
+        .where(eq(workspacesTable.clerkUserId, outsider));
+    }
+  });
+
   it("clears only the agent's own voice history and returns the deleted count", async () => {
     const agent = await createAgent(`${RUN_TAG} Cleared`);
     const bystander = await createAgent(`${RUN_TAG} Bystander`);
@@ -982,6 +1082,12 @@ describe("text conversations", () => {
       .from(agentMessagesTable)
       .where(eq(agentMessagesTable.id, nonVoice.id));
     expect(survivors).toHaveLength(1);
+    const unread = await request(app).get("/api/talk-unread");
+    expect(
+      unread.body.agents.some(
+        (entry: { agentId: string }) => entry.agentId === agent.id,
+      ),
+    ).toBe(false);
   });
 
   it("a clear during an in-flight converse wins: the late reply is not persisted", async () => {

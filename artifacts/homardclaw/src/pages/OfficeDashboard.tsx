@@ -13,6 +13,7 @@ import {
   useGetDocumentation,
   useGetMemorySettings,
   useGetOfficeDeskOrder,
+  useGetTalkUnread,
   ApprovalDecisionDecision,
 } from "@workspace/api-client-react";
 import { reorderByExplicitOrder } from "@/hooks/useOfficeSeating";
@@ -34,6 +35,7 @@ import {
   officeAnimationStatus,
 } from "./office-agent-activity";
 import { SCENE_HOTSPOTS } from "./office-scene-hotspots";
+import { unreadTalkAgentIds } from "./office-unread";
 import "./office-dashboard.css";
 
 /** The full 1586 × 992 submarine illustration is the scene coordinate plane. */
@@ -314,6 +316,17 @@ export default function OfficeDashboard() {
   const { data: inspectorSettings, isLoading: inspectorSettingsLoading } =
     useGetInspectorSettings();
   const { data: deskOrder } = useGetOfficeDeskOrder();
+  const { data: talkUnread } = useGetTalkUnread({
+    query: {
+      queryKey: ["/api/talk-unread"],
+      refetchInterval: 10_000,
+      refetchIntervalInBackground: false,
+    },
+  });
+  const unreadAgentIds = React.useMemo(
+    () => unreadTalkAgentIds(talkUnread),
+    [talkUnread],
+  );
   // Polls so a stalled queue or a lost worker lease surfaces on its own.
   const { data: runtimeHealth } = useGetRuntimeHealth({
     query: { queryKey: ["/api/runtime/health"], refetchInterval: 10000 },
@@ -835,6 +848,14 @@ export default function OfficeDashboard() {
                             )
                           }
                         >
+                          {unreadAgentIds.has(agent.id) && (
+                            <span
+                              className="room-agent__unread-bubble"
+                              aria-hidden="true"
+                            >
+                              …
+                            </span>
+                          )}
                           <MarlowLobster
                             pose={pose}
                             status={stopped ? "paused" : displayStatus}

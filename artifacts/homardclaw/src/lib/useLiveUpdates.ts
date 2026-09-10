@@ -17,8 +17,8 @@ const TOPIC_PREFIXES: Record<string, string[]> = {
   agents: ["/api/agents"],
   schedules: ["/api/schedules"],
   "chat-question-schedules": ["/api/chat-question-schedules"],
-  talk: ["/api/agents/"],
-  messages: ["/api/messages"],
+  talk: ["/api/agents/", "/api/talk-unread"],
+  messages: ["/api/messages", "/api/agents/", "/api/talk-unread"],
   overview: [
     "/api/office/overview",
     "/api/runtime/health",
