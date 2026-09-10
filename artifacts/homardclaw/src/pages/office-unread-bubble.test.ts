@@ -37,4 +37,13 @@ describe("office unread Talk bubbles", () => {
       /\.room-agent__unread-bubble\s*\{[^}]*z-index:\s*3;[^}]*pointer-events:\s*none;/s,
     );
   });
+
+  it("points the bubble tail to the left", () => {
+    expect(styles).toMatch(
+      /\.room-agent__unread-bubble::after\s*\{[^}]*left:\s*4px;[^}]*border-left:\s*2px solid #2b2733;[^}]*}/s,
+    );
+    expect(styles).not.toMatch(
+      /\.room-agent__unread-bubble::after\s*\{[^}]*border-right:\s*2px solid #2b2733;/s,
+    );
+  });
 });
