@@ -39,20 +39,22 @@ export const SCENE_HOTSPOTS: SceneHotspot[] = [
     width: "10%",
     height: "9%",
   },
+  // The Approval console absorbed the centre instrument bank that used to
+  // open Teams: with that hotspot gone, the freed space (left edge 14.9%,
+  // top edge 42.55% in the old layout) grows Approvals into a larger,
+  // easier-to-hit command console instead of sitting unused.
   {
     href: "/approvals",
     label: "Approvals",
     ariaLabel: "Command console — open Approvals",
-    left: "19.6%",
-    top: "49.5%",
-    width: "4.2%",
-    height: "4.5%",
+    left: "18.7%",
+    top: "47.2%",
+    width: "6.1%",
+    height: "9.2%",
     extraClass: "scene-hotspot--approval",
   },
-  // Crustabot and Team navigation lives on two unused instrument banks in the
-  // port control console. The four wall computers are workstations only.
-  // Both banks open the Crustabots page — Teams lands on its Teams tab —
-  // since team navigation now lives inside the Crustabot menu.
+  // Crustabot navigation lives on the left instrument bank in the port
+  // control console. The four wall computers are workstations only.
   {
     href: "/agents",
     label: "Crustabots",
@@ -61,16 +63,6 @@ export const SCENE_HOTSPOTS: SceneHotspot[] = [
     top: "47.7%",
     width: "5.2%",
     height: "8.4%",
-    extraClass: "scene-hotspot--console",
-  },
-  {
-    href: "/agents?tab=teams",
-    label: "Teams",
-    ariaLabel: "Centre server instrument bank — open Teams",
-    left: "16.7%",
-    top: "45.8%",
-    width: "3.6%",
-    height: "6.5%",
     extraClass: "scene-hotspot--console",
   },
   {
