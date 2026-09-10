@@ -28,6 +28,11 @@ import { useIsDesktop } from "@/hooks/use-mobile";
 import { useRoomHotspotReveal } from "@/hooks/useRoomHotspotReveal";
 import { OFFICE_WINDOW_NAME, officeWindowHref } from "@/lib/office-window";
 import { chooseOfficeRolePlacements } from "./office-role-placements";
+import {
+  deskPoseForAgent,
+  isOfficeAgentWorking,
+  officeAnimationStatus,
+} from "./office-agent-activity";
 import { SCENE_HOTSPOTS } from "./office-scene-hotspots";
 import "./office-dashboard.css";
 
@@ -128,22 +133,8 @@ const IDLE_ACTIVITIES = [
 
 type IdleActivity = (typeof IDLE_ACTIVITIES)[number];
 
-/** Statuses where the agent turns to face its desk. */
-const AT_DESK_STATUSES = new Set(["working", "researching"]);
-
 function randomIdleActivity(): IdleActivity {
   return IDLE_ACTIVITIES[Math.floor(Math.random() * IDLE_ACTIVITIES.length)];
-}
-
-function poseForAgent(
-  status: string,
-  activity: IdleActivity | undefined,
-): LobsterPose {
-  if (AT_DESK_STATUSES.has(status)) return "working";
-  // An idle agent briefly renders plain-seated until the transition effect
-  // assigns its activity; picking here instead would reshuffle every render.
-  if (status === "idle" && activity) return activity;
-  return "seated";
 }
 
 interface OpenOfficeWindow {
@@ -566,8 +557,7 @@ export default function OfficeDashboard() {
       dutyRole: placement.role,
       mirrorX: placement.seat.mirrorX ?? false,
       pose: placement.seat.pose,
-      displayStatus:
-        agent.status === "paused" ? "paused" : placement.seat.status,
+      displayStatus: officeAnimationStatus(agent.status),
       zIndex: floorZIndex(placement.seat.top) + 3,
     })),
     ...floorAgents.map((agent, index) => {
@@ -578,7 +568,7 @@ export default function OfficeDashboard() {
         dutyRole: undefined,
         mirrorX: false,
         pose: "floor-working" as LobsterPose,
-        displayStatus: agent.status,
+        displayStatus: officeAnimationStatus(agent.status),
         zIndex: floorZIndex(seat.top),
       };
     }),
@@ -589,8 +579,8 @@ export default function OfficeDashboard() {
       mirrorX: false,
       pose: stopped
         ? ("seated" as LobsterPose)
-        : poseForAgent(agent.status, idleActivities[agent.id]),
-      displayStatus: agent.status,
+        : deskPoseForAgent(agent.status, idleActivities[agent.id]),
+      displayStatus: officeAnimationStatus(agent.status),
       zIndex: DESK_Z_INDEX,
     })),
     // Sandboxed agents work from their own cushion, exactly like the ones
@@ -601,7 +591,7 @@ export default function OfficeDashboard() {
       dutyRole: undefined,
       mirrorX: false,
       pose: "floor-working" as LobsterPose,
-      displayStatus: agent.status,
+      displayStatus: officeAnimationStatus(agent.status),
       zIndex: floorZIndex(EXTERIOR_SEATS[index].top),
     })),
   ];
@@ -736,7 +726,7 @@ export default function OfficeDashboard() {
                 >
                   {/* A monitor wakes only when the agent seated below it works. */}
                   {deskAgents.map((agent, index) =>
-                    !stopped && AT_DESK_STATUSES.has(agent.status) ? (
+                    !stopped && isOfficeAgentWorking(agent.status) ? (
                       <WorkstationScreen
                         key={`${agent.id}-screen`}
                         station={DESK_SEATS[index]}

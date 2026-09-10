@@ -10,7 +10,6 @@ describe("office role placements", () => {
       left: 17.2,
       top: 49.4,
       pose: "working",
-      status: "working",
       mirrorX: true,
     });
     expect(OFFICE_ROLE_SEATS.documentation).toMatchObject({
@@ -29,7 +28,6 @@ describe("office role placements", () => {
       left: 30.4,
       top: 45.2,
       pose: "working",
-      status: "working",
       mirrorX: true,
     });
   });

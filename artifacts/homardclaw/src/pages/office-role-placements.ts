@@ -11,7 +11,6 @@ export type OfficeRoleSeat = {
   top: number;
   label: string;
   pose: LobsterPose;
-  status: "idle" | "working";
   mirrorX?: boolean;
 };
 
@@ -26,7 +25,6 @@ export const OFFICE_ROLE_SEATS: Record<OfficeRole, OfficeRoleSeat> = {
     top: 68.2,
     label: "documentation reading spot in front of Providers",
     pose: "hotel-reading",
-    status: "idle",
   },
   approval: {
     // The working composite is drawn from behind with one claw on the keys.
@@ -36,7 +34,6 @@ export const OFFICE_ROLE_SEATS: Record<OfficeRole, OfficeRoleSeat> = {
     top: 49.4,
     label: "approval console typing station",
     pose: "working",
-    status: "working",
     mirrorX: true,
   },
   memory: {
@@ -46,7 +43,6 @@ export const OFFICE_ROLE_SEATS: Record<OfficeRole, OfficeRoleSeat> = {
     top: 69.2,
     label: "memory cable station in front of the Memory computer",
     pose: "memory-cables",
-    status: "working",
   },
   inspector: {
     // Just to the right of the blue Inbox navigation console (hotspot at
@@ -57,7 +53,6 @@ export const OFFICE_ROLE_SEATS: Record<OfficeRole, OfficeRoleSeat> = {
     top: 45.2,
     label: "inbox inspection station",
     pose: "working",
-    status: "working",
     mirrorX: true,
   },
 };
