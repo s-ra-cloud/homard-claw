@@ -2,17 +2,342 @@ import type { LookupAddress } from "node:dns";
 import { lookup as dnsLookup } from "node:dns/promises";
 import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
+import { existsSync } from "node:fs";
 import sanitizeHtml from "sanitize-html";
 
 const WEB_SEARCH_API_KEY_ENV = "WEB_SEARCH_API_KEY";
 const WEB_SEARCH_ENDPOINT = "https://api.search.brave.com/res/v1/web/search";
-const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
-const MAX_REDIRECTS = 3;
-const DEFAULT_TIMEOUT_MS = 30_000;
-const DEFAULT_RESULT_CHARS = 4_000;
+export const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+export const MAX_REDIRECTS = 3;
+export const DEFAULT_TIMEOUT_MS = 30_000;
+export const DEFAULT_RESULT_CHARS = 4_000;
 
 export type NativeWebOutcome =
   { ok: true; text: string } | { ok: false; message: string };
+
+export const MAX_RENDERED_LINKS = 80;
+export const MAX_RENDERED_REQUESTS = 40;
+export const MAX_RENDERED_BYTES = 4 * 1024 * 1024;
+const MAX_RENDERED_PAGES = 1;
+
+export class WebRenderLimitError extends Error {
+  constructor(
+    public readonly limit:
+      | "requests"
+      | "bytes"
+      | "text"
+      | "links"
+      | "pages"
+      | "time",
+  ) {
+    super(`The rendered website exceeded its ${limit} limit.`);
+    this.name = "WebRenderLimitError";
+  }
+}
+
+export type RenderedRequestPolicyInput = {
+  url: string;
+  origin: string;
+  method: string;
+  resourceType: string;
+};
+
+/** Pure browser-route policy; kept separate so every request rule is testable. */
+export function isAllowedRenderedRequest(input: RenderedRequestPolicyInput): boolean {
+  try {
+    const parsed = new URL(input.url);
+    return parsed.protocol === "https:" &&
+      parsed.origin === input.origin &&
+      !/(?:^|\/)(?:login|signin|sign-in|oauth|authorize|account)(?:\/|$)/i.test(parsed.pathname) &&
+      input.method === "GET" &&
+      !["websocket", "eventsource", "media", "manifest", "texttrack", "download"].includes(input.resourceType);
+  } catch {
+    return false;
+  }
+}
+
+export function chromiumLaunchOptions(origin: string, pinnedAddress: string) {
+  const host = new URL(origin).hostname;
+  const replacement =
+    isIP(pinnedAddress) === 6 ? `[${pinnedAddress}]` : pinnedAddress;
+  return {
+    headless: true,
+    executablePath: chromiumExecutable(),
+    args: [`--host-resolver-rules=MAP ${host} ${replacement},EXCLUDE *`],
+  };
+}
+
+function chromiumExecutable(): string | undefined {
+  const configured = process.env.CHROMIUM_EXECUTABLE_PATH;
+  if (configured && existsSync(configured)) return configured;
+  for (const candidate of [
+    "/repl/tools/bin/chromium",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/google-chrome",
+  ]) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+/** Data-only extraction function evaluated in the isolated browser page. */
+export function extractRenderedPage({
+  maxLinks,
+  allowedOrigin,
+}: {
+  maxLinks: number;
+  allowedOrigin: string;
+}) {
+  const document = (globalThis as any).document;
+  const links: string[] = [];
+  const tabs: string[] = [];
+  const tabPanels: string[] = [];
+  document.querySelectorAll("a[href]").forEach((node: any) => {
+    const href = node.href && node.tagName === "A" ? node.href : "";
+    const label = (node.textContent || node.getAttribute("aria-label") || "").trim();
+    if (href && new URL(href).origin === allowedOrigin) {
+      links.push(`${label || "link"} — ${href}`);
+    }
+  });
+  document.querySelectorAll('[role="tab"]').forEach((node: any, index: number) => {
+    const label = (node.textContent || node.getAttribute("aria-label") || "").trim();
+    if (label) tabs.push(`${index + 1}. ${label}`);
+  });
+  document.querySelectorAll('[role="tabpanel"]').forEach((node: any) => {
+    const label = node.getAttribute("aria-label") || node.getAttribute("data-title") || "Tab panel";
+    const text = (node.textContent || "").trim();
+    if (text) tabPanels.push(`${label}: ${text}`);
+  });
+  return {
+    text: document.body?.innerText || "",
+    tabPanels: [...new Set(tabPanels)],
+    links: [...new Set(links)].slice(0, maxLinks),
+    tabs: [...new Set(tabs)].slice(0, maxLinks),
+  };
+}
+
+/** Render an approved application in an isolated browser context. The model
+ * receives only text and URLs; it never receives a page/evaluate primitive. */
+async function performApprovedWebsiteRender(
+  url: string,
+  origin: string,
+  tabIndex: number | undefined,
+  options: { timeoutMs: number; charLimit: number },
+  control: {
+    deadline: number;
+    setCancel: (cancel: () => void) => void;
+  },
+): Promise<string> {
+  // Production may point at a system Chromium with
+  // CHROMIUM_EXECUTABLE_PATH; Playwright's bundled executable is the fallback.
+  const { chromium } = await import("playwright");
+  const validated = await resolvePublicTarget(
+    url,
+    defaultResolver,
+    Math.max(1, control.deadline - Date.now()),
+  );
+  const pinned = validated.addresses[0]!;
+  // Keep Chromium's sandbox enabled. DNS is pinned for this browser instance.
+  const browser = await chromium.launch(chromiumLaunchOptions(origin, pinned.address));
+  control.setCancel(() => {
+    void browser.close().catch(() => undefined);
+  });
+  const context = await browser.newContext({ acceptDownloads: false, serviceWorkers: "block" });
+  const deadline = control.deadline;
+  let requestCount = 0;
+  let transferred = 0;
+  let responsePolicyError: Error | null = null;
+  let openedPageCount = 0;
+  context.on("page", (openedPage: any) => {
+    openedPageCount += 1;
+    if (openedPageCount > MAX_RENDERED_PAGES) {
+      responsePolicyError = new WebRenderLimitError("pages");
+      void openedPage.close();
+    }
+  });
+  await context.route("**/*", async (route: any) => {
+    requestCount += 1;
+    if (requestCount > MAX_RENDERED_REQUESTS) {
+      responsePolicyError = new WebRenderLimitError("requests");
+      await route.abort();
+      return;
+    }
+    const request = route.request();
+    const requestUrl = request.url();
+    try {
+      const parsed = new URL(requestUrl);
+      if (!isAllowedRenderedRequest({
+        url: requestUrl,
+        origin,
+        method: request.method(),
+        resourceType: request.resourceType(),
+      })) {
+        await route.abort();
+        return;
+      }
+      await resolvePublicTarget(parsed.toString(), defaultResolver, Math.max(100, deadline - Date.now()));
+      await route.continue();
+    } catch {
+      await route.abort();
+    }
+  });
+  try {
+    const page = await context.newPage();
+    const cdp = await context.newCDPSession(page);
+    await cdp.send("Network.enable");
+    cdp.on("Network.dataReceived", (event) => {
+      transferred += event.encodedDataLength;
+      if (
+        transferred > MAX_RENDERED_BYTES &&
+        !(responsePolicyError instanceof WebRenderLimitError)
+      ) {
+        responsePolicyError = new WebRenderLimitError("bytes");
+        void page.close();
+      }
+    });
+    await page.addInitScript(() => {
+      (globalThis as any).open = () => null;
+      const pageDocument = (globalThis as any).document;
+      pageDocument.addEventListener(
+        "submit",
+        (event: { preventDefault: () => void }) => event.preventDefault(),
+        true,
+      );
+    });
+    page.on("download", (download) => {
+      responsePolicyError = new Error("attachment_refused");
+      void download.cancel();
+      void page.close();
+    });
+    page.on("response", async (response: any) => {
+      const headers = response.headers();
+      if (headers["content-disposition"]?.toLowerCase().includes("attachment")) {
+        responsePolicyError = new Error("attachment_refused");
+        void page.close();
+        return;
+      }
+      if (response.request().isNavigationRequest() &&
+          !/^(?:text\/|application\/(?:xhtml\+xml|json))/i.test(headers["content-type"] ?? "")) {
+        responsePolicyError = new Error("unsupported_content_type");
+      }
+      const length = Number(headers["content-length"] ?? 0);
+      if (Number.isFinite(length) && length > MAX_RENDERED_BYTES) {
+        responsePolicyError = new WebRenderLimitError("bytes");
+        void page.close();
+      }
+    });
+    try {
+      await page.goto(url, {
+        waitUntil: "domcontentloaded",
+        timeout: options.timeoutMs,
+      });
+      await page.waitForTimeout(
+        Math.min(1_500, Math.max(0, deadline - Date.now())),
+      );
+    } catch (error) {
+      if (responsePolicyError) throw responsePolicyError;
+      throw error;
+    }
+    if (responsePolicyError) throw responsePolicyError;
+    if (Date.now() > deadline) throw new WebTimeoutError();
+    if (tabIndex !== undefined) {
+      if (
+        !Number.isInteger(tabIndex) ||
+        tabIndex < 1 ||
+        tabIndex > MAX_RENDERED_LINKS
+      ) {
+        throw new Error("invalid_tab");
+      }
+      const tabs = page.locator('[role="tab"]');
+      const tabCount = await tabs.count();
+      if (tabIndex > tabCount) throw new Error(`tab_unavailable_${tabCount}`);
+      await tabs.nth(tabIndex - 1).click({
+        timeout: Math.max(1, deadline - Date.now()),
+      });
+      await page.waitForTimeout(
+        Math.min(1_500, Math.max(0, deadline - Date.now())),
+      );
+      if (responsePolicyError) throw responsePolicyError;
+      if (Date.now() > deadline) throw new WebTimeoutError();
+    }
+    const result = await page.evaluate(
+      ({ maxLinks, allowedOrigin }) => {
+      const document = (globalThis as any).document;
+      const links: string[] = [];
+      const tabs: string[] = [];
+      const tabPanels: string[] = [];
+      document.querySelectorAll("a[href]").forEach((node: any) => {
+        const href = node.href && node.tagName === "A" ? node.href : "";
+        const label = (node.textContent || node.getAttribute("aria-label") || "").trim();
+        if (href && new URL(href).origin === allowedOrigin) {
+          links.push(`${label || "link"} — ${href}`);
+        }
+      });
+      document.querySelectorAll('[role="tab"]').forEach((node: any, index: number) => {
+        const label = (node.textContent || node.getAttribute("aria-label") || "").trim();
+        if (label) tabs.push(`${index + 1}. ${label}`);
+      });
+      document.querySelectorAll('[role="tabpanel"]').forEach((node: any) => {
+        const label =
+          node.getAttribute("aria-label") ||
+          node.getAttribute("data-title") ||
+          "Tab panel";
+        const text = (node.textContent || "").trim();
+        if (text) tabPanels.push(`${label}: ${text}`);
+      });
+      return {
+        text: document.body?.innerText || "",
+        tabPanels: [...new Set(tabPanels)],
+        links: [...new Set(links)].slice(0, maxLinks),
+        tabs: [...new Set(tabs)].slice(0, maxLinks),
+      };
+      },
+      { maxLinks: MAX_RENDERED_LINKS, allowedOrigin: origin },
+    );
+    if (result.text.length > options.charLimit) throw new WebRenderLimitError("text");
+    return boundText(
+      `${readableText(result.text)}${
+        result.tabPanels.length
+          ? `\n\nRendered tab panels:\n${result.tabPanels.join("\n\n")}`
+          : ""
+      }\n\nDiscoverable tabs (read one by passing its number as tab):\n${
+        result.tabs.length ? result.tabs.join("\n") : "(none)"
+      }\n\nDiscoverable same-origin links:\n${result.links
+        .map((v: string, i: number) => `${i + 1}. ${v}`)
+        .join("\n")}`,
+      options.charLimit,
+    );
+  } finally {
+    await browser.close();
+  }
+}
+
+async function renderApprovedWebsite(
+  url: string,
+  origin: string,
+  tabIndex: number | undefined,
+  options: { timeoutMs: number; charLimit: number },
+): Promise<string> {
+  const deadline = Date.now() + options.timeoutMs;
+  let timedOut = false;
+  let cancel: () => void = () => {};
+  return withRenderedDeadline(
+    () =>
+      performApprovedWebsiteRender(url, origin, tabIndex, options, {
+        deadline,
+        setCancel(nextCancel) {
+          cancel = nextCancel;
+          if (timedOut) cancel();
+        },
+      }),
+    options.timeoutMs,
+    () => {
+      timedOut = true;
+      cancel();
+    },
+  );
+}
 
 type ResolvedTarget = {
   url: URL;
@@ -35,9 +360,33 @@ export type WebFetchDependencies = {
 };
 
 class WebTargetRefusedError extends Error {}
-class WebTimeoutError extends Error {}
-class WebBodyLimitError extends Error {}
-class WebRedirectLimitError extends Error {}
+export class WebTimeoutError extends Error {
+  constructor() { super("The web tool timed out."); }
+}
+export async function withRenderedDeadline<T>(
+  operation: () => Promise<T>,
+  timeoutMs: number,
+  cancel: () => void,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      cancel();
+      reject(new WebTimeoutError());
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([operation(), timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+export class WebBodyLimitError extends Error {
+  constructor() { super("The web response exceeded its byte limit."); }
+}
+export class WebRedirectLimitError extends Error {
+  constructor() { super("The web page redirected too many times."); }
+}
 
 function stripControlCharacters(value: string): string {
   // Keep ordinary whitespace, but remove terminal/control payloads.
@@ -432,7 +781,7 @@ async function requestPageOnce(
 /** Fetch a public HTTPS page, revalidating and pinning DNS on every hop. */
 export async function fetchReadablePage(
   rawUrl: string,
-  options: { timeoutMs: number },
+  options: { timeoutMs: number; allowedOrigin?: string },
   dependencies: WebFetchDependencies = {},
 ): Promise<string> {
   const resolver = dependencies.resolve ?? defaultResolver;
@@ -443,13 +792,20 @@ export async function fetchReadablePage(
     const remaining = deadline - Date.now();
     if (remaining <= 0) throw new WebTimeoutError();
     const target = await resolvePublicTarget(current, resolver, remaining);
+    if (options.allowedOrigin && target.url.origin !== options.allowedOrigin) {
+      throw new WebTargetRefusedError();
+    }
     const response = await requestOnce(target, {
       timeoutMs: remaining,
       maxBytes: MAX_RESPONSE_BYTES,
     });
     if (response.status >= 300 && response.status < 400 && response.location) {
       if (redirects >= MAX_REDIRECTS) throw new WebRedirectLimitError();
-      current = new URL(response.location, target.url).toString();
+      const next = new URL(response.location, target.url);
+      if (options.allowedOrigin && next.origin !== options.allowedOrigin) {
+        throw new WebTargetRefusedError();
+      }
+      current = next.toString();
       continue;
     }
     if (response.status < 200 || response.status >= 300) {
@@ -544,6 +900,12 @@ async function searchWeb(query: string, timeoutMs: number): Promise<string> {
 }
 
 function webFailureMessage(error: unknown): string {
+  if (error instanceof WebRenderLimitError) {
+    return `The rendered website was refused because it exceeded the ${error.limit} limit.`;
+  }
+  if (error instanceof Error && error.message === "attachment_refused") {
+    return "The website response is a download, which read-only website access does not allow.";
+  }
   if (error instanceof WebTargetRefusedError) {
     return "The requested page was refused because it is not a public https:// address.";
   }
@@ -582,6 +944,45 @@ export async function executeNativeWebHandler(
 ): Promise<NativeWebOutcome> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const charLimit = options.charLimit ?? DEFAULT_RESULT_CHARS;
+  if (handler === "website.read") {
+    const origin = typeof params.origin === "string" ? params.origin : "";
+    const url = typeof params.url === "string" && params.url ? params.url : origin;
+    const tabIndex = typeof params.tab === "number" ? params.tab : undefined;
+    if (
+      tabIndex !== undefined &&
+      (!Number.isInteger(tabIndex) ||
+        tabIndex < 1 ||
+        tabIndex > MAX_RENDERED_LINKS)
+    ) {
+      return {
+        ok: false,
+        message: `Tab must be an integer from 1 to ${MAX_RENDERED_LINKS}.`,
+      };
+    }
+    try {
+      const parsedOrigin = new URL(origin);
+      if (parsedOrigin.protocol !== "https:" || parsedOrigin.origin !== origin) {
+        return { ok: false, message: "This website definition is invalid." };
+      }
+      const target = new URL(url);
+      if (target.origin !== origin || target.protocol !== "https:" ||
+          target.username || target.password) {
+        return { ok: false, message: "Navigation was refused: it must stay on the approved HTTPS origin." };
+      }
+      return {
+        ok: true,
+        text: `[EXTERNAL UNTRUSTED WEBSITE CONTENT]\n${boundText(
+          await renderApprovedWebsite(target.toString(), origin, tabIndex, {
+            timeoutMs,
+            charLimit,
+          }),
+          charLimit,
+        )}\n[END EXTERNAL UNTRUSTED WEBSITE CONTENT]`,
+      };
+    } catch (error) {
+      return { ok: false, message: webFailureMessage(error) };
+    }
+  }
   // Treat the package as one configured feature. Fetch never silently works
   // around a missing search credential while the catalog says disconnected.
   if (!process.env[WEB_SEARCH_API_KEY_ENV]?.trim()) {

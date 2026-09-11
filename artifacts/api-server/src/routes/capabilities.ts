@@ -4,6 +4,7 @@ import {
   agentsTable,
   db,
   workspaceConnectedAppsTable,
+  workspaceWebsitesTable,
   type CapabilityPackageRecord,
 } from "@workspace/db";
 import { and, eq, sql } from "drizzle-orm";
@@ -33,6 +34,7 @@ import {
 } from "../capabilities/service";
 import { mcpListTools, resolveMcpEndpoint } from "../capabilities/mcp";
 import { nativeWebConfigured } from "../capabilities/web";
+import { websiteManifest } from "../capabilities/websites";
 
 const router: IRouter = Router();
 
@@ -134,7 +136,7 @@ function skillJson(manifest: CapabilityManifest) {
 
 router.get("/capabilities", async (req, res): Promise<void> => {
   const wsId = req.workspaceId!;
-  const [rows, enabledRows, grantCounts] = await Promise.all([
+  const [rows, enabledRows, grantCounts, websites] = await Promise.all([
     listInstallRows(wsId),
     db
       .select()
@@ -155,6 +157,7 @@ router.get("/capabilities", async (req, res): Promise<void> => {
         ),
       )
       .groupBy(agentAppGrantsTable.app),
+    db.select().from(workspaceWebsitesTable).where(eq(workspaceWebsitesTable.workspaceId, wsId)),
   ]);
   const disabled = new Set(
     enabledRows.filter((row) => !row.enabled).map((row) => row.app),
@@ -211,6 +214,30 @@ router.get("/capabilities", async (req, res): Promise<void> => {
       };
     }),
   );
+  for (const website of websites) {
+    const manifest = websiteManifest(website);
+    packages.push({
+      packageId: manifest.id,
+      displayName: manifest.displayName,
+      description: manifest.description,
+      publisher: manifest.publisher,
+      builtin: false,
+      connection: "none",
+      installed: !website.removedAt,
+      installedVersion: website.revision,
+      registryVersion: website.revision,
+      status: website.removedAt ? "removed" : "active",
+      enabled: website.enabled && !website.removedAt,
+      quarantineReason: null,
+      pendingVersion: null,
+      pendingDiff: null,
+      health: website.enabled && !website.removedAt ? "none_required" : "not_connected",
+      healthDetail: website.enabled ? null : "Disabled by workspace owner.",
+      grantedAgents: grants.get(manifest.id) ?? 0,
+      tools: toolJson(manifest),
+      skills: skillJson(manifest),
+    });
+  }
   res.json({ packages });
 });
 

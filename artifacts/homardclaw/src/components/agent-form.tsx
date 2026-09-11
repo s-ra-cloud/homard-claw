@@ -11,6 +11,7 @@ import {
   useListCapabilities,
   useListConnectedApps,
   useListCustomApis,
+  useListWebsites,
   useListProviderModels,
 } from "@workspace/api-client-react";
 import { LOBSTER_PRESETS, MarlowLobster } from "@/components/ui/marlow-lobster";
@@ -794,16 +795,22 @@ function ConnectedAppsFields({
   const { data: connectedApps } = useListConnectedApps();
   const { data: capabilities } = useListCapabilities();
   const { data: customApis } = useListCustomApis();
+  const { data: websites } = useListWebsites();
   const apps = connectedApps?.apps ?? [];
   // Installed optional capability packages (e.g. Web Research) are granted
   // exactly like the built-in apps: explicit, per agent, default nothing.
   const packages = (capabilities?.packages ?? []).filter(
-    (pkg) => !pkg.builtin && pkg.installed && pkg.status === "active",
+    (pkg) =>
+      !pkg.builtin &&
+      pkg.installed &&
+      pkg.status === "active" &&
+      !pkg.packageId.startsWith("website_"),
   );
   // Owner-whitelisted custom APIs join the same explicit-grant model: each
   // one defaults to "No Access" for every Crustabot.
   const custom = customApis?.apis ?? [];
-  if (apps.length === 0 && packages.length === 0 && custom.length === 0)
+  const sites = websites?.websites ?? [];
+  if (apps.length === 0 && packages.length === 0 && custom.length === 0 && sites.length === 0)
     return null;
   return (
     <div className="border-4 border-border bg-muted/20 p-4 space-y-3">
@@ -1018,6 +1025,43 @@ function ConnectedAppsFields({
                           {option.label}
                         </SelectItem>
                       ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage className={messageClass} />
+                </FormItem>
+              );
+            }}
+          />
+        ))}
+        {sites.map((site) => (
+          <FormField
+            key={`website_${site.id}`}
+            control={form.control}
+            name={`appGrants.website_${site.id}` as const}
+            render={({ field }) => {
+              const level = field.value === "read" ? "read" : "none";
+              return (
+                <FormItem className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 border-2 border-border/50 bg-background/50 p-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold uppercase text-xs">{site.displayName}</span>
+                      <Badge variant="outline">Website · Read Only</Badge>
+                      {!site.enabled ? <Badge variant="destructive">Disabled</Badge> : <Badge variant="success">Enabled</Badge>}
+                    </div>
+                    <p className="text-[9px] text-muted-foreground font-mono mt-1 break-all">{site.origin}</p>
+                    <p className="text-[9px] text-muted-foreground uppercase font-bold mt-1">
+                      {site.enabled ? "Read rendered pages and same-origin links only." : "Disabled — access is unavailable until enabled in Connected Apps."}
+                    </p>
+                  </div>
+                  <Select onValueChange={field.onChange} value={level}>
+                    <FormControl>
+                      <SelectTrigger className={`${selectTriggerClass} sm:w-44`} disabled={!site.enabled}>
+                        <SelectValue />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent className={selectContentClass}>
+                      <SelectItem value="none" className={selectItemClass}>No Access</SelectItem>
+                      <SelectItem value="read" className={selectItemClass}>Read Only</SelectItem>
                     </SelectContent>
                   </Select>
                   <FormMessage className={messageClass} />

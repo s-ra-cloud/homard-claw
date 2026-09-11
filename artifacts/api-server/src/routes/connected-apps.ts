@@ -6,6 +6,7 @@ import {
   customApiConnectionsTable,
   db,
   workspaceConnectedAppsTable,
+  workspaceWebsitesTable,
   type CustomApiConnectionRecord,
 } from "@workspace/db";
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -29,6 +30,14 @@ import {
   UpdateCustomApiResponse,
   ValidateCustomApiParams,
   ValidateCustomApiResponse,
+  ListWebsitesResponse,
+  CreateWebsiteBody,
+  CreateWebsiteResponse,
+  UpdateWebsiteParams,
+  UpdateWebsiteBody,
+  UpdateWebsiteResponse,
+  DeleteWebsiteParams,
+  DeleteWebsiteResponse,
 } from "@workspace/api-zod";
 import {
   APP_CATALOG,
@@ -52,8 +61,99 @@ import {
 import { findRegistryEntry } from "../capabilities/registry";
 import { recordAudit } from "../audit";
 import { publish } from "../events";
+import { normalizeWebsiteOrigin, websitePackageId, websiteRevision } from "../capabilities/websites";
 
 const router: IRouter = Router();
+
+function websiteJson(row: typeof workspaceWebsitesTable.$inferSelect, grantedAgents = 0) {
+  return { id: row.id, displayName: row.displayName, origin: row.origin, revision: row.revision,
+    enabled: row.enabled, removed: row.removedAt !== null, grantedAgents,
+    createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
+}
+
+router.get("/connected-apps/websites", async (req, res): Promise<void> => {
+  const rows = await db.select().from(workspaceWebsitesTable)
+    .where(eq(workspaceWebsitesTable.workspaceId, req.workspaceId!))
+    .orderBy(workspaceWebsitesTable.createdAt);
+  const counts = await customGrantCounts(req.workspaceId!, rows.map((row) => websitePackageId(row.id)));
+  res.json(ListWebsitesResponse.parse({ websites: rows.map((row) => websiteJson(row, counts.get(websitePackageId(row.id)) ?? 0)) }));
+});
+
+router.post("/connected-apps/websites", async (req, res): Promise<void> => {
+  const parsed = CreateWebsiteBody.safeParse(req.body);
+  const displayName = parsed.success ? parsed.data.displayName.trim() : "";
+  const origin = parsed.success ? normalizeWebsiteOrigin(parsed.data.origin) : null;
+  if (!displayName || displayName.length > 80 || !origin) {
+    res.status(400).json({ error: "A display name and normalized public HTTPS origin are required." });
+    return;
+  }
+  try {
+    const [row] = await db.transaction(async (tx) => {
+      const [inserted] = await tx.insert(workspaceWebsitesTable).values({
+        workspaceId: req.workspaceId!, displayName, origin, enabled: false,
+      }).returning();
+      await recordAudit(req.workspaceId!, "website.created", `Website "${displayName}" (${origin}) was added disabled.`, tx);
+      return [inserted];
+    });
+    res.status(201).json(CreateWebsiteResponse.parse(websiteJson(row)));
+  } catch (error) {
+    if (isUniqueViolation(error)) { res.status(409).json({ error: "That origin is already allowlisted." }); return; }
+    throw error;
+  }
+});
+
+router.patch("/connected-apps/websites/:id", async (req, res): Promise<void> => {
+  const id = req.params.id;
+  const params = UpdateWebsiteParams.safeParse(req.params);
+  const body = UpdateWebsiteBody.safeParse(req.body);
+  if (!params.success || !body.success || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(params.data.id)) { res.status(400).json({ error: "Invalid website update" }); return; }
+  const updates = body.data;
+  const row = await db.transaction(async (tx) => {
+    const [existing] = await tx.select().from(workspaceWebsitesTable).where(and(eq(workspaceWebsitesTable.id, id), eq(workspaceWebsitesTable.workspaceId, req.workspaceId!))).limit(1).for("update");
+    if (!existing || existing.removedAt) return null;
+    const nextOrigin = updates.origin === undefined ? existing.origin : normalizeWebsiteOrigin(updates.origin);
+    const nextName = updates.displayName === undefined ? existing.displayName : updates.displayName.trim();
+    if (!nextOrigin || !nextName || nextName.length > 80) throw new Error("invalid_website_update");
+    const touched = nextOrigin !== existing.origin || nextName !== existing.displayName;
+    const enabled = updates.enabled ?? existing.enabled;
+    const [updated] = await tx.update(workspaceWebsitesTable).set({
+      displayName: nextName, origin: nextOrigin, enabled,
+      revision:
+        touched || existing.enabled !== enabled
+          ? websiteRevision()
+          : existing.revision,
+      updatedAt: new Date(),
+    }).where(eq(workspaceWebsitesTable.id, existing.id)).returning();
+    await recordAudit(req.workspaceId!, "website.updated", `Website "${nextName}" was ${enabled ? "enabled" : "disabled"}.`, tx);
+    return updated;
+  }).catch((error) => {
+    if (error instanceof Error && error.message === "invalid_website_update") return "invalid" as const;
+    throw error;
+  });
+  if (row === null) { res.status(404).json({ error: "Website not found" }); return; }
+  if (row === "invalid") { res.status(400).json({ error: "Invalid website update" }); return; }
+  const counts = await customGrantCounts(req.workspaceId!, [websitePackageId(row.id)]);
+  res.json(
+    UpdateWebsiteResponse.parse(
+      websiteJson(row, counts.get(websitePackageId(row.id)) ?? 0),
+    ),
+  );
+});
+
+router.delete("/connected-apps/websites/:id", async (req, res): Promise<void> => {
+  const parsedParams = DeleteWebsiteParams.safeParse(req.params);
+  if (!parsedParams.success || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(parsedParams.data.id)) { res.status(400).json({ error: "Invalid website id" }); return; }
+  const removed = await db.transaction(async (tx) => {
+    const [existing] = await tx.select().from(workspaceWebsitesTable).where(and(eq(workspaceWebsitesTable.id, parsedParams.data.id), eq(workspaceWebsitesTable.workspaceId, req.workspaceId!))).limit(1).for("update");
+    if (!existing || existing.removedAt) return false;
+    await tx.update(workspaceWebsitesTable).set({ enabled: false, removedAt: new Date(), revision: websiteRevision(), updatedAt: new Date() }).where(and(eq(workspaceWebsitesTable.id, existing.id), eq(workspaceWebsitesTable.workspaceId, req.workspaceId!)));
+    await tx.delete(agentAppGrantsTable).where(and(eq(agentAppGrantsTable.app, websitePackageId(existing.id)), inArray(agentAppGrantsTable.agentId, tx.select({ id: agentsTable.id }).from(agentsTable).where(eq(agentsTable.workspaceId, req.workspaceId!)))));
+    await recordAudit(req.workspaceId!, "website.deleted", `Website "${existing.displayName}" was removed.`, tx);
+    return true;
+  });
+  if (!removed) { res.status(404).json({ error: "Website not found" }); return; }
+  res.json(DeleteWebsiteResponse.parse({ deleted: true }));
+});
 
 /**
  * Inventory of every supported app for the signed-in user's workspace: live

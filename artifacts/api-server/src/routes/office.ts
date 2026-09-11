@@ -85,6 +85,7 @@ import {
   taskLogsTable,
   tasksTable,
   teamsTable,
+  workspaceWebsitesTable,
   type AppAccessLevel,
   type ConnectedAppId,
 } from "@workspace/db";
@@ -174,6 +175,7 @@ import {
   getOfficeDeskOrder,
 } from "../office-desk-order";
 import { findRegistryEntry } from "../capabilities/registry";
+import { websitePackageId } from "../capabilities/websites";
 import connectedAppsRouter from "./connected-apps";
 import bugReportsRouter from "./bug-reports";
 import capabilitiesRouter from "./capabilities";
@@ -321,7 +323,12 @@ function dedupeGrants(
     if (!findRegistryEntry(grant.app) && !workspaceCustomApps.has(grant.app)) {
       continue;
     }
-    byApp.set(grant.app, grant.accessLevel);
+    // Website capabilities are intentionally read-only, regardless of a
+    // client attempting to submit a stronger grant level.
+    byApp.set(
+      grant.app,
+      grant.app.startsWith("website_") ? "read" : grant.accessLevel,
+    );
   }
   return [...byApp.entries()]
     .map(([app, accessLevel]) => ({ app, accessLevel }))
@@ -352,6 +359,20 @@ async function grantsByAgent(
     map.set(row.agentId, list);
   }
   return map;
+}
+
+async function listWebsitePackageIds(workspaceId: string): Promise<Set<string>> {
+  try {
+    const rows = await db
+      .select({ id: workspaceWebsitesTable.id })
+      .from(workspaceWebsitesTable)
+      .where(and(eq(workspaceWebsitesTable.workspaceId, workspaceId), isNull(workspaceWebsitesTable.removedAt)));
+    return new Set((Array.isArray(rows) ? rows : []).map((row) => websitePackageId(row.id)));
+  } catch {
+    // Older test fixtures/deployments without the optional table must not
+    // widen or prevent ordinary agent creation.
+    return new Set();
+  }
 }
 
 function toAgent(
@@ -606,7 +627,10 @@ router.post("/agents", async (req, res): Promise<void> => {
   // Grants ride along on the create payload but live in their own table;
   // they must never be spread into the agents insert.
   const { appGrants, ...agentFields } = parsed.data;
-  const customApps = await listCustomApiPackageIds(req.workspaceId!);
+  const customApps = new Set([
+    ...(await listCustomApiPackageIds(req.workspaceId!)),
+    ...(await listWebsitePackageIds(req.workspaceId!)),
+  ]);
   try {
     const outcome = await db.transaction(async (tx) => {
       const [agent] = await tx
@@ -708,7 +732,10 @@ router.patch("/agents/:agentId", async (req, res): Promise<void> => {
     res.status(400).json({ error: "No fields to update" });
     return;
   }
-  const customApps = await listCustomApiPackageIds(req.workspaceId!);
+  const customApps = new Set([
+    ...(await listCustomApiPackageIds(req.workspaceId!)),
+    ...(await listWebsitePackageIds(req.workspaceId!)),
+  ]);
   try {
     const outcome = await db.transaction(async (tx) => {
       const [existing] = await tx

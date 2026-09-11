@@ -11,6 +11,11 @@ import {
   useDisconnectGithubApp,
   getGetGithubConnectionQueryKey,
   getListConnectedAppsQueryKey,
+  useListWebsites,
+  useCreateWebsite,
+  useUpdateWebsite,
+  useDeleteWebsite,
+  getListWebsitesQueryKey,
   useListCapabilities,
   useInstallCapability,
   useUninstallCapability,
@@ -25,6 +30,7 @@ import {
   type ConnectedApp,
   type CapabilityPackage,
   type TelegramLinkCode,
+  type Website,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { navigateToExternal } from "@/lib/office-window";
@@ -45,6 +51,8 @@ import {
   Globe,
   AlertTriangle,
   Send,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 
 const APP_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -857,6 +865,130 @@ function CapabilityCard({ pkg }: { pkg: CapabilityPackage }) {
   );
 }
 
+function WebsiteManager() {
+  const { data, isLoading, error } = useListWebsites();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [editing, setEditing] = React.useState<string | null>(null);
+  const [name, setName] = React.useState("");
+  const [origin, setOrigin] = React.useState("");
+  const refresh = () =>
+    queryClient.invalidateQueries({ queryKey: getListWebsitesQueryKey() });
+  const fail = (error: Error) =>
+    toast({ variant: "destructive", title: "Website change failed", description: error.message });
+  const create = useCreateWebsite({
+    mutation: {
+      onSuccess: () => {
+        setName("");
+        setOrigin("");
+        void refresh();
+        toast({ title: "Website added", description: "It starts disabled with no Crustabot access." });
+      },
+      onError: fail,
+    },
+  });
+  const update = useUpdateWebsite({
+    mutation: {
+      onSuccess: () => {
+        setEditing(null);
+        void refresh();
+        toast({ title: "Website updated" });
+      },
+      onError: fail,
+    },
+  });
+  const remove = useDeleteWebsite({
+    mutation: {
+      onSuccess: () => {
+        void refresh();
+        toast({ title: "Website removed", description: "Any grants were revoked." });
+      },
+      onError: fail,
+    },
+  });
+  const websites = data?.websites ?? [];
+  const beginEdit = (site: Website) => {
+    setEditing(site.id);
+    setName(site.displayName);
+    setOrigin(site.origin);
+  };
+  return (
+    <section className="space-y-4">
+      <div className="border-b-4 border-border pb-4 pt-2">
+        <h2 className="font-display text-base sm:text-xl uppercase">Public Websites</h2>
+        <p className="text-muted-foreground text-sm">
+          Approve HTTPS origins for read-only rendered browsing. Websites are disabled by default;
+          explicitly grant access on each Crustabot&apos;s personnel file.
+        </p>
+      </div>
+      <PixelCard className="space-y-3">
+        <div className="flex items-center gap-2">
+          <Globe className="w-5 h-5 text-accent" />
+          <span className="font-display uppercase text-sm">Add approved website</span>
+        </div>
+        <p className="text-[10px] uppercase font-bold text-muted-foreground">
+          SHADOWS starter site: <span className="font-mono">https://shadows-project.org/</span>
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-[1fr_2fr_auto] gap-2">
+          <input aria-label="Website name" value={editing ? "" : name} onChange={(e) => setName(e.target.value)}
+            placeholder="SHADOWS" className="h-10 border-4 border-border bg-background px-2 font-mono text-xs" />
+          <input aria-label="Approved HTTPS origin" value={editing ? "" : origin} onChange={(e) => setOrigin(e.target.value)}
+            placeholder="https://shadows-project.org/" className="h-10 border-4 border-border bg-background px-2 font-mono text-xs" />
+          <Button variant="primary" size="sm" disabled={create.isPending || Boolean(editing) || !name.trim() || !origin.trim()}
+            onClick={() => create.mutate({ data: { displayName: name.trim(), origin: origin.trim() } })}>
+            {create.isPending ? "..." : "ADD WEBSITE"}
+          </Button>
+        </div>
+      </PixelCard>
+      {isLoading ? <PixelCard className="animate-pulse h-24"><div /></PixelCard> : error ? (
+        <PixelCard className="text-center text-sm">Website inventory could not be loaded. Try again.</PixelCard>
+      ) : websites.length === 0 ? (
+        <PixelCard className="text-center text-sm text-muted-foreground">No approved websites yet.</PixelCard>
+      ) : websites.map((site) => (
+        <PixelCard key={site.id}>
+          {editing === site.id ? (
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_2fr_auto_auto] gap-2">
+              <input aria-label="Edit website name" value={name} onChange={(e) => setName(e.target.value)}
+                className="h-10 border-4 border-border bg-background px-2 font-mono text-xs" />
+              <input aria-label="Edit approved HTTPS origin" value={origin} onChange={(e) => setOrigin(e.target.value)}
+                className="h-10 border-4 border-border bg-background px-2 font-mono text-xs" />
+              <Button size="sm" variant="primary" disabled={update.isPending || !name.trim() || !origin.trim()}
+                onClick={() => update.mutate({ id: site.id, data: { displayName: name.trim(), origin: origin.trim() } })}>SAVE</Button>
+              <Button size="sm" variant="outline" onClick={() => setEditing(null)}>CANCEL</Button>
+            </div>
+          ) : (
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-display uppercase text-sm">{site.displayName}</span>
+                  <Badge variant={site.enabled ? "success" : "destructive"}>{site.enabled ? "Enabled" : "Disabled"}</Badge>
+                  <Badge variant="outline">Read Only</Badge>
+                  {site.displayName.toUpperCase() === "SHADOWS" ? <Badge variant="warning">Starter Site</Badge> : null}
+                </div>
+                <p className="font-mono text-xs break-all mt-1">{site.origin}</p>
+                <p className="text-[10px] uppercase font-bold text-muted-foreground mt-1">
+                  {site.enabled ? "Healthy · available for explicit grants" : "Disabled · grants cannot use this site"} ·
+                  {" "}{site.grantedAgents} Crustabot{site.grantedAgents === 1 ? "" : "s"} with access · revision {site.revision}
+                </p>
+              </div>
+              <div className="flex gap-2 shrink-0 flex-wrap">
+                <Button size="sm" variant={site.enabled ? "outline" : "primary"} disabled={update.isPending}
+                  onClick={() => update.mutate({ id: site.id, data: { enabled: !site.enabled } })}>
+                  {site.enabled ? "DISABLE" : "ENABLE"}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => beginEdit(site)}><Pencil className="w-3 h-3 mr-1" />EDIT</Button>
+                <Button size="sm" variant="outline" disabled={remove.isPending} onClick={() => {
+                  if (window.confirm(`Remove ${site.displayName}? Existing grants will be revoked.`)) remove.mutate({ id: site.id });
+                }}><Trash2 className="w-3 h-3 mr-1" />REMOVE</Button>
+              </div>
+            </div>
+          )}
+        </PixelCard>
+      ))}
+    </section>
+  );
+}
+
 export default function ConnectedAppsPage() {
   const { data, isLoading, error, refetch, isFetching } =
     useListConnectedApps();
@@ -974,6 +1106,7 @@ export default function ConnectedAppsPage() {
         )}
 
         <CustomApiSection />
+        <WebsiteManager />
 
         <div className="border-b-4 border-border pb-4 pt-2">
           <h2 className="font-display text-base sm:text-xl text-foreground uppercase mb-1">

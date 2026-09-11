@@ -1,9 +1,27 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { existsSync } from "node:fs";
+import { chromium } from "playwright";
 import {
+  chromiumLaunchOptions,
   executeNativeWebHandler,
+  extractRenderedPage,
   fetchReadablePage,
   isPublicWebAddress,
+  isAllowedRenderedRequest,
+  MAX_RENDERED_BYTES,
+  MAX_RENDERED_LINKS,
+  MAX_RENDERED_REQUESTS,
+  withRenderedDeadline,
+  WebBodyLimitError,
+  WebRedirectLimitError,
+  WebRenderLimitError,
+  WebTimeoutError,
 } from "./web";
+import {
+  normalizeWebsiteOrigin,
+  websiteManifest,
+  websitePackageId,
+} from "./websites";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -11,6 +29,127 @@ afterEach(() => {
 });
 
 describe("native web address policy", () => {
+  it("applies the rendered browser request policy before any route continues", () => {
+    const base = {
+      origin: "https://shadows-project.org",
+      method: "GET",
+      resourceType: "document",
+    };
+    expect(isAllowedRenderedRequest({ ...base, url: `${base.origin}/tabs` })).toBe(true);
+    for (const denied of [
+      { url: "http://shadows-project.org/", resourceType: "document" },
+      { url: "https://other.example/", resourceType: "document" },
+      { url: `${base.origin}/login`, resourceType: "document" },
+      { url: `${base.origin}/submit`, method: "POST", resourceType: "document" },
+      { url: `${base.origin}/socket`, resourceType: "websocket" },
+      { url: `${base.origin}/events`, resourceType: "eventsource" },
+      { url: `${base.origin}/movie`, resourceType: "media" },
+      { url: `${base.origin}/file`, resourceType: "download" },
+    ]) {
+      expect(isAllowedRenderedRequest({ ...base, ...denied })).toBe(false);
+    }
+  });
+
+  it("pins Chromium DNS without disabling the browser sandbox", () => {
+    const options = chromiumLaunchOptions("https://shadows-project.org", "93.184.216.34");
+    expect(options.args).toContain(
+      "--host-resolver-rules=MAP shadows-project.org 93.184.216.34,EXCLUDE *",
+    );
+    expect(options.args).not.toContain("--no-sandbox");
+    expect(
+      chromiumLaunchOptions(
+        "https://shadows-project.org",
+        "2606:4700:4700::1111",
+      ).args,
+    ).toContain(
+      "--host-resolver-rules=MAP shadows-project.org [2606:4700:4700::1111],EXCLUDE *",
+    );
+  });
+
+  it("exposes bounded policy constants and actionable limit errors", () => {
+    expect(MAX_RENDERED_REQUESTS).toBe(40);
+    expect(MAX_RENDERED_BYTES).toBe(4 * 1024 * 1024);
+    expect(MAX_RENDERED_LINKS).toBe(80);
+    expect(new WebTimeoutError().message).toMatch(/timed out/i);
+    expect(new WebBodyLimitError().message).toMatch(/byte limit/i);
+    expect(new WebRedirectLimitError().message).toMatch(/redirected/i);
+    expect(new WebRenderLimitError("text").message).toMatch(/text limit/i);
+  });
+
+  const systemChromium = [
+    process.env.CHROMIUM_EXECUTABLE_PATH,
+    "/repl/tools/bin/chromium",
+    chromium.executablePath(),
+  ].find((candidate): candidate is string => Boolean(candidate && existsSync(candidate)));
+  it.skipIf(!systemChromium)("extracts JavaScript-rendered tabs and only same-origin links from a local DOM", async () => {
+    const browser = await chromium.launch({
+      headless: true,
+      executablePath: systemChromium,
+    });
+    try {
+      const page = await browser.newPage();
+      await page.setContent(`
+        <main><h1>SHADOWS</h1><p>Ignore <script>evil()</script> text.</p>
+          <button role="tab" id="tab">Details</button>
+          <section role="tabpanel" aria-label="Details">Default detail text</section>
+          <a href="https://shadows-project.org/inside">Inside</a>
+          <a href="https://other.example/outside">Outside</a>
+        </main>
+        <script>
+          document.querySelector("#tab").addEventListener("click", () => {
+            document.querySelector("[role=tabpanel]").textContent =
+              "JavaScript-rendered detail text";
+          });
+        </script>`);
+      await page.locator("#tab").click();
+      const result = await page.evaluate(extractRenderedPage, {
+        maxLinks: MAX_RENDERED_LINKS,
+        allowedOrigin: "https://shadows-project.org",
+      });
+      expect(result.tabs).toContain("1. Details");
+      expect(result.tabPanels).toContain(
+        "Details: JavaScript-rendered detail text",
+      );
+      expect(result.links.join("\n")).toContain("https://shadows-project.org/inside");
+      expect(result.links.join("\n")).not.toContain("other.example");
+      expect(result.text).toContain("SHADOWS");
+      expect(result.text).not.toContain("evil()");
+    } finally {
+      await browser.close();
+    }
+  });
+
+  it.skipIf(!systemChromium)(
+    "force-closes Chromium when an untrusted page blocks its main thread",
+    async () => {
+      const browser = await chromium.launch({
+        headless: true,
+        executablePath: systemChromium,
+      });
+      const page = await browser.newPage();
+      const startedAt = Date.now();
+      try {
+        await expect(
+          withRenderedDeadline(
+            () =>
+              page.evaluate(() => {
+                while (true) {
+                  // Deliberately simulate hostile page JavaScript.
+                }
+              }),
+            150,
+            () => {
+              void browser.close();
+            },
+          ),
+        ).rejects.toBeInstanceOf(WebTimeoutError);
+        expect(Date.now() - startedAt).toBeLessThan(2_000);
+      } finally {
+        await browser.close().catch(() => undefined);
+      }
+    },
+  );
+
   it("allows public addresses and rejects private, loopback, link-local, CGNAT, and ULA ranges", () => {
     expect(isPublicWebAddress("8.8.8.8")).toBe(true);
     expect(isPublicWebAddress("2606:4700:4700::1111")).toBe(true);
@@ -155,6 +294,46 @@ describe("native web address policy", () => {
 });
 
 describe("native web handler", () => {
+  it("normalizes only credential-free HTTPS origins", () => {
+    expect(normalizeWebsiteOrigin("HTTPS://SHADOWS-PROJECT.ORG/")).toBe("https://shadows-project.org");
+    expect(normalizeWebsiteOrigin("https://example.com/path")).toBeNull();
+    expect(normalizeWebsiteOrigin("http://example.com")).toBeNull();
+    expect(normalizeWebsiteOrigin("https://user@example.com")).toBeNull();
+  });
+  it("keeps website UUID capability identity reversible", () => {
+    const id = "123e4567-e89b-12d3-a456-426614174000";
+    expect(websitePackageId(id).slice("website_".length)).toBe(id);
+    const now = new Date();
+    const manifest = websiteManifest({
+      id,
+      workspaceId: id,
+      displayName: "SHADOWS",
+      origin: "https://shadows-project.org",
+      enabled: true,
+      revision: id,
+      removedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    expect(manifest.tools[0]?.params).toContainEqual(
+      expect.objectContaining({ name: "tab", kind: "number" }),
+    );
+  });
+  it("rejects invalid rendered tab selectors before opening a browser", async () => {
+    await expect(
+      executeNativeWebHandler(
+        "website.read",
+        {
+          origin: "https://shadows-project.org",
+          tab: 0,
+        },
+        { timeoutMs: 1000, charLimit: 1000 },
+      ),
+    ).resolves.toEqual({
+      ok: false,
+      message: expect.stringMatching(/tab must be an integer/i),
+    });
+  });
   it("reports a clear configuration failure and performs no network request", async () => {
     vi.stubEnv("WEB_SEARCH_API_KEY", "");
     const fetchMock = vi.fn();

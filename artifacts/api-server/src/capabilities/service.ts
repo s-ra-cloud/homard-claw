@@ -1,9 +1,10 @@
 import {
   capabilityPackagesTable,
   db,
+  workspaceWebsitesTable,
   type CapabilityPackageRecord,
 } from "@workspace/db";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { recordAudit } from "../audit";
 import type { AppOperation } from "../connected-apps/catalog";
 import { findOperation } from "../connected-apps/catalog";
@@ -25,6 +26,7 @@ import {
   isBuiltinPackageId,
   listRegistryEntries,
 } from "./registry";
+import { websiteManifest } from "./websites";
 
 /**
  * Workspace-facing capability resolution. Built-in packages (gmail, drive,
@@ -176,6 +178,14 @@ export async function loadWorkspaceCapabilities(
   // the manifest is synthesized from the current row, its version is the
   // definition revision, and disabled/malformed rows contribute nothing.
   for (const manifest of await listActiveCustomApiManifests(workspaceId)) {
+    packages.set(manifest.id, manifest);
+    resolveTools(manifest, tools);
+  }
+  const websites = await db.select().from(workspaceWebsitesTable).where(
+    and(eq(workspaceWebsitesTable.workspaceId, workspaceId), eq(workspaceWebsitesTable.enabled, true), sql`${workspaceWebsitesTable.removedAt} is null`),
+  );
+  for (const website of websites) {
+    const manifest = websiteManifest(website);
     packages.set(manifest.id, manifest);
     resolveTools(manifest, tools);
   }

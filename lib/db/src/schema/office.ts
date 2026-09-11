@@ -1586,6 +1586,38 @@ export type WorkspaceConnectedAppRecord =
 export type CustomApiConnectionRecord =
   typeof customApiConnectionsTable.$inferSelect;
 
+/** Owner-approved, read-only public HTTPS origins. */
+export const workspaceWebsitesTable = pgTable(
+  "workspace_websites",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspacesTable.id, { onDelete: "cascade" }),
+    displayName: text("display_name").notNull(),
+    /** Canonical origin (scheme + host + optional port), never a path. */
+    origin: text("origin").notNull(),
+    revision: text("revision")
+      .notNull()
+      .default(sql`gen_random_uuid()::text`),
+    enabled: boolean("enabled").notNull().default(false),
+    removedAt: timestamp("removed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("workspace_websites_ws_origin_unique").on(
+      table.workspaceId,
+      table.origin,
+    ),
+  ],
+);
+export type WorkspaceWebsiteRecord = typeof workspaceWebsitesTable.$inferSelect;
+
 /**
  * Owner-only diagnostics: a bug report filed from a task's detail view.
  * `context` snapshots the task's state at report time (status, objective,

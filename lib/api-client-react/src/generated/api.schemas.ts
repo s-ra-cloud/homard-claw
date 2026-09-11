@@ -1045,6 +1045,38 @@ export interface CustomApiOperation {
   params: CustomApiParam[];
 }
 
+export interface Website {
+  id: string;
+  displayName: string;
+  /** @pattern ^https:// */
+  origin: string;
+  revision: string;
+  enabled: boolean;
+  removed: boolean;
+  grantedAgents: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WebsiteList {
+  websites: Website[];
+}
+
+export interface WebsiteCreate {
+  /** @maxLength 80 */
+  displayName: string;
+  /** @maxLength 300 */
+  origin: string;
+}
+
+export interface WebsiteUpdate {
+  /** @maxLength 80 */
+  displayName?: string;
+  /** @maxLength 300 */
+  origin?: string;
+  enabled?: boolean;
+}
+
 export type CustomApiAuthType = typeof CustomApiAuthType[keyof typeof CustomApiAuthType];
 
 

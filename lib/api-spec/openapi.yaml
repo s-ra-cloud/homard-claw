@@ -1834,6 +1834,58 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CustomApi"
+  /connected-apps/websites:
+    get:
+      operationId: listWebsites
+      tags: [office]
+      summary: List owner-approved public websites
+      responses:
+        "200":
+          description: Websites
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebsiteList" }
+    post:
+      operationId: createWebsite
+      tags: [office]
+      summary: Add a disabled public HTTPS website
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebsiteCreate" }
+      responses:
+        "201":
+          description: Created website
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Website" }
+  /connected-apps/websites/{id}:
+    patch:
+      operationId: updateWebsite
+      tags: [office]
+      summary: Update or enable an approved website
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebsiteUpdate" }
+      responses:
+        "200":
+          description: Updated website
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Website" }
+    delete:
+      operationId: deleteWebsite
+      tags: [office]
+      summary: Remove an approved website and revoke its grants
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Removed website }
         "400":
           description: The definition was rejected; the error lists why
         "409":
@@ -2749,6 +2801,38 @@ components:
         params:
           type: array
           items: { $ref: "#/components/schemas/CustomApiParam" }
+    Website:
+      type: object
+      required: [id, displayName, origin, revision, enabled, removed, grantedAgents, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        displayName: { type: string }
+        origin: { type: string, pattern: "^https://" }
+        revision: { type: string }
+        enabled: { type: boolean }
+        removed: { type: boolean }
+        grantedAgents: { type: number }
+        createdAt: { type: string }
+        updatedAt: { type: string }
+    WebsiteList:
+      type: object
+      required: [websites]
+      properties:
+        websites:
+          type: array
+          items: { $ref: "#/components/schemas/Website" }
+    WebsiteCreate:
+      type: object
+      required: [displayName, origin]
+      properties:
+        displayName: { type: string, maxLength: 80 }
+        origin: { type: string, maxLength: 300 }
+    WebsiteUpdate:
+      type: object
+      properties:
+        displayName: { type: string, maxLength: 80 }
+        origin: { type: string, maxLength: 300 }
+        enabled: { type: boolean }
     CustomApi:
       type: object
       description: >-

@@ -6,6 +6,8 @@ import { executeCustomApiTool } from "../connected-apps/custom-api-executor";
 import { mcpCallTool, McpConfigError, resolveMcpEndpoint } from "./mcp";
 import type { ResolvedCapabilityTool } from "./service";
 import { executeNativeWebHandler } from "./web";
+import { db, workspaceWebsitesTable } from "@workspace/db";
+import { and, eq, isNull } from "drizzle-orm";
 
 const DEFAULT_MCP_TIMEOUT_MS = 30_000;
 const DEFAULT_MCP_RESULT_CHARS = 4_000;
@@ -50,9 +52,21 @@ export async function executeCapabilityTool(
     return executeOperation(tool.builtinOp, params, context);
   }
   if (tool.def.executor.kind === "native") {
+    let nativeParams = params;
+    if (tool.def.executor.handler === "website.read") {
+      const websiteId = tool.packageId.slice("website_".length);
+      const [website] = context.workspaceId
+        ? await db.select({ origin: workspaceWebsitesTable.origin, revision: workspaceWebsitesTable.revision })
+            .from(workspaceWebsitesTable)
+            .where(and(eq(workspaceWebsitesTable.id, websiteId), eq(workspaceWebsitesTable.workspaceId, context.workspaceId), eq(workspaceWebsitesTable.enabled, true), isNull(workspaceWebsitesTable.removedAt)))
+            .limit(1)
+        : [];
+      if (!website || (context.expectedRevision && website.revision !== context.expectedRevision)) return { ok: false, kind: "failed", message: "This approved website definition changed or is disabled; read it again before retrying." };
+      nativeParams = { ...params, origin: website.origin };
+    }
     const outcome = await executeNativeWebHandler(
       tool.def.executor.handler,
-      params,
+      nativeParams,
       {
         timeoutMs: tool.def.timeoutMs ?? DEFAULT_MCP_TIMEOUT_MS,
         charLimit: tool.def.resultCharLimit ?? DEFAULT_MCP_RESULT_CHARS,

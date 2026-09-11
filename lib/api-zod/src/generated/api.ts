@@ -3977,6 +3977,102 @@ export const CreateCustomApiResponse = zod.object({
 
 
 /**
+ * @summary List owner-approved public websites
+ */
+export const listWebsitesResponseWebsitesItemOriginRegExp = new RegExp('^https:/');
+
+
+export const ListWebsitesResponse = zod.object({
+  "websites": zod.array(zod.object({
+  "id": zod.string(),
+  "displayName": zod.string(),
+  "origin": zod.string().regex(listWebsitesResponseWebsitesItemOriginRegExp),
+  "revision": zod.string(),
+  "enabled": zod.boolean(),
+  "removed": zod.boolean(),
+  "grantedAgents": zod.number(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+}))
+})
+
+
+/**
+ * @summary Add a disabled public HTTPS website
+ */
+export const createWebsiteBodyDisplayNameMax = 80;
+
+export const createWebsiteBodyOriginMax = 300;
+
+
+
+export const CreateWebsiteBody = zod.object({
+  "displayName": zod.string().max(createWebsiteBodyDisplayNameMax),
+  "origin": zod.string().max(createWebsiteBodyOriginMax)
+})
+
+export const createWebsiteResponseOriginRegExp = new RegExp('^https:/');
+
+
+export const CreateWebsiteResponse = zod.object({
+  "id": zod.string(),
+  "displayName": zod.string(),
+  "origin": zod.string().regex(createWebsiteResponseOriginRegExp),
+  "revision": zod.string(),
+  "enabled": zod.boolean(),
+  "removed": zod.boolean(),
+  "grantedAgents": zod.number(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+
+
+/**
+ * @summary Update or enable an approved website
+ */
+export const UpdateWebsiteParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const updateWebsiteBodyDisplayNameMax = 80;
+
+export const updateWebsiteBodyOriginMax = 300;
+
+
+
+export const UpdateWebsiteBody = zod.object({
+  "displayName": zod.string().max(updateWebsiteBodyDisplayNameMax).optional(),
+  "origin": zod.string().max(updateWebsiteBodyOriginMax).optional(),
+  "enabled": zod.boolean().optional()
+})
+
+export const updateWebsiteResponseOriginRegExp = new RegExp('^https:/');
+
+
+export const UpdateWebsiteResponse = zod.object({
+  "id": zod.string(),
+  "displayName": zod.string(),
+  "origin": zod.string().regex(updateWebsiteResponseOriginRegExp),
+  "revision": zod.string(),
+  "enabled": zod.boolean(),
+  "removed": zod.boolean(),
+  "grantedAgents": zod.number(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+
+
+/**
+ * @summary Remove an approved website and revoke its grants
+ */
+export const DeleteWebsiteParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const DeleteWebsiteResponse = zod.unknown()
+
+
+/**
  * @summary Parse an OpenAPI 3 JSON document into draft operations for review
  */
 export const parseCustomApiSpecBodyDocumentMax = 524288;

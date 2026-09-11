@@ -142,6 +142,10 @@ import type {
   VoiceConverseInput,
   VoiceSettingsInput,
   VoiceStatus,
+  Website,
+  WebsiteCreate,
+  WebsiteList,
+  WebsiteUpdate,
   WorkspaceSkill,
   WorkspaceSkillInput,
   WorkspaceSkillUpdate
@@ -7799,7 +7803,7 @@ export const createCustomApi = async (customApiCreate: CustomApiCreate, options?
 
 
 
-export const getCreateCustomApiMutationOptions = <TError = ErrorType<void>,
+export const getCreateCustomApiMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCustomApi>>, TError,{data: BodyType<CustomApiCreate>}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createCustomApi>>, TError,{data: BodyType<CustomApiCreate>}, TContext> => {
 
@@ -7828,12 +7832,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateCustomApiMutationResult = NonNullable<Awaited<ReturnType<typeof createCustomApi>>>
     export type CreateCustomApiMutationBody = BodyType<CustomApiCreate>
-    export type CreateCustomApiMutationError = ErrorType<void>
+    export type CreateCustomApiMutationError = ErrorType<unknown>
 
     /**
  * @summary Whitelist a third-party REST API with an exact operation catalog
  */
-export const useCreateCustomApi = <TError = ErrorType<void>,
+export const useCreateCustomApi = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCustomApi>>, TError,{data: BodyType<CustomApiCreate>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof createCustomApi>>,
@@ -7842,6 +7846,297 @@ export const useCreateCustomApi = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getCreateCustomApiMutationOptions(options));
+    }
+
+export const getListWebsitesUrl = () => {
+
+
+
+
+  return `/api/connected-apps/websites`
+}
+
+/**
+ * @summary List owner-approved public websites
+ */
+export const listWebsites = async ( options?: Parameters<typeof customFetch>[1]): Promise<WebsiteList> => {
+
+  return customFetch<WebsiteList>(getListWebsitesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListWebsitesQueryKey = () => {
+    return [
+    `/api/connected-apps/websites`
+    ] as const;
+    }
+
+
+export const getListWebsitesQueryOptions = <TData = Awaited<ReturnType<typeof listWebsites>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listWebsites>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListWebsitesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listWebsites>>> = ({ signal }) => listWebsites({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listWebsites>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListWebsitesQueryResult = NonNullable<Awaited<ReturnType<typeof listWebsites>>>
+export type ListWebsitesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List owner-approved public websites
+ */
+
+export function useListWebsites<TData = Awaited<ReturnType<typeof listWebsites>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listWebsites>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListWebsitesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateWebsiteUrl = () => {
+
+
+
+
+  return `/api/connected-apps/websites`
+}
+
+/**
+ * @summary Add a disabled public HTTPS website
+ */
+export const createWebsite = async (websiteCreate: WebsiteCreate, options?: Parameters<typeof customFetch>[1]): Promise<Website> => {
+
+  return customFetch<Website>(getCreateWebsiteUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(websiteCreate)
+  }
+);}
+
+
+
+
+
+export const getCreateWebsiteMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createWebsite>>, TError,{data: BodyType<WebsiteCreate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createWebsite>>, TError,{data: BodyType<WebsiteCreate>}, TContext> => {
+
+const mutationKey = ['createWebsite'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createWebsite>>, {data: BodyType<WebsiteCreate>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createWebsite(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateWebsiteMutationResult = NonNullable<Awaited<ReturnType<typeof createWebsite>>>
+    export type CreateWebsiteMutationBody = BodyType<WebsiteCreate>
+    export type CreateWebsiteMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Add a disabled public HTTPS website
+ */
+export const useCreateWebsite = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createWebsite>>, TError,{data: BodyType<WebsiteCreate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createWebsite>>,
+        TError,
+        {data: BodyType<WebsiteCreate>},
+        TContext
+      > => {
+      return useMutation(getCreateWebsiteMutationOptions(options));
+    }
+
+export const getUpdateWebsiteUrl = (id: string,) => {
+
+
+
+
+  return `/api/connected-apps/websites/${id}`
+}
+
+/**
+ * @summary Update or enable an approved website
+ */
+export const updateWebsite = async (id: string,
+    websiteUpdate: WebsiteUpdate, options?: Parameters<typeof customFetch>[1]): Promise<Website> => {
+
+  return customFetch<Website>(getUpdateWebsiteUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(websiteUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdateWebsiteMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateWebsite>>, TError,{id: string;data: BodyType<WebsiteUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateWebsite>>, TError,{id: string;data: BodyType<WebsiteUpdate>}, TContext> => {
+
+const mutationKey = ['updateWebsite'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateWebsite>>, {id: string;data: BodyType<WebsiteUpdate>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateWebsite(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateWebsiteMutationResult = NonNullable<Awaited<ReturnType<typeof updateWebsite>>>
+    export type UpdateWebsiteMutationBody = BodyType<WebsiteUpdate>
+    export type UpdateWebsiteMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Update or enable an approved website
+ */
+export const useUpdateWebsite = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateWebsite>>, TError,{id: string;data: BodyType<WebsiteUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateWebsite>>,
+        TError,
+        {id: string;data: BodyType<WebsiteUpdate>},
+        TContext
+      > => {
+      return useMutation(getUpdateWebsiteMutationOptions(options));
+    }
+
+export const getDeleteWebsiteUrl = (id: string,) => {
+
+
+
+
+  return `/api/connected-apps/websites/${id}`
+}
+
+/**
+ * @summary Remove an approved website and revoke its grants
+ */
+export const deleteWebsite = async (id: string, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+  return customFetch<void>(getDeleteWebsiteUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteWebsiteMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteWebsite>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteWebsite>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['deleteWebsite'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteWebsite>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteWebsite(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteWebsiteMutationResult = NonNullable<Awaited<ReturnType<typeof deleteWebsite>>>
+
+    export type DeleteWebsiteMutationError = ErrorType<void>
+
+    /**
+ * @summary Remove an approved website and revoke its grants
+ */
+export const useDeleteWebsite = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteWebsite>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteWebsite>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getDeleteWebsiteMutationOptions(options));
     }
 
 export const getParseCustomApiSpecUrl = () => {

@@ -2,6 +2,7 @@ import {
   agentsTable,
   appActionsTable,
   customApiConnectionsTable,
+  workspaceWebsitesTable,
   db,
   tasksTable,
   type AppActionRecord,
@@ -118,7 +119,10 @@ export async function runAllowedAction(input: {
   // Custom-API rows record the definition revision they run under, so the
   // audit trail always says which owner-reviewed contract applied.
   const definitionRevision =
-    tool?.def.executor.kind === "custom_api" ? tool.manifest.version : null;
+    tool && (tool.def.executor.kind === "custom_api" ||
+      tool.def.executor.kind === "native" && tool.def.executor.handler === "website.read")
+      ? tool.manifest.version
+      : null;
   const [pending] = await db
     .insert(appActionsTable)
     .values({
@@ -184,6 +188,17 @@ export async function claimApprovedAction(
               and ('custom_' || ${customApiConnectionsTable.slug}) = ${appActionsTable.app}
               and ${customApiConnectionsTable.enabled} = true
               and ${customApiConnectionsTable.revision} = ${appActionsTable.definitionRevision}
+          )
+          or exists (
+            select 1
+            from ${workspaceWebsitesTable}
+            join ${agentsTable} as website_agents
+              on website_agents.id = ${appActionsTable.agentId}
+            where ${workspaceWebsitesTable.workspaceId} = website_agents.workspace_id
+              and ('website_' || ${workspaceWebsitesTable.id}::text) = ${appActionsTable.app}
+              and ${workspaceWebsitesTable.enabled} = true
+              and ${workspaceWebsitesTable.removedAt} is null
+              and ${workspaceWebsitesTable.revision} = ${appActionsTable.definitionRevision}
           )
         )`,
       ),

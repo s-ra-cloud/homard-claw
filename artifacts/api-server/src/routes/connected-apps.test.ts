@@ -17,10 +17,12 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   agentAppGrantsTable,
   agentsTable,
+  auditEventsTable,
   db,
   googleAccountsTable,
   tasksTable,
   workspaceConnectedAppsTable,
+  workspaceWebsitesTable,
   workspacesTable,
 } from "@workspace/db";
 import { and, eq, inArray } from "drizzle-orm";
@@ -66,6 +68,8 @@ import {
 } from "../connected-apps/catalog";
 import { encryptRefreshToken } from "../google/credentials";
 import type { AppAccessLevel, ConnectedAppId } from "@workspace/db";
+import { loadWorkspaceCapabilities } from "../capabilities/service";
+import { websitePackageId } from "../capabilities/websites";
 
 const app = express();
 app.use(express.json());
@@ -73,11 +77,111 @@ app.use((req, _res, next) => {
   (req as unknown as { log: { warn: () => void } }).log = { warn: () => {} };
   next();
 });
+
+describe("owner-managed website allowlists", () => {
+  it("creates disabled websites, audits lifecycle, counts active grants, and enforces read-only grants", async () => {
+    const created = await request(app)
+      .post("/api/connected-apps/websites")
+      .send({ displayName: `SHADOWS ${RUN_TAG}`, origin: "HTTPS://SHADOWS-PROJECT.ORG/" });
+    expect(created.status).toBe(201);
+    const websiteId = created.body.id as string;
+    createdWebsiteIds.push(websiteId);
+    const packageId = websitePackageId(websiteId);
+    expect(created.body).toMatchObject({
+      origin: "https://shadows-project.org",
+      enabled: false,
+      grantedAgents: 0,
+      removed: false,
+    });
+
+    const audit = await db.select({ kind: auditEventsTable.kind })
+      .from(auditEventsTable)
+      .where(and(eq(auditEventsTable.workspaceId, workspaceId), eq(auditEventsTable.kind, "website.created")));
+    expect(audit.length).toBeGreaterThan(0);
+    expect((await loadWorkspaceCapabilities(workspaceId)).packages.has(packageId)).toBe(false);
+
+    const agent = await createAgent("Website reader", {
+      appGrants: [{ app: packageId, accessLevel: "write" }],
+    });
+    expect(agent.status).toBe(201);
+    expect(agent.body.appGrants).toEqual([{ app: packageId, accessLevel: "read" }]);
+
+    const enabled = await request(app)
+      .patch(`/api/connected-apps/websites/${websiteId}`)
+      .send({ enabled: true });
+    expect(enabled.status).toBe(200);
+    expect(enabled.body.revision).not.toBe(created.body.revision);
+    const listedEnabled = await request(app).get("/api/connected-apps/websites");
+    expect(listedEnabled.body.websites.find((site: { id: string }) => site.id === websiteId).grantedAgents).toBe(1);
+    const capabilities = await loadWorkspaceCapabilities(workspaceId);
+    expect(capabilities.packages.has(packageId)).toBe(true);
+    expect(capabilities.tools.get(`${packageId}.read`)).toBeDefined();
+
+    const { authorizeAppAction } = await import("../connected-apps/authorize");
+    const allowed = authorizeAppAction(
+      { grants: new Map([[packageId, "read"]]), sensitiveDataSandbox: false, capabilities },
+      `${packageId}.read`,
+      {},
+    );
+    expect(allowed.kind).toBe("allow");
+    const sandboxed = authorizeAppAction(
+      { grants: new Map([[packageId, "read"]]), sensitiveDataSandbox: true, capabilities },
+      `${packageId}.read`,
+      {},
+    );
+    expect(sandboxed.kind).toBe("deny");
+
+    const disabled = await request(app)
+      .patch(`/api/connected-apps/websites/${websiteId}`)
+      .send({ enabled: false });
+    expect(disabled.status).toBe(200);
+    expect(disabled.body.grantedAgents).toBe(1);
+    expect(disabled.body.revision).not.toBe(enabled.body.revision);
+    expect((await loadWorkspaceCapabilities(workspaceId)).packages.has(packageId)).toBe(false);
+  });
+
+  it("keeps website definitions strictly tenant-scoped and removes their grants", async () => {
+    const created = await request(app)
+      .post("/api/connected-apps/websites")
+      .send({ displayName: `Tenant site ${RUN_TAG}`, origin: "https://tenant.example" });
+    expect(created.status).toBe(201);
+    const websiteId = created.body.id as string;
+    createdWebsiteIds.push(websiteId);
+
+    authState.userId = otherClerkId;
+    try {
+      const list = await request(app).get("/api/connected-apps/websites");
+      expect(list.status).toBe(200);
+      expect(list.body.websites.some((site: { id: string }) => site.id === websiteId)).toBe(false);
+      expect((await request(app).patch(`/api/connected-apps/websites/${websiteId}`).send({ enabled: true })).status).toBe(404);
+      expect((await request(app).delete(`/api/connected-apps/websites/${websiteId}`)).status).toBe(404);
+    } finally {
+      authState.userId = (await db.select({ clerkUserId: workspacesTable.clerkUserId })
+        .from(workspacesTable).where(eq(workspacesTable.id, workspaceId)))[0]!.clerkUserId;
+    }
+
+    const agent = await createAgent("Removal reader", {
+      appGrants: [{ app: websitePackageId(websiteId), accessLevel: "read" }],
+    });
+    expect(agent.status).toBe(201);
+    const removed = await request(app).delete(`/api/connected-apps/websites/${websiteId}`);
+    expect(removed.status).toBe(200);
+    const grants = await db.select().from(agentAppGrantsTable)
+      .where(eq(agentAppGrantsTable.agentId, agent.body.id));
+    expect(grants).toEqual([]);
+    expect((await request(app).get("/api/connected-apps/websites")).body.websites
+      .find((site: { id: string }) => site.id === websiteId)).toBeDefined();
+    expect((await loadWorkspaceCapabilities(workspaceId)).packages.has(websitePackageId(websiteId))).toBe(false);
+  });
+});
 app.use("/api", officeRouter);
 
 const RUN_TAG = `HC Apps Test ${Date.now()}`;
 const createdAgentIds: string[] = [];
+const createdWebsiteIds: string[] = [];
 let workspaceId: string;
+let otherWorkspaceId: string;
+let otherClerkId: string;
 /** app → original settings row (or null when there was none) to restore. */
 const touchedSettings = new Map<string, { enabled: boolean } | null>();
 
@@ -124,6 +228,12 @@ beforeAll(async () => {
     .returning();
   workspaceId = workspace.id;
   authState.userId = workspace.clerkUserId;
+  otherClerkId = `connected-apps-route-other-${Date.now()}`;
+  const [otherWorkspace] = await db
+    .insert(workspacesTable)
+    .values({ clerkUserId: otherClerkId })
+    .returning();
+  otherWorkspaceId = otherWorkspace.id;
   await db.insert(googleAccountsTable).values({
     workspaceId,
     clerkUserId: workspace.clerkUserId,
@@ -136,6 +246,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  if (createdWebsiteIds.length > 0) {
+    await db.delete(workspaceWebsitesTable).where(inArray(workspaceWebsitesTable.id, createdWebsiteIds));
+  }
   // Restore any shared enable-switch rows exactly as we found them.
   for (const [appId, original] of touchedSettings) {
     if (original === null) {
@@ -177,6 +290,7 @@ afterAll(async () => {
       .where(inArray(agentsTable.id, createdAgentIds));
   }
   await db.delete(workspacesTable).where(eq(workspacesTable.id, workspaceId));
+  await db.delete(workspacesTable).where(eq(workspacesTable.id, otherWorkspaceId));
   vi.unstubAllEnvs();
 });
 
