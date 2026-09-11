@@ -18,7 +18,6 @@ import {
   useRetryTask,
   useDecideApproval,
   useDecideTaskFallback,
-  useGetMe,
   useCreateBugReport,
   ApprovalDecisionDecision,
   TaskFallbackInputAction,
@@ -31,6 +30,7 @@ import {
   type TaskEstimate,
   type TaskLog,
   type InputAttachment,
+  type BugReportCreateInput,
 } from "@workspace/api-client-react";
 import { Shell } from "@/components/layout/Shell";
 import {
@@ -822,12 +822,25 @@ function TaskDetailDialog({
 }
 
 /**
- * Owner-only diagnostics action: files a bug report tied to this task, with
- * the task's current state (objective, status, provider, error) captured
- * server-side. Hidden entirely for every other signed-in account.
+ * Files a bug report tied to this task, with the task's current state
+ * (objective, status, provider, error) captured server-side.
  */
-function SendBugReportButton({ task }: { task: Task }) {
-  const { data: me } = useGetMe();
+export const BUG_REPORT_SUCCESS_TITLE = "Bug report received";
+export const BUG_REPORT_SUCCESS_DESCRIPTION =
+  "Thanks for helping us improve HomardClaw.";
+
+export function buildBugReportInput(
+  taskId: string,
+  description: string,
+): BugReportCreateInput {
+  const trimmedDescription = description.trim();
+  return {
+    taskId,
+    ...(trimmedDescription ? { description: trimmedDescription } : {}),
+  };
+}
+
+export function SendBugReportButton({ task }: { task: Task }) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [description, setDescription] = useState("");
@@ -835,8 +848,8 @@ function SendBugReportButton({ task }: { task: Task }) {
     mutation: {
       onSuccess: () => {
         toast({
-          title: "Bug report sent",
-          description: "Saved to Providers → Bug Reports.",
+          title: BUG_REPORT_SUCCESS_TITLE,
+          description: BUG_REPORT_SUCCESS_DESCRIPTION,
         });
         setOpen(false);
         setDescription("");
@@ -854,8 +867,6 @@ function SendBugReportButton({ task }: { task: Task }) {
       },
     },
   });
-
-  if (!me?.isOwner) return null;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -894,12 +905,7 @@ function SendBugReportButton({ task }: { task: Task }) {
               data-testid="button-confirm-send-bug-report"
               onClick={() =>
                 createBugReport.mutate({
-                  data: {
-                    taskId: task.id,
-                    ...(description.trim()
-                      ? { description: description.trim() }
-                      : {}),
-                  },
+                  data: buildBugReportInput(task.id, description),
                 })
               }
             >

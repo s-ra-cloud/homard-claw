@@ -236,7 +236,7 @@ export async function requireWorkspace(
 /**
  * True only for the single account whose *verified* Clerk email matches
  * OWNER_EMAIL. Used to gate features meant for the office owner alone
- * (e.g. bug reports) — distinct from `requireWorkspace`, which every
+ * (e.g. reviewing bug reports) — distinct from `requireWorkspace`, which every
  * signed-in account passes for its own isolated data.
  */
 export async function isOwnerRequest(req: Request): Promise<boolean> {

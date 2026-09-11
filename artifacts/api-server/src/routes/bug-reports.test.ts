@@ -12,7 +12,7 @@ import {
 import { eq, inArray } from "drizzle-orm";
 
 const authState = vi.hoisted(() => ({
-  userId: "hc-bug-owner" as string,
+  userId: "hc-bug-owner" as string | null,
   emails: {} as Record<string, string>,
 }));
 
@@ -50,8 +50,9 @@ const STRANGER = `hc-bug-stranger-${Date.now()}`;
 const OWNER_EMAIL = "owner@example.test";
 const createdAgentIds: string[] = [];
 const createdWorkspaceUserIds = [OWNER, STRANGER];
+const originalOwnerEmail = process.env.OWNER_EMAIL;
 
-async function asUser<T>(userId: string, fn: () => Promise<T>): Promise<T> {
+async function asUser<T>(userId: string | null, fn: () => Promise<T>): Promise<T> {
   const prev = authState.userId;
   authState.userId = userId;
   try {
@@ -61,7 +62,12 @@ async function asUser<T>(userId: string, fn: () => Promise<T>): Promise<T> {
   }
 }
 
-beforeAll(() => {
+beforeAll(async () => {
+  // Resolve fixtures without invoking the legacy-workspace adoption path.
+  // An owner email match must never transfer real workspace data to a test user.
+  await db.insert(workspacesTable).values(
+    createdWorkspaceUserIds.map((clerkUserId) => ({ clerkUserId })),
+  );
   process.env.OWNER_EMAIL = OWNER_EMAIL;
   authState.emails = {
     [OWNER]: OWNER_EMAIL,
@@ -70,7 +76,8 @@ beforeAll(() => {
 });
 
 afterAll(async () => {
-  delete process.env.OWNER_EMAIL;
+  if (originalOwnerEmail === undefined) delete process.env.OWNER_EMAIL;
+  else process.env.OWNER_EMAIL = originalOwnerEmail;
   if (createdAgentIds.length > 0) {
     await db
       .delete(bugReportsTable)
@@ -90,14 +97,14 @@ afterAll(async () => {
 
 let taskCounter = 0;
 
-async function createTask(): Promise<{
+async function createTask(userId = OWNER): Promise<{
   taskId: string;
   agentId: string;
   objective: string;
 }> {
   const tag = `${RUN_TAG} ${++taskCounter}`;
   const objective = `${tag}: reproduce the bug`;
-  return asUser(OWNER, async () => {
+  return asUser(userId, async () => {
     const agent = await request(app)
       .post("/api/agents")
       .send({
@@ -131,7 +138,7 @@ async function createTask(): Promise<{
     const [ws] = await db
       .select({ id: workspacesTable.id })
       .from(workspacesTable)
-      .where(eq(workspacesTable.clerkUserId, OWNER))
+      .where(eq(workspacesTable.clerkUserId, userId))
       .limit(1);
     const [row] = await db
       .insert(tasksTable)
@@ -162,16 +169,44 @@ describe("GET /me", () => {
 });
 
 describe("bug reports", () => {
-  it("refuses non-owners on both list and create", async () => {
-    const { taskId } = await createTask();
+  it("lets non-owners submit their own task with server context and attribution, but not list reports", async () => {
+    const { taskId, agentId, objective } = await createTask(STRANGER);
+    const [task] = await db.select().from(tasksTable).where(eq(tasksTable.id, taskId));
+    let reportId = "";
     await asUser(STRANGER, async () => {
       const list = await request(app).get("/api/bug-reports");
       expect(list.status).toBe(403);
       const create = await request(app)
         .post("/api/bug-reports")
-        .send({ taskId, description: "should be refused" });
-      expect(create.status).toBe(403);
+        .send({
+          taskId,
+          description: `${RUN_TAG} member report`,
+          reporterClerkUserId: OWNER,
+          context: { taskObjective: "forged" },
+        });
+      expect(create.status).toBe(201);
+      reportId = create.body.id;
+      expect(create.body).toMatchObject({
+        taskId, agentId, description: `${RUN_TAG} member report`,
+        context: {
+          taskObjective: objective,
+          taskStatus: task.status,
+          provider: task.provider,
+          model: task.model,
+          errorKind: task.errorKind,
+          errorMessage: task.errorMessage,
+        },
+      });
+      expect(create.body.context.agentName).toContain(RUN_TAG);
+      const [stored] = await db.select().from(bugReportsTable)
+        .where(eq(bugReportsTable.id, reportId));
+      expect(stored.reporterClerkUserId).toBe(STRANGER);
+      expect(stored.workspaceId).toBe(task.workspaceId);
+      expect((await request(app).get("/api/bug-reports")).status).toBe(403);
     });
+    const list = await asUser(OWNER, () => request(app).get("/api/bug-reports"));
+    expect(list.status).toBe(200);
+    expect(list.body.reports.some((report: { id: string }) => report.id === reportId)).toBe(true);
   });
 
   it("lets the owner file a report and see it snapshot the task", async () => {
@@ -198,12 +233,27 @@ describe("bug reports", () => {
     ).toBe(true);
   });
 
-  it("404s filing a report against an unknown or foreign task id", async () => {
+  it("404s non-owner submissions against missing and foreign tasks without storing reports", async () => {
     const missing = "00000000-0000-4000-8000-000000000000";
-    const res = await asUser(OWNER, () =>
-      request(app).post("/api/bug-reports").send({ taskId: missing }),
-    );
-    expect(res.status).toBe(404);
+    const { taskId: foreign } = await createTask(OWNER);
+    for (const taskId of [missing, foreign]) {
+      const res = await asUser(STRANGER, () =>
+        request(app).post("/api/bug-reports").send({ taskId }),
+      );
+      expect(res.status).toBe(404);
+      expect(res.body.error).toBe("Task not found");
+      const rows = await db.select().from(bugReportsTable)
+        .where(eq(bugReportsTable.taskId, taskId));
+      expect(rows).toHaveLength(0);
+    }
+  });
+
+  it("requires authentication for submission and listing", async () => {
+    await asUser(null, async () => {
+      expect((await request(app).get("/api/bug-reports")).status).toBe(401);
+      expect((await request(app).post("/api/bug-reports")
+        .send({ taskId: "00000000-0000-4000-8000-000000000000" })).status).toBe(401);
+    });
   });
 
   it("400s when neither taskId nor agentId is provided", async () => {

@@ -30,7 +30,9 @@ router.get("/bug-reports", requireOwner, async (_req, res): Promise<void> => {
   );
 });
 
-router.post("/bug-reports", requireOwner, async (req, res): Promise<void> => {
+// The parent office router requires an authenticated workspace. Submission is
+// open to its members; only administrative review above requires the owner.
+router.post("/bug-reports", async (req, res): Promise<void> => {
   const parsed = CreateBugReportBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });

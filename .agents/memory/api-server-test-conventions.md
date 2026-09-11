@@ -5,9 +5,9 @@ description: How lifecycle/integration tests for the office API are set up and t
 
 The api-server uses vitest + supertest suites (e.g. src/routes/office.lifecycle.test.ts) that run against the real development Postgres. Rules for any new suite:
 
-- Mock @clerk/express getAuth via vi.hoisted state; in beforeAll, impersonate the *existing* `owner_clerk_id` from system_state so requireOwner passes without mutating ownership.
-- If no owner row exists, the suite may let its test identity claim it, but teardown must delete the row only where key AND value match the test identity — never unconditionally.
-- **Why:** requireOwner claims first-seen identity as permanent owner; a careless test could lock out or delete the real owner.
+- Mock Clerk auth and pre-create isolated workspaces for synthetic users before any authenticated request, including synthetic owners with matching verified emails.
+- **Why:** a matching owner email with no existing workspace can adopt the legacy workspace; cleanup by synthetic user ID can then attempt to delete real data. Owner-only authorization is now verified-email based, not a first-seen owner claim.
+- **How to apply:** seed both owner and non-owner workspace fixtures before requests, restore temporary owner-email configuration, and delete only those isolated fixtures.
 - Tag all created records with a unique run tag (e.g. `HC Test <timestamp>`) in names/summaries, track created ids, and clean up agents/tasks/approvals in afterAll; end with pool.end().
 - NEVER delete or durably mutate audit_events rows in tests: the audit log is hash-chained and append-only, so any edit/delete makes chain verification report tampering forever. Tamper probes must run inside a transaction that always rolls back; test audit rows just accumulate.
 - Policy gating runs before every provider call, so tests exercising other mechanics must opt out of it (autonomous agents, generous limits, priced tasks) or their tasks park for approval instead of running.
@@ -18,9 +18,9 @@ The api-server uses vitest + supertest suites (e.g. src/routes/office.lifecycle.
 
 ## Browser e2e against the web app
 
-The same owner gate applies to the UI: a Playwright/testing subagent that signs in as a freshly created Clerk user gets 403 on every `/api` call and sees an empty app. Read the current `owner_clerk_id` from `system_state` and tell the tester to impersonate exactly that Clerk identity (look its email up through the Clerk backend API with `CLERK_SECRET_KEY`).
+Fresh signed-in users have isolated workspaces; they do not see the existing office's data. Use an isolated, pre-created workspace for browser fixtures. Only administrative review surfaces require the configured owner's verified email.
 
-**Why:** the owner gate is permanent and first-come; a test identity must never claim or replace it.
+**Why:** browser fixtures must not adopt or mutate the legacy workspace to gain access to test data.
 
 Also give the tester a *conversable* agent: retired agents still exist in `agents` but are filtered out of Talk and other rosters, so picking one looks like a missing-contact bug.
 
