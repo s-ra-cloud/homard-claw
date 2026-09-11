@@ -46,11 +46,12 @@ export const OFFICE_ROLE_SEATS: Record<OfficeRole, OfficeRoleSeat> = {
   },
   inspector: {
     // Just to the right of the blue Inbox navigation console (hotspot at
-    // ~25.8/44.6), still on the port side of the submarine. The raised anchor
-    // puts the working claws on the controls while the wheelbase stays below
-    // the console front. The mirrored pose faces the console it reviews.
+    // ~25.8/44.6), still on the port side of the submarine. Raised from 45.2
+    // so both claws land on the console top instead of hovering past its
+    // right edge, while the wheelbase stays below the console front. The
+    // mirrored pose faces the console it reviews.
     left: 30.4,
-    top: 45.2,
+    top: 41.2,
     label: "inbox inspection station",
     pose: "working",
     mirrorX: true,
