@@ -109,49 +109,49 @@ export default function EditAgentPage() {
 
   const form = useForm<AgentFormValues>({
     resolver: zodResolver(agentFormSchema),
-    // The loaded agent arrives through `values`, which React Hook Form only
-    // applies in an effect. Without a full blank starting point the form
-    // renders once with no field values at all and the page crashes.
     defaultValues: emptyAgentFormValues,
-    values: agent
-      ? {
-          name: agent.name,
-          title: agent.title,
-          mission: agent.mission,
-          specialization: agent.specialization ?? "",
-          personality: agent.personality ?? "",
-          goals: agent.goals ?? "",
-          instructions: agent.instructions ?? "",
-          provider: agent.provider ?? "workspace_default",
-          model: agent.model ?? "",
-          codexModel: agent.codexModel ?? "",
-          codexReasoning: agent.codexReasoning ?? "",
-          voiceStyle: agent.voiceStyle ?? "none",
-          securityPreset: agent.securityPreset,
-          autonomy: agent.autonomy,
-          gender: agent.gender,
-          maxTaskBudgetCents:
-            agent.permissionOverrides?.maxTaskBudgetCents != null
-              ? String(agent.permissionOverrides.maxTaskBudgetCents)
-              : "",
-          dailyBudgetCents:
-            agent.permissionOverrides?.dailyBudgetCents != null
-              ? String(agent.permissionOverrides.dailyBudgetCents)
-              : "",
-          maxTasksPerDay:
-            agent.permissionOverrides?.maxTasksPerDay != null
-              ? String(agent.permissionOverrides.maxTasksPerDay)
-              : "",
-          approvalThresholdCents:
-            agent.permissionOverrides?.approvalThresholdCents != null
-              ? String(agent.permissionOverrides.approvalThresholdCents)
-              : "",
-          shellColor: agent.avatar.shellColor,
-          appGrants: appGrantsFormValue(agent.appGrants),
-          sensitiveDataSandbox: agent.sensitiveDataSandbox,
-        }
-      : undefined,
   });
+  const hydratedAgentId = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!agent || hydratedAgentId.current === agent.id) return;
+    form.reset({
+      name: agent.name,
+      title: agent.title,
+      mission: agent.mission,
+      specialization: agent.specialization ?? "",
+      personality: agent.personality ?? "",
+      goals: agent.goals ?? "",
+      instructions: agent.instructions ?? "",
+      provider: agent.provider ?? "workspace_default",
+      model: agent.model ?? "",
+      codexModel: agent.codexModel ?? "",
+      codexReasoning: agent.codexReasoning ?? "",
+      voiceStyle: agent.voiceStyle ?? "none",
+      securityPreset: agent.securityPreset,
+      autonomy: agent.autonomy,
+      gender: agent.gender,
+      maxTaskBudgetCents:
+        agent.permissionOverrides?.maxTaskBudgetCents != null
+          ? String(agent.permissionOverrides.maxTaskBudgetCents)
+          : "",
+      dailyBudgetCents:
+        agent.permissionOverrides?.dailyBudgetCents != null
+          ? String(agent.permissionOverrides.dailyBudgetCents)
+          : "",
+      maxTasksPerDay:
+        agent.permissionOverrides?.maxTasksPerDay != null
+          ? String(agent.permissionOverrides.maxTasksPerDay)
+          : "",
+      approvalThresholdCents:
+        agent.permissionOverrides?.approvalThresholdCents != null
+          ? String(agent.permissionOverrides.approvalThresholdCents)
+          : "",
+      shellColor: agent.avatar.shellColor,
+      appGrants: appGrantsFormValue(agent.appGrants),
+      sensitiveDataSandbox: agent.sensitiveDataSandbox,
+    });
+    hydratedAgentId.current = agent.id;
+  }, [agent, form]);
 
   const updateAgent = useUpdateAgent({
     mutation: {
@@ -219,6 +219,20 @@ export default function EditAgentPage() {
     });
   };
 
+  const onInvalid = () => {
+    requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLElement>('[aria-invalid="true"]')
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    toast({
+      variant: "destructive",
+      title: "Changes not saved",
+      description:
+        "One or more fields need attention. Correct the highlighted field and save again.",
+    });
+  };
+
   return (
     <Shell>
       <div className="p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto space-y-6 sm:space-y-8">
@@ -247,7 +261,9 @@ export default function EditAgentPage() {
         ) : error || !agent ? (
           <PixelCard className="text-center p-6 sm:p-12">
             <h3 className="font-display text-lg uppercase mb-2">
-              {agentMissing ? "Crustabot Not Found" : "Personnel File Unavailable"}
+              {agentMissing
+                ? "Crustabot Not Found"
+                : "Personnel File Unavailable"}
             </h3>
             <p className="text-muted-foreground mb-6">
               {agentMissing
@@ -257,7 +273,10 @@ export default function EditAgentPage() {
             </p>
             <div className="flex flex-wrap justify-center gap-3">
               {!agentMissing && (
-                <Button variant="primary" onClick={() => window.location.reload()}>
+                <Button
+                  variant="primary"
+                  onClick={() => window.location.reload()}
+                >
                   Try Again
                 </Button>
               )}
@@ -276,8 +295,8 @@ export default function EditAgentPage() {
                 <PixelCard title="Office Seating">
                   <div className="flex items-center justify-between gap-4">
                     <p className="text-muted-foreground text-sm">
-                      {agent.name} is sitting on the floor. Seat it at the
-                      first desk; the current desk occupants shift right.
+                      {agent.name} is sitting on the floor. Seat it at the first
+                      desk; the current desk occupants shift right.
                     </p>
                     <Button
                       type="button"
@@ -298,7 +317,7 @@ export default function EditAgentPage() {
               <PixelCard title="Configuration">
                 <Form {...form}>
                   <form
-                    onSubmit={form.handleSubmit(onSubmit)}
+                    onSubmit={form.handleSubmit(onSubmit, onInvalid)}
                     className="space-y-6"
                   >
                     <AgentFormFields form={form} />
