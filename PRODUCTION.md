@@ -27,11 +27,18 @@ verify a deployment.
 | `DATABASE_URL`                                  | Postgres connection                                                    | yes         |
 | `CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`     | User authentication                                                    | yes         |
 | `VITE_CLERK_PUBLISHABLE_KEY`                    | Web build-time Clerk key                                               | yes (build) |
+| `BASE_PATH`                                     | Web build-time base path passed to Vite's `base` config                | yes (build) |
 | `SESSION_SECRET`                                | Session signing + encryption key for per-workspace credentials         | yes         |
+| `OWNER_EMAIL`                                   | Verified email that identifies the single office owner across environments (see below) | recommended |
 | `WEB_SEARCH_API_KEY`                            | Infrastructure key for the native Brave Search capability              | optional*   |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET` | Infrastructure secrets for Telegram Talk, notifications, and approvals | optional*   |
 | `TELEGRAM_WEBHOOK_URL`                          | Public HTTPS `/api/telegram/webhook` URL                               | no          |
 | `TELEGRAM_BOT_USERNAME`                         | Bot username used for the link shortcut                                | no          |
+| `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET` | Legacy OAuth app credentials for the GitHub Connected App           | optional*   |
+| `GITHUB_OAUTH_REDIRECT_URI`                     | Override for the GitHub OAuth callback URL (else derived from the request) | no      |
+| `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_PRIVATE_KEY` | GitHub App installation credentials for the GitHub Connected App (preferred over legacy OAuth; must all be set together) | optional* |
+| `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` | OAuth credentials for the Gmail / Google Drive Connected Apps        | optional*   |
+| `GOOGLE_OAUTH_REDIRECT_URI`                     | Override for the Google OAuth callback URL (else derived from the request) | no      |
 | `LOG_LEVEL`                                     | Pino level (default `info`)                                            | no          |
 
 AI provider credentials are **not** server environment variables. Each
@@ -53,6 +60,28 @@ Telegram and the UI hides the integration. **`TELEGRAM_WEBHOOK_URL` is needed
 only when the server cannot derive the public URL from `REPLIT_DOMAINS` or
 `REPLIT_DEV_DOMAIN`; it must be an HTTPS URL ending in
 `/api/telegram/webhook`.**
+
+GitHub and Google are Connected App capability packages (see
+`docs/capability-packages.md`), not per-server credentials: the env vars
+above only register the OAuth app / GitHub App server-side, and each user
+still connects their own account from the Connected Apps page. GitHub
+supports two auth paths — legacy OAuth (`GITHUB_OAUTH_*`) and a GitHub App
+installation (`GITHUB_APP_*`); when both are configured the app prefers the
+GitHub App path because its tokens self-renew, and installation status
+falls back to OAuth only if no installation exists. Google
+(`GOOGLE_OAUTH_*`) backs both the Gmail and Google Drive packages through
+one shared per-user credential with incremental OAuth consent. Without the
+relevant client id/secret pair, the corresponding Connected App is hidden
+from the UI rather than failing at connect time.
+
+`OWNER_EMAIL` is the durable identity of the single office owner. Clerk
+keeps separate user stores per environment, so seeding production from
+development data leaves a stored owner id that cannot exist in the live
+Clerk instance; setting `OWNER_EMAIL` lets ownership follow whichever
+signed-in account's *verified* primary email matches it, surviving a
+republish or a Clerk account recreation. Leaving it unset falls back to a
+permanent first-authenticated-user claim, which is fine for a fresh
+deployment but cannot recover from a Clerk instance change.
 
 ## Database schema strategy
 
