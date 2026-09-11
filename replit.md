@@ -1,6 +1,9 @@
-# [Project name]
+# Crustabox (Homard Claw)
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A private AI office where you create, configure, and supervise Crustabots —
+AI agents bound to a provider (Claude Code, Codex, or OpenRouter) — from one
+shared dashboard that handles scheduling, memory, approvals, and audit
+history.
 
 ## Run & Operate
 
@@ -20,6 +23,17 @@ _Replace the heading above with the project's name, and this line with one sente
   UI. The server derives its webhook from the Replit domain; set
   `TELEGRAM_WEBHOOK_URL=https://<your-domain>/api/telegram/webhook` when it
   cannot.
+- Optional Connected Apps: `GITHUB_OAUTH_CLIENT_ID`/`GITHUB_OAUTH_CLIENT_SECRET`
+  (or `GITHUB_APP_ID`/`GITHUB_APP_SLUG`/`GITHUB_APP_PRIVATE_KEY` for the
+  preferred GitHub App path) enable the GitHub Connected App;
+  `GOOGLE_OAUTH_CLIENT_ID`/`GOOGLE_OAUTH_CLIENT_SECRET` enable Gmail and
+  Google Drive. See `docs/capability-packages.md`.
+- Manual frontend builds (`pnpm run build` / a bare `vite build`) need `PORT`
+  and `BASE_PATH` set — the Replit workflow provides them, but a shell build
+  must pass them explicitly, e.g. `PORT=5000 BASE_PATH=/`.
+- `OWNER_EMAIL` (optional in dev): pins the single office owner to a verified
+  email instead of the first-authenticated Clerk account. Matters most in
+  production (see `PRODUCTION.md`).
 
 ### Telegram webhook (optional)
 
@@ -89,7 +103,30 @@ Codex's own SDK refresh path may rewrite `auth.json`; Crustabox never does.
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/api-server/src/` — Express API + background worker.
+  - `routes/` — one file per resource (`office.ts` is the largest: agents,
+    tasks, teams, approvals, island/leave, voice, documentation settings).
+  - `capabilities/` — the Connected Apps / capability-package extensibility
+    layer (manifest, registry, install lifecycle, execution). See
+    `docs/capability-packages.md`.
+  - `github/`, `google/` — OAuth + GitHub App credential flows backing the
+    GitHub, Gmail, and Google Drive Connected Apps.
+  - `codex/`, `execution.ts` — provider adapters (Claude Code, Codex,
+    OpenRouter) behind one start/continue/cancel contract.
+  - `scheduler.ts`, `chat-question-scheduler.ts`,
+    `daily-talk-checkin-scheduler.ts` — three sibling claim/finalize
+    schedulers (task launches, proactive chat questions, one daily
+    unprompted Talk check-in), all ticked from `worker.ts`.
+  - `worker.ts`, `worker-ownership.ts` — the singleton task-queue worker and
+    its self-healing ownership lease.
+- `artifacts/homardclaw/src/` — the React office UI (`pages/`, `components/`).
+- `lib/db/src/schema/` — Drizzle schema; the source of truth for the DB
+  (`office.ts` holds nearly every table).
+- `lib/api-spec/openapi.yaml` — API contract; `pnpm --filter @workspace/api-spec run codegen` regenerates the Zod schemas and React Query client from it.
+- `docs/capability-packages.md` — how to author a new Connected App package.
+- `.agents/memory/*.md` — durable engineering notes on non-obvious
+  invariants (scheduling, auth, tenancy, sandboxing); read before touching
+  the area a note names.
 
 ## Architecture decisions
 
@@ -100,10 +137,40 @@ _Populate as you build — short repo map plus pointers to the source-of-truth f
 - **Codex is serialized with a durable `provider_leases` row, not an advisory lock.** The lease is keyed by a hash of the auth _file path_, so one credential can never run two Codex jobs even across processes, and it survives a restart.
 - **The queue worker is a singleton via an expiring, heartbeated `worker_ownership` row** (`artifacts/api-server/src/worker-ownership.ts`), not an advisory lock: the holder renews every 10s, ownership expires after 30s of missed heartbeats, and any standby instance takes over the expired row (Autoscale self-healing). Renewal failure aborts local provider calls; the per-attempt fence in `finishIfStillRunning` blocks a stale instance's results. Clean shutdown deletes the row for instant handoff. `/api/runtime/health` reports active/standby state plus the ownership row's staleness.
 - **Fallbacks are never silent.** On a Codex auth/allowance failure the task stops and the owner picks wait / cancel / approve-paid-fallback. Approval only records consent; the spend policy is re-evaluated at execution time and the reason and destination are written to the audit chain.
+- **GitHub prefers its App installation over legacy OAuth.** Both auth paths can be configured at once; a workspace with an active GitHub App installation always uses it (self-renewing tokens) and OAuth is only consulted as a fallback. Gmail and Google Drive instead share a single Google account per workspace via incremental OAuth consent (declining Drive's broader organize scope still allows reads and app-created files).
+- **The office owner's identity is `OWNER_EMAIL`, not a stored Clerk id.** Clerk user stores are per-environment, so a cached id from development means nothing in production. A verified-email match takes over the stored owner row; a mismatch or missing `OWNER_EMAIL` never overrides an existing owner.
+- **Chat-question and daily-Talk-check-in schedulers are siblings of the task scheduler, not variants of it.** Each reuses the same claim → dispatch/fire → finalize discipline (see `.agents/memory/durable-scheduling.md`) but owns its own table, so a bug in one can't regress task-schedule firing.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+See `README.md` for the user-facing feature list. Notable areas with more
+depth than the README covers:
+
+- **Teams & delegation** — a team has one lead; only the lead can split its
+  own task into sub-tasks for teammates, gated by depth/quota checks
+  evaluated inside the same transaction as the parent-task lock so
+  concurrent hand-offs can't overshoot the cap.
+- **Talk** — text or voice chat with an agent, backed by a per-workspace
+  OpenAI key (Talk voice settings), independent of which provider runs the
+  agent's tasks. Chat can only *propose* a task; it never queues one
+  directly. A daily proactive check-in (one random eligible agent, random
+  time, no configuration) and owner-scheduled recurring chat questions are
+  both separate from task scheduling and ride the same Talk history.
+- **Retirement Island vs. day off** — retiring an agent
+  (`POST /agents/:id/retire`) is permanent: it can never be deleted, paused,
+  or resumed again, and appears forever on the Island (beach or, up to 10
+  at a time, hotel). A "day off" is a separate, temporary, reversible pause
+  the owner grants conversationally; the agent returns automatically the
+  next morning.
+- **Approval preferences** — per workspace, the owner can name a reviewer
+  agent to auto-review pending approvals, cap automatic failed-task
+  retries (1-3), or flip an "always approve everything" bypass. All three
+  live-sync over the same SSE topic as the approval board.
+- **Bug reports & usage reports** — bug reports are owner-only, filed from
+  a task or the Talk window, and auto-attach the relevant context (task
+  state, or the last 10 Talk turns). The Reports page aggregates real
+  (never estimated) cost/token usage — no feature here creates cost data
+  that didn't come from a completed provider call.
 
 ## User preferences
 
