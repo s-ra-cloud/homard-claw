@@ -181,6 +181,12 @@ const THREAD_RESUME_HINTS = [
   "thread/resume failed",
 ];
 
+export function isThreadResumeFailure(message: string): boolean {
+  return THREAD_RESUME_HINTS.some((hint) =>
+    message.toLowerCase().includes(hint),
+  );
+}
+
 /**
  * The one resume failure that is provider-confirmed pre-execution even when
  * it arrives as a rejected promise: the server refused `thread/resume`
@@ -230,7 +236,7 @@ const AUTH_HINTS = [
 export function classifyCodexError(rawMessage: string): CodexRunError {
   const message = sanitizeErrorMessage(rawMessage);
   const haystack = message.toLowerCase();
-  if (THREAD_RESUME_HINTS.some((hint) => haystack.includes(hint))) {
+  if (isThreadResumeFailure(message)) {
     const error = new CodexRunError("provider_error", message);
     // The full production signature is the server's own pre-turn resume
     // rejection, so it counts as proof nothing ran — even when it reaches

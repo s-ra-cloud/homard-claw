@@ -955,6 +955,55 @@ describe("Codex execution", () => {
     expect(sdkCalls.at(1)!.threadId).toBe(firstRow.providerThreadId);
   });
 
+  it.each([
+    "pre-start event",
+    "rejected promise",
+    "broken stream",
+    "post-start event",
+    "post-start rejection",
+  ])("handles a queued task's missing rollout: %s", async (mode) => {
+    // Digits resembling auth/rate-limit hints must not change classification.
+    const production =
+      "thread/resume failed: no rollout found for thread id 0199a7f2-429b-401e-9a4f-5b6c7d8e9f01 (code -32600)";
+    const agent = await createAgent(`${RUN_TAG} Lost rollout ${mode}`);
+    turnScript = [successTurn()];
+    const first = await insertTask(agent.id);
+    await drainOne([agent.id]);
+    const original = await getTaskRow(first.id);
+    const started = mode.startsWith("post-start");
+    const events: CodexThreadEvent[] = started ? [{ type: "turn.started" }] : [];
+    const failure: ScriptedTurn = { events };
+    if (mode === "rejected promise") failure.throws = new Error(production);
+    else if (mode === "broken stream" || mode === "post-start rejection")
+      failure.throwsMidStream = new Error(production);
+    else events.push({ type: "error", message: production });
+    turnScript = [failure];
+
+    const second = await insertTask(agent.id, {
+      conversationId: original.conversationId,
+    });
+    await drainOne([agent.id]);
+    const failed = await getTaskRow(second.id);
+    expect(failed.status).toBe("failed");
+    expect(failed.errorKind).toBe("provider_error");
+    expect(sdkCalls).toHaveLength(2); // No automatic allowance-spending replay.
+    expect(sdkCalls[1]!.kind).toBe("resume");
+    const [conversation] = await db.select().from(providerConversationsTable)
+      .where(eq(providerConversationsTable.id, original.conversationId!));
+    expect(conversation!.resumable).toBe(started);
+
+    turnScript = [successTurn()];
+    const next = await insertTask(agent.id, {
+      conversationId: original.conversationId,
+    });
+    await drainOne([agent.id]);
+    expect((await getTaskRow(next.id)).status).toBe("completed");
+    expect(sdkCalls[2]!.kind).toBe(started ? "resume" : "start");
+    const [healed] = await db.select().from(providerConversationsTable)
+      .where(eq(providerConversationsTable.id, original.conversationId!));
+    expect(healed!.resumable).toBe(true);
+  });
+
   it("gives each agent its own conversation, thread, and directory", async () => {
     const one = await createAgent(`${RUN_TAG} Iso A`);
     const two = await createAgent(`${RUN_TAG} Iso B`);

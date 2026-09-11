@@ -616,9 +616,13 @@ describe("notifications", () => {
     expect(marked.body.updated).toBe(mine.length);
 
     const after = await request(app).get("/api/notifications?limit=50");
+    // The scheduler may emit another notification between list and read.
+    // Only the IDs submitted above were requested to become read.
+    const markedIds = new Set(mine.map((n) => n.id));
     const afterMine = (
-      after.body.notifications as { body: string; read: boolean }[]
-    ).filter((n) => n.body.includes(RUN_TAG));
+      after.body.notifications as { id: string; read: boolean }[]
+    ).filter((n) => markedIds.has(n.id));
+    expect(afterMine).toHaveLength(mine.length);
     expect(afterMine.every((n) => n.read)).toBe(true);
   });
 });

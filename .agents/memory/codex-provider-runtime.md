@@ -110,6 +110,15 @@ SDK promise proves nothing and must fail closed — a subscription turn that
 may have run must never be replayed, or the allowance is double-spent.
 Recording a fresh SDK-issued thread id heals the row (resumable=true).
 
+Queued tasks deliberately do not replay a failed resume within the same run,
+even when the error text claims the turn never started; they retire the thread
+only when no turn start was observed, then fail for an explicit retry.
+**Why:** the shared classifier has a Talk-specific missing-rollout exception
+that can label rejected promises pre-start. That is not permission for the
+queue worker to replay a potentially billed dispatch.
+**How to apply:** keep queue recovery separate from Talk's immediate-recovery
+policy; verify rejected promises and post-start failures never trigger replay.
+
 ## A lease check belongs before the write, not only in the catch
 
 **Why:** a heartbeat fires on a timer, so it cannot cover the window between

@@ -9,7 +9,7 @@ import {
   tasksTable,
   workspacesTable,
 } from "@workspace/db";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 const authState = vi.hoisted(() => ({
   userId: "hc-bug-owner" as string | null,
@@ -50,6 +50,7 @@ const STRANGER = `hc-bug-stranger-${Date.now()}`;
 const OWNER_EMAIL = "owner@example.test";
 const createdAgentIds: string[] = [];
 const createdWorkspaceUserIds = [OWNER, STRANGER];
+const createdWorkspaceIds: string[] = [];
 const originalOwnerEmail = process.env.OWNER_EMAIL;
 
 async function asUser<T>(userId: string | null, fn: () => Promise<T>): Promise<T> {
@@ -65,9 +66,10 @@ async function asUser<T>(userId: string | null, fn: () => Promise<T>): Promise<T
 beforeAll(async () => {
   // Resolve fixtures without invoking the legacy-workspace adoption path.
   // An owner email match must never transfer real workspace data to a test user.
-  await db.insert(workspacesTable).values(
+  const rows = await db.insert(workspacesTable).values(
     createdWorkspaceUserIds.map((clerkUserId) => ({ clerkUserId })),
-  );
+  ).returning({ id: workspacesTable.id });
+  createdWorkspaceIds.push(...rows.map((row) => row.id));
   process.env.OWNER_EMAIL = OWNER_EMAIL;
   authState.emails = {
     [OWNER]: OWNER_EMAIL,
@@ -78,21 +80,27 @@ beforeAll(async () => {
 afterAll(async () => {
   if (originalOwnerEmail === undefined) delete process.env.OWNER_EMAIL;
   else process.env.OWNER_EMAIL = originalOwnerEmail;
-  if (createdAgentIds.length > 0) {
-    await db
-      .delete(bugReportsTable)
-      .where(inArray(bugReportsTable.agentId, createdAgentIds));
-    await db
-      .delete(tasksTable)
-      .where(inArray(tasksTable.agentId, createdAgentIds));
-    await db
-      .delete(agentsTable)
-      .where(inArray(agentsTable.id, createdAgentIds));
+  try {
+    if (createdAgentIds.length > 0) {
+      await db
+        .delete(bugReportsTable)
+        .where(inArray(bugReportsTable.agentId, createdAgentIds));
+      await db
+        .delete(tasksTable)
+        .where(inArray(tasksTable.agentId, createdAgentIds));
+      await db
+        .delete(agentsTable)
+        .where(inArray(agentsTable.id, createdAgentIds));
+    }
+    if (createdWorkspaceIds.length > 0) {
+      await db.delete(workspacesTable).where(and(
+        inArray(workspacesTable.id, createdWorkspaceIds),
+        inArray(workspacesTable.clerkUserId, createdWorkspaceUserIds),
+      ));
+    }
+  } finally {
+    await pool.end();
   }
-  await db
-    .delete(workspacesTable)
-    .where(inArray(workspacesTable.clerkUserId, createdWorkspaceUserIds));
-  await pool.end();
 });
 
 let taskCounter = 0;
@@ -126,15 +134,7 @@ async function createTask(userId = OWNER): Promise<{
       .set({ paused: true })
       .where(eq(agentsTable.id, agent.body.id));
 
-    const task = await request(app).post("/api/tasks").send({
-      agentId: agent.body.id,
-      objective,
-    });
-    expect([201, 409, 423, 503]).toContain(task.status);
-    if (task.status === 201) {
-      return { taskId: task.body.id, agentId: agent.body.id, objective };
-    }
-
+    // Reporting needs a stored task, not live dispatch or approval side effects.
     const [ws] = await db
       .select({ id: workspacesTable.id })
       .from(workspacesTable)
@@ -161,6 +161,9 @@ describe("GET /me", () => {
     const owner = await asUser(OWNER, () => request(app).get("/api/me"));
     expect(owner.status).toBe(200);
     expect(owner.body.isOwner).toBe(true);
+    const [workspace] = await db.select().from(workspacesTable)
+      .where(eq(workspacesTable.clerkUserId, OWNER));
+    expect(createdWorkspaceIds).toContain(workspace!.id);
 
     const stranger = await asUser(STRANGER, () => request(app).get("/api/me"));
     expect(stranger.status).toBe(200);

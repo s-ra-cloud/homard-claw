@@ -49,3 +49,15 @@ a failure that passes in isolation is interference, not a regression. If a
 run seems hung at startup, another suite run is holding the lock.
 
 - The dev Postgres does not auto-sync with merged schema changes; push the schema before blaming tests for "missing relation" errors.
+
+
+## Fake verified owners must have a workspace before their first request
+
+Pre-create isolated workspaces for synthetic accounts whose verified email
+matches OWNER_EMAIL. Clean up only workspace IDs returned by those inserts,
+never rows discovered by the synthetic user ID after a request.
+**Why:** first-request legacy adoption can transfer the real office to the
+fake owner; deleting by that user ID then attempts to cascade-delete real data.
+**How to apply:** owner-role route tests should seed their workspace before
+HTTP setup, retain insert-returned IDs, and create terminal task fixtures
+directly when the behavior under test does not require queue dispatch.

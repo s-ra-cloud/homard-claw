@@ -57,10 +57,12 @@ import {
   withOwnershipFence,
 } from "./worker-ownership";
 import { codexAuthFingerprint } from "./codex/runtime";
+import { isThreadResumeFailure } from "./codex/execute";
 import { codexLeaseHeartbeatMs, codexLeaseTtlMs } from "./codex/config";
 import {
   ensureConversationWorkspace,
   getConversation,
+  markConversationUnresumable,
   recordThreadId,
   resolveConversation,
   touchConversation,
@@ -1982,6 +1984,22 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
               .set({ providerThreadId: emitted })
               .where(eq(tasksTable.id, task.id));
           },
+        }).catch(async (error: unknown) => {
+          // Retire a dead resume for the next explicit run, never replay this
+          // dispatch. Even a production-shaped SDK rejection may have spent
+          // allowance; an observed turn start also rules out retiring it.
+          if (
+            provider === "codex_chatgpt" &&
+            lastThreadId &&
+            conversationId &&
+            error instanceof ProviderCallError &&
+            error.kind === "provider_error" &&
+            error.turnStarted !== true &&
+            isThreadResumeFailure(error.message)
+          ) {
+            await markConversationUnresumable(conversationId);
+          }
+          throw error;
         });
         inputTokensTotal += result.inputTokens;
         outputTokensTotal += result.outputTokens;
