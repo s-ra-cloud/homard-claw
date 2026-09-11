@@ -90,8 +90,10 @@ import { navigateToExternal } from "@/lib/office-window";
 import {
   ATTACHMENT_ACCEPT,
   MAX_ATTACHMENTS,
+  attachmentsForTalkProposal,
   attachmentLabel,
   readAttachment,
+  withTalkAttachments,
 } from "@/lib/attachments";
 
 export type Turn = {
@@ -449,6 +451,9 @@ export function CallView({
     useState<AgentDelegationProposal | null>(null);
   const [pendingDelegation, setPendingDelegation] =
     useState<AgentDelegationTarget | null>(null);
+  const [proposalAttachments, setProposalAttachments] = useState<
+    InputAttachment[]
+  >([]);
   const [liveTranscript, setLiveTranscript] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
@@ -462,6 +467,8 @@ export function CallView({
   proposedDelegationRef.current = proposedDelegation;
   const pendingDelegationRef = useRef<AgentDelegationTarget | null>(null);
   pendingDelegationRef.current = pendingDelegation;
+  const proposalAttachmentsRef = useRef<InputAttachment[]>([]);
+  proposalAttachmentsRef.current = proposalAttachments;
   // Bumped on unmount (i.e. contact switch / hang up) so late replies from a
   // previous conversation can never leak into the current one.
   const epochRef = useRef(0);
@@ -690,7 +697,14 @@ export function CallView({
   const queueProposedTask = useCallback(
     (objective: string) => {
       setProposedTask(null);
-      createTask.mutate({ data: { agentId, objective, talkMode: true } });
+      const retainedAttachments = proposalAttachmentsRef.current;
+      setProposalAttachments([]);
+      createTask.mutate({
+        data: withTalkAttachments(
+          { agentId, objective, talkMode: true },
+          retainedAttachments,
+        ),
+      });
     },
     [agentId, createTask],
   );
@@ -701,6 +715,7 @@ export function CallView({
         const proposal = proposedDelegationRef.current;
         setProposedDelegation(null);
         setPendingDelegation(null);
+        setProposalAttachments([]);
         void queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
         void queryClient.invalidateQueries({ queryKey: ["/api/messages"] });
         appendTurn({
@@ -725,11 +740,14 @@ export function CallView({
     (proposal: AgentDelegationProposal) => {
       delegateTask.mutate({
         agentId,
-        data: {
-          targetAgentId: proposal.targetAgentId,
-          objective: proposal.objective,
-          note: proposal.note,
-        },
+        data: withTalkAttachments(
+          {
+            targetAgentId: proposal.targetAgentId,
+            objective: proposal.objective,
+            note: proposal.note,
+          },
+          proposalAttachmentsRef.current,
+        ),
       });
     },
     [agentId, delegateTask],
@@ -761,6 +779,7 @@ export function CallView({
         setProposedTask(null);
         setProposedDelegation(null);
         setPendingDelegation(null);
+        setProposalAttachments([]);
         appendTurn({
           role: "agent",
           text: pending
@@ -794,6 +813,7 @@ export function CallView({
         setProposedTask(null);
         setProposedDelegation(null);
         setPendingDelegation(null);
+        setProposalAttachments([]);
         setFlowError(null);
         queryClient.invalidateQueries({
           queryKey: getGetTalkHistoryQueryKey(agentId),
@@ -855,6 +875,12 @@ export function CallView({
           setProposedTask(data.proposedTaskObjective ?? null);
           setProposedDelegation(data.proposedDelegation ?? null);
           setPendingDelegation(data.pendingDelegation ?? null);
+          setProposalAttachments(
+            attachmentsForTalkProposal(
+              Boolean(data.proposedTaskObjective || data.proposedDelegation),
+              turnAttachments,
+            ),
+          );
           setPhase("idle");
         })
         .catch((err) => {
@@ -1051,6 +1077,7 @@ export function CallView({
                   ? (event.pendingDelegation as AgentDelegationTarget)
                   : null,
               );
+              setProposalAttachments([]);
               expectAudio = event.voice != null;
               // Stay in "thinking" until audio actually arrives, so a failed
               // TTS stream cannot strand the UI in a speaking state.
@@ -1366,7 +1393,10 @@ export function CallView({
           <Button
             size="sm"
             variant="outline"
-            onClick={() => setPendingDelegation(null)}
+            onClick={() => {
+              setPendingDelegation(null);
+              setProposalAttachments([]);
+            }}
           >
             Cancel
           </Button>
@@ -1395,7 +1425,10 @@ export function CallView({
             <Button
               size="sm"
               variant="outline"
-              onClick={() => setProposedTask(null)}
+              onClick={() => {
+                setProposedTask(null);
+                setProposalAttachments([]);
+              }}
             >
               <X className="w-3 h-3 mr-1" aria-hidden="true" /> Dismiss
             </Button>
@@ -1429,6 +1462,7 @@ export function CallView({
               onClick={() => {
                 setProposedDelegation(null);
                 setPendingDelegation(null);
+                setProposalAttachments([]);
               }}
             >
               <X className="w-3 h-3 mr-1" aria-hidden="true" /> Dismiss

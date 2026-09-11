@@ -1408,6 +1408,33 @@ export interface DelegationInput {
   note?: string;
 }
 
+export type InputAttachmentEncoding = typeof InputAttachmentEncoding[keyof typeof InputAttachmentEncoding];
+
+
+export const InputAttachmentEncoding = {
+  text: 'text',
+  base64: 'base64',
+} as const;
+
+export interface InputAttachment {
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  name: string;
+  /**
+     * @minLength 1
+     * @maxLength 100
+     */
+  mimeType: string;
+  encoding: InputAttachmentEncoding;
+  /**
+     * @minLength 1
+     * @maxLength 34000000
+     */
+  content: string;
+}
+
 export interface TalkDelegationInput {
   targetAgentId: string;
   /**
@@ -1417,6 +1444,8 @@ export interface TalkDelegationInput {
   objective: string;
   /** @maxLength 2000 */
   note?: string;
+  /** @maxItems 4 */
+  attachments?: InputAttachment[];
 }
 
 export interface AgentDelegationProposal {
@@ -1562,33 +1591,6 @@ export interface TalkReadResult {
 
 export interface ClearTalkHistoryResult {
   deleted: number;
-}
-
-export type InputAttachmentEncoding = typeof InputAttachmentEncoding[keyof typeof InputAttachmentEncoding];
-
-
-export const InputAttachmentEncoding = {
-  text: 'text',
-  base64: 'base64',
-} as const;
-
-export interface InputAttachment {
-  /**
-     * @minLength 1
-     * @maxLength 160
-     */
-  name: string;
-  /**
-     * @minLength 1
-     * @maxLength 100
-     */
-  mimeType: string;
-  encoding: InputAttachmentEncoding;
-  /**
-     * @minLength 1
-     * @maxLength 34000000
-     */
-  content: string;
 }
 
 export interface ConverseInput {

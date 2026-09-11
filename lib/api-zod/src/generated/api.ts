@@ -826,12 +826,26 @@ export const delegateFromTalkBodyObjectiveMax = 5000;
 
 export const delegateFromTalkBodyNoteMax = 2000;
 
+export const delegateFromTalkBodyAttachmentsItemNameMax = 160;
+
+export const delegateFromTalkBodyAttachmentsItemMimeTypeMax = 100;
+
+export const delegateFromTalkBodyAttachmentsItemContentMax = 34000000;
+
+export const delegateFromTalkBodyAttachmentsMax = 4;
+
 
 
 export const DelegateFromTalkBody = zod.object({
   "targetAgentId": zod.string(),
   "objective": zod.string().min(delegateFromTalkBodyObjectiveMin).max(delegateFromTalkBodyObjectiveMax),
-  "note": zod.string().max(delegateFromTalkBodyNoteMax).optional()
+  "note": zod.string().max(delegateFromTalkBodyNoteMax).optional(),
+  "attachments": zod.array(zod.object({
+  "name": zod.string().min(1).max(delegateFromTalkBodyAttachmentsItemNameMax),
+  "mimeType": zod.string().min(1).max(delegateFromTalkBodyAttachmentsItemMimeTypeMax),
+  "encoding": zod.enum(['text', 'base64']),
+  "content": zod.string().min(1).max(delegateFromTalkBodyAttachmentsItemContentMax)
+})).max(delegateFromTalkBodyAttachmentsMax).optional()
 })
 
 export const DelegateFromTalkResponse = zod.object({

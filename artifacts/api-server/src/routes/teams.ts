@@ -161,6 +161,7 @@ router.post(
           delegatedByAgentId: source.id,
           talkMode: true,
           talkAutoApprove,
+          files: body.data.attachments ?? [],
           handoffContext: handoff.promptSection,
           handoffSources: handoff.sources,
           status: "queued",
@@ -199,6 +200,13 @@ router.post(
     res.status(201).json(
       DelegateFromTalkResponse.parse({
         ...outcome.task,
+        files: outcome.task.files.map((file) => ({
+          name: file.name,
+          content:
+            file.encoding === "base64"
+              ? `[${file.mimeType ?? "binary file"} attachment]`
+              : file.content,
+        })),
         agentName: outcome.targetName,
         teamName: null,
         delegatedByAgentName: outcome.source.name,

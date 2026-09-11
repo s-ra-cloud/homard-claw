@@ -345,6 +345,14 @@ describe("delegation authorization", () => {
           // pinned memory as "relevant" purely through fixture boilerplate.
           objective: "Check the alert logs and report back",
           note: "Please check the latest logs and report back.",
+          attachments: [
+            {
+              name: "alert-log.txt",
+              mimeType: "text/plain",
+              encoding: "text",
+              content: "Original Talk attachment content BLUE-LANTERN-47.",
+            },
+          ],
         });
       expect(res.status).toBe(201);
       expect(res.body).toMatchObject({
@@ -353,6 +361,12 @@ describe("delegation authorization", () => {
         teamId: team.id,
         delegatedByAgentId: lead.id,
         status: "queued",
+        files: [
+          {
+            name: "alert-log.txt",
+            content: "Original Talk attachment content BLUE-LANTERN-47.",
+          },
+        ],
       });
 
       const task = await getTaskRow(res.body.id);
@@ -363,6 +377,14 @@ describe("delegation authorization", () => {
         delegatedByAgentId: lead.id,
       });
       expect(task.handoffContext).toContain("BLUE-LANTERN-47");
+      expect(task.files).toEqual([
+        {
+          name: "alert-log.txt",
+          mimeType: "text/plain",
+          encoding: "text",
+          content: "Original Talk attachment content BLUE-LANTERN-47.",
+        },
+      ]);
       expect(task.handoffContext).toContain(
         "Please check the latest logs and report back.",
       );

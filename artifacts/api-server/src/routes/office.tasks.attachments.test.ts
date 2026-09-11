@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CreateTaskBody } from "@workspace/api-zod";
+import { CreateTaskBody, DelegateFromTalkBody } from "@workspace/api-zod";
 
 // Content length that a 25 MB source file expands to once base64-encoded
 // (ceil(n/3)*4), the shape every binary attachment (images, PDFs) takes.
@@ -46,5 +46,35 @@ describe("CreateTaskBody attachment size validation", () => {
     ];
     const result = CreateTaskBody.safeParse(body);
     expect(result.success).toBe(false);
+  });
+});
+
+describe("DelegateFromTalkBody attachment validation", () => {
+  const delegationBody = (length: number) => {
+    const task = bodyWithAttachmentContent(length);
+    return {
+      targetAgentId: "agent-2",
+      objective: task.objective,
+      attachments: task.attachments,
+    };
+  };
+
+  it("accepts the same attachment boundary as direct task creation", () => {
+    expect(
+      DelegateFromTalkBody.safeParse(
+        delegationBody(MAX_ATTACHMENT_CONTENT_LENGTH),
+      ).success,
+    ).toBe(true);
+  });
+
+  it("rejects oversized and excess attachments", () => {
+    expect(
+      DelegateFromTalkBody.safeParse(
+        delegationBody(MAX_ATTACHMENT_CONTENT_LENGTH + 1),
+      ).success,
+    ).toBe(false);
+    const body = delegationBody(10);
+    body.attachments = Array(5).fill(body.attachments[0]);
+    expect(DelegateFromTalkBody.safeParse(body).success).toBe(false);
   });
 });

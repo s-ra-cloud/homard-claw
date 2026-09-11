@@ -3174,6 +3174,11 @@ components:
         targetAgentId: { type: string }
         objective: { type: string, minLength: 3, maxLength: 5000 }
         note: { type: string, maxLength: 2000 }
+        attachments:
+          type: array
+          maxItems: 4
+          items:
+            $ref: "#/components/schemas/InputAttachment"
     AgentDelegationProposal:
       type: object
       required: [targetAgentId, targetAgentName, objective, note]

@@ -5,6 +5,7 @@
  * Crustabox private Crustabot office API
  * OpenAPI spec version: 0.1.0
  */
+import type { InputAttachment } from './inputAttachment';
 
 export interface TalkDelegationInput {
   targetAgentId: string;
@@ -15,4 +16,6 @@ export interface TalkDelegationInput {
   objective: string;
   /** @maxLength 2000 */
   note?: string;
+  /** @maxItems 4 */
+  attachments?: InputAttachment[];
 }
