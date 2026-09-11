@@ -3,6 +3,8 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   ApiError,
+  type AgentDetail,
+  type Agent,
   useAssignAgentFirstDesk,
   useGetAgent,
   useUpdateAgent,
@@ -112,8 +114,11 @@ export default function EditAgentPage() {
     defaultValues: emptyAgentFormValues,
   });
   const hydratedAgentId = React.useRef<string | null>(null);
+  const { isDirty } = form.formState;
   React.useEffect(() => {
-    if (!agent || hydratedAgentId.current === agent.id) return;
+    // Cached detail can render before the fresh GET. Accept fresh data until
+    // editing starts, but never overwrite an in-progress draft.
+    if (!agent || (hydratedAgentId.current === agent.id && isDirty)) return;
     form.reset({
       name: agent.name,
       title: agent.title,
@@ -151,13 +156,27 @@ export default function EditAgentPage() {
       sensitiveDataSandbox: agent.sensitiveDataSandbox,
     });
     hydratedAgentId.current = agent.id;
-  }, [agent, form]);
+  }, [agent, form, isDirty]);
 
   const updateAgent = useUpdateAgent({
     mutation: {
-      onSuccess: () => {
+      onSuccess: async (savedAgent) => {
+        // A GET started before PATCH must not overwrite its newer response.
+        const detailKey = [`/api/agents/${savedAgent.id}`];
+        await Promise.all([
+          queryClient.cancelQueries({ queryKey: detailKey }),
+          queryClient.cancelQueries({ queryKey: ["/api/agents"] }),
+        ]);
+        queryClient.setQueryData<AgentDetail>(detailKey, (previous) =>
+          previous ? { ...previous, agent: savedAgent } : undefined,
+        );
+        queryClient.setQueryData<Agent[]>(["/api/agents"], (previous) =>
+          previous?.map((item) =>
+            item.id === savedAgent.id ? savedAgent : item,
+          ),
+        );
         queryClient.invalidateQueries({ queryKey: ["/api/agents"] });
-        queryClient.invalidateQueries({ queryKey: [`/api/agents/${agentId}`] });
+        queryClient.invalidateQueries({ queryKey: detailKey });
         queryClient.invalidateQueries({ queryKey: ["/api/office/overview"] });
         queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
         toast({

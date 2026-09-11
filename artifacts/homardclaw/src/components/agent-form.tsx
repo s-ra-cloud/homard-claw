@@ -25,7 +25,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Select,
+  Select as BaseSelect,
   SelectContent,
   SelectItem,
   SelectTrigger,
@@ -33,6 +33,23 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+
+// Every picker in this form uses explicit values for clearing ("none" or
+// "workspace_default"). Radix's hidden native select can emit "" as the form
+// hydrates on SPA remount; that is not a user selection and must not reach RHF.
+function Select({
+  onValueChange,
+  ...props
+}: React.ComponentProps<typeof BaseSelect>) {
+  return (
+    <BaseSelect
+      {...props}
+      onValueChange={(value) => {
+        if (value !== "") onValueChange?.(value);
+      }}
+    />
+  );
+}
 
 export const VOICE_OPTIONS = [
   { value: "none", label: "None (Text Only)" },
