@@ -114,6 +114,8 @@ const EXTERIOR_SEATS = [
 /** Character size as a share of the wide scene, preserving the old pixel size. */
 const CHARACTER_PCT = 4.6;
 const SCENE_ASPECT = 1586 / 992;
+/** SSE is the fast path; this only bounds how long a missed status can linger. */
+export const OFFICE_AGENT_REFRESH_MS = 15_000;
 /**
  * Floor cushions overlap by depth: the further back a mat sits, the lower it
  * draws. Everything stays below the desk agents, which own z-index 12.
@@ -305,7 +307,13 @@ export default function OfficeDashboard() {
     data: agents,
     isLoading: agentsLoading,
     isError: agentsError,
-  } = useListAgents();
+  } = useListAgents({
+    query: {
+      queryKey: ["/api/agents"],
+      refetchInterval: OFFICE_AGENT_REFRESH_MS,
+      refetchIntervalInBackground: false,
+    },
+  });
   const { data: approvals } = useListApprovals();
   const { data: approvalSettings, isLoading: approvalSettingsLoading } =
     useGetApprovalSettings();
