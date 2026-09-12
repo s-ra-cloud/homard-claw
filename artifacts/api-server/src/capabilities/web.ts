@@ -3,7 +3,9 @@ import { lookup as dnsLookup } from "node:dns/promises";
 import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
 import { existsSync } from "node:fs";
+import { delimiter, join } from "node:path";
 import sanitizeHtml from "sanitize-html";
+import { logger } from "../lib/logger";
 
 const WEB_SEARCH_API_KEY_ENV = "WEB_SEARCH_API_KEY";
 const WEB_SEARCH_ENDPOINT = "https://api.search.brave.com/res/v1/web/search";
@@ -32,6 +34,27 @@ export class WebRenderLimitError extends Error {
   ) {
     super(`The rendered website exceeded its ${limit} limit.`);
     this.name = "WebRenderLimitError";
+  }
+}
+
+export class WebsiteBrowserUnavailableError extends Error {
+  constructor() {
+    super("Approved website browser runtime unavailable.");
+    this.name = "WebsiteBrowserUnavailableError";
+  }
+}
+
+export class WebsiteNavigationError extends Error {
+  constructor() {
+    super("Approved website navigation failed.");
+    this.name = "WebsiteNavigationError";
+  }
+}
+
+export class WebsiteRenderingError extends Error {
+  constructor() {
+    super("Approved website rendering failed.");
+    this.name = "WebsiteRenderingError";
   }
 }
 
@@ -67,15 +90,23 @@ export function chromiumLaunchOptions(origin: string, pinnedAddress: string) {
   };
 }
 
-function chromiumExecutable(): string | undefined {
+export function chromiumExecutable(): string | undefined {
   const configured = process.env.CHROMIUM_EXECUTABLE_PATH;
   if (configured && existsSync(configured)) return configured;
-  for (const candidate of [
+  const candidates = [
     "/repl/tools/bin/chromium",
     "/usr/bin/chromium",
     "/usr/bin/chromium-browser",
     "/usr/bin/google-chrome",
-  ]) {
+    ...((process.env.PATH ?? "").split(delimiter).flatMap((directory) =>
+      directory
+        ? ["chromium", "chromium-browser", "google-chrome"].map((name) =>
+            join(directory, name),
+          )
+        : [],
+    )),
+  ];
+  for (const candidate of candidates) {
     if (existsSync(candidate)) return candidate;
   }
   return undefined;
@@ -131,15 +162,44 @@ async function performApprovedWebsiteRender(
 ): Promise<string> {
   // Production may point at a system Chromium with
   // CHROMIUM_EXECUTABLE_PATH; Playwright's bundled executable is the fallback.
-  const { chromium } = await import("playwright");
-  const validated = await resolvePublicTarget(
-    url,
-    defaultResolver,
-    Math.max(1, control.deadline - Date.now()),
-  );
+  let chromium;
+  try {
+    ({ chromium } = await import("playwright"));
+  } catch {
+    throw new WebsiteBrowserUnavailableError();
+  }
+  const executablePath = chromiumExecutable();
+  const bundledExecutable = chromium.executablePath();
+  if (!executablePath && !existsSync(bundledExecutable)) {
+    throw new WebsiteBrowserUnavailableError();
+  }
+  let validated;
+  try {
+    validated = await resolvePublicTarget(
+      url,
+      defaultResolver,
+      Math.max(1, control.deadline - Date.now()),
+    );
+  } catch (error) {
+    if (
+      error instanceof WebTargetRefusedError ||
+      error instanceof WebTimeoutError
+    ) {
+      throw error;
+    }
+    throw new WebsiteNavigationError();
+  }
   const pinned = validated.addresses[0]!;
   // Keep Chromium's sandbox enabled. DNS is pinned for this browser instance.
-  const browser = await chromium.launch(chromiumLaunchOptions(origin, pinned.address));
+  let browser;
+  try {
+    browser = await chromium.launch({
+      ...chromiumLaunchOptions(origin, pinned.address),
+      executablePath: executablePath ?? bundledExecutable,
+    });
+  } catch {
+    throw new WebsiteBrowserUnavailableError();
+  }
   control.setCancel(() => {
     void browser.close().catch(() => undefined);
   });
@@ -237,7 +297,8 @@ async function performApprovedWebsiteRender(
       );
     } catch (error) {
       if (responsePolicyError) throw responsePolicyError;
-      throw error;
+      if (error instanceof WebTimeoutError) throw error;
+      throw new WebsiteNavigationError();
     }
     if (responsePolicyError) throw responsePolicyError;
     if (Date.now() > deadline) throw new WebTimeoutError();
@@ -249,20 +310,27 @@ async function performApprovedWebsiteRender(
       ) {
         throw new Error("invalid_tab");
       }
-      const tabs = page.locator('[role="tab"]');
-      const tabCount = await tabs.count();
-      if (tabIndex > tabCount) throw new Error(`tab_unavailable_${tabCount}`);
-      await tabs.nth(tabIndex - 1).click({
-        timeout: Math.max(1, deadline - Date.now()),
-      });
-      await page.waitForTimeout(
-        Math.min(1_500, Math.max(0, deadline - Date.now())),
-      );
+      try {
+        const tabs = page.locator('[role="tab"]');
+        const tabCount = await tabs.count();
+        if (tabIndex > tabCount) throw new WebsiteRenderingError();
+        await tabs.nth(tabIndex - 1).click({
+          timeout: Math.max(1, deadline - Date.now()),
+        });
+        await page.waitForTimeout(
+          Math.min(1_500, Math.max(0, deadline - Date.now())),
+        );
+      } catch (error) {
+        if (error instanceof WebsiteRenderingError) throw error;
+        throw new WebsiteRenderingError();
+      }
       if (responsePolicyError) throw responsePolicyError;
       if (Date.now() > deadline) throw new WebTimeoutError();
     }
-    const result = await page.evaluate(
-      ({ maxLinks, allowedOrigin }) => {
+    let result;
+    try {
+      result = await page.evaluate(
+        ({ maxLinks, allowedOrigin }) => {
       const document = (globalThis as any).document;
       const links: string[] = [];
       const tabs: string[] = [];
@@ -293,8 +361,13 @@ async function performApprovedWebsiteRender(
         tabs: [...new Set(tabs)].slice(0, maxLinks),
       };
       },
-      { maxLinks: MAX_RENDERED_LINKS, allowedOrigin: origin },
-    );
+        { maxLinks: MAX_RENDERED_LINKS, allowedOrigin: origin },
+      );
+    } catch (error) {
+      if (responsePolicyError) throw responsePolicyError;
+      if (error instanceof WebTimeoutError) throw error;
+      throw new WebsiteRenderingError();
+    }
     if (result.text.length > options.charLimit) throw new WebRenderLimitError("text");
     return boundText(
       `${readableText(result.text)}${
@@ -899,7 +972,7 @@ async function searchWeb(query: string, timeoutMs: number): Promise<string> {
   }
 }
 
-function webFailureMessage(error: unknown): string {
+export function webFailureMessage(error: unknown): string {
   if (error instanceof WebRenderLimitError) {
     return `The rendered website was refused because it exceeded the ${error.limit} limit.`;
   }
@@ -920,6 +993,15 @@ function webFailureMessage(error: unknown): string {
   }
   if (error instanceof WebRedirectLimitError) {
     return "The requested page was refused because it redirected too many times.";
+  }
+  if (error instanceof WebsiteBrowserUnavailableError) {
+    return "Approved website reading is unavailable because this deployment has no usable browser runtime.";
+  }
+  if (error instanceof WebsiteNavigationError) {
+    return "The approved website could not be opened. It may be unavailable, blocking automated browsers, or failing during navigation.";
+  }
+  if (error instanceof WebsiteRenderingError) {
+    return "The approved website opened, but its rendered content could not be read within the supported browser features.";
   }
   if (error instanceof Error && error.message === "not_configured") {
     return `Web Research is not configured: ${WEB_SEARCH_API_KEY_ENV} is missing.`;
@@ -980,6 +1062,27 @@ export async function executeNativeWebHandler(
         )}\n[END EXTERNAL UNTRUSTED WEBSITE CONTENT]`,
       };
     } catch (error) {
+      logger.warn(
+        {
+          capability: "approved_website_read",
+          stage:
+            error instanceof WebsiteBrowserUnavailableError
+              ? "browser_runtime"
+              : error instanceof WebsiteNavigationError
+                ? "navigation"
+                : error instanceof WebsiteRenderingError
+                  ? "rendering"
+                  : error instanceof WebRenderLimitError
+                    ? `limit_${error.limit}`
+                    : error instanceof WebTargetRefusedError
+                      ? "authorization_or_public_network"
+                      : error instanceof WebTimeoutError
+                        ? "timeout"
+                        : "unexpected",
+          errorName: error instanceof Error ? error.name : "unknown",
+        },
+        "Approved website read failed",
+      );
       return { ok: false, message: webFailureMessage(error) };
     }
   }

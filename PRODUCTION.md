@@ -54,6 +54,13 @@ to an operator or another workspace's credential. Without
 `WEB_SEARCH_API_KEY`, Web Research reports **not configured** and performs no
 network request.
 
+Approved website reading is independent of Web Research and does not use
+`WEB_SEARCH_API_KEY`. It requires a usable Chromium executable. The server
+checks `CHROMIUM_EXECUTABLE_PATH`, standard system locations, executables on
+`PATH`, and finally Playwright's bundled browser. Published images should ship
+the configured Nix `chromium` package; a missing or unlaunchable browser is
+reported as a browser-runtime failure rather than a search-configuration error.
+
 Telegram is enabled only when **both** `TELEGRAM_BOT_TOKEN` and
 `TELEGRAM_WEBHOOK_SECRET` are set. Without them the API does not contact
 Telegram and the UI hides the integration. **`TELEGRAM_WEBHOOK_URL` is needed
@@ -136,6 +143,25 @@ deployment but cannot recover from a Clerk instance change.
 4. Providers page shows which credentials are configured.
 5. Dispatch a small task; watch it complete (or block with a clear reason
    if no provider credential is set).
+6. For an enabled, granted website, run its `.read` operation with
+   `WEB_SEARCH_API_KEY` unset and confirm rendered text and same-origin links
+   are returned. Browser-runtime, navigation, rendering, and limit failures
+   should remain distinct in the action record.
+   The built-handler smoke command is
+   `pnpm --filter @workspace/api-server run smoke:website -- https://shadows-project.org`.
+
+### SHADOWS incident evidence (2026-09-12)
+
+Read-only production evidence shows Chef George selected the enabled SHADOWS
+website package and its current revision. The approved `.read` action failed
+before three later Web Research searches independently reported the missing
+search key. The old action stored only the generic reachability message, so the
+precise historical browser exception is not recoverable. A current workspace
+smoke check returned HTTP 200 and rendered the project description and
+same-origin navigation. The deployment-safe repair therefore addresses the
+confirmed diagnostic loss and the confirmed absence of Playwright's bundled
+browser by discovering the system Chromium from `PATH`; it does not claim the
+allowlist or DNS policy caused the historical failure.
 
 ## Test & validation commands
 

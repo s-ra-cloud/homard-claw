@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { chromium } from "playwright";
 import {
   chromiumLaunchOptions,
+  chromiumExecutable,
   executeNativeWebHandler,
   extractRenderedPage,
   fetchReadablePage,
@@ -16,12 +17,22 @@ import {
   WebRedirectLimitError,
   WebRenderLimitError,
   WebTimeoutError,
+  webFailureMessage,
+  WebsiteBrowserUnavailableError,
+  WebsiteNavigationError,
+  WebsiteRenderingError,
 } from "./web";
 import {
   normalizeWebsiteOrigin,
   websiteManifest,
   websitePackageId,
 } from "./websites";
+
+const systemChromium = [
+  process.env.CHROMIUM_EXECUTABLE_PATH,
+  "/repl/tools/bin/chromium",
+  chromium.executablePath(),
+].find((candidate): candidate is string => Boolean(candidate && existsSync(candidate)));
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -66,6 +77,35 @@ describe("native web address policy", () => {
     );
   });
 
+  it("discovers a deployment Chromium from PATH rather than relying on Playwright's absent bundle", () => {
+    vi.stubEnv("CHROMIUM_EXECUTABLE_PATH", "");
+    vi.stubEnv("PATH", "/repl/tools/bin");
+    expect(chromiumExecutable()).toBe("/repl/tools/bin/chromium");
+  });
+
+  it("keeps browser, navigation, rendering, and limit failures distinct and search-independent", () => {
+    vi.stubEnv("WEB_SEARCH_API_KEY", "");
+    expect(webFailureMessage(new WebsiteBrowserUnavailableError())).toMatch(
+      /browser runtime/i,
+    );
+    expect(webFailureMessage(new WebsiteNavigationError())).toMatch(
+      /could not be opened/i,
+    );
+    expect(webFailureMessage(new WebsiteRenderingError())).toMatch(
+      /rendered content/i,
+    );
+    expect(webFailureMessage(new WebRenderLimitError("requests"))).toMatch(
+      /requests limit/i,
+    );
+    for (const error of [
+      new WebsiteBrowserUnavailableError(),
+      new WebsiteNavigationError(),
+      new WebsiteRenderingError(),
+    ]) {
+      expect(webFailureMessage(error)).not.toMatch(/WEB_SEARCH|search key/i);
+    }
+  });
+
   it("exposes bounded policy constants and actionable limit errors", () => {
     expect(MAX_RENDERED_REQUESTS).toBe(40);
     expect(MAX_RENDERED_BYTES).toBe(4 * 1024 * 1024);
@@ -76,11 +116,6 @@ describe("native web address policy", () => {
     expect(new WebRenderLimitError("text").message).toMatch(/text limit/i);
   });
 
-  const systemChromium = [
-    process.env.CHROMIUM_EXECUTABLE_PATH,
-    "/repl/tools/bin/chromium",
-    chromium.executablePath(),
-  ].find((candidate): candidate is string => Boolean(candidate && existsSync(candidate)));
   it.skipIf(!systemChromium)("extracts JavaScript-rendered tabs and only same-origin links from a local DOM", async () => {
     const browser = await chromium.launch({
       headless: true,
@@ -362,6 +397,25 @@ describe("native web handler", () => {
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it.skipIf(!systemChromium)(
+    "reads the approved JavaScript-rendered SHADOWS site without a web-search key",
+    async () => {
+      vi.stubEnv("WEB_SEARCH_API_KEY", "");
+      const outcome = await executeNativeWebHandler(
+        "website.read",
+        { origin: "https://shadows-project.org" },
+        { timeoutMs: 20_000, charLimit: 8_000 },
+      );
+      expect(outcome.ok).toBe(true);
+      if (!outcome.ok) return;
+      expect(outcome.text).toContain("Comparative Archetypal Atlas");
+      expect(outcome.text).toMatch(/myth|symbol/i);
+      expect(outcome.text).toContain("https://shadows-project.org/");
+      expect(outcome.text).not.toMatch(/WEB_SEARCH_API_KEY/);
+    },
+    30_000,
+  );
 
   it("searches through the fixed HTTPS API and returns sanitized HTTPS results", async () => {
     vi.stubEnv("WEB_SEARCH_API_KEY", "test-search-secret");
