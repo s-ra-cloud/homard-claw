@@ -775,11 +775,16 @@ describe("drive reads by MIME type", () => {
     if (!outcome.ok) expect(outcome.kind).toBe("failed");
   });
 
-  it("surfaces a revoked authorization as an auth outcome", async () => {
+  it("surfaces an insufficient-scope refusal as an auth outcome", async () => {
     stubDriveFile({
       mimeType: "application/vnd.google-apps.spreadsheet",
       readStatus: 403,
-      readErrorBody: { error: "insufficient scope" },
+      readErrorBody: {
+        error: {
+          code: 403,
+          errors: [{ domain: "global", reason: "insufficientPermissions" }],
+        },
+      },
     });
     const outcome = await executeOperation(readOp(), { fileId: "f1" }, ctx());
     expect(outcome.ok).toBe(false);

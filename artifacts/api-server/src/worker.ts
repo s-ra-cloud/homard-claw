@@ -205,6 +205,28 @@ export async function addTaskLog(
   }
 }
 
+/**
+ * Keep the worker's connected-app checkpoints on the same error path as a
+ * provider dispatch. Returning from an action loop after an abort skips the
+ * terminal-state handling in runTask and can leave the task running forever.
+ */
+function abortControllerAtDeadline(
+  controller: AbortController,
+  deadlineAt: number,
+): void {
+  if (!controller.signal.aborted && Date.now() >= deadlineAt) {
+    controller.abort("timeout");
+  }
+}
+
+function throwIfAborted(signal: AbortSignal, subject: string): void {
+  if (!signal.aborted) return;
+  if (signal.reason === "timeout") {
+    throw new ProviderCallError("timeout", `The ${subject} timed out.`);
+  }
+  throw new ProviderCallError("cancelled", `The ${subject} was cancelled.`);
+}
+
 /** Abort the provider call for a task running in this process, if any. */
 export function abortRunningTask(taskId: string): boolean {
   const controller = inFlight.get(taskId);
@@ -1099,6 +1121,20 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     }
   }
 
+  // Connected-app work can run before the first provider round (for example,
+  // when an owner-approved Drive read is waiting on the provider). Use the
+  // same wall-clock ceiling for that work as for the provider call below.
+  const runLimitMs = Math.min(
+    CALL_TIMEOUT_MS,
+    perms.maxRunSeconds !== null
+      ? perms.maxRunSeconds * 1000
+      : CALL_TIMEOUT_MS,
+  );
+  // One wall-clock budget covers both owner-approved connected-app work and
+  // the provider rounds that follow it. A provider must not receive a fresh
+  // full timeout merely because the approved phase used part of this turn.
+  const attemptDeadlineAt = Date.now() + runLimitMs;
+
   // Connected apps: grants are loaded fresh on every attempt so a revoked
   // or downgraded grant applies to the very next action. A load failure
   // fails closed — the run proceeds with no app access at all.
@@ -1189,6 +1225,13 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     message: string;
     refusedAt: Date;
   } | null = null;
+  const approvedActionController = new AbortController();
+  const approvedActionDeadlineAt = attemptDeadlineAt;
+  const approvedActionTimeout = setTimeout(
+    () => approvedActionController.abort("timeout"),
+    Math.max(0, approvedActionDeadlineAt - Date.now()),
+  );
+  inFlight.set(task.id, approvedActionController);
   try {
     // Any action still "executing" belongs to a crashed attempt. Each one
     // is verified against the provider via its idempotency marker: a write
@@ -1235,6 +1278,11 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
       (action) => action.status === "approved",
     );
     for (const approved of approvedActions) {
+      abortControllerAtDeadline(
+        approvedActionController,
+        approvedActionDeadlineAt,
+      );
+      if (approvedActionController.signal.aborted) break;
       // Approval is necessary but not sufficient: the grant, the workspace
       // enable switch, and the recorded params are all re-checked against
       // the state loaded moments ago. A revoke after approval wins.
@@ -1274,8 +1322,13 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         workspaceId,
         // Preserving an auth-refused action only makes sense when the task
         // still has an attempt left to actually run it later.
-        { allowAuthPark: task.attempts < maxAttempts },
+        {
+          allowAuthPark: task.attempts < maxAttempts,
+          signal: approvedActionController.signal,
+          deadlineAt: approvedActionDeadlineAt,
+        },
       );
+      if (approvedActionController.signal.aborted) break;
       if (action.status === "approved") {
         // Parked: the credential was refused before any work happened, and
         // the action keeps its approval for ONE automatic retry after the
@@ -1297,7 +1350,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         action.status === "executed" ? "info" : "warn",
         action.status === "executed"
           ? `Done: ${action.targetSummary}.`
-          : `The approved action failed: ${action.errorMessage ?? "unknown error"}`,
+          : `The approved action failed: ${action.errorMessage ?? "unknown error"}. The failure was recorded; deliberately continuing with the provider so the model can recover.`,
       );
     }
   } catch (error) {
@@ -1305,6 +1358,36 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
       { taskId: task.id, error },
       "Could not run approved connected-app actions",
     );
+  } finally {
+    clearTimeout(approvedActionTimeout);
+    if (inFlight.get(task.id) === approvedActionController) {
+      inFlight.delete(task.id);
+    }
+  }
+  if (approvedActionController.signal.aborted) {
+    if (approvedActionController.signal.reason === "timeout") {
+      const timeoutMessage =
+        "The connected-app action run timed out before the provider could continue.";
+      await finishIfStillRunning(task.id, task.attempts, {
+        status: "failed",
+        errorKind: "timeout",
+        errorMessage: timeoutMessage,
+      });
+      await setTaskPhase(task.id, task.attempts, "failed", workspaceId);
+      await addTaskLog(task.id, "error", `Failed (timeout): ${timeoutMessage}`);
+    } else {
+      // The owner cancellation route commits `cancelled` before it aborts
+      // this controller. Keep that terminal state and do not spend another
+      // provider round after the action row was finalized.
+      await setTaskPhase(task.id, task.attempts, "cancelled", workspaceId);
+      await addTaskLog(
+        task.id,
+        "warn",
+        "The approved connected-app action was cancelled after its result was finalized; no provider round will run.",
+      );
+    }
+    await settleAgentStatus(agent.id, workspaceId);
+    return;
   }
   if (parkedActionForAuthRecovery) {
     // Park the task itself instead of consulting the model against a broken
@@ -1678,15 +1761,6 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
       return;
     }
 
-    // Time limit: the run is interrupted at the agent's wall-clock ceiling,
-    // never later than the global call timeout.
-    const runLimitMs = Math.min(
-      CALL_TIMEOUT_MS,
-      perms.maxRunSeconds !== null
-        ? perms.maxRunSeconds * 1000
-        : CALL_TIMEOUT_MS,
-    );
-
     // An unrecognized runtime id throws, and the catch below blocks the
     // task. Silently falling back to the built-in runtime would run work
     // somewhere it was never assigned.
@@ -1809,7 +1883,11 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
 
     const controller = new AbortController();
     inFlight.set(task.id, controller);
-    const timeout = setTimeout(() => controller.abort("timeout"), runLimitMs);
+    const deadlineAt = attemptDeadlineAt;
+    const timeout = setTimeout(
+      () => controller.abort("timeout"),
+      Math.max(0, deadlineAt - Date.now()),
+    );
     // A provider lease expires on a wall clock, but a call can outlive any
     // TTL we would be willing to configure. Without a heartbeat the lease
     // lapses mid-run and a second process takes the same credential —
@@ -1937,11 +2015,15 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
       const maxProviderCalls =
         MAX_ACTION_ROUNDS + MAX_MALFORMED_RECOVERY_ROUNDS + 1;
       for (let call = 1; call <= maxProviderCalls; call += 1) {
+        abortControllerAtDeadline(controller, deadlineAt);
+        throwIfAborted(controller.signal, "provider attempt");
         // Refreshed at the top of every round — never the value cached from
         // an earlier round or from before the loop — so this turn always
         // carries the agent's current pinned memories, not a stale copy.
         await refreshPinnedInstructions();
         system = buildSystem();
+        abortControllerAtDeadline(controller, deadlineAt);
+        throwIfAborted(controller.signal, "provider dispatch");
         // Snapshot what this dispatch's prompt replays, so a provider that
         // retains the thread server-side is never re-sent these entries.
         const promptHistoryLength = actionHistory.length;
@@ -2268,6 +2350,8 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
 
         let parkedForApproval = false;
         for (const request of validRequests.slice(0, MAX_ACTIONS_PER_ROUND)) {
+          abortControllerAtDeadline(controller, deadlineAt);
+          throwIfAborted(controller.signal, "connected-app action");
           if (isTaskResultOperation(request.operation)) {
             // Internal read over the office's own completed-task records:
             // no connector, no approval, no appActions row. Caller identity
@@ -2354,22 +2438,40 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
             "info",
             `Using a connected app: ${verdict.targetSummary}.`,
           );
-          const { action } = await runAllowedAction({
-            taskId: task.id,
-            agentId: agent.id,
-            agentName: agent.name,
-            workspaceId,
-            app: verdict.op.app,
-            operation: verdict.op.name,
-            params: verdict.params,
-            targetSummary: verdict.targetSummary,
-          });
+          let action: Awaited<ReturnType<typeof runAllowedAction>>["action"];
+          try {
+            ({ action } = await runAllowedAction({
+              taskId: task.id,
+              agentId: agent.id,
+              agentName: agent.name,
+              workspaceId,
+              app: verdict.op.app,
+              operation: verdict.op.name,
+              params: verdict.params,
+              targetSummary: verdict.targetSummary,
+              signal: controller.signal,
+              deadlineAt,
+            }));
+          } catch (error) {
+            // An aborting transport may reject instead of returning its
+            // finalized failed action. Preserve the timeout/cancelled kind
+            // so the outer worker catch still settles the task coherently.
+            if (controller.signal.aborted) {
+              throwIfAborted(controller.signal, "connected-app action");
+            }
+            throw error;
+          }
           actionHistory.push(describeActionForModel(action));
+          if (controller.signal.aborted) {
+            // Do not return directly: the outer worker catch owns terminal
+            // task transitions for timeout, cancellation, and lease loss.
+            throwIfAborted(controller.signal, "connected-app action");
+          }
           if (action.status !== "executed") {
             await addTaskLog(
               task.id,
               "warn",
-              `Connected-app action failed: ${action.errorMessage ?? "unknown error"}`,
+              `Connected-app action failed: ${action.errorMessage ?? "unknown error"}. The recoverable action failure was recorded; deliberately continuing with the next provider round so the model can recover.`,
             );
           }
         }

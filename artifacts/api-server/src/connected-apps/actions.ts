@@ -114,6 +114,8 @@ export async function runAllowedAction(input: {
   operation: string;
   params: Record<string, unknown>;
   targetSummary: string;
+  signal?: AbortSignal;
+  deadlineAt?: number;
 }): Promise<{ action: AppActionRecord; outcome: ExecutionOutcome }> {
   const tool = await resolveTool(input.operation, input.workspaceId);
   // Custom-API rows record the definition revision they run under, so the
@@ -143,6 +145,9 @@ export async function runAllowedAction(input: {
         actionId: pending.id,
         workspaceId: input.workspaceId,
         expectedRevision: definitionRevision,
+        taskId: input.taskId,
+        signal: input.signal,
+        deadlineAt: input.deadlineAt,
       })
     : { ok: false, kind: "failed", message: "Unknown operation." };
   const action = await finalizeAction(
@@ -458,13 +463,16 @@ export async function executeClaimedAction(
   action: AppActionRecord,
   agentName: string,
   workspaceId: string | null,
-  options?: { allowAuthPark?: boolean },
+  options?: { allowAuthPark?: boolean; signal?: AbortSignal; deadlineAt?: number },
 ): Promise<{ action: AppActionRecord; outcome: ExecutionOutcome }> {
   const tool = await resolveTool(action.operation, workspaceId);
   const outcome: ExecutionOutcome = tool
     ? await executeCapabilityTool(tool, action.params ?? {}, {
         actionId: action.id,
         workspaceId,
+        taskId: action.taskId,
+        signal: options?.signal,
+        deadlineAt: options?.deadlineAt,
         // Bind execution to the definition revision recorded when the
         // request was made/approved; the executor refuses on mismatch.
         // Only custom-API actions carry one — built-in operations keep

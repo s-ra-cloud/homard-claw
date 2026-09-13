@@ -18,4 +18,14 @@ Rules:
 
 **Why:** credentials must bind to the durable task owner, not the browser session or an ambient workspace connector; fail closed on revocation/under-scoping.
 
+## Cancellation and refusal boundaries
+
+A cancelled caller must detach from a shared Google refresh without aborting other active callers. Abort the underlying refresh when no callers remain, with an independent hard ceiling for the shared work.
+
+**Why:** Gmail and Drive share credentials; attaching one task's abort signal directly to shared refresh work would make cancelling that task break unrelated reads.
+
+Do not add pre-execution replay eligibility merely because a Drive HTTP response is an auth refusal. Credential resolution failures and HTTP refusals retain separate replay contracts; file-level permission denial is not evidence that the account must reconnect.
+
+**How to apply:** preserve these distinctions when extending deadline propagation to other Google operations. A failed action outcome after task-deadline expiry must still reach terminal task handling, not return early leaving the parent running.
+
 **How to apply:** tests stub global fetch for oauth2.googleapis.com/token + gmail.googleapis.com + www.googleapis.com + api.github.com, insert googleAccountsTable/githubAccountsTable rows with `encryptRefreshToken(...)`/`encryptGithubToken(...)`, stubEnv the client ids/secrets, and call `clearGoogleTokenCache()` in beforeEach (see src/connected-apps/actions.recovery.test.ts and src/google/oauth.test.ts).

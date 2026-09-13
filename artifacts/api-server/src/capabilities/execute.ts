@@ -27,6 +27,9 @@ export async function executeCapabilityTool(
   context: {
     actionId: string;
     workspaceId: string | null;
+    taskId?: string;
+    signal?: AbortSignal;
+    deadlineAt?: number;
     /**
      * For custom-API tools: the definition revision the request was
      * recorded/approved under. The executor refuses on mismatch so an

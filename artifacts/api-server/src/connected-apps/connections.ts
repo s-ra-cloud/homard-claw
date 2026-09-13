@@ -36,6 +36,11 @@ import {
   type SlidesSlide,
 } from "./slides";
 import {
+  readDriveFileTransport,
+  type DriveReadFailureDetails,
+  type DriveTokenOptions,
+} from "./drive-transport";
+import {
   GoogleAuthError,
   driveAccessToken,
   driveOrganizeAccessToken,
@@ -226,6 +231,12 @@ export type ExecutionContext = {
    * session can only ever execute against its own owner's accounts.
    */
   workspaceId: string | null;
+  /** Cancellation propagated from the owning task attempt, when present. */
+  signal?: AbortSignal;
+  /** Absolute deadline shared by the whole operation, when present. */
+  deadlineAt?: number;
+  /** Durable task id used for safe transport correlation, when present. */
+  taskId?: string;
 };
 
 /** Outcome for operations attempted without a resolvable owner. */
@@ -741,40 +752,136 @@ const DRIVE_EXPORTABLE_PREFIX = "application/vnd.google-apps.";
 /** Google Sheets reject a text/plain export; CSV keeps rows readable. */
 const DRIVE_SPREADSHEET_MIME = "application/vnd.google-apps.spreadsheet";
 
-/**
- * Pick the Drive export format a Google-native file actually supports.
- * Sheets only export to tabular formats (CSV keeps rows as readable text);
- * Docs and other Google-native types keep the plain-text export.
- */
-function driveExportMime(mime: string): string {
-  return mime === DRIVE_SPREADSHEET_MIME ? "text/csv" : "text/plain";
+const DRIVE_READ_LOG_STAGES = new Set([
+  "starting",
+  "credentials",
+  "credential",
+  "refresh",
+  "refresh_body",
+  "metadata",
+  "export",
+  "download",
+  "body",
+  "complete",
+  "failure",
+]);
+
+function safeDriveReadStage(stage: string): string {
+  return DRIVE_READ_LOG_STAGES.has(stage) ? stage : "unknown";
+}
+
+function safeDriveReadStatus(status: number | undefined): number | null {
+  return typeof status === "number" &&
+    Number.isInteger(status) &&
+    status >= 100 &&
+    status <= 599
+    ? status
+    : null;
 }
 
 async function driveReadFile(
   params: Record<string, unknown>,
   ctx: ExecutionContext,
 ): Promise<ExecutionOutcome> {
-  const fileId = encodeURIComponent(String(params.fileId));
-  // supportsAllDrives lets reads reach shared-drive files by id too.
-  const meta = await driveJson(
-    ctx.workspaceId,
-    `/drive/v3/files/${fileId}?fields=${encodeURIComponent("id,name,mimeType")}&supportsAllDrives=true`,
-  );
-  if (!meta.ok) return meta.outcome;
-  const file = meta.data as { name?: string; mimeType?: string };
-  const mime = file.mimeType ?? "";
-  const path = mime.startsWith(DRIVE_EXPORTABLE_PREFIX)
-    ? `/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent(driveExportMime(mime))}`
-    : `/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`;
-  const content = await driveJson(ctx.workspaceId, path);
-  if (!content.ok) return content.outcome;
-  const text =
-    typeof content.data === "string"
-      ? content.data
-      : JSON.stringify(content.data);
+  const startedAt = Date.now();
+  let stageStartedAt = startedAt;
+  let failureDetails: DriveReadFailureDetails | undefined;
+  const logStage = (stage: string): void => {
+    const now = Date.now();
+    const safeStage = safeDriveReadStage(stage);
+    try {
+      logger.info(
+        {
+          component: "google_drive_read",
+          taskId: ctx.taskId ?? null,
+          actionId: ctx.actionId ?? null,
+          workspaceId: ctx.workspaceId,
+          stage: safeStage,
+          durationMs: now - startedAt,
+          stageDurationMs: now - stageStartedAt,
+        },
+        "Google Drive read stage",
+      );
+    } catch {
+      // Observability must never change the connector outcome.
+    }
+    stageStartedAt = now;
+  };
+  const logFailure = (details: DriveReadFailureDetails): void => {
+    const providerStatus = safeDriveReadStatus(details.providerStatus);
+    failureDetails = {
+      ...details,
+      stage: safeDriveReadStage(details.stage),
+      ...(providerStatus === null
+        ? {}
+        : { providerStatus }),
+    };
+  };
+  logStage("starting");
+
+  let result: Awaited<ReturnType<typeof readDriveFileTransport>>;
+  try {
+    result = await readDriveFileTransport({
+      workspaceId: ctx.workspaceId,
+      fileId: String(params.fileId),
+      signal: ctx.signal,
+      deadlineAt: ctx.deadlineAt,
+      taskId: ctx.taskId,
+      onStage: logStage,
+      onFailure: logFailure,
+      resolveToken: async (
+        workspaceId: string,
+        options: DriveTokenOptions,
+      ): Promise<string> => (await driveAccessToken(workspaceId, options)).token,
+    });
+  } catch {
+    // The transport is designed not to throw, but keep action finalization
+    // safe if a future parser/provider implementation escapes its boundary.
+    result = {
+      ok: false,
+      kind: "failed",
+      message: "The Google Drive read could not be completed.",
+    };
+    failureDetails = {
+      stage: "failure",
+      failureClass: "transport",
+    };
+  }
+
+  const completedAt = Date.now();
+  try {
+    logger[result.ok ? "info" : "warn"](
+      {
+        component: "google_drive_read",
+        taskId: ctx.taskId ?? null,
+        actionId: ctx.actionId ?? null,
+        workspaceId: ctx.workspaceId,
+        stage: result.ok ? "complete" : "failure",
+        durationMs: completedAt - startedAt,
+        stageDurationMs: completedAt - stageStartedAt,
+        status: result.ok ? "success" : "failed",
+        ...(result.ok
+          ? {}
+          : {
+              failureClass: failureDetails?.failureClass ?? "transport",
+              ...(failureDetails?.providerStatus === undefined
+                ? {}
+                : { providerStatus: failureDetails.providerStatus }),
+            }),
+      },
+      result.ok
+        ? "Google Drive read completed"
+        : "Google Drive read failed",
+    );
+  } catch {
+    // A logger transport failure must not skip action finalization.
+  }
+  if (!result.ok) return result;
   return {
     ok: true,
-    summary: truncate(`"${file.name ?? params.fileId}" (${mime}):\n${text}`),
+    summary: truncate(
+      `"${result.name ?? params.fileId}" (${result.mimeType}):\n${result.text}`,
+    ),
   };
 }
 

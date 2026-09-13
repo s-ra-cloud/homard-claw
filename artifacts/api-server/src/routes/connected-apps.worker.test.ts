@@ -105,6 +105,7 @@ const touchedSettings = new Map<string, { enabled: boolean } | null>();
 async function createAgent(
   name: string,
   appGrants: Array<{ app: string; accessLevel: string }>,
+  permissionOverrides: Record<string, unknown> = {},
 ) {
   const res = await request(app)
     .post("/api/agents")
@@ -121,6 +122,7 @@ async function createAgent(
         maxTaskBudgetCents: null,
         dailyBudgetCents: null,
         maxTasksPerDay: null,
+        ...permissionOverrides,
       },
       avatar: { shellColor: "#C34428", deskStyle: "standard", accessory: "none" },
       appGrants,
@@ -184,6 +186,31 @@ async function getActions(taskId: string) {
     .from(appActionsTable)
     .where(eq(appActionsTable.taskId, taskId))
     .orderBy(appActionsTable.createdAt);
+}
+
+async function insertApprovedAction(
+  taskId: string,
+  agentId: string,
+  input: {
+    app: string;
+    operation: string;
+    params: Record<string, unknown>;
+    targetSummary: string;
+  },
+) {
+  const [action] = await db
+    .insert(appActionsTable)
+    .values({
+      taskId,
+      agentId,
+      app: input.app,
+      operation: input.operation,
+      params: input.params,
+      targetSummary: input.targetSummary,
+      status: "approved",
+    })
+    .returning();
+  return action!;
 }
 
 async function getPendingApproval(taskId: string) {
@@ -432,7 +459,19 @@ describe("approval-gated write, end to end", () => {
     const [opArg, paramsArg, contextArg] = executeMock.mock.calls[0]!;
     expect((opArg as { name: string }).name).toBe("gmail.send_email");
     expect(paramsArg).toEqual(SEND_EMAIL_PARAMS);
-    expect(contextArg).toEqual({ actionId: action.id, workspaceId });
+    expect(contextArg).toEqual(
+      expect.objectContaining({
+        actionId: action.id,
+        workspaceId,
+        taskId: task.id,
+      }),
+    );
+    expect((contextArg as { signal?: AbortSignal }).signal).toBeInstanceOf(
+      AbortSignal,
+    );
+    expect(
+      (contextArg as { deadlineAt?: number }).deadlineAt,
+    ).toEqual(expect.any(Number));
 
     const [executed] = await getActions(task.id);
     expect(executed?.id).toBe(action.id);
@@ -692,6 +731,165 @@ describe("sensitive data sandbox at the worker boundary", () => {
     const logs = await getLogs(task.id);
     expect(logs.some((l) => l.message.includes("was NOT run"))).toBe(true);
     expect((await getTaskRow(task.id))?.status).toBe("completed");
+  });
+});
+
+describe("connected-app cancellation and recoverable failures", () => {
+  it("finalizes a failed Drive read, deliberately continues, and keeps a later provider failure distinct", async () => {
+    const agent = await createAgent("Read Recovery", [
+      { app: "google_drive", accessLevel: "read" },
+    ]);
+    // Use the final allowed attempt so the later provider error is terminal
+    // rather than a queued retry; the action failure still gets its own
+    // durable row and recovery log first.
+    const task = await insertRunningTask(agent.id, { attempts: 3 });
+    const readBlock = `<app_action>${JSON.stringify({
+      operation: "google_drive.read_file",
+      params: { fileId: "drive-file-1" },
+    })}</app_action>`;
+    executeMock.mockResolvedValueOnce({
+      ok: false,
+      kind: "failed",
+      message: "Drive temporarily refused the read.",
+    });
+
+    let providerCalls = 0;
+    fetchMock.mockImplementation(async (url: unknown) => {
+      if (String(url).includes("/models")) return jsonResponse(PRICING_CATALOG);
+      providerCalls += 1;
+      if (providerCalls === 1) return jsonResponse(completion(readBlock));
+      // A 4xx is a terminal provider_error, unlike the recoverable action
+      // failure above. The two messages must not be conflated.
+      return jsonResponse({ error: "provider rejected the later round" }, 400);
+    });
+
+    await runTask({ task, agent: await loadAgent(agent.id) });
+
+    const [failedRead] = await getActions(task.id);
+    expect(failedRead?.operation).toBe("google_drive.read_file");
+    expect(failedRead?.status).toBe("failed");
+    expect(failedRead?.errorMessage).toContain("Drive temporarily refused");
+    expect(completionCalls()).toHaveLength(2);
+
+    const logs = await getLogs(task.id);
+    expect(
+      logs.some(
+        (log) =>
+          log.message.includes("deliberately continuing") &&
+          log.message.includes("next provider round"),
+      ),
+    ).toBe(true);
+    expect(logs.some((log) => log.message.includes("Failed (provider_error)"))).toBe(
+      true,
+    );
+    const done = await getTaskRow(task.id);
+    expect(done?.status).toBe("failed");
+    expect(done?.errorKind).toBe("provider_error");
+    expect(done?.errorMessage).not.toContain("Drive temporarily refused");
+  });
+
+  it("finalizes an owner-cancelled approved Drive read and sends no provider round", async () => {
+    const agent = await createAgent("Cancel Approved Read", [
+      { app: "google_drive", accessLevel: "read" },
+    ]);
+    const task = await insertRunningTask(agent.id);
+    const action = await insertApprovedAction(task.id, agent.id, {
+      app: "google_drive",
+      operation: "google_drive.read_file",
+      params: { fileId: "drive-file-cancelled" },
+      targetSummary: "Drive file drive-file-cancelled",
+    });
+
+    executeMock.mockImplementation(
+      async (
+        _operation: unknown,
+        _params: unknown,
+        context: { signal?: AbortSignal },
+      ) => {
+        expect(context.signal).toBeInstanceOf(AbortSignal);
+        const cancel = await request(app).post(`/api/tasks/${task.id}/cancel`);
+        expect(cancel.status).toBe(200);
+        await new Promise<void>((resolve) => {
+          if (context.signal?.aborted) {
+            resolve();
+            return;
+          }
+          context.signal?.addEventListener("abort", () => resolve(), {
+            once: true,
+          });
+        });
+        return {
+          ok: false,
+          kind: "failed",
+          message: "The Drive read was cancelled by the owner.",
+        };
+      },
+    );
+
+    await runTask({ task, agent: await loadAgent(agent.id) });
+
+    const [finalized] = await getActions(task.id);
+    expect(finalized?.id).toBe(action.id);
+    expect(finalized?.status).toBe("failed");
+    expect(finalized?.errorMessage).toContain("cancelled by the owner");
+    expect(completionCalls()).toHaveLength(0);
+    expect(executeMock).toHaveBeenCalledTimes(1);
+    expect((await getTaskRow(task.id))?.status).toBe("cancelled");
+    const logs = await getLogs(task.id);
+    expect(
+      logs.some((log) =>
+        log.message.includes("no provider round will run"),
+      ),
+    ).toBe(true);
+  });
+
+  it("records a timeout when an allowed Drive read outlives the attempt deadline", async () => {
+    const agent = await createAgent(
+      "Timeout Allowed Read",
+      [{ app: "google_drive", accessLevel: "read" }],
+      { maxRunSeconds: 1 },
+    );
+    const task = await insertRunningTask(agent.id);
+    const readBlock = `<app_action>${JSON.stringify({
+      operation: "google_drive.read_file",
+      params: { fileId: "drive-file-timeout" },
+    })}</app_action>`;
+    queueCompletions([completion(readBlock)]);
+
+    executeMock.mockImplementation(
+      async (
+        _operation: unknown,
+        _params: unknown,
+        context: { signal?: AbortSignal },
+      ) => {
+        expect(context.signal).toBeInstanceOf(AbortSignal);
+        await new Promise<void>((resolve) => {
+          if (context.signal?.aborted) {
+            resolve();
+            return;
+          }
+          context.signal?.addEventListener("abort", () => resolve(), {
+            once: true,
+          });
+        });
+        return {
+          ok: false,
+          kind: "failed",
+          message: "The Drive read timed out.",
+        };
+      },
+    );
+
+    await runTask({ task, agent: await loadAgent(agent.id) });
+
+    const [timedOut] = await getActions(task.id);
+    expect(timedOut?.status).toBe("failed");
+    expect(timedOut?.errorMessage).toContain("timed out");
+    const done = await getTaskRow(task.id);
+    expect(done?.status).toBe("failed");
+    expect(done?.errorKind).toBe("timeout");
+    expect(done?.errorMessage).toMatch(/connected-app action timed out/i);
+    expect(completionCalls()).toHaveLength(1);
   });
 });
 
