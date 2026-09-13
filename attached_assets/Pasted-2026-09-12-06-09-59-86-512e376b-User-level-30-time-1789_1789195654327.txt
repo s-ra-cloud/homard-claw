@@ -1,0 +1,2495 @@
+2026-09-12 06:09:59.86
+512e376b
+User
+{"level":30,"time":1789186199865,"pid":21,"hostname":"localhost","req":{"id":323,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:10:00.31
+512e376b
+User
+{"level":30,"time":1789186200310,"pid":21,"hostname":"localhost","req":{"id":324,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":164,"msg":"request completed"}
+
+2026-09-12 06:10:09.97
+512e376b
+User
+{"level":30,"time":1789186209972,"pid":21,"hostname":"localhost","req":{"id":325,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:10:10.63
+512e376b
+User
+{"level":30,"time":1789186210633,"pid":21,"hostname":"localhost","req":{"id":326,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":287,"msg":"request completed"}
+
+2026-09-12 06:10:20.08
+512e376b
+User
+{"level":30,"time":1789186220079,"pid":21,"hostname":"localhost","req":{"id":327,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:10:20.58
+512e376b
+User
+{"level":30,"time":1789186220582,"pid":21,"hostname":"localhost","req":{"id":328,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:10:20.89
+512e376b
+User
+{"level":30,"time":1789186220896,"pid":21,"hostname":"localhost","req":{"id":329,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":154,"msg":"request completed"}
+
+2026-09-12 06:10:30.19
+512e376b
+User
+{"level":30,"time":1789186230192,"pid":21,"hostname":"localhost","req":{"id":330,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":70,"msg":"request completed"}
+
+2026-09-12 06:10:31.09
+512e376b
+User
+{"level":30,"time":1789186231092,"pid":21,"hostname":"localhost","req":{"id":331,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":160,"msg":"request completed"}
+
+2026-09-12 06:10:31.09
+512e376b
+User
+{"level":30,"time":1789186231093,"pid":21,"hostname":"localhost","req":{"id":332,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":55,"msg":"request completed"}
+
+2026-09-12 06:10:40.33
+512e376b
+User
+{"level":30,"time":1789186240338,"pid":21,"hostname":"localhost","req":{"id":333,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:10:41.28
+512e376b
+User
+{"level":30,"time":1789186241286,"pid":21,"hostname":"localhost","req":{"id":334,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":160,"msg":"request completed"}
+
+2026-09-12 06:10:50.44
+512e376b
+User
+{"level":30,"time":1789186250445,"pid":21,"hostname":"localhost","req":{"id":335,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:10:51.48
+512e376b
+User
+{"level":30,"time":1789186251482,"pid":21,"hostname":"localhost","req":{"id":336,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":157,"msg":"request completed"}
+
+2026-09-12 06:11:00.56
+512e376b
+User
+{"level":30,"time":1789186260560,"pid":21,"hostname":"localhost","req":{"id":337,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:11:01.75
+512e376b
+User
+{"level":30,"time":1789186261758,"pid":21,"hostname":"localhost","req":{"id":338,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":235,"msg":"request completed"}
+
+2026-09-12 06:11:10.66
+512e376b
+User
+{"level":30,"time":1789186270667,"pid":21,"hostname":"localhost","req":{"id":339,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:11:11.95
+512e376b
+User
+{"level":30,"time":1789186271954,"pid":21,"hostname":"localhost","req":{"id":340,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":156,"msg":"request completed"}
+
+2026-09-12 06:11:20.69
+512e376b
+User
+{"level":30,"time":1789186280698,"pid":21,"hostname":"localhost","req":{"id":341,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":69,"msg":"request completed"}
+
+2026-09-12 06:11:20.76
+512e376b
+User
+{"level":30,"time":1789186280769,"pid":21,"hostname":"localhost","req":{"id":342,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:11:22.15
+512e376b
+User
+{"level":30,"time":1789186282150,"pid":21,"hostname":"localhost","req":{"id":343,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":158,"msg":"request completed"}
+
+2026-09-12 06:11:26.24
+512e376b
+User
+{"level":30,"time":1789186286240,"pid":21,"hostname":"localhost","req":{"id":344,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":53,"msg":"request completed"}
+
+2026-09-12 06:11:30.86
+512e376b
+User
+{"level":30,"time":1789186290869,"pid":21,"hostname":"localhost","req":{"id":345,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:11:32.34
+512e376b
+User
+{"level":30,"time":1789186292344,"pid":21,"hostname":"localhost","req":{"id":346,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":152,"msg":"request completed"}
+
+2026-09-12 06:11:40.97
+512e376b
+User
+{"level":30,"time":1789186300973,"pid":21,"hostname":"localhost","req":{"id":347,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:11:42.53
+512e376b
+User
+{"level":30,"time":1789186302532,"pid":21,"hostname":"localhost","req":{"id":348,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":153,"msg":"request completed"}
+
+2026-09-12 06:11:51.08
+512e376b
+User
+{"level":30,"time":1789186311084,"pid":21,"hostname":"localhost","req":{"id":349,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:11:52.72
+512e376b
+User
+{"level":30,"time":1789186312728,"pid":21,"hostname":"localhost","req":{"id":350,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":161,"msg":"request completed"}
+
+2026-09-12 06:12:01.19
+512e376b
+User
+{"level":30,"time":1789186321194,"pid":21,"hostname":"localhost","req":{"id":351,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:12:02.91
+512e376b
+User
+{"level":30,"time":1789186322918,"pid":21,"hostname":"localhost","req":{"id":352,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":154,"msg":"request completed"}
+
+2026-09-12 06:12:11.29
+512e376b
+User
+{"level":30,"time":1789186331299,"pid":21,"hostname":"localhost","req":{"id":353,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:12:13.11
+512e376b
+User
+{"level":30,"time":1789186333116,"pid":21,"hostname":"localhost","req":{"id":354,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":159,"msg":"request completed"}
+
+2026-09-12 06:12:20.56
+512e376b
+User
+{"level":30,"time":1789186340564,"pid":21,"hostname":"localhost","req":{"id":301,"method":"GET","url":"/api/events"},"res":{"statusCode":200},"responseTime":240052,"msg":"request completed"}
+
+2026-09-12 06:12:20.85
+512e376b
+User
+{"level":30,"time":1789186340856,"pid":21,"hostname":"localhost","req":{"id":355,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":124,"msg":"request completed"}
+
+2026-09-12 06:12:21.39
+512e376b
+User
+{"level":30,"time":1789186341396,"pid":21,"hostname":"localhost","req":{"id":357,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":52,"msg":"request completed"}
+
+2026-09-12 06:12:21.40
+512e376b
+User
+{"level":30,"time":1789186341404,"pid":21,"hostname":"localhost","req":{"id":356,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:12:23.31
+512e376b
+User
+{"level":30,"time":1789186343318,"pid":21,"hostname":"localhost","req":{"id":358,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":163,"msg":"request completed"}
+
+2026-09-12 06:12:31.51
+512e376b
+User
+{"level":30,"time":1789186351515,"pid":21,"hostname":"localhost","req":{"id":360,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":70,"msg":"request completed"}
+
+2026-09-12 06:12:33.51
+512e376b
+User
+{"level":30,"time":1789186353512,"pid":21,"hostname":"localhost","req":{"id":361,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":155,"msg":"request completed"}
+
+2026-09-12 06:12:41.62
+512e376b
+User
+{"level":30,"time":1789186361623,"pid":21,"hostname":"localhost","req":{"id":362,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:12:43.79
+512e376b
+User
+{"level":30,"time":1789186363794,"pid":21,"hostname":"localhost","req":{"id":363,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":245,"msg":"request completed"}
+
+2026-09-12 06:12:51.73
+512e376b
+User
+{"level":30,"time":1789186371734,"pid":21,"hostname":"localhost","req":{"id":364,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":71,"msg":"request completed"}
+
+2026-09-12 06:12:53.99
+512e376b
+User
+{"level":30,"time":1789186373993,"pid":21,"hostname":"localhost","req":{"id":365,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":157,"msg":"request completed"}
+
+2026-09-12 06:13:01.84
+512e376b
+User
+{"level":30,"time":1789186381841,"pid":21,"hostname":"localhost","req":{"id":366,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:13:04.19
+512e376b
+User
+{"level":30,"time":1789186384191,"pid":21,"hostname":"localhost","req":{"id":367,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":162,"msg":"request completed"}
+
+2026-09-12 06:13:11.95
+512e376b
+User
+{"level":30,"time":1789186391953,"pid":21,"hostname":"localhost","req":{"id":368,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":69,"msg":"request completed"}
+
+2026-09-12 06:13:14.38
+512e376b
+User
+{"level":30,"time":1789186394386,"pid":21,"hostname":"localhost","req":{"id":369,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":157,"msg":"request completed"}
+
+2026-09-12 06:13:16.53
+512e376b
+User
+{"level":30,"time":1789186396538,"pid":21,"hostname":"localhost","req":{"id":370,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":51,"msg":"request completed"}
+
+2026-09-12 06:13:20.95
+512e376b
+User
+{"level":30,"time":1789186400959,"pid":21,"hostname":"localhost","req":{"id":371,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:13:22.05
+512e376b
+User
+{"level":30,"time":1789186402050,"pid":21,"hostname":"localhost","req":{"id":372,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:13:24.57
+512e376b
+User
+{"level":30,"time":1789186404574,"pid":21,"hostname":"localhost","req":{"id":373,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":153,"msg":"request completed"}
+
+2026-09-12 06:13:32.16
+512e376b
+User
+{"level":30,"time":1789186412165,"pid":21,"hostname":"localhost","req":{"id":374,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:13:34.77
+512e376b
+User
+{"level":30,"time":1789186414771,"pid":21,"hostname":"localhost","req":{"id":375,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":159,"msg":"request completed"}
+
+2026-09-12 06:13:42.27
+512e376b
+User
+{"level":30,"time":1789186422274,"pid":21,"hostname":"localhost","req":{"id":376,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":68,"msg":"request completed"}
+
+2026-09-12 06:13:44.96
+512e376b
+User
+{"level":30,"time":1789186424961,"pid":21,"hostname":"localhost","req":{"id":377,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":154,"msg":"request completed"}
+
+2026-09-12 06:13:52.38
+512e376b
+User
+{"level":30,"time":1789186432385,"pid":21,"hostname":"localhost","req":{"id":378,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:13:55.14
+512e376b
+User
+{"level":30,"time":1789186435149,"pid":21,"hostname":"localhost","req":{"id":379,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":152,"msg":"request completed"}
+
+2026-09-12 06:14:02.48
+512e376b
+User
+{"level":30,"time":1789186442488,"pid":21,"hostname":"localhost","req":{"id":380,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":61,"msg":"request completed"}
+
+2026-09-12 06:14:05.34
+512e376b
+User
+{"level":30,"time":1789186445341,"pid":21,"hostname":"localhost","req":{"id":381,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":153,"msg":"request completed"}
+
+2026-09-12 06:14:11.70
+512e376b
+User
+{"level":30,"time":1789186451705,"pid":21,"hostname":"localhost","req":{"id":382,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":54,"msg":"request completed"}
+
+2026-09-12 06:14:12.59
+512e376b
+User
+{"level":30,"time":1789186452591,"pid":21,"hostname":"localhost","req":{"id":383,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:14:15.54
+512e376b
+User
+{"level":30,"time":1789186455545,"pid":21,"hostname":"localhost","req":{"id":384,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":164,"msg":"request completed"}
+
+2026-09-12 06:14:21.06
+512e376b
+User
+{"level":30,"time":1789186461064,"pid":21,"hostname":"localhost","req":{"id":385,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":68,"msg":"request completed"}
+
+2026-09-12 06:14:22.69
+512e376b
+User
+{"level":30,"time":1789186462695,"pid":21,"hostname":"localhost","req":{"id":386,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:14:25.75
+512e376b
+User
+{"level":30,"time":1789186465752,"pid":21,"hostname":"localhost","req":{"id":387,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":166,"msg":"request completed"}
+
+2026-09-12 06:14:31.95
+512e376b
+User
+{"level":30,"time":1789186471954,"pid":21,"hostname":"localhost","req":{"id":388,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J2aLFwyUAS3AWNicYy6zN4BdAR/tokens"},"res":{"statusCode":200},"responseTime":348,"msg":"request completed"}
+
+2026-09-12 06:14:32.82
+512e376b
+User
+{"level":30,"time":1789186472825,"pid":21,"hostname":"localhost","req":{"id":389,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:14:35.95
+512e376b
+User
+{"level":30,"time":1789186475959,"pid":21,"hostname":"localhost","req":{"id":390,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":167,"msg":"request completed"}
+
+2026-09-12 06:14:42.93
+512e376b
+User
+{"level":30,"time":1789186482934,"pid":21,"hostname":"localhost","req":{"id":391,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:14:46.16
+512e376b
+User
+{"level":30,"time":1789186486160,"pid":21,"hostname":"localhost","req":{"id":392,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":165,"msg":"request completed"}
+
+2026-09-12 06:14:53.04
+512e376b
+User
+{"level":30,"time":1789186493046,"pid":21,"hostname":"localhost","req":{"id":393,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:14:56.35
+512e376b
+User
+{"level":30,"time":1789186496357,"pid":21,"hostname":"localhost","req":{"id":394,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":155,"msg":"request completed"}
+
+2026-09-12 06:15:03.16
+512e376b
+User
+{"level":30,"time":1789186503166,"pid":21,"hostname":"localhost","req":{"id":395,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":70,"msg":"request completed"}
+
+2026-09-12 06:15:06.55
+512e376b
+User
+{"level":30,"time":1789186506550,"pid":21,"hostname":"localhost","req":{"id":396,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":158,"msg":"request completed"}
+
+2026-09-12 06:15:06.85
+512e376b
+User
+{"level":30,"time":1789186506850,"pid":21,"hostname":"localhost","req":{"id":397,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":45,"msg":"request completed"}
+
+2026-09-12 06:15:13.28
+512e376b
+User
+{"level":30,"time":1789186513281,"pid":21,"hostname":"localhost","req":{"id":398,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:15:16.81
+512e376b
+User
+{"level":30,"time":1789186516819,"pid":21,"hostname":"localhost","req":{"id":399,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":230,"msg":"request completed"}
+
+2026-09-12 06:15:21.17
+512e376b
+User
+{"level":30,"time":1789186521172,"pid":21,"hostname":"localhost","req":{"id":400,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":68,"msg":"request completed"}
+
+2026-09-12 06:15:23.39
+512e376b
+User
+{"level":30,"time":1789186523390,"pid":21,"hostname":"localhost","req":{"id":401,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:15:27.01
+512e376b
+User
+{"level":30,"time":1789186527012,"pid":21,"hostname":"localhost","req":{"id":402,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":158,"msg":"request completed"}
+
+2026-09-12 06:15:33.50
+512e376b
+User
+{"level":30,"time":1789186533509,"pid":21,"hostname":"localhost","req":{"id":403,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":68,"msg":"request completed"}
+
+2026-09-12 06:15:37.20
+512e376b
+User
+{"level":30,"time":1789186537203,"pid":21,"hostname":"localhost","req":{"id":404,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":158,"msg":"request completed"}
+
+2026-09-12 06:15:43.61
+512e376b
+User
+{"level":30,"time":1789186543611,"pid":21,"hostname":"localhost","req":{"id":405,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":61,"msg":"request completed"}
+
+2026-09-12 06:15:47.39
+512e376b
+User
+{"level":30,"time":1789186547396,"pid":21,"hostname":"localhost","req":{"id":406,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":155,"msg":"request completed"}
+
+2026-09-12 06:15:53.71
+512e376b
+User
+{"level":30,"time":1789186553716,"pid":21,"hostname":"localhost","req":{"id":407,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:15:57.58
+512e376b
+User
+{"level":30,"time":1789186557589,"pid":21,"hostname":"localhost","req":{"id":408,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":157,"msg":"request completed"}
+
+2026-09-12 06:16:02.01
+512e376b
+User
+{"level":30,"time":1789186562015,"pid":21,"hostname":"localhost","req":{"id":409,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":62,"msg":"request completed"}
+
+2026-09-12 06:16:03.82
+512e376b
+User
+{"level":30,"time":1789186563821,"pid":21,"hostname":"localhost","req":{"id":410,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:16:07.78
+512e376b
+User
+{"level":30,"time":1789186567782,"pid":21,"hostname":"localhost","req":{"id":411,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":155,"msg":"request completed"}
+
+2026-09-12 06:16:13.92
+512e376b
+User
+{"level":30,"time":1789186573924,"pid":21,"hostname":"localhost","req":{"id":412,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:16:17.97
+512e376b
+User
+{"level":30,"time":1789186577972,"pid":21,"hostname":"localhost","req":{"id":413,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":156,"msg":"request completed"}
+
+2026-09-12 06:16:21.27
+512e376b
+User
+{"level":30,"time":1789186581273,"pid":21,"hostname":"localhost","req":{"id":414,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:16:23.66
+512e376b
+User
+{"level":30,"time":1789186583664,"pid":21,"hostname":"localhost","req":{"id":359,"method":"GET","url":"/api/events"},"res":{"statusCode":200},"responseTime":240055,"msg":"request completed"}
+
+2026-09-12 06:16:24.02
+512e376b
+User
+{"level":30,"time":1789186584028,"pid":21,"hostname":"localhost","req":{"id":415,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:16:28.16
+512e376b
+User
+{"level":30,"time":1789186588169,"pid":21,"hostname":"localhost","req":{"id":417,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":155,"msg":"request completed"}
+
+2026-09-12 06:16:34.13
+512e376b
+User
+{"level":30,"time":1789186594132,"pid":21,"hostname":"localhost","req":{"id":418,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:16:38.36
+512e376b
+User
+{"level":30,"time":1789186598366,"pid":21,"hostname":"localhost","req":{"id":419,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":157,"msg":"request completed"}
+
+2026-09-12 06:16:44.23
+512e376b
+User
+{"level":30,"time":1789186604239,"pid":21,"hostname":"localhost","req":{"id":420,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:16:48.56
+512e376b
+User
+{"level":30,"time":1789186608561,"pid":21,"hostname":"localhost","req":{"id":421,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":161,"msg":"request completed"}
+
+2026-09-12 06:16:54.35
+512e376b
+User
+{"level":30,"time":1789186614353,"pid":21,"hostname":"localhost","req":{"id":422,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":70,"msg":"request completed"}
+
+2026-09-12 06:16:57.15
+512e376b
+User
+{"level":30,"time":1789186617156,"pid":21,"hostname":"localhost","req":{"id":423,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":50,"msg":"request completed"}
+
+2026-09-12 06:16:58.82
+512e376b
+User
+{"level":30,"time":1789186618824,"pid":21,"hostname":"localhost","req":{"id":424,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":228,"msg":"request completed"}
+
+2026-09-12 06:17:04.46
+512e376b
+User
+{"level":30,"time":1789186624461,"pid":21,"hostname":"localhost","req":{"id":425,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:17:09.01
+512e376b
+User
+{"level":30,"time":1789186629010,"pid":21,"hostname":"localhost","req":{"id":426,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":152,"msg":"request completed"}
+
+2026-09-12 06:17:14.57
+512e376b
+User
+{"level":30,"time":1789186634572,"pid":21,"hostname":"localhost","req":{"id":427,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:17:19.23
+512e376b
+User
+{"level":30,"time":1789186639232,"pid":21,"hostname":"localhost","req":{"id":428,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":155,"msg":"request completed"}
+
+2026-09-12 06:17:21.43
+512e376b
+User
+{"level":30,"time":1789186641436,"pid":21,"hostname":"localhost","req":{"id":429,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":125,"msg":"request completed"}
+
+2026-09-12 06:17:24.67
+512e376b
+User
+{"level":30,"time":1789186644676,"pid":21,"hostname":"localhost","req":{"id":430,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":68,"msg":"request completed"}
+
+2026-09-12 06:17:29.42
+512e376b
+User
+{"level":30,"time":1789186649424,"pid":21,"hostname":"localhost","req":{"id":431,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":156,"msg":"request completed"}
+
+2026-09-12 06:17:34.78
+512e376b
+User
+{"level":30,"time":1789186654783,"pid":21,"hostname":"localhost","req":{"id":432,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:17:39.61
+512e376b
+User
+{"level":30,"time":1789186659619,"pid":21,"hostname":"localhost","req":{"id":433,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":156,"msg":"request completed"}
+
+2026-09-12 06:17:44.88
+512e376b
+User
+{"level":30,"time":1789186664889,"pid":21,"hostname":"localhost","req":{"id":434,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:17:49.88
+512e376b
+User
+{"level":30,"time":1789186669881,"pid":21,"hostname":"localhost","req":{"id":435,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":227,"msg":"request completed"}
+
+2026-09-12 06:17:52.30
+512e376b
+User
+{"level":30,"time":1789186672305,"pid":21,"hostname":"localhost","req":{"id":436,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":56,"msg":"request completed"}
+
+2026-09-12 06:17:54.99
+512e376b
+User
+{"level":30,"time":1789186674991,"pid":21,"hostname":"localhost","req":{"id":437,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:18:00.07
+512e376b
+User
+{"level":30,"time":1789186680071,"pid":21,"hostname":"localhost","req":{"id":438,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":153,"msg":"request completed"}
+
+2026-09-12 06:18:05.08
+512e376b
+User
+{"level":30,"time":1789186685089,"pid":21,"hostname":"localhost","req":{"id":439,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:18:10.26
+512e376b
+User
+{"level":30,"time":1789186690265,"pid":21,"hostname":"localhost","req":{"id":440,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":158,"msg":"request completed"}
+
+2026-09-12 06:18:15.19
+512e376b
+User
+{"level":30,"time":1789186695193,"pid":21,"hostname":"localhost","req":{"id":441,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":68,"msg":"request completed"}
+
+2026-09-12 06:18:20.45
+512e376b
+User
+{"level":30,"time":1789186700457,"pid":21,"hostname":"localhost","req":{"id":442,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":157,"msg":"request completed"}
+
+2026-09-12 06:18:21.53
+512e376b
+User
+{"level":30,"time":1789186701536,"pid":21,"hostname":"localhost","req":{"id":443,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:18:25.29
+512e376b
+User
+{"level":30,"time":1789186705296,"pid":21,"hostname":"localhost","req":{"id":444,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:18:30.65
+512e376b
+User
+{"level":30,"time":1789186710652,"pid":21,"hostname":"localhost","req":{"id":445,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":153,"msg":"request completed"}
+
+2026-09-12 06:18:35.40
+512e376b
+User
+{"level":30,"time":1789186715400,"pid":21,"hostname":"localhost","req":{"id":446,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:18:40.92
+512e376b
+User
+{"level":30,"time":1789186720926,"pid":21,"hostname":"localhost","req":{"id":447,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":231,"msg":"request completed"}
+
+2026-09-12 06:18:45.50
+512e376b
+User
+{"level":30,"time":1789186725503,"pid":21,"hostname":"localhost","req":{"id":448,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:18:47.46
+512e376b
+User
+{"level":30,"time":1789186727469,"pid":21,"hostname":"localhost","req":{"id":449,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":51,"msg":"request completed"}
+
+2026-09-12 06:18:51.11
+512e376b
+User
+{"level":30,"time":1789186731119,"pid":21,"hostname":"localhost","req":{"id":450,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":154,"msg":"request completed"}
+
+2026-09-12 06:18:55.59
+512e376b
+User
+{"level":30,"time":1789186735596,"pid":21,"hostname":"localhost","req":{"id":451,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":61,"msg":"request completed"}
+
+2026-09-12 06:19:01.33
+512e376b
+User
+{"level":30,"time":1789186741334,"pid":21,"hostname":"localhost","req":{"id":452,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":181,"msg":"request completed"}
+
+2026-09-12 06:19:05.69
+512e376b
+User
+{"level":30,"time":1789186745699,"pid":21,"hostname":"localhost","req":{"id":453,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:19:11.53
+512e376b
+User
+{"level":30,"time":1789186751529,"pid":21,"hostname":"localhost","req":{"id":454,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":153,"msg":"request completed"}
+
+2026-09-12 06:19:15.80
+512e376b
+User
+{"level":30,"time":1789186755804,"pid":21,"hostname":"localhost","req":{"id":455,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:19:21.72
+512e376b
+User
+{"level":30,"time":1789186761721,"pid":21,"hostname":"localhost","req":{"id":457,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":145,"msg":"request completed"}
+
+2026-09-12 06:19:21.72
+512e376b
+User
+{"level":30,"time":1789186761727,"pid":21,"hostname":"localhost","req":{"id":456,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":155,"msg":"request completed"}
+
+2026-09-12 06:19:25.90
+512e376b
+User
+{"level":30,"time":1789186765905,"pid":21,"hostname":"localhost","req":{"id":458,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:19:31.93
+512e376b
+User
+{"level":30,"time":1789186771936,"pid":21,"hostname":"localhost","req":{"id":459,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":168,"msg":"request completed"}
+
+2026-09-12 06:19:36.01
+512e376b
+User
+{"level":30,"time":1789186776009,"pid":21,"hostname":"localhost","req":{"id":460,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":70,"msg":"request completed"}
+
+2026-09-12 06:19:42.14
+512e376b
+User
+{"level":30,"time":1789186782142,"pid":21,"hostname":"localhost","req":{"id":461,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":165,"msg":"request completed"}
+
+2026-09-12 06:19:42.63
+512e376b
+User
+{"level":30,"time":1789186782635,"pid":21,"hostname":"localhost","req":{"id":462,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":69,"msg":"request completed"}
+
+2026-09-12 06:19:46.11
+512e376b
+User
+{"level":30,"time":1789186786112,"pid":21,"hostname":"localhost","req":{"id":463,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":68,"msg":"request completed"}
+
+2026-09-12 06:19:52.33
+512e376b
+User
+{"level":30,"time":1789186792338,"pid":21,"hostname":"localhost","req":{"id":464,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":156,"msg":"request completed"}
+
+2026-09-12 06:19:56.21
+512e376b
+User
+{"level":30,"time":1789186796215,"pid":21,"hostname":"localhost","req":{"id":465,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":68,"msg":"request completed"}
+
+2026-09-12 06:20:02.54
+512e376b
+User
+{"level":30,"time":1789186802542,"pid":21,"hostname":"localhost","req":{"id":466,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":158,"msg":"request completed"}
+
+2026-09-12 06:20:06.32
+512e376b
+User
+{"level":30,"time":1789186806320,"pid":21,"hostname":"localhost","req":{"id":467,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:20:12.73
+512e376b
+User
+{"level":30,"time":1789186812738,"pid":21,"hostname":"localhost","req":{"id":468,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":156,"msg":"request completed"}
+
+2026-09-12 06:20:16.42
+512e376b
+User
+{"level":30,"time":1789186816420,"pid":21,"hostname":"localhost","req":{"id":469,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":68,"msg":"request completed"}
+
+2026-09-12 06:20:21.82
+512e376b
+User
+{"level":30,"time":1789186821825,"pid":21,"hostname":"localhost","req":{"id":470,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":68,"msg":"request completed"}
+
+2026-09-12 06:20:22.92
+512e376b
+User
+{"level":30,"time":1789186822923,"pid":21,"hostname":"localhost","req":{"id":471,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":151,"msg":"request completed"}
+
+2026-09-12 06:20:26.51
+512e376b
+User
+{"level":30,"time":1789186826518,"pid":21,"hostname":"localhost","req":{"id":472,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:20:26.84
+512e376b
+User
+{"level":30,"time":1789186826845,"pid":21,"hostname":"localhost","req":{"id":416,"method":"GET","url":"/api/events"},"res":{"statusCode":200},"responseTime":240052,"msg":"request completed"}
+
+2026-09-12 06:20:33.11
+512e376b
+User
+{"level":30,"time":1789186833112,"pid":21,"hostname":"localhost","req":{"id":474,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":157,"msg":"request completed"}
+
+2026-09-12 06:20:36.62
+512e376b
+User
+{"level":30,"time":1789186836621,"pid":21,"hostname":"localhost","req":{"id":475,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:20:37.78
+512e376b
+User
+{"level":30,"time":1789186837786,"pid":21,"hostname":"localhost","req":{"id":476,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":60,"msg":"request completed"}
+
+2026-09-12 06:20:43.31
+512e376b
+User
+{"level":30,"time":1789186843310,"pid":21,"hostname":"localhost","req":{"id":477,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":159,"msg":"request completed"}
+
+2026-09-12 06:20:46.72
+512e376b
+User
+{"level":30,"time":1789186846722,"pid":21,"hostname":"localhost","req":{"id":478,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:20:53.51
+512e376b
+User
+{"level":30,"time":1789186853512,"pid":21,"hostname":"localhost","req":{"id":479,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":155,"msg":"request completed"}
+
+2026-09-12 06:20:56.82
+512e376b
+User
+{"level":30,"time":1789186856824,"pid":21,"hostname":"localhost","req":{"id":480,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:21:03.70
+512e376b
+User
+{"level":30,"time":1789186863704,"pid":21,"hostname":"localhost","req":{"id":481,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":154,"msg":"request completed"}
+
+2026-09-12 06:21:06.92
+512e376b
+User
+{"level":30,"time":1789186866924,"pid":21,"hostname":"localhost","req":{"id":482,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:21:13.97
+512e376b
+User
+{"level":30,"time":1789186873977,"pid":21,"hostname":"localhost","req":{"id":483,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":232,"msg":"request completed"}
+
+2026-09-12 06:21:17.02
+512e376b
+User
+{"level":30,"time":1789186877027,"pid":21,"hostname":"localhost","req":{"id":484,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:21:21.92
+512e376b
+User
+{"level":30,"time":1789186881926,"pid":21,"hostname":"localhost","req":{"id":485,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:21:24.16
+512e376b
+User
+{"level":30,"time":1789186884164,"pid":21,"hostname":"localhost","req":{"id":486,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":152,"msg":"request completed"}
+
+2026-09-12 06:21:27.12
+512e376b
+User
+{"level":30,"time":1789186887127,"pid":21,"hostname":"localhost","req":{"id":487,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:21:32.93
+512e376b
+User
+{"level":30,"time":1789186892933,"pid":21,"hostname":"localhost","req":{"id":488,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":56,"msg":"request completed"}
+
+2026-09-12 06:21:34.36
+512e376b
+User
+{"level":30,"time":1789186894360,"pid":21,"hostname":"localhost","req":{"id":489,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":155,"msg":"request completed"}
+
+2026-09-12 06:21:37.22
+512e376b
+User
+{"level":30,"time":1789186897223,"pid":21,"hostname":"localhost","req":{"id":490,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:21:44.55
+512e376b
+User
+{"level":30,"time":1789186904552,"pid":21,"hostname":"localhost","req":{"id":491,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":152,"msg":"request completed"}
+
+2026-09-12 06:21:47.31
+512e376b
+User
+{"level":30,"time":1789186907318,"pid":21,"hostname":"localhost","req":{"id":492,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:21:54.74
+512e376b
+User
+{"level":30,"time":1789186914742,"pid":21,"hostname":"localhost","req":{"id":493,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":153,"msg":"request completed"}
+
+2026-09-12 06:21:57.41
+512e376b
+User
+{"level":30,"time":1789186917418,"pid":21,"hostname":"localhost","req":{"id":494,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:22:04.93
+512e376b
+User
+{"level":30,"time":1789186924935,"pid":21,"hostname":"localhost","req":{"id":495,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":152,"msg":"request completed"}
+
+2026-09-12 06:22:07.51
+512e376b
+User
+{"level":30,"time":1789186927512,"pid":21,"hostname":"localhost","req":{"id":496,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":62,"msg":"request completed"}
+
+2026-09-12 06:22:15.13
+512e376b
+User
+{"level":30,"time":1789186935131,"pid":21,"hostname":"localhost","req":{"id":497,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":155,"msg":"request completed"}
+
+2026-09-12 06:22:17.60
+512e376b
+User
+{"level":30,"time":1789186937608,"pid":21,"hostname":"localhost","req":{"id":498,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:22:22.11
+512e376b
+User
+{"level":30,"time":1789186942109,"pid":21,"hostname":"localhost","req":{"id":499,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":146,"msg":"request completed"}
+
+2026-09-12 06:22:25.31
+512e376b
+User
+{"level":30,"time":1789186945319,"pid":21,"hostname":"localhost","req":{"id":500,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":153,"msg":"request completed"}
+
+2026-09-12 06:22:27.70
+512e376b
+User
+{"level":30,"time":1789186947706,"pid":21,"hostname":"localhost","req":{"id":501,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":62,"msg":"request completed"}
+
+2026-09-12 06:22:28.08
+512e376b
+User
+{"level":30,"time":1789186948085,"pid":21,"hostname":"localhost","req":{"id":502,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":53,"msg":"request completed"}
+
+2026-09-12 06:22:35.50
+512e376b
+User
+{"level":30,"time":1789186955508,"pid":21,"hostname":"localhost","req":{"id":503,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":153,"msg":"request completed"}
+
+2026-09-12 06:22:37.81
+512e376b
+User
+{"level":30,"time":1789186957810,"pid":21,"hostname":"localhost","req":{"id":504,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:22:45.70
+512e376b
+User
+{"level":30,"time":1789186965704,"pid":21,"hostname":"localhost","req":{"id":505,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":153,"msg":"request completed"}
+
+2026-09-12 06:22:47.90
+512e376b
+User
+{"level":30,"time":1789186967907,"pid":21,"hostname":"localhost","req":{"id":506,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":62,"msg":"request completed"}
+
+2026-09-12 06:22:55.97
+512e376b
+User
+{"level":30,"time":1789186975975,"pid":21,"hostname":"localhost","req":{"id":507,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":233,"msg":"request completed"}
+
+2026-09-12 06:22:58.00
+512e376b
+User
+{"level":30,"time":1789186978005,"pid":21,"hostname":"localhost","req":{"id":508,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:23:06.18
+512e376b
+User
+{"level":30,"time":1789186986185,"pid":21,"hostname":"localhost","req":{"id":509,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":167,"msg":"request completed"}
+
+2026-09-12 06:23:08.10
+512e376b
+User
+{"level":30,"time":1789186988104,"pid":21,"hostname":"localhost","req":{"id":510,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:23:16.38
+512e376b
+User
+{"level":30,"time":1789186996380,"pid":21,"hostname":"localhost","req":{"id":511,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":154,"msg":"request completed"}
+
+2026-09-12 06:23:18.20
+512e376b
+User
+{"level":30,"time":1789186998205,"pid":21,"hostname":"localhost","req":{"id":512,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:23:22.21
+512e376b
+User
+{"level":30,"time":1789187002212,"pid":21,"hostname":"localhost","req":{"id":513,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":62,"msg":"request completed"}
+
+2026-09-12 06:23:23.22
+512e376b
+User
+{"level":30,"time":1789187003228,"pid":21,"hostname":"localhost","req":{"id":514,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":48,"msg":"request completed"}
+
+2026-09-12 06:23:26.57
+512e376b
+User
+{"level":30,"time":1789187006570,"pid":21,"hostname":"localhost","req":{"id":515,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":152,"msg":"request completed"}
+
+2026-09-12 06:23:28.30
+512e376b
+User
+{"level":30,"time":1789187008307,"pid":21,"hostname":"localhost","req":{"id":516,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":68,"msg":"request completed"}
+
+2026-09-12 06:23:36.75
+512e376b
+User
+{"level":30,"time":1789187016757,"pid":21,"hostname":"localhost","req":{"id":517,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":155,"msg":"request completed"}
+
+2026-09-12 06:23:38.41
+512e376b
+User
+{"level":30,"time":1789187018411,"pid":21,"hostname":"localhost","req":{"id":518,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:23:47.03
+512e376b
+User
+{"level":30,"time":1789187027030,"pid":21,"hostname":"localhost","req":{"id":519,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":236,"msg":"request completed"}
+
+2026-09-12 06:23:48.51
+512e376b
+User
+{"level":30,"time":1789187028518,"pid":21,"hostname":"localhost","req":{"id":520,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:23:57.25
+512e376b
+User
+{"level":30,"time":1789187037250,"pid":21,"hostname":"localhost","req":{"id":521,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":158,"msg":"request completed"}
+
+2026-09-12 06:23:58.61
+512e376b
+User
+{"level":30,"time":1789187038615,"pid":21,"hostname":"localhost","req":{"id":522,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:24:07.43
+512e376b
+User
+{"level":30,"time":1789187047438,"pid":21,"hostname":"localhost","req":{"id":523,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":152,"msg":"request completed"}
+
+2026-09-12 06:24:08.71
+512e376b
+User
+{"level":30,"time":1789187048717,"pid":21,"hostname":"localhost","req":{"id":524,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:24:17.63
+512e376b
+User
+{"level":30,"time":1789187057639,"pid":21,"hostname":"localhost","req":{"id":525,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":159,"msg":"request completed"}
+
+2026-09-12 06:24:18.37
+512e376b
+User
+{"level":30,"time":1789187058378,"pid":21,"hostname":"localhost","req":{"id":526,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":52,"msg":"request completed"}
+
+2026-09-12 06:24:18.82
+512e376b
+User
+{"level":30,"time":1789187058823,"pid":21,"hostname":"localhost","req":{"id":527,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":69,"msg":"request completed"}
+
+2026-09-12 06:24:22.31
+512e376b
+User
+{"level":30,"time":1789187062314,"pid":21,"hostname":"localhost","req":{"id":528,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":68,"msg":"request completed"}
+
+2026-09-12 06:24:27.83
+512e376b
+User
+{"level":30,"time":1789187067833,"pid":21,"hostname":"localhost","req":{"id":529,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":153,"msg":"request completed"}
+
+2026-09-12 06:24:28.92
+512e376b
+User
+{"level":30,"time":1789187068922,"pid":21,"hostname":"localhost","req":{"id":530,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:24:29.93
+512e376b
+User
+{"level":30,"time":1789187069932,"pid":21,"hostname":"localhost","req":{"id":473,"method":"GET","url":"/api/events"},"res":{"statusCode":200},"responseTime":240051,"msg":"request completed"}
+
+2026-09-12 06:24:38.04
+512e376b
+User
+{"level":30,"time":1789187078046,"pid":21,"hostname":"localhost","req":{"id":532,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":180,"msg":"request completed"}
+
+2026-09-12 06:24:39.02
+512e376b
+User
+{"level":30,"time":1789187079024,"pid":21,"hostname":"localhost","req":{"id":533,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:24:48.23
+512e376b
+User
+{"level":30,"time":1789187088230,"pid":21,"hostname":"localhost","req":{"id":534,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":150,"msg":"request completed"}
+
+2026-09-12 06:24:49.12
+512e376b
+User
+{"level":30,"time":1789187089126,"pid":21,"hostname":"localhost","req":{"id":535,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:24:58.42
+512e376b
+User
+{"level":30,"time":1789187098426,"pid":21,"hostname":"localhost","req":{"id":536,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":152,"msg":"request completed"}
+
+2026-09-12 06:24:59.22
+512e376b
+User
+{"level":30,"time":1789187099220,"pid":21,"hostname":"localhost","req":{"id":537,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":60,"msg":"request completed"}
+
+2026-09-12 06:25:08.61
+512e376b
+User
+{"level":30,"time":1789187108612,"pid":21,"hostname":"localhost","req":{"id":538,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":150,"msg":"request completed"}
+
+2026-09-12 06:25:09.32
+512e376b
+User
+{"level":30,"time":1789187109324,"pid":21,"hostname":"localhost","req":{"id":539,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:25:13.53
+512e376b
+User
+{"level":30,"time":1789187113535,"pid":21,"hostname":"localhost","req":{"id":540,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":53,"msg":"request completed"}
+
+2026-09-12 06:25:18.80
+512e376b
+User
+{"level":30,"time":1789187118805,"pid":21,"hostname":"localhost","req":{"id":541,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":159,"msg":"request completed"}
+
+2026-09-12 06:25:19.42
+512e376b
+User
+{"level":30,"time":1789187119425,"pid":21,"hostname":"localhost","req":{"id":542,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:25:22.41
+512e376b
+User
+{"level":30,"time":1789187122413,"pid":21,"hostname":"localhost","req":{"id":543,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:25:28.99
+512e376b
+User
+{"level":30,"time":1789187128994,"pid":21,"hostname":"localhost","req":{"id":544,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":151,"msg":"request completed"}
+
+2026-09-12 06:25:29.52
+512e376b
+User
+{"level":30,"time":1789187129524,"pid":21,"hostname":"localhost","req":{"id":545,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:25:39.19
+512e376b
+User
+{"level":30,"time":1789187139191,"pid":21,"hostname":"localhost","req":{"id":546,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":155,"msg":"request completed"}
+
+2026-09-12 06:25:39.63
+512e376b
+User
+{"level":30,"time":1789187139633,"pid":21,"hostname":"localhost","req":{"id":547,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":72,"msg":"request completed"}
+
+2026-09-12 06:25:49.39
+512e376b
+User
+{"level":30,"time":1789187149399,"pid":21,"hostname":"localhost","req":{"id":548,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":164,"msg":"request completed"}
+
+2026-09-12 06:25:49.73
+512e376b
+User
+{"level":30,"time":1789187149733,"pid":21,"hostname":"localhost","req":{"id":549,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:25:59.58
+512e376b
+User
+{"level":30,"time":1789187159584,"pid":21,"hostname":"localhost","req":{"id":550,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":148,"msg":"request completed"}
+
+2026-09-12 06:25:59.83
+512e376b
+User
+{"level":30,"time":1789187159830,"pid":21,"hostname":"localhost","req":{"id":551,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":62,"msg":"request completed"}
+
+2026-09-12 06:26:08.69
+512e376b
+User
+{"level":30,"time":1789187168690,"pid":21,"hostname":"localhost","req":{"id":552,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":49,"msg":"request completed"}
+
+2026-09-12 06:26:09.77
+512e376b
+User
+{"level":30,"time":1789187169779,"pid":21,"hostname":"localhost","req":{"id":553,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":157,"msg":"request completed"}
+
+2026-09-12 06:26:09.93
+512e376b
+User
+{"level":30,"time":1789187169935,"pid":21,"hostname":"localhost","req":{"id":554,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":70,"msg":"request completed"}
+
+2026-09-12 06:26:18.19
+512e376b
+User
+{"level":30,"time":1789187178191,"pid":21,"hostname":"localhost","req":{"id":555,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J2aLFwyUAS3AWNicYy6zN4BdAR/tokens"},"res":{"statusCode":200},"responseTime":292,"msg":"request completed"}
+
+2026-09-12 06:26:20.03
+512e376b
+User
+{"level":30,"time":1789187180036,"pid":21,"hostname":"localhost","req":{"id":557,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:26:20.04
+512e376b
+User
+{"level":30,"time":1789187180043,"pid":21,"hostname":"localhost","req":{"id":556,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":228,"msg":"request completed"}
+
+2026-09-12 06:26:22.50
+512e376b
+User
+{"level":30,"time":1789187182506,"pid":21,"hostname":"localhost","req":{"id":558,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":61,"msg":"request completed"}
+
+2026-09-12 06:26:30.13
+512e376b
+User
+{"level":30,"time":1789187190135,"pid":21,"hostname":"localhost","req":{"id":559,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":59,"msg":"request completed"}
+
+2026-09-12 06:26:30.22
+512e376b
+User
+{"level":30,"time":1789187190229,"pid":21,"hostname":"localhost","req":{"id":560,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":150,"msg":"request completed"}
+
+2026-09-12 06:26:40.25
+512e376b
+User
+{"level":30,"time":1789187200251,"pid":21,"hostname":"localhost","req":{"id":561,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":77,"msg":"request completed"}
+
+2026-09-12 06:26:40.42
+512e376b
+User
+{"level":30,"time":1789187200419,"pid":21,"hostname":"localhost","req":{"id":562,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":153,"msg":"request completed"}
+
+2026-09-12 06:26:50.35
+512e376b
+User
+{"level":30,"time":1789187210358,"pid":21,"hostname":"localhost","req":{"id":563,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:26:50.61
+512e376b
+User
+{"level":30,"time":1789187210609,"pid":21,"hostname":"localhost","req":{"id":564,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":156,"msg":"request completed"}
+
+2026-09-12 06:27:00.46
+512e376b
+User
+{"level":30,"time":1789187220464,"pid":21,"hostname":"localhost","req":{"id":565,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:27:00.80
+512e376b
+User
+{"level":30,"time":1789187220800,"pid":21,"hostname":"localhost","req":{"id":566,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":157,"msg":"request completed"}
+
+2026-09-12 06:27:03.83
+512e376b
+User
+{"level":30,"time":1789187223835,"pid":21,"hostname":"localhost","req":{"id":567,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":50,"msg":"request completed"}
+
+2026-09-12 06:27:10.56
+512e376b
+User
+{"level":30,"time":1789187230567,"pid":21,"hostname":"localhost","req":{"id":568,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":61,"msg":"request completed"}
+
+2026-09-12 06:27:11.06
+512e376b
+User
+{"level":30,"time":1789187231065,"pid":21,"hostname":"localhost","req":{"id":569,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":228,"msg":"request completed"}
+
+2026-09-12 06:27:20.67
+512e376b
+User
+{"level":30,"time":1789187240675,"pid":21,"hostname":"localhost","req":{"id":570,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:27:21.33
+512e376b
+User
+{"level":30,"time":1789187241331,"pid":21,"hostname":"localhost","req":{"id":571,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":157,"msg":"request completed"}
+
+2026-09-12 06:27:22.66
+512e376b
+User
+{"level":30,"time":1789187242660,"pid":21,"hostname":"localhost","req":{"id":572,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":122,"msg":"request completed"}
+
+2026-09-12 06:27:30.77
+512e376b
+User
+{"level":30,"time":1789187250775,"pid":21,"hostname":"localhost","req":{"id":573,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":61,"msg":"request completed"}
+
+2026-09-12 06:27:31.51
+512e376b
+User
+{"level":30,"time":1789187251514,"pid":21,"hostname":"localhost","req":{"id":574,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":146,"msg":"request completed"}
+
+2026-09-12 06:27:40.87
+512e376b
+User
+{"level":30,"time":1789187260879,"pid":21,"hostname":"localhost","req":{"id":575,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:27:41.70
+512e376b
+User
+{"level":30,"time":1789187261704,"pid":21,"hostname":"localhost","req":{"id":576,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":152,"msg":"request completed"}
+
+2026-09-12 06:27:50.98
+512e376b
+User
+{"level":30,"time":1789187270984,"pid":21,"hostname":"localhost","req":{"id":577,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:27:51.89
+512e376b
+User
+{"level":30,"time":1789187271896,"pid":21,"hostname":"localhost","req":{"id":578,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":153,"msg":"request completed"}
+
+2026-09-12 06:27:58.98
+512e376b
+User
+{"level":30,"time":1789187278981,"pid":21,"hostname":"localhost","req":{"id":579,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":54,"msg":"request completed"}
+
+2026-09-12 06:28:01.08
+512e376b
+User
+{"level":30,"time":1789187281082,"pid":21,"hostname":"localhost","req":{"id":580,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:28:02.08
+512e376b
+User
+{"level":30,"time":1789187282088,"pid":21,"hostname":"localhost","req":{"id":581,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":156,"msg":"request completed"}
+
+2026-09-12 06:28:11.19
+512e376b
+User
+{"level":30,"time":1789187291191,"pid":21,"hostname":"localhost","req":{"id":582,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":62,"msg":"request completed"}
+
+2026-09-12 06:28:12.27
+512e376b
+User
+{"level":30,"time":1789187292275,"pid":21,"hostname":"localhost","req":{"id":583,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":149,"msg":"request completed"}
+
+2026-09-12 06:28:21.29
+512e376b
+User
+{"level":30,"time":1789187301296,"pid":21,"hostname":"localhost","req":{"id":584,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:28:22.48
+512e376b
+User
+{"level":30,"time":1789187302480,"pid":21,"hostname":"localhost","req":{"id":585,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":159,"msg":"request completed"}
+
+2026-09-12 06:28:22.76
+512e376b
+User
+{"level":30,"time":1789187302764,"pid":21,"hostname":"localhost","req":{"id":586,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:28:31.40
+512e376b
+User
+{"level":30,"time":1789187311405,"pid":21,"hostname":"localhost","req":{"id":587,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:28:32.66
+512e376b
+User
+{"level":30,"time":1789187312666,"pid":21,"hostname":"localhost","req":{"id":588,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":151,"msg":"request completed"}
+
+2026-09-12 06:28:33.01
+512e376b
+User
+{"level":30,"time":1789187313012,"pid":21,"hostname":"localhost","req":{"id":531,"method":"GET","url":"/api/events"},"res":{"statusCode":200},"responseTime":240050,"msg":"request completed"}
+
+2026-09-12 06:28:41.51
+512e376b
+User
+{"level":30,"time":1789187321513,"pid":21,"hostname":"localhost","req":{"id":590,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:28:43.40
+512e376b
+User
+{"level":30,"time":1789187323400,"pid":21,"hostname":"localhost","req":{"id":591,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":162,"msg":"request completed"}
+
+2026-09-12 06:28:51.62
+512e376b
+User
+{"level":30,"time":1789187331621,"pid":21,"hostname":"localhost","req":{"id":592,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:28:53.59
+512e376b
+User
+{"level":30,"time":1789187333590,"pid":21,"hostname":"localhost","req":{"id":593,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":155,"msg":"request completed"}
+
+2026-09-12 06:28:54.13
+512e376b
+User
+{"level":30,"time":1789187334136,"pid":21,"hostname":"localhost","req":{"id":594,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":54,"msg":"request completed"}
+
+2026-09-12 06:29:01.72
+512e376b
+User
+{"level":30,"time":1789187341726,"pid":21,"hostname":"localhost","req":{"id":595,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:29:03.77
+512e376b
+User
+{"level":30,"time":1789187343779,"pid":21,"hostname":"localhost","req":{"id":596,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":151,"msg":"request completed"}
+
+2026-09-12 06:29:11.83
+512e376b
+User
+{"level":30,"time":1789187351834,"pid":21,"hostname":"localhost","req":{"id":597,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":68,"msg":"request completed"}
+
+2026-09-12 06:29:14.04
+512e376b
+User
+{"level":30,"time":1789187354048,"pid":21,"hostname":"localhost","req":{"id":598,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":231,"msg":"request completed"}
+
+2026-09-12 06:29:21.94
+512e376b
+User
+{"level":30,"time":1789187361940,"pid":21,"hostname":"localhost","req":{"id":599,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:29:22.86
+512e376b
+User
+{"level":30,"time":1789187362863,"pid":21,"hostname":"localhost","req":{"id":600,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":60,"msg":"request completed"}
+
+2026-09-12 06:29:24.30
+512e376b
+User
+{"level":30,"time":1789187364304,"pid":21,"hostname":"localhost","req":{"id":601,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":152,"msg":"request completed"}
+
+2026-09-12 06:29:32.03
+512e376b
+User
+{"level":30,"time":1789187372038,"pid":21,"hostname":"localhost","req":{"id":602,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":59,"msg":"request completed"}
+
+2026-09-12 06:29:34.49
+512e376b
+User
+{"level":30,"time":1789187374494,"pid":21,"hostname":"localhost","req":{"id":603,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":151,"msg":"request completed"}
+
+2026-09-12 06:29:42.14
+512e376b
+User
+{"level":30,"time":1789187382147,"pid":21,"hostname":"localhost","req":{"id":604,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:29:44.69
+512e376b
+User
+{"level":30,"time":1789187384699,"pid":21,"hostname":"localhost","req":{"id":605,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":166,"msg":"request completed"}
+
+2026-09-12 06:29:49.29
+512e376b
+User
+{"level":30,"time":1789187389296,"pid":21,"hostname":"localhost","req":{"id":606,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":53,"msg":"request completed"}
+
+2026-09-12 06:29:52.24
+512e376b
+User
+{"level":30,"time":1789187392243,"pid":21,"hostname":"localhost","req":{"id":607,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":61,"msg":"request completed"}
+
+2026-09-12 06:29:54.88
+512e376b
+User
+{"level":30,"time":1789187394887,"pid":21,"hostname":"localhost","req":{"id":608,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":153,"msg":"request completed"}
+
+2026-09-12 06:30:02.34
+512e376b
+User
+{"level":30,"time":1789187402349,"pid":21,"hostname":"localhost","req":{"id":609,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:30:05.08
+512e376b
+User
+{"level":30,"time":1789187405086,"pid":21,"hostname":"localhost","req":{"id":610,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":159,"msg":"request completed"}
+
+2026-09-12 06:30:12.45
+512e376b
+User
+{"level":30,"time":1789187412459,"pid":21,"hostname":"localhost","req":{"id":611,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":68,"msg":"request completed"}
+
+2026-09-12 06:30:15.32
+512e376b
+User
+{"level":30,"time":1789187415321,"pid":21,"hostname":"localhost","req":{"id":612,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":193,"msg":"request completed"}
+
+2026-09-12 06:30:22.56
+512e376b
+User
+{"level":30,"time":1789187422566,"pid":21,"hostname":"localhost","req":{"id":613,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:30:22.96
+512e376b
+User
+{"level":30,"time":1789187422967,"pid":21,"hostname":"localhost","req":{"id":614,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:30:25.50
+512e376b
+User
+{"level":30,"time":1789187425504,"pid":21,"hostname":"localhost","req":{"id":615,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":148,"msg":"request completed"}
+
+2026-09-12 06:30:32.67
+512e376b
+User
+{"level":30,"time":1789187432673,"pid":21,"hostname":"localhost","req":{"id":616,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:30:35.68
+512e376b
+User
+{"level":30,"time":1789187435689,"pid":21,"hostname":"localhost","req":{"id":617,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":151,"msg":"request completed"}
+
+2026-09-12 06:30:42.77
+512e376b
+User
+{"level":30,"time":1789187442776,"pid":21,"hostname":"localhost","req":{"id":618,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:30:44.45
+512e376b
+User
+{"level":30,"time":1789187444451,"pid":21,"hostname":"localhost","req":{"id":619,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":58,"msg":"request completed"}
+
+2026-09-12 06:30:45.88
+512e376b
+User
+{"level":30,"time":1789187445881,"pid":21,"hostname":"localhost","req":{"id":620,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":156,"msg":"request completed"}
+
+2026-09-12 06:30:52.87
+512e376b
+User
+{"level":30,"time":1789187452879,"pid":21,"hostname":"localhost","req":{"id":621,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:30:56.07
+512e376b
+User
+{"level":30,"time":1789187456071,"pid":21,"hostname":"localhost","req":{"id":622,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":156,"msg":"request completed"}
+
+2026-09-12 06:31:02.98
+512e376b
+User
+{"level":30,"time":1789187462988,"pid":21,"hostname":"localhost","req":{"id":623,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":68,"msg":"request completed"}
+
+2026-09-12 06:31:06.26
+512e376b
+User
+{"level":30,"time":1789187466267,"pid":21,"hostname":"localhost","req":{"id":624,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":157,"msg":"request completed"}
+
+2026-09-12 06:31:13.09
+512e376b
+User
+{"level":30,"time":1789187473093,"pid":21,"hostname":"localhost","req":{"id":625,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:31:16.45
+512e376b
+User
+{"level":30,"time":1789187476456,"pid":21,"hostname":"localhost","req":{"id":626,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":151,"msg":"request completed"}
+
+2026-09-12 06:31:23.06
+512e376b
+User
+{"level":30,"time":1789187483067,"pid":21,"hostname":"localhost","req":{"id":627,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:31:23.19
+512e376b
+User
+{"level":30,"time":1789187483191,"pid":21,"hostname":"localhost","req":{"id":628,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:31:26.68
+512e376b
+User
+{"level":30,"time":1789187486683,"pid":21,"hostname":"localhost","req":{"id":629,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":157,"msg":"request completed"}
+
+2026-09-12 06:31:33.29
+512e376b
+User
+{"level":30,"time":1789187493292,"pid":21,"hostname":"localhost","req":{"id":630,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:31:36.86
+512e376b
+User
+{"level":30,"time":1789187496868,"pid":21,"hostname":"localhost","req":{"id":631,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":150,"msg":"request completed"}
+
+2026-09-12 06:31:39.59
+512e376b
+User
+{"level":30,"time":1789187499596,"pid":21,"hostname":"localhost","req":{"id":632,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":52,"msg":"request completed"}
+
+2026-09-12 06:31:43.39
+512e376b
+User
+{"level":30,"time":1789187503391,"pid":21,"hostname":"localhost","req":{"id":633,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:31:47.13
+512e376b
+User
+{"level":30,"time":1789187507135,"pid":21,"hostname":"localhost","req":{"id":634,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":227,"msg":"request completed"}
+
+2026-09-12 06:31:53.49
+512e376b
+User
+{"level":30,"time":1789187513495,"pid":21,"hostname":"localhost","req":{"id":635,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:31:57.32
+512e376b
+User
+{"level":30,"time":1789187517322,"pid":21,"hostname":"localhost","req":{"id":636,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":153,"msg":"request completed"}
+
+2026-09-12 06:32:03.60
+512e376b
+User
+{"level":30,"time":1789187523607,"pid":21,"hostname":"localhost","req":{"id":637,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:32:07.51
+512e376b
+User
+{"level":30,"time":1789187527512,"pid":21,"hostname":"localhost","req":{"id":638,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":156,"msg":"request completed"}
+
+2026-09-12 06:32:13.71
+512e376b
+User
+{"level":30,"time":1789187533719,"pid":21,"hostname":"localhost","req":{"id":639,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":70,"msg":"request completed"}
+
+2026-09-12 06:32:17.69
+512e376b
+User
+{"level":30,"time":1789187537699,"pid":21,"hostname":"localhost","req":{"id":640,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":156,"msg":"request completed"}
+
+2026-09-12 06:32:23.22
+512e376b
+User
+{"level":30,"time":1789187543226,"pid":21,"hostname":"localhost","req":{"id":641,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":125,"msg":"request completed"}
+
+2026-09-12 06:32:23.82
+512e376b
+User
+{"level":30,"time":1789187543822,"pid":21,"hostname":"localhost","req":{"id":642,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:32:27.88
+512e376b
+User
+{"level":30,"time":1789187547882,"pid":21,"hostname":"localhost","req":{"id":643,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":152,"msg":"request completed"}
+
+2026-09-12 06:32:33.92
+512e376b
+User
+{"level":30,"time":1789187553926,"pid":21,"hostname":"localhost","req":{"id":644,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:32:34.96
+512e376b
+User
+{"level":30,"time":1789187554965,"pid":21,"hostname":"localhost","req":{"id":645,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":274,"msg":"request completed"}
+
+2026-09-12 06:32:36.09
+512e376b
+User
+{"level":30,"time":1789187556096,"pid":21,"hostname":"localhost","req":{"id":589,"method":"GET","url":"/api/events"},"res":{"statusCode":200},"responseTime":240052,"msg":"request completed"}
+
+2026-09-12 06:32:38.08
+512e376b
+User
+{"level":30,"time":1789187558083,"pid":21,"hostname":"localhost","req":{"id":646,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":163,"msg":"request completed"}
+
+2026-09-12 06:32:44.02
+512e376b
+User
+{"level":30,"time":1789187564024,"pid":21,"hostname":"localhost","req":{"id":648,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:32:48.28
+512e376b
+User
+{"level":30,"time":1789187568286,"pid":21,"hostname":"localhost","req":{"id":649,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":169,"msg":"request completed"}
+
+2026-09-12 06:32:54.13
+512e376b
+User
+{"level":30,"time":1789187574131,"pid":21,"hostname":"localhost","req":{"id":650,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":68,"msg":"request completed"}
+
+2026-09-12 06:32:58.48
+512e376b
+User
+{"level":30,"time":1789187578480,"pid":21,"hostname":"localhost","req":{"id":651,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":158,"msg":"request completed"}
+
+2026-09-12 06:33:04.23
+512e376b
+User
+{"level":30,"time":1789187584236,"pid":21,"hostname":"localhost","req":{"id":652,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:33:08.67
+512e376b
+User
+{"level":30,"time":1789187588674,"pid":21,"hostname":"localhost","req":{"id":653,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":159,"msg":"request completed"}
+
+2026-09-12 06:33:14.34
+512e376b
+User
+{"level":30,"time":1789187594340,"pid":21,"hostname":"localhost","req":{"id":654,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:33:18.86
+512e376b
+User
+{"level":30,"time":1789187598864,"pid":21,"hostname":"localhost","req":{"id":655,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":152,"msg":"request completed"}
+
+2026-09-12 06:33:23.32
+512e376b
+User
+{"level":30,"time":1789187603329,"pid":21,"hostname":"localhost","req":{"id":656,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:33:24.43
+512e376b
+User
+{"level":30,"time":1789187604437,"pid":21,"hostname":"localhost","req":{"id":657,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:33:29.07
+512e376b
+User
+{"level":30,"time":1789187609079,"pid":21,"hostname":"localhost","req":{"id":658,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":160,"msg":"request completed"}
+
+2026-09-12 06:33:30.10
+512e376b
+User
+{"level":30,"time":1789187610102,"pid":21,"hostname":"localhost","req":{"id":659,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":49,"msg":"request completed"}
+
+2026-09-12 06:33:34.53
+512e376b
+User
+{"level":30,"time":1789187614537,"pid":21,"hostname":"localhost","req":{"id":660,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:33:39.27
+512e376b
+User
+{"level":30,"time":1789187619273,"pid":21,"hostname":"localhost","req":{"id":661,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":156,"msg":"request completed"}
+
+2026-09-12 06:33:44.64
+512e376b
+User
+{"level":30,"time":1789187624642,"pid":21,"hostname":"localhost","req":{"id":662,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:33:49.46
+512e376b
+User
+{"level":30,"time":1789187629463,"pid":21,"hostname":"localhost","req":{"id":663,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":155,"msg":"request completed"}
+
+2026-09-12 06:33:54.75
+512e376b
+User
+{"level":30,"time":1789187634749,"pid":21,"hostname":"localhost","req":{"id":664,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:33:59.64
+512e376b
+User
+{"level":30,"time":1789187639649,"pid":21,"hostname":"localhost","req":{"id":665,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":152,"msg":"request completed"}
+
+2026-09-12 06:34:04.86
+512e376b
+User
+{"level":30,"time":1789187644865,"pid":21,"hostname":"localhost","req":{"id":666,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:34:09.84
+512e376b
+User
+{"level":30,"time":1789187649842,"pid":21,"hostname":"localhost","req":{"id":667,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":151,"msg":"request completed"}
+
+2026-09-12 06:34:15.00
+512e376b
+User
+{"level":30,"time":1789187655004,"pid":21,"hostname":"localhost","req":{"id":668,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":62,"msg":"request completed"}
+
+2026-09-12 06:34:20.15
+512e376b
+User
+{"level":30,"time":1789187660159,"pid":21,"hostname":"localhost","req":{"id":669,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":235,"msg":"request completed"}
+
+2026-09-12 06:34:23.49
+512e376b
+User
+{"level":30,"time":1789187663493,"pid":21,"hostname":"localhost","req":{"id":670,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:34:25.12
+512e376b
+User
+{"level":30,"time":1789187665123,"pid":21,"hostname":"localhost","req":{"id":671,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:34:25.25
+512e376b
+User
+{"level":30,"time":1789187665252,"pid":21,"hostname":"localhost","req":{"id":672,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":51,"msg":"request completed"}
+
+2026-09-12 06:34:30.35
+512e376b
+User
+{"level":30,"time":1789187670353,"pid":21,"hostname":"localhost","req":{"id":673,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":153,"msg":"request completed"}
+
+2026-09-12 06:34:35.22
+512e376b
+User
+{"level":30,"time":1789187675226,"pid":21,"hostname":"localhost","req":{"id":674,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:34:40.54
+512e376b
+User
+{"level":30,"time":1789187680546,"pid":21,"hostname":"localhost","req":{"id":675,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":158,"msg":"request completed"}
+
+2026-09-12 06:34:45.32
+512e376b
+User
+{"level":30,"time":1789187685320,"pid":21,"hostname":"localhost","req":{"id":676,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":61,"msg":"request completed"}
+
+2026-09-12 06:34:50.74
+512e376b
+User
+{"level":30,"time":1789187690747,"pid":21,"hostname":"localhost","req":{"id":677,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":163,"msg":"request completed"}
+
+2026-09-12 06:34:55.41
+512e376b
+User
+{"level":30,"time":1789187695418,"pid":21,"hostname":"localhost","req":{"id":678,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:35:00.93
+512e376b
+User
+{"level":30,"time":1789187700935,"pid":21,"hostname":"localhost","req":{"id":679,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":151,"msg":"request completed"}
+
+2026-09-12 06:35:05.51
+512e376b
+User
+{"level":30,"time":1789187705514,"pid":21,"hostname":"localhost","req":{"id":680,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":62,"msg":"request completed"}
+
+2026-09-12 06:35:11.20
+512e376b
+User
+{"level":30,"time":1789187711204,"pid":21,"hostname":"localhost","req":{"id":681,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":229,"msg":"request completed"}
+
+2026-09-12 06:35:15.61
+512e376b
+User
+{"level":30,"time":1789187715613,"pid":21,"hostname":"localhost","req":{"id":682,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:35:20.39
+512e376b
+User
+{"level":30,"time":1789187720399,"pid":21,"hostname":"localhost","req":{"id":683,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":54,"msg":"request completed"}
+
+2026-09-12 06:35:21.49
+512e376b
+User
+{"level":30,"time":1789187721489,"pid":21,"hostname":"localhost","req":{"id":684,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":156,"msg":"request completed"}
+
+2026-09-12 06:35:23.59
+512e376b
+User
+{"level":30,"time":1789187723592,"pid":21,"hostname":"localhost","req":{"id":685,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:35:25.71
+512e376b
+User
+{"level":30,"time":1789187725712,"pid":21,"hostname":"localhost","req":{"id":686,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:35:31.67
+512e376b
+User
+{"level":30,"time":1789187731675,"pid":21,"hostname":"localhost","req":{"id":687,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":150,"msg":"request completed"}
+
+2026-09-12 06:35:35.81
+512e376b
+User
+{"level":30,"time":1789187735815,"pid":21,"hostname":"localhost","req":{"id":688,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":68,"msg":"request completed"}
+
+2026-09-12 06:35:41.90
+512e376b
+User
+{"level":30,"time":1789187741903,"pid":21,"hostname":"localhost","req":{"id":689,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":158,"msg":"request completed"}
+
+2026-09-12 06:35:45.91
+512e376b
+User
+{"level":30,"time":1789187745919,"pid":21,"hostname":"localhost","req":{"id":690,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:35:52.10
+512e376b
+User
+{"level":30,"time":1789187752109,"pid":21,"hostname":"localhost","req":{"id":691,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":157,"msg":"request completed"}
+
+2026-09-12 06:35:56.01
+512e376b
+User
+{"level":30,"time":1789187756016,"pid":21,"hostname":"localhost","req":{"id":692,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:36:02.30
+512e376b
+User
+{"level":30,"time":1789187762300,"pid":21,"hostname":"localhost","req":{"id":693,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":153,"msg":"request completed"}
+
+2026-09-12 06:36:06.11
+512e376b
+User
+{"level":30,"time":1789187766119,"pid":21,"hostname":"localhost","req":{"id":694,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":70,"msg":"request completed"}
+
+2026-09-12 06:36:12.49
+512e376b
+User
+{"level":30,"time":1789187772494,"pid":21,"hostname":"localhost","req":{"id":695,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":158,"msg":"request completed"}
+
+2026-09-12 06:36:15.54
+512e376b
+User
+{"level":30,"time":1789187775541,"pid":21,"hostname":"localhost","req":{"id":696,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":61,"msg":"request completed"}
+
+2026-09-12 06:36:16.21
+512e376b
+User
+{"level":30,"time":1789187776215,"pid":21,"hostname":"localhost","req":{"id":697,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:36:22.69
+512e376b
+User
+{"level":30,"time":1789187782699,"pid":21,"hostname":"localhost","req":{"id":698,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":154,"msg":"request completed"}
+
+2026-09-12 06:36:23.68
+512e376b
+User
+{"level":30,"time":1789187783688,"pid":21,"hostname":"localhost","req":{"id":699,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":62,"msg":"request completed"}
+
+2026-09-12 06:36:26.31
+512e376b
+User
+{"level":30,"time":1789187786317,"pid":21,"hostname":"localhost","req":{"id":700,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:36:32.89
+512e376b
+User
+{"level":30,"time":1789187792893,"pid":21,"hostname":"localhost","req":{"id":701,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":151,"msg":"request completed"}
+
+2026-09-12 06:36:36.42
+512e376b
+User
+{"level":30,"time":1789187796422,"pid":21,"hostname":"localhost","req":{"id":702,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:36:39.23
+512e376b
+User
+{"level":30,"time":1789187799237,"pid":21,"hostname":"localhost","req":{"id":647,"method":"GET","url":"/api/events"},"res":{"statusCode":200},"responseTime":240050,"msg":"request completed"}
+
+2026-09-12 06:36:43.08
+512e376b
+User
+{"level":30,"time":1789187803082,"pid":21,"hostname":"localhost","req":{"id":704,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":155,"msg":"request completed"}
+
+2026-09-12 06:36:46.52
+512e376b
+User
+{"level":30,"time":1789187806525,"pid":21,"hostname":"localhost","req":{"id":705,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:36:53.35
+512e376b
+User
+{"level":30,"time":1789187813357,"pid":21,"hostname":"localhost","req":{"id":706,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":236,"msg":"request completed"}
+
+2026-09-12 06:36:56.63
+512e376b
+User
+{"level":30,"time":1789187816635,"pid":21,"hostname":"localhost","req":{"id":707,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:37:03.55
+512e376b
+User
+{"level":30,"time":1789187823554,"pid":21,"hostname":"localhost","req":{"id":708,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":157,"msg":"request completed"}
+
+2026-09-12 06:37:06.73
+512e376b
+User
+{"level":30,"time":1789187826739,"pid":21,"hostname":"localhost","req":{"id":709,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:37:10.69
+512e376b
+User
+{"level":30,"time":1789187830694,"pid":21,"hostname":"localhost","req":{"id":710,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":55,"msg":"request completed"}
+
+2026-09-12 06:37:13.74
+512e376b
+User
+{"level":30,"time":1789187833741,"pid":21,"hostname":"localhost","req":{"id":711,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":153,"msg":"request completed"}
+
+2026-09-12 06:37:16.83
+512e376b
+User
+{"level":30,"time":1789187836835,"pid":21,"hostname":"localhost","req":{"id":712,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:37:23.94
+512e376b
+User
+{"level":30,"time":1789187843944,"pid":21,"hostname":"localhost","req":{"id":713,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":218,"msg":"request completed"}
+
+2026-09-12 06:37:24.03
+512e376b
+User
+{"level":30,"time":1789187844038,"pid":21,"hostname":"localhost","req":{"id":714,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":264,"msg":"request completed"}
+
+2026-09-12 06:37:26.93
+512e376b
+User
+{"level":30,"time":1789187846935,"pid":21,"hostname":"localhost","req":{"id":715,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":62,"msg":"request completed"}
+
+2026-09-12 06:37:34.29
+512e376b
+User
+{"level":30,"time":1789187854294,"pid":21,"hostname":"localhost","req":{"id":716,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":152,"msg":"request completed"}
+
+2026-09-12 06:37:37.03
+512e376b
+User
+{"level":30,"time":1789187857034,"pid":21,"hostname":"localhost","req":{"id":717,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:37:44.49
+512e376b
+User
+{"level":30,"time":1789187864490,"pid":21,"hostname":"localhost","req":{"id":718,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":156,"msg":"request completed"}
+
+2026-09-12 06:37:47.13
+512e376b
+User
+{"level":30,"time":1789187867138,"pid":21,"hostname":"localhost","req":{"id":719,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:37:54.67
+512e376b
+User
+{"level":30,"time":1789187874677,"pid":21,"hostname":"localhost","req":{"id":720,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":149,"msg":"request completed"}
+
+2026-09-12 06:37:57.23
+512e376b
+User
+{"level":30,"time":1789187877237,"pid":21,"hostname":"localhost","req":{"id":721,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:38:04.86
+512e376b
+User
+{"level":30,"time":1789187884866,"pid":21,"hostname":"localhost","req":{"id":722,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":151,"msg":"request completed"}
+
+2026-09-12 06:38:05.83
+512e376b
+User
+{"level":30,"time":1789187885839,"pid":21,"hostname":"localhost","req":{"id":723,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":53,"msg":"request completed"}
+
+2026-09-12 06:38:07.33
+512e376b
+User
+{"level":30,"time":1789187887338,"pid":21,"hostname":"localhost","req":{"id":724,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:38:15.06
+512e376b
+User
+{"level":30,"time":1789187895060,"pid":21,"hostname":"localhost","req":{"id":725,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":152,"msg":"request completed"}
+
+2026-09-12 06:38:17.45
+512e376b
+User
+{"level":30,"time":1789187897453,"pid":21,"hostname":"localhost","req":{"id":726,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":71,"msg":"request completed"}
+
+2026-09-12 06:38:24.15
+512e376b
+User
+{"level":30,"time":1789187904150,"pid":21,"hostname":"localhost","req":{"id":727,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:38:25.25
+512e376b
+User
+{"level":30,"time":1789187905250,"pid":21,"hostname":"localhost","req":{"id":728,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":151,"msg":"request completed"}
+
+2026-09-12 06:38:27.56
+512e376b
+User
+{"level":30,"time":1789187907569,"pid":21,"hostname":"localhost","req":{"id":729,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:38:35.44
+512e376b
+User
+{"level":30,"time":1789187915440,"pid":21,"hostname":"localhost","req":{"id":730,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":150,"msg":"request completed"}
+
+2026-09-12 06:38:37.67
+512e376b
+User
+{"level":30,"time":1789187917672,"pid":21,"hostname":"localhost","req":{"id":731,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:38:45.62
+512e376b
+User
+{"level":30,"time":1789187925628,"pid":21,"hostname":"localhost","req":{"id":732,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":152,"msg":"request completed"}
+
+2026-09-12 06:38:47.76
+512e376b
+User
+{"level":30,"time":1789187927768,"pid":21,"hostname":"localhost","req":{"id":733,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":61,"msg":"request completed"}
+
+2026-09-12 06:38:55.81
+512e376b
+User
+{"level":30,"time":1789187935813,"pid":21,"hostname":"localhost","req":{"id":734,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":149,"msg":"request completed"}
+
+2026-09-12 06:38:57.86
+512e376b
+User
+{"level":30,"time":1789187937865,"pid":21,"hostname":"localhost","req":{"id":735,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:39:00.98
+512e376b
+User
+{"level":30,"time":1789187940981,"pid":21,"hostname":"localhost","req":{"id":736,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":51,"msg":"request completed"}
+
+2026-09-12 06:39:06.06
+512e376b
+User
+{"level":30,"time":1789187946069,"pid":21,"hostname":"localhost","req":{"id":737,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":156,"msg":"request completed"}
+
+2026-09-12 06:39:07.97
+512e376b
+User
+{"level":30,"time":1789187947978,"pid":21,"hostname":"localhost","req":{"id":738,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:39:16.25
+512e376b
+User
+{"level":30,"time":1789187956256,"pid":21,"hostname":"localhost","req":{"id":739,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":155,"msg":"request completed"}
+
+2026-09-12 06:39:18.07
+512e376b
+User
+{"level":30,"time":1789187958076,"pid":21,"hostname":"localhost","req":{"id":740,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:39:24.25
+512e376b
+User
+{"level":30,"time":1789187964251,"pid":21,"hostname":"localhost","req":{"id":741,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:39:26.45
+512e376b
+User
+{"level":30,"time":1789187966452,"pid":21,"hostname":"localhost","req":{"id":742,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":153,"msg":"request completed"}
+
+2026-09-12 06:39:28.17
+512e376b
+User
+{"level":30,"time":1789187968172,"pid":21,"hostname":"localhost","req":{"id":743,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":62,"msg":"request completed"}
+
+2026-09-12 06:39:36.64
+512e376b
+User
+{"level":30,"time":1789187976645,"pid":21,"hostname":"localhost","req":{"id":744,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":150,"msg":"request completed"}
+
+2026-09-12 06:39:38.31
+512e376b
+User
+{"level":30,"time":1789187978297,"pid":21,"hostname":"localhost","req":{"id":745,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:39:46.83
+512e376b
+User
+{"level":30,"time":1789187986839,"pid":21,"hostname":"localhost","req":{"id":746,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":155,"msg":"request completed"}
+
+2026-09-12 06:39:48.39
+512e376b
+User
+{"level":30,"time":1789187988398,"pid":21,"hostname":"localhost","req":{"id":747,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:39:56.12
+512e376b
+User
+{"level":30,"time":1789187996126,"pid":21,"hostname":"localhost","req":{"id":748,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":61,"msg":"request completed"}
+
+2026-09-12 06:39:57.03
+512e376b
+User
+{"level":30,"time":1789187997030,"pid":21,"hostname":"localhost","req":{"id":749,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":158,"msg":"request completed"}
+
+2026-09-12 06:39:58.50
+512e376b
+User
+{"level":30,"time":1789187998502,"pid":21,"hostname":"localhost","req":{"id":750,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:40:07.22
+512e376b
+User
+{"level":30,"time":1789188007225,"pid":21,"hostname":"localhost","req":{"id":751,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":151,"msg":"request completed"}
+
+2026-09-12 06:40:08.60
+512e376b
+User
+{"level":30,"time":1789188008602,"pid":21,"hostname":"localhost","req":{"id":752,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:40:17.42
+512e376b
+User
+{"level":30,"time":1789188017424,"pid":21,"hostname":"localhost","req":{"id":753,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":159,"msg":"request completed"}
+
+2026-09-12 06:40:18.71
+512e376b
+User
+{"level":30,"time":1789188018710,"pid":21,"hostname":"localhost","req":{"id":754,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":70,"msg":"request completed"}
+
+2026-09-12 06:40:24.35
+512e376b
+User
+{"level":30,"time":1789188024355,"pid":21,"hostname":"localhost","req":{"id":755,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":69,"msg":"request completed"}
+
+2026-09-12 06:40:27.61
+512e376b
+User
+{"level":30,"time":1789188027619,"pid":21,"hostname":"localhost","req":{"id":756,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":158,"msg":"request completed"}
+
+2026-09-12 06:40:28.81
+512e376b
+User
+{"level":30,"time":1789188028817,"pid":21,"hostname":"localhost","req":{"id":757,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":68,"msg":"request completed"}
+
+2026-09-12 06:40:37.89
+512e376b
+User
+{"level":30,"time":1789188037898,"pid":21,"hostname":"localhost","req":{"id":758,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":155,"msg":"request completed"}
+
+2026-09-12 06:40:38.96
+512e376b
+User
+{"level":30,"time":1789188038963,"pid":21,"hostname":"localhost","req":{"id":759,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:40:42.32
+512e376b
+User
+{"level":30,"time":1789188042324,"pid":21,"hostname":"localhost","req":{"id":703,"method":"GET","url":"/api/events"},"res":{"statusCode":200},"responseTime":240048,"msg":"request completed"}
+
+2026-09-12 06:40:48.08
+512e376b
+User
+{"level":30,"time":1789188048088,"pid":21,"hostname":"localhost","req":{"id":761,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":150,"msg":"request completed"}
+
+2026-09-12 06:40:49.06
+512e376b
+User
+{"level":30,"time":1789188049065,"pid":21,"hostname":"localhost","req":{"id":762,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:40:51.27
+512e376b
+User
+{"level":30,"time":1789188051275,"pid":21,"hostname":"localhost","req":{"id":763,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":57,"msg":"request completed"}
+
+2026-09-12 06:40:58.31
+512e376b
+User
+{"level":30,"time":1789188058316,"pid":21,"hostname":"localhost","req":{"id":764,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":151,"msg":"request completed"}
+
+2026-09-12 06:40:59.16
+512e376b
+User
+{"level":30,"time":1789188059169,"pid":21,"hostname":"localhost","req":{"id":765,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:41:08.54
+512e376b
+User
+{"level":30,"time":1789188068546,"pid":21,"hostname":"localhost","req":{"id":766,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":156,"msg":"request completed"}
+
+2026-09-12 06:41:09.27
+512e376b
+User
+{"level":30,"time":1789188069277,"pid":21,"hostname":"localhost","req":{"id":767,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":69,"msg":"request completed"}
+
+2026-09-12 06:41:18.74
+512e376b
+User
+{"level":30,"time":1789188078746,"pid":21,"hostname":"localhost","req":{"id":768,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":157,"msg":"request completed"}
+
+2026-09-12 06:41:19.38
+512e376b
+User
+{"level":30,"time":1789188079381,"pid":21,"hostname":"localhost","req":{"id":769,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:41:24.46
+512e376b
+User
+{"level":30,"time":1789188084461,"pid":21,"hostname":"localhost","req":{"id":770,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":65,"msg":"request completed"}
+
+2026-09-12 06:41:28.93
+512e376b
+User
+{"level":30,"time":1789188088936,"pid":21,"hostname":"localhost","req":{"id":771,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":153,"msg":"request completed"}
+
+2026-09-12 06:41:29.48
+512e376b
+User
+{"level":30,"time":1789188089482,"pid":21,"hostname":"localhost","req":{"id":772,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:41:39.14
+512e376b
+User
+{"level":30,"time":1789188099145,"pid":21,"hostname":"localhost","req":{"id":773,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":153,"msg":"request completed"}
+
+2026-09-12 06:41:39.58
+512e376b
+User
+{"level":30,"time":1789188099581,"pid":21,"hostname":"localhost","req":{"id":774,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:41:46.51
+512e376b
+User
+{"level":30,"time":1789188106512,"pid":21,"hostname":"localhost","req":{"id":775,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":51,"msg":"request completed"}
+
+2026-09-12 06:41:49.33
+512e376b
+User
+{"level":30,"time":1789188109337,"pid":21,"hostname":"localhost","req":{"id":776,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":150,"msg":"request completed"}
+
+2026-09-12 06:41:49.68
+512e376b
+User
+{"level":30,"time":1789188109684,"pid":21,"hostname":"localhost","req":{"id":777,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:41:59.53
+512e376b
+User
+{"level":30,"time":1789188119530,"pid":21,"hostname":"localhost","req":{"id":778,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":151,"msg":"request completed"}
+
+2026-09-12 06:41:59.78
+512e376b
+User
+{"level":30,"time":1789188119782,"pid":21,"hostname":"localhost","req":{"id":779,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":62,"msg":"request completed"}
+
+2026-09-12 06:42:09.79
+512e376b
+User
+{"level":30,"time":1789188129791,"pid":21,"hostname":"localhost","req":{"id":780,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":155,"msg":"request completed"}
+
+2026-09-12 06:42:09.90
+512e376b
+User
+{"level":30,"time":1789188129902,"pid":21,"hostname":"localhost","req":{"id":781,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":66,"msg":"request completed"}
+
+2026-09-12 06:42:20.00
+512e376b
+User
+{"level":30,"time":1789188140001,"pid":21,"hostname":"localhost","req":{"id":782,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":158,"msg":"request completed"}
+
+2026-09-12 06:42:20.01
+512e376b
+User
+{"level":30,"time":1789188140016,"pid":21,"hostname":"localhost","req":{"id":783,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":74,"msg":"request completed"}
+
+2026-09-12 06:42:24.63
+512e376b
+User
+{"level":30,"time":1789188144632,"pid":21,"hostname":"localhost","req":{"id":784,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":133,"msg":"request completed"}
+
+2026-09-12 06:42:30.10
+512e376b
+User
+{"level":30,"time":1789188150109,"pid":21,"hostname":"localhost","req":{"id":786,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":61,"msg":"request completed"}
+
+2026-09-12 06:42:30.20
+512e376b
+User
+{"level":30,"time":1789188150201,"pid":21,"hostname":"localhost","req":{"id":785,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":155,"msg":"request completed"}
+
+2026-09-12 06:42:40.22
+512e376b
+User
+{"level":30,"time":1789188160222,"pid":21,"hostname":"localhost","req":{"id":787,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:42:40.39
+512e376b
+User
+{"level":30,"time":1789188160391,"pid":21,"hostname":"localhost","req":{"id":788,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":154,"msg":"request completed"}
+
+2026-09-12 06:42:41.66
+512e376b
+User
+{"level":30,"time":1789188161669,"pid":21,"hostname":"localhost","req":{"id":789,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:42:50.33
+512e376b
+User
+{"level":30,"time":1789188170330,"pid":21,"hostname":"localhost","req":{"id":790,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":62,"msg":"request completed"}
+
+2026-09-12 06:42:50.58
+512e376b
+User
+{"level":30,"time":1789188170579,"pid":21,"hostname":"localhost","req":{"id":791,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":150,"msg":"request completed"}
+
+2026-09-12 06:43:00.43
+512e376b
+User
+{"level":30,"time":1789188180435,"pid":21,"hostname":"localhost","req":{"id":792,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:43:00.76
+512e376b
+User
+{"level":30,"time":1789188180767,"pid":21,"hostname":"localhost","req":{"id":793,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":147,"msg":"request completed"}
+
+2026-09-12 06:43:10.54
+512e376b
+User
+{"level":30,"time":1789188190540,"pid":21,"hostname":"localhost","req":{"id":794,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:43:10.95
+512e376b
+User
+{"level":30,"time":1789188190953,"pid":21,"hostname":"localhost","req":{"id":795,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":154,"msg":"request completed"}
+
+2026-09-12 06:43:20.64
+512e376b
+User
+{"level":30,"time":1789188200647,"pid":21,"hostname":"localhost","req":{"id":796,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:43:21.14
+512e376b
+User
+{"level":30,"time":1789188201147,"pid":21,"hostname":"localhost","req":{"id":797,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":155,"msg":"request completed"}
+
+2026-09-12 06:43:24.74
+512e376b
+User
+{"level":30,"time":1789188204742,"pid":21,"hostname":"localhost","req":{"id":798,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":68,"msg":"request completed"}
+
+2026-09-12 06:43:30.75
+512e376b
+User
+{"level":30,"time":1789188210753,"pid":21,"hostname":"localhost","req":{"id":799,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":60,"msg":"request completed"}
+
+2026-09-12 06:43:31.33
+512e376b
+User
+{"level":30,"time":1789188211334,"pid":21,"hostname":"localhost","req":{"id":800,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":150,"msg":"request completed"}
+
+2026-09-12 06:43:36.83
+512e376b
+User
+{"level":30,"time":1789188216830,"pid":21,"hostname":"localhost","req":{"id":801,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":62,"msg":"request completed"}
+
+2026-09-12 06:43:40.85
+512e376b
+User
+{"level":30,"time":1789188220856,"pid":21,"hostname":"localhost","req":{"id":802,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:43:41.52
+512e376b
+User
+{"level":30,"time":1789188221525,"pid":21,"hostname":"localhost","req":{"id":803,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":157,"msg":"request completed"}
+
+2026-09-12 06:43:50.96
+512e376b
+User
+{"level":30,"time":1789188230965,"pid":21,"hostname":"localhost","req":{"id":804,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:43:51.72
+512e376b
+User
+{"level":30,"time":1789188231721,"pid":21,"hostname":"localhost","req":{"id":805,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":160,"msg":"request completed"}
+
+2026-09-12 06:43:55.53
+512e376b
+User
+{"level":30,"time":1789188235536,"pid":21,"hostname":"localhost","req":{"id":806,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J2aLFwyUAS3AWNicYy6zN4BdAR/tokens"},"res":{"statusCode":200},"responseTime":367,"msg":"request completed"}
+
+2026-09-12 06:44:01.08
+512e376b
+User
+{"level":30,"time":1789188241081,"pid":21,"hostname":"localhost","req":{"id":807,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":68,"msg":"request completed"}
+
+2026-09-12 06:44:01.91
+512e376b
+User
+{"level":30,"time":1789188241918,"pid":21,"hostname":"localhost","req":{"id":808,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":155,"msg":"request completed"}
+
+2026-09-12 06:44:11.19
+512e376b
+User
+{"level":30,"time":1789188251191,"pid":21,"hostname":"localhost","req":{"id":809,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:44:12.11
+512e376b
+User
+{"level":30,"time":1789188252115,"pid":21,"hostname":"localhost","req":{"id":810,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":158,"msg":"request completed"}
+
+2026-09-12 06:44:21.30
+512e376b
+User
+{"level":30,"time":1789188261301,"pid":21,"hostname":"localhost","req":{"id":811,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":67,"msg":"request completed"}
+
+2026-09-12 06:44:22.51
+512e376b
+User
+{"level":30,"time":1789188262512,"pid":21,"hostname":"localhost","req":{"id":812,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":362,"msg":"request completed"}
+
+2026-09-12 06:44:24.84
+512e376b
+User
+{"level":30,"time":1789188264840,"pid":21,"hostname":"localhost","req":{"id":813,"method":"GET","url":"/api/notifications"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:44:31.40
+512e376b
+User
+{"level":30,"time":1789188271406,"pid":21,"hostname":"localhost","req":{"id":814,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":62,"msg":"request completed"}
+
+2026-09-12 06:44:31.97
+512e376b
+User
+{"level":30,"time":1789188271979,"pid":21,"hostname":"localhost","req":{"id":815,"method":"POST","url":"/api/__clerk/v1/client/sessions/sess_3J8PH13kngq0eDzXkEoIpvXFNnJ/tokens"},"res":{"statusCode":200},"responseTime":50,"msg":"request completed"}
+
+2026-09-12 06:44:32.69
+512e376b
+User
+{"level":30,"time":1789188272694,"pid":21,"hostname":"localhost","req":{"id":816,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":146,"msg":"request completed"}
+
+2026-09-12 06:44:41.50
+512e376b
+User
+{"level":30,"time":1789188281509,"pid":21,"hostname":"localhost","req":{"id":817,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":63,"msg":"request completed"}
+
+2026-09-12 06:44:42.88
+512e376b
+User
+{"level":30,"time":1789188282884,"pid":21,"hostname":"localhost","req":{"id":818,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":152,"msg":"request completed"}
+
+2026-09-12 06:44:45.45
+512e376b
+User
+{"level":30,"time":1789188285451,"pid":21,"hostname":"localhost","req":{"id":760,"method":"GET","url":"/api/events"},"res":{"statusCode":200},"responseTime":240050,"msg":"request completed"}
+
+2026-09-12 06:44:51.60
+512e376b
+User
+{"level":30,"time":1789188291609,"pid":21,"hostname":"localhost","req":{"id":820,"method":"GET","url":"/api/talk-unread"},"res":{"statusCode":304},"responseTime":64,"msg":"request completed"}
+
+2026-09-12 06:44:53.07
+512e376b
+User
+{"level":30,"time":1789188293073,"pid":21,"hostname":"localhost","req":{"id":821,"method":"GET","url":"/api/runtime/health"},"res":{"statusCode":200},"responseTime":150,"msg":"request completed"}
+
