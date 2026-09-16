@@ -23,7 +23,9 @@ import {
   transcribeAudio,
   useClearTalkHistory,
   useConverseWithAgent,
+  useCreateBugReport,
   useCreateTask,
+  useGetMe,
   useGetProviderSettings,
   useGetTalkHistory,
   useGetGithubConnection,
@@ -45,16 +47,25 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import type {
   useAudioPlayback,
   useVoiceRecorder,
 } from "@workspace/integrations-openai-ai-react/audio";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { MarlowLobster } from "@/components/ui/marlow-lobster";
 import { useToast } from "@/hooks/use-toast";
+import { apiErrorMessage } from "@/lib/api-error";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  Bug,
   CheckCircle2,
   AlertTriangle,
   ChevronLeft,
@@ -191,6 +202,110 @@ function errorText(error: unknown, fallback: string): string {
     return "The message could not reach the server — the connection dropped or the network is offline. Check your connection, then press Resend.";
   }
   return error instanceof Error && error.message ? error.message : fallback;
+}
+
+/**
+ * Owner-only diagnostics action: files a bug report through the same
+ * `/bug-reports` channel task detail views use, attaching this agent and a
+ * chronological excerpt of the recent Talk transcript as context.
+ */
+function TalkBugReportButton({
+  agentId,
+  agentName,
+  turns,
+}: {
+  agentId: string;
+  agentName: string;
+  turns: Turn[];
+}) {
+  const { data: me } = useGetMe();
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [description, setDescription] = useState("");
+  const createBugReport = useCreateBugReport({
+    mutation: {
+      onSuccess: () => {
+        toast({
+          title: "Bug report sent",
+          description: "Saved to Providers → Bug Reports.",
+        });
+        setOpen(false);
+        setDescription("");
+      },
+      onError: (error) => {
+        const message = apiErrorMessage(
+          error,
+          "The bug report could not be sent.",
+        );
+        toast({
+          title: "Bug report failed",
+          description: message,
+          variant: "destructive",
+        });
+      },
+    },
+  });
+
+  if (!me?.isOwner) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <button
+          type="button"
+          className="flex items-center justify-center w-9 h-9 shrink-0 border-2 border-border bg-muted/40 text-foreground pixel-shadow"
+          aria-label={`Report a bug in the conversation with ${agentName}`}
+          title="Report bug"
+          data-testid="button-talk-send-bug-report"
+        >
+          <Bug className="w-4 h-4" aria-hidden="true" />
+        </button>
+      </DialogTrigger>
+      <DialogContent className="border-4 border-border bg-card rounded-none max-w-md">
+        <DialogTitle className="font-display uppercase text-sm">
+          Send bug report
+        </DialogTitle>
+        <div className="space-y-3">
+          <p className="text-[10px] font-mono text-muted-foreground uppercase">
+            The last few messages with {agentName} are attached automatically.
+          </p>
+          <Textarea
+            placeholder="What went wrong? (optional)"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            maxLength={4000}
+            className="min-h-24"
+          />
+          <div className="flex justify-end gap-2">
+            <Button size="sm" variant="outline" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={createBugReport.isPending}
+              data-testid="button-talk-confirm-send-bug-report"
+              onClick={() =>
+                createBugReport.mutate({
+                  data: {
+                    agentId,
+                    ...(description.trim()
+                      ? { description: description.trim() }
+                      : {}),
+                    talkMessages: turns
+                      .filter((t) => !t.failed)
+                      .slice(-10)
+                      .map(({ role, text }) => ({ role, text })),
+                  },
+                })
+              }
+            >
+              {createBugReport.isPending ? "SENDING..." : "SEND"}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 export interface CallViewProps {
@@ -1121,6 +1236,11 @@ export function CallView({
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
+          <TalkBugReportButton
+            agentId={agentId}
+            agentName={agent.name}
+            turns={turns}
+          />
           <button
             type="button"
             onClick={onOpenAgent}

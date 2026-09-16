@@ -5,6 +5,7 @@
  * Crustabox private Crustabot office API
  * OpenAPI spec version: 0.1.0
  */
+import type { BugReportTalkMessage } from './bugReportTalkMessage';
 
 export interface BugReportContext {
   /** @nullable */
@@ -21,4 +22,6 @@ export interface BugReportContext {
   errorMessage?: string | null;
   /** @nullable */
   agentName?: string | null;
+  /** Recent Talk turns, oldest first, attached when the report was filed from the Talk window. */
+  talkMessages?: BugReportTalkMessage[];
 }

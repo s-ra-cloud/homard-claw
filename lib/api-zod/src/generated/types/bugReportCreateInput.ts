@@ -5,9 +5,16 @@
  * Crustabox private Crustabot office API
  * OpenAPI spec version: 0.1.0
  */
+import type { BugReportTalkMessage } from './bugReportTalkMessage';
 
+/**
+ * Either taskId (a task's detail view) or agentId (the Talk window) must be provided.
+ */
 export interface BugReportCreateInput {
-  taskId: string;
+  taskId?: string;
+  agentId?: string;
   /** @maxLength 4000 */
   description?: string;
+  /** Recent Talk turns, oldest first. Only meaningful alongside agentId; ignored for task reports. */
+  talkMessages?: BugReportTalkMessage[];
 }

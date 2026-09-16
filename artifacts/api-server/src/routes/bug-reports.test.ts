@@ -205,4 +205,52 @@ describe("bug reports", () => {
     );
     expect(res.status).toBe(404);
   });
+
+  it("400s when neither taskId nor agentId is provided", async () => {
+    const res = await asUser(OWNER, () =>
+      request(app)
+        .post("/api/bug-reports")
+        .send({ description: "no target given" }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("404s filing a report against an unknown agent id", async () => {
+    const missing = "00000000-0000-4000-8000-000000000000";
+    const res = await asUser(OWNER, () =>
+      request(app).post("/api/bug-reports").send({ agentId: missing }),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("lets the owner file a report from Talk, attaching the transcript excerpt", async () => {
+    const { agentId } = await createTask();
+    const talkMessages = [
+      { role: "user", text: "why did this break" },
+      { role: "agent", text: "let me check the logs" },
+    ];
+    const created = await asUser(OWNER, () =>
+      request(app)
+        .post("/api/bug-reports")
+        .send({
+          agentId,
+          description: `${RUN_TAG} talk description`,
+          talkMessages,
+        }),
+    );
+    expect(created.status).toBe(201);
+    expect(created.body.taskId).toBeNull();
+    expect(created.body.agentId).toBe(agentId);
+    expect(created.body.context.talkMessages).toEqual(talkMessages);
+
+    const list = await asUser(OWNER, () =>
+      request(app).get("/api/bug-reports"),
+    );
+    expect(list.status).toBe(200);
+    expect(
+      (list.body.reports as { id: string }[]).some(
+        (r) => r.id === created.body.id,
+      ),
+    ).toBe(true);
+  });
 });

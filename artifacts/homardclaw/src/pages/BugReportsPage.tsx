@@ -46,7 +46,8 @@ export default function BugReportsPage() {
             Bug Reports
           </h1>
           <p className="text-muted-foreground text-sm">
-            Filed from task details, newest first. Visible to you alone.
+            Filed from task details or the Talk window, newest first.
+            Visible to you alone.
           </p>
         </div>
 
@@ -122,6 +123,26 @@ export default function BugReportsPage() {
                       </p>
                     </div>
                   )}
+
+                  {report.context.talkMessages &&
+                    report.context.talkMessages.length > 0 && (
+                      <div className="border-2 border-border/50 bg-muted/20 p-2 space-y-1">
+                        <div className="text-[10px] font-bold uppercase text-muted-foreground mb-1">
+                          Recent Talk messages
+                        </div>
+                        {report.context.talkMessages.map((turn, i) => (
+                          <p
+                            key={i}
+                            className="font-mono text-xs whitespace-pre-wrap"
+                          >
+                            <span className="font-bold uppercase text-muted-foreground">
+                              {turn.role}:
+                            </span>{" "}
+                            {turn.text}
+                          </p>
+                        ))}
+                      </div>
+                    )}
 
                   <div className="flex flex-wrap items-center gap-3 text-[10px] font-mono text-muted-foreground uppercase">
                     {report.context.provider && (
