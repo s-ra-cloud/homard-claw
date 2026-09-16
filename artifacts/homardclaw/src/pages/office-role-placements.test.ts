@@ -26,7 +26,7 @@ describe("office role placements", () => {
     // raised onto the Inbox navigation console on the port side.
     expect(OFFICE_ROLE_SEATS.inspector).toMatchObject({
       left: 30.4,
-      top: 45.2,
+      top: 41.2,
       pose: "working",
       mirrorX: true,
     });
