@@ -19,10 +19,10 @@ function response(body: string, status = 200): Response {
  * depend on a checked-in document or a fixture generator. Keeping the bytes
  * here exercises the same isolated parser used by production Drive reads.
  */
-function pdfFixture(text: string): Uint8Array {
+function pdfFixture(text: string, padding = 0): Uint8Array {
   const stream = `BT /F1 12 Tf 72 720 Td (${text}) Tj ET`;
   const objects = [
-    "<< /Type /Catalog /Pages 2 0 R >>",
+    `<< /Type /Catalog /Pages 2 0 R >>${" ".repeat(padding)}`,
     "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
     "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
@@ -44,6 +44,60 @@ function pdfFixture(text: string): Uint8Array {
 }
 
 describe("readDriveFileTransport", () => {
+  it.each(["application/pdf", "text/plain", "application/vnd.google-apps.document"])(
+    "enforces the inclusive 25 MB boundary for %s with honest, missing and understated lengths",
+    async (mimeType) => {
+      expect(MAX_DRIVE_READ_BODY_BYTES).toBe(25_000_000);
+      for (const length of [undefined, "1", "25000000", "25000001"]) {
+        for (const size of [25_000_000, 25_000_001]) {
+          let sent = 0;
+          let cancelled = false;
+          let calls = 0;
+          const extractPdf = vi.fn(async (bytes: Uint8Array, options?: ExtractPdfTextOptions) => {
+            expect(bytes.byteLength).toBe(25_000_000);
+            expect(options).toMatchObject({ maxInputBytes: 25_000_000, pdfPages: "7-9" });
+            return "Selected pages";
+          });
+          const stream = new ReadableStream<Uint8Array>({
+            pull(controller) {
+              if (sent === size) { controller.close(); return; }
+              const count = Math.min(64 * 1024, size - sent);
+              controller.enqueue(new Uint8Array(count).fill(65));
+              sent += count;
+            },
+            cancel() { cancelled = true; },
+          }, { highWaterMark: 0 });
+          const result = await readDriveFileTransport({
+            workspaceId: "size-workspace", fileId: "private-file",
+            pdfPages: mimeType === "application/pdf" ? "7-9" : undefined,
+            resolveToken: async () => "token", extractPdf,
+            fetchImpl: async () => ++calls === 1
+              ? response(JSON.stringify({ mimeType }))
+              : new Response(stream, { headers: length ? { "content-length": length } : {} }),
+          });
+          if (size > 25_000_000 || length === "25000001") {
+            expect(result).toEqual({ ok: false, kind: "failed",
+              message: "Google Drive returned a file larger than the 25 MB read limit." });
+            expect(cancelled).toBe(true);
+            expect(extractPdf).not.toHaveBeenCalled();
+          } else {
+            expect(result.ok).toBe(true);
+            if (mimeType === "application/pdf") expect(extractPdf).toHaveBeenCalledTimes(1);
+            else if (result.ok) expect(result.text.length).toBe(25_000_000);
+          }
+        }
+      }
+    },
+  );
+
+  it("retains the smaller metadata response allowance", async () => {
+    const result = await readDriveFileTransport({
+      workspaceId: "workspace", fileId: "file", resolveToken: async () => "token",
+      fetchImpl: async () => response(" ".repeat(2 * 1024 * 1024 + 1)),
+    });
+    expect(result.ok).toBe(false);
+  });
+
   it("forwards page selection with the original workspace and extraction bounds", async () => {
     const resolveToken = vi.fn(async (_workspaceId: string | null) => "token");
     const extractPdf = vi.fn(async (_bytes: Uint8Array, _options?: ExtractPdfTextOptions) => "selected text");
@@ -148,7 +202,7 @@ describe("readDriveFileTransport", () => {
   });
 
   it("extracts a deterministic PDF through the shared parser on the production path", async () => {
-    const bytes = pdfFixture("Drive parser fixture");
+    const bytes = pdfFixture("Drive parser fixture", 3_000_000);
     let calls = 0;
     const result = await readDriveFileTransport({
       workspaceId: "workspace-pdf-real",
@@ -288,7 +342,7 @@ describe("readDriveFileTransport", () => {
     expect(extractorSawAbort).toBe(true);
   });
 
-  it("does not invoke extraction after a PDF exceeds the 2 MiB download limit", async () => {
+  it("does not invoke extraction after a PDF exceeds the 25 MB download limit", async () => {
     let calls = 0;
     let extractionCalled = false;
     const result = await readDriveFileTransport({
@@ -310,7 +364,7 @@ describe("readDriveFileTransport", () => {
     expect(result).toEqual({
       ok: false,
       kind: "failed",
-      message: "Google Drive returned a file larger than the read limit.",
+      message: "Google Drive returned a file larger than the 25 MB read limit.",
     });
     expect(extractionCalled).toBe(false);
   });
@@ -553,7 +607,7 @@ describe("readDriveFileTransport", () => {
     expect(result).toEqual({
       ok: false,
       kind: "failed",
-      message: "Google Drive returned a file larger than the read limit.",
+      message: "Google Drive returned a file larger than the 25 MB read limit.",
     });
   });
 

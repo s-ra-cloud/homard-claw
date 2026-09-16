@@ -22,7 +22,7 @@ No private file contents or credentials are reproduced here.
 - Text downloads are checked for valid UTF-8, NUL bytes and common binary
   signatures. Valid Unicode text is preserved.
 - Text-based PDFs are downloaded as bytes and parsed locally in an isolated,
-  cancellable process. Drive retains its 2 MiB download cap and 30-second
+  cancellable process. Drive uses a 25 MB (25,000,000-byte) download cap and 30-second
   total deadline, including extraction. No new Google permissions or external
   document service are required.
 - PDF extraction allows at most 100 pages and 100,000 Unicode characters.

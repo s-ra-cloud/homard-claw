@@ -15,7 +15,9 @@ import { extractPdfText, parsePdfPages, PdfExtractionError } from "../pdf/extrac
 
 export const DEFAULT_DRIVE_READ_TIMEOUT_MS = 30_000;
 /** A read can be large, but never allows an unbounded response body. */
-export const MAX_DRIVE_READ_BODY_BYTES = 2 * 1024 * 1024;
+export const MAX_DRIVE_READ_BODY_BYTES = 25_000_000;
+/** Metadata and refusal payloads do not need the file download allowance. */
+const MAX_DRIVE_CONTROL_BODY_BYTES = 2 * 1024 * 1024;
 
 const DRIVE_API_BASE_URL = "https://www.googleapis.com";
 const DRIVE_EXPORTABLE_PREFIX = "application/vnd.google-apps.";
@@ -340,7 +342,7 @@ function bodyTooLargeFailure(): DriveReadTransportFailure {
   return {
     ok: false,
     kind: "failed",
-    message: "Google Drive returned a file larger than the read limit.",
+    message: "Google Drive returned a file larger than the 25 MB read limit.",
   };
 }
 
@@ -555,9 +557,10 @@ async function boundedResponseBytes(
   response: Response,
   state: TransportState,
   reportBodyFailure = true,
+  maxBytes = MAX_DRIVE_READ_BODY_BYTES,
 ): Promise<Uint8Array | DriveReadTransportFailure> {
   const contentLength = responseBodySize(response);
-  if (contentLength !== null && contentLength > MAX_DRIVE_READ_BODY_BYTES) {
+  if (contentLength !== null && contentLength > maxBytes) {
     state.controller.abort();
     discardResponseBody(response);
     if (reportBodyFailure) {
@@ -569,7 +572,7 @@ async function boundedResponseBytes(
   if (!response.body) {
     const buffer = await runBounded(() => response.arrayBuffer(), state);
     const bytes = new Uint8Array(buffer);
-    if (bytes.byteLength > MAX_DRIVE_READ_BODY_BYTES) {
+    if (bytes.byteLength > maxBytes) {
       state.controller.abort();
       if (reportBodyFailure) {
         reportFailure(state, { failureClass: "body_limit", stage: "body" });
@@ -588,7 +591,7 @@ async function boundedResponseBytes(
       if (next.done) break;
       const chunk = next.value;
       total += chunk.byteLength;
-      if (total > MAX_DRIVE_READ_BODY_BYTES) {
+      if (total > maxBytes) {
         state.controller.abort();
         try {
           void reader.cancel().catch(() => undefined);
@@ -629,8 +632,9 @@ async function boundedResponseText(
   response: Response,
   state: TransportState,
   reportBodyFailure = true,
+  maxBytes = MAX_DRIVE_CONTROL_BODY_BYTES,
 ): Promise<string | DriveReadTransportFailure> {
-  const bytes = await boundedResponseBytes(response, state, reportBodyFailure);
+  const bytes = await boundedResponseBytes(response, state, reportBodyFailure, maxBytes);
   if (!(bytes instanceof Uint8Array)) return bytes;
   try {
     return validateTextContent(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
@@ -799,7 +803,8 @@ async function requestDriveRead(
 
   safeStage(state, "body");
   try {
-    const body = await boundedResponseText(response, state);
+    const body = await boundedResponseText(response, state, true,
+      stage === "metadata" ? MAX_DRIVE_CONTROL_BODY_BYTES : MAX_DRIVE_READ_BODY_BYTES);
     if (typeof body !== "string") {
       // boundedResponseText reports a body limit before returning it.
       if (!state.failureReported) {
