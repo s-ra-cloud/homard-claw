@@ -26,7 +26,18 @@ A `CapabilityManifest` declares, before anything can be enabled:
 
 - **Identity**: `id`, `displayName`, `version`, `publisher`, `description`.
 - **Connection**: `gmail` / `google_drive` / `github` (OAuth built-ins),
-  `mcp` (remote server), or `none`.
+  `mcp` (remote server), or `none`. Gmail and Google Drive share one Google
+  account per workspace with incremental consent — connecting Drive adds
+  its scopes without revoking Gmail's, and Drive's file-organizing tools
+  (rename/move/create folder on pre-existing files) need a broader `drive`
+  scope that a user can decline while keeping read access and
+  app-created-file writes. GitHub supports two auth paths that can coexist:
+  a legacy OAuth app (single `repo` scope, token never expires/refreshes)
+  and a GitHub App installation (short-lived, self-renewing tokens minted
+  from a signed app JWT), configured respectively by `GITHUB_OAUTH_*` and
+  `GITHUB_APP_*` env vars (see `PRODUCTION.md`). When both are configured
+  for a workspace, the GitHub App installation is used and OAuth is only a
+  fallback.
 - **Tools** (`CapabilityToolDef`): stable namespaced name
   (`<packageId>.<tool>` — tools outside the package's namespace are ignored,
   so a package can never shadow another package's operation), description,
