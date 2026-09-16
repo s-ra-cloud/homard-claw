@@ -276,13 +276,13 @@ describe("bug reports", () => {
     expect(res.status).toBe(404);
   });
 
-  it("lets the owner file a report from Talk, attaching the transcript excerpt", async () => {
-    const { agentId } = await createTask();
+  it("lets a non-owner file a report from Talk in their workspace, attaching the transcript excerpt without list access", async () => {
+    const { agentId } = await createTask(STRANGER);
     const talkMessages = [
       { role: "user", text: "why did this break" },
       { role: "agent", text: "let me check the logs" },
     ];
-    const created = await asUser(OWNER, () =>
+    const created = await asUser(STRANGER, () =>
       request(app)
         .post("/api/bug-reports")
         .send({
@@ -295,6 +295,9 @@ describe("bug reports", () => {
     expect(created.body.taskId).toBeNull();
     expect(created.body.agentId).toBe(agentId);
     expect(created.body.context.talkMessages).toEqual(talkMessages);
+    expect((await asUser(STRANGER, () =>
+      request(app).get("/api/bug-reports"),
+    )).status).toBe(403);
 
     const list = await asUser(OWNER, () =>
       request(app).get("/api/bug-reports"),
@@ -305,5 +308,22 @@ describe("bug reports", () => {
         (r) => r.id === created.body.id,
       ),
     ).toBe(true);
+  });
+
+  it("404s non-owner Talk reports against missing and foreign agents without storing reports", async () => {
+    const missing = "00000000-0000-4000-8000-000000000000";
+    const { agentId: foreign } = await createTask(OWNER);
+    for (const agentId of [missing, foreign]) {
+      const before = await db.select().from(bugReportsTable)
+        .where(eq(bugReportsTable.agentId, agentId));
+      const res = await asUser(STRANGER, () =>
+        request(app).post("/api/bug-reports").send({ agentId }),
+      );
+      expect(res.status).toBe(404);
+      expect(res.body.error).toBe("Agent not found");
+      const after = await db.select().from(bugReportsTable)
+        .where(eq(bugReportsTable.agentId, agentId));
+      expect(after).toHaveLength(before.length);
+    }
   });
 });

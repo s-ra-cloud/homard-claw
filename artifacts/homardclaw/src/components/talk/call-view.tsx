@@ -26,7 +26,6 @@ import {
   useConverseWithAgent,
   useCreateBugReport,
   useCreateTask,
-  useGetMe,
   useGetProviderSettings,
   useGetTalkHistory,
   useGetGithubConnection,
@@ -216,11 +215,26 @@ function errorText(error: unknown, fallback: string): string {
 }
 
 /**
- * Owner-only diagnostics action: files a bug report through the same
+ * Files a bug report through the same
  * `/bug-reports` channel task detail views use, attaching this agent and a
  * chronological excerpt of the recent Talk transcript as context.
  */
-function TalkBugReportButton({
+export function buildTalkBugReportInput(
+  agentId: string,
+  description: string,
+  turns: Turn[],
+) {
+  const trimmedDescription = description.trim();
+  return {
+    agentId,
+    ...(trimmedDescription ? { description: trimmedDescription } : {}),
+    talkMessages: turns
+      .filter((turn) => !turn.failed)
+      .slice(-10)
+      .map(({ role, text }) => ({ role, text })),
+  };
+}
+export function TalkBugReportButton({
   agentId,
   agentName,
   turns,
@@ -229,7 +243,6 @@ function TalkBugReportButton({
   agentName: string;
   turns: Turn[];
 }) {
-  const { data: me } = useGetMe();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [description, setDescription] = useState("");
@@ -237,8 +250,8 @@ function TalkBugReportButton({
     mutation: {
       onSuccess: () => {
         toast({
-          title: "Bug report sent",
-          description: "Saved to Providers → Bug Reports.",
+          title: "Bug report received",
+          description: "Thanks for helping us improve HomardClaw.",
         });
         setOpen(false);
         setDescription("");
@@ -256,8 +269,6 @@ function TalkBugReportButton({
       },
     },
   });
-
-  if (!me?.isOwner) return null;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -297,16 +308,7 @@ function TalkBugReportButton({
               data-testid="button-talk-confirm-send-bug-report"
               onClick={() =>
                 createBugReport.mutate({
-                  data: {
-                    agentId,
-                    ...(description.trim()
-                      ? { description: description.trim() }
-                      : {}),
-                    talkMessages: turns
-                      .filter((t) => !t.failed)
-                      .slice(-10)
-                      .map(({ role, text }) => ({ role, text })),
-                  },
+                  data: buildTalkBugReportInput(agentId, description, turns),
                 })
               }
             >

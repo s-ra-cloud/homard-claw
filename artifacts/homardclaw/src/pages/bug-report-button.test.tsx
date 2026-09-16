@@ -80,9 +80,13 @@ vi.doMock("@/components/ui/textarea", () => ({
 }));
 
 let SendBugReportButton: (props: { task: { id: string } }) => ReactNode;
+let TalkBugReportButton: typeof import("@/components/talk/call-view").TalkBugReportButton;
+let buildTalkBugReportInput: typeof import("@/components/talk/call-view").buildTalkBugReportInput;
 
 beforeAll(async () => {
   ({ SendBugReportButton } = await import("./TasksPage"));
+  ({ TalkBugReportButton, buildTalkBugReportInput } =
+    await import("@/components/talk/call-view"));
 });
 
 beforeEach(() => {
@@ -135,5 +139,69 @@ describe("SendBugReportButton component behavior", () => {
     });
     expect(testState.stateHooks[0].setState).toHaveBeenCalledWith(false);
     expect(testState.stateHooks[1].setState).toHaveBeenCalledWith("");
+  });
+});
+
+describe("TalkBugReportButton component behavior", () => {
+  const turns = Array.from({ length: 12 }, (_, index) => ({
+    role: index % 2 === 0 ? ("user" as const) : ("agent" as const),
+    text: `message ${index}`,
+    key: `turn-${index}`,
+    failed: index === 10,
+  }));
+
+  function renderTalkReportButton() {
+    return renderToStaticMarkup(
+      createElement(TalkBugReportButton, {
+        agentId: "agent-7",
+        agentName: "Marlow",
+        turns,
+      }),
+    );
+  }
+
+  it("renders the Talk report control for an authenticated non-owner and owner", () => {
+    testState.isOwner = false;
+    const nonOwnerMarkup = renderTalkReportButton();
+    testState.isOwner = true;
+    const ownerMarkup = renderTalkReportButton();
+
+    expect(nonOwnerMarkup).toContain(
+      'data-testid="button-talk-send-bug-report"',
+    );
+    expect(ownerMarkup).toContain(
+      'data-testid="button-talk-send-bug-report"',
+    );
+  });
+
+  it("submits the selected agent, trimmed description, and bounded successful transcript", () => {
+    const input = buildTalkBugReportInput(
+      "agent-7",
+      "  The reply stopped.  ",
+      turns,
+    );
+
+    expect(input).toEqual({
+      agentId: "agent-7",
+      description: "The reply stopped.",
+      talkMessages: turns
+        .filter((turn) => !turn.failed)
+        .slice(-10)
+        .map(({ role, text }) => ({ role, text })),
+    });
+    expect(input.talkMessages).toHaveLength(10);
+    expect(buildTalkBugReportInput("agent-7", " \n ", turns)).not.toHaveProperty(
+      "description",
+    );
+  });
+
+  it("uses an account-neutral success confirmation", () => {
+    renderTalkReportButton();
+    testState.mutationOptions?.mutation?.onSuccess?.();
+
+    expect(testState.toast).toHaveBeenCalledWith({
+      title: "Bug report received",
+      description: "Thanks for helping us improve HomardClaw.",
+    });
   });
 });

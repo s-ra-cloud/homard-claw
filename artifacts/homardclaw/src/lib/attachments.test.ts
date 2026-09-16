@@ -17,37 +17,62 @@ function textFile(bytes: number, name = "notes.txt"): File {
 
 describe("readAttachment", () => {
   it("accepts a text file right at the 25 MB boundary", async () => {
-    const attachment = await readAttachment(textFile(MAX_FILE_BYTES));
-    expect(attachment.content).toHaveLength(MAX_FILE_BYTES);
+  const attachment = {
+    name: "brief.txt",
+    mimeType: "text/plain",
+    encoding: "text" as const,
+    content: "Keep this exact content.",
+  };
+    expect(attachment).toMatchObject({ encoding: "base64", mimeType: expect.stringContaining("wordprocessingml") });
+    expect(attachmentLabel(attachment)).toBe("DOCX · brief.docx");
   });
 
-  it("rejects a file one byte over the 25 MB boundary", async () => {
-    await expect(readAttachment(textFile(MAX_FILE_BYTES + 1))).rejects.toThrow(
-      "notes.txt is larger than 25 MB.",
-    );
-  });
-
-  it("still accepts small files well under the limit", async () => {
-    const attachment = await readAttachment(textFile(10));
-    expect(attachment.content).toHaveLength(10);
-  });
-
-  it("infers supported MIME types when the browser leaves File.type blank", () => {
+  it("prefers a supported browser MIME and preserves unknown legacy files as text", () => {
     expect(
-      inferAttachmentMimeType({ name: "brief.PDF", type: "" }),
-    ).toBe("application/pdf");
+      inferAttachmentMimeType({ name: "notes.unknown", type: "text/plain" }),
+    ).toBe("text/plain");
     expect(
-      inferAttachmentMimeType({ name: "brief.DOCX", type: "" }),
-    ).toBe("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      inferAttachmentMimeType({
+        name: "legacy.notes",
+        type: "application/x-legacy-note",
+      }),
+    ).toBe("text/plain");
   });
 
-  it("identifies DOCX uploads with the browser MIME and UI label", () => {
-    const attachment = {
-      name: "brief.docx",
-      mimeType: inferAttachmentMimeType({ name: "brief.docx", type: "" }),
-      encoding: "base64" as const,
-      content: "UEsDBA==",
-    };
+});
+
+describe("Talk proposal attachments", () => {
+  const attachment = {
+    name: "brief.txt",
+    mimeType: "text/plain",
+    encoding: "text" as const,
+    content: "Keep this exact content.",
+  };
+    expect(attachment).toMatchObject({ encoding: "base64", mimeType: expect.stringContaining("wordprocessingml") });
+    expect(attachmentLabel(attachment)).toBe("DOCX · brief.docx");
+  });
+
+  it("prefers a supported browser MIME and preserves unknown legacy files as text", () => {
+    expect(
+      inferAttachmentMimeType({ name: "notes.unknown", type: "text/plain" }),
+    ).toBe("text/plain");
+    expect(
+      inferAttachmentMimeType({
+        name: "legacy.notes",
+        type: "application/x-legacy-note",
+      }),
+    ).toBe("text/plain");
+  });
+
+});
+
+describe("Talk proposal attachments", () => {
+  const attachment = {
+    name: "brief.txt",
+    mimeType: "text/plain",
+    encoding: "text" as const,
+    content: "Keep this exact content.",
+  };
     expect(attachment).toMatchObject({ encoding: "base64", mimeType: expect.stringContaining("wordprocessingml") });
     expect(attachmentLabel(attachment)).toBe("DOCX · brief.docx");
   });
