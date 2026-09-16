@@ -33,3 +33,4 @@
 - [Agent form remounts](agent-form-remounts.md) — Safari SPA reopen can emit empty Radix values; verify save→roster→edit, not just initial hydration.
 - [Daily proactive Talk](daily-proactive-talk.md) — one random agent checks in daily via retained occurrence rows, exact message evidence, bounded calls, and fail-closed retries.
 - [Local PDF isolation](local-pdf-isolation.md) — provider-neutral text is canonical; Node parser limits need OS address-space bounds and exit-aware RSS monitoring.
+- [Published SPA route cache](published-spa-route-cache.md) — office iframe routes need per-open cache tokens and one-shot stale-asset recovery after publishes.

@@ -34,6 +34,56 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      /*
+       * A cached SPA document can outlive the hashed assets from the publish
+       * that created it. Recover once with a unique URL instead of leaving a
+       * blank page when that old module or stylesheet returns 404.
+       */
+      (() => {
+        const key = `asset-recovery:${location.pathname}`;
+        const alreadyRetried = () => {
+          try {
+            return sessionStorage.getItem(key) === "1";
+          } catch {
+            return false;
+          }
+        };
+        const markRetried = () => {
+          try {
+            sessionStorage.setItem(key, "1");
+          } catch {
+            // A unique recovery URL still helps when storage is unavailable.
+          }
+        };
+        window.addEventListener(
+          "error",
+          (event) => {
+            const target = event.target;
+            if (
+              !(target instanceof HTMLScriptElement) &&
+              !(target instanceof HTMLLinkElement)
+            )
+              return;
+            if (alreadyRetried()) return;
+            markRetried();
+            const url = new URL(location.href);
+            url.searchParams.set("asset-recovery", Date.now().toString(36));
+            location.replace(url);
+          },
+          true,
+        );
+        window.addEventListener("load", () => {
+          window.setTimeout(() => {
+            try {
+              sessionStorage.removeItem(key);
+            } catch {
+              // Nothing to clear when storage is unavailable.
+            }
+          }, 5_000);
+        });
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

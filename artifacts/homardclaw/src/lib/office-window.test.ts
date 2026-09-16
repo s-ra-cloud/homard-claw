@@ -9,6 +9,7 @@ import {
   OFFICE_WINDOW_NAME,
   isOfficeWindowFrame,
   navigateToExternal,
+  officeWindowHref,
   type OfficeFrameWindow,
 } from "./office-window";
 
@@ -57,6 +58,18 @@ function makeFrame(top: OfficeFrameWindow["top"], name: string): FakeWindow {
 }
 
 const AUTH_URL = "https://github.com/login/oauth/authorize?client_id=abc";
+
+describe("officeWindowHref", () => {
+  it("preserves internal routes and adds an optional per-open cache token", () => {
+    expect(officeWindowHref("/talk/agent-1")).toBe("/talk/agent-1");
+    expect(officeWindowHref("/talk/agent-1", "fresh publish")).toBe(
+      "/talk/agent-1?office-load=fresh%20publish",
+    );
+    expect(officeWindowHref("/tasks?filter=open", "next")).toBe(
+      "/tasks?filter=open&office-load=next",
+    );
+  });
+});
 
 describe("isOfficeWindowFrame", () => {
   it("is true only for the named frame inside another window", () => {

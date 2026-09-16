@@ -144,6 +144,7 @@ function randomIdleActivity(): IdleActivity {
 interface OpenOfficeWindow {
   href: string;
   title: string;
+  cacheToken: string;
 }
 
 const BUBBLE_STREAMS = [5, 18, 31, 72, 83, 95];
@@ -280,7 +281,7 @@ function ParchmentWindow({
           <iframe
             key={windowState.href}
             name={OFFICE_WINDOW_NAME}
-            src={officeWindowHref(windowState.href)}
+            src={officeWindowHref(windowState.href, windowState.cacheToken)}
             title={windowState.title}
             allow="microphone"
           />
@@ -455,7 +456,14 @@ export default function OfficeDashboard() {
     }
     event.preventDefault();
     lastWindowTriggerRef.current = event.currentTarget;
-    setOpenWindow({ href, title });
+    setOpenWindow({
+      href,
+      title,
+      cacheToken:
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    });
   };
 
   const closeOfficeWindow = React.useCallback(() => {

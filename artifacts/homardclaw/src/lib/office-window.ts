@@ -25,10 +25,17 @@ export function isOfficeWindowFrame(
   );
 }
 
-/** Preserve Vite's deployment base while opening an internal application route. */
-export function officeWindowHref(path: string): string {
+/**
+ * Preserve Vite's deployment base while opening an internal application route.
+ * A per-open cache token prevents a previously visited SPA route from reusing
+ * old index HTML that points at JavaScript chunks removed by a newer publish.
+ */
+export function officeWindowHref(path: string, cacheToken?: string): string {
   const base = import.meta.env.BASE_URL.replace(/\/$/, "");
-  return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+  const href = `${base}${path.startsWith("/") ? path : `/${path}`}`;
+  if (!cacheToken) return href;
+  const separator = href.includes("?") ? "&" : "?";
+  return `${href}${separator}office-load=${encodeURIComponent(cacheToken)}`;
 }
 
 /**
