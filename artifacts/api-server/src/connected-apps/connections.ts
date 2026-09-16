@@ -837,6 +837,7 @@ async function driveReadFile(
     result = await readDriveFileTransport({
       workspaceId: ctx.workspaceId,
       fileId: String(params.fileId),
+      pdfPages: params.pdfPages as string | undefined,
       signal: ctx.signal,
       deadlineAt: ctx.deadlineAt,
       taskId: ctx.taskId,

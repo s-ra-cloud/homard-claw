@@ -70,9 +70,23 @@ async function extract(bytes) {
       return error("page_limit");
     }
 
-    let output = "";
+    const selected = process.argv.length > 2;
+    const start = selected ? Number(process.argv[2]) : 1;
+    const end = selected ? Number(process.argv[3]) : document.numPages;
+    if (selected && (!Number.isInteger(start) || !Number.isInteger(end) ||
+      start < 1 || end < start || end > MAX_PAGES || end - start >= 5)) {
+      await document.destroy();
+      return error("invalid_page_range");
+    }
+    if (end > document.numPages) {
+      await document.destroy();
+      return error("page_out_of_range");
+    }
+    let output = selected
+      ? `[PDF selection: pages ${start}-${end} of ${document.numPages}. Only this range was read; pages outside it were not read. Text only; visual/image content omitted.]\n`
+      : "";
     let hasExtractableText = false;
-    for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+    for (let pageNumber = start; pageNumber <= end; pageNumber += 1) {
       const page = await document.getPage(pageNumber);
       const content = await page.getTextContent({ disableNormalization: false });
       const text = pgSafe(content.items.map((item) => (
@@ -91,7 +105,7 @@ async function extract(bytes) {
       }
     }
     await document.destroy();
-    if (!hasExtractableText) return error("scanned");
+    if (!hasExtractableText && !selected) return error("scanned");
     result(output);
   } catch (cause) {
     const name = cause && typeof cause === "object" && "name" in cause ? String(cause.name) : "";

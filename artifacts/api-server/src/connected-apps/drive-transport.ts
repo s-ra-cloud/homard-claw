@@ -11,7 +11,7 @@
  */
 
 import type { DriveAccessTokenOptions } from "../google/credentials";
-import { extractPdfText, PdfExtractionError } from "../pdf/extract";
+import { extractPdfText, parsePdfPages, PdfExtractionError } from "../pdf/extract";
 
 export const DEFAULT_DRIVE_READ_TIMEOUT_MS = 30_000;
 /** A read can be large, but never allows an unbounded response body. */
@@ -78,6 +78,7 @@ export type DriveFetch = (
 export type DriveReadInput = {
   workspaceId: string | null;
   fileId: string;
+  pdfPages?: string;
   signal?: AbortSignal;
   deadlineAt?: number;
   /**
@@ -897,6 +898,11 @@ function mimeExport(mimeType: string): string {
 export async function readDriveFileTransport(
   input: DriveReadInput,
 ): Promise<DriveReadTransportResult> {
+  try {
+    parsePdfPages(input.pdfPages);
+  } catch {
+    return pdfExtractionFailure(new PdfExtractionError("invalid_page_range").message);
+  }
   const now = input.now ?? Date.now;
   const startedAt = now();
   const defaultDeadlineAt = startedAt + DEFAULT_DRIVE_READ_TIMEOUT_MS;
@@ -1027,6 +1033,9 @@ export async function readDriveFileTransport(
       reportFailure(state, { failureClass: "unsupported_content", stage: "metadata" });
       return unsupportedContentFailure();
     }
+    if (input.pdfPages !== undefined && !isPdfDownload(mimeType)) {
+      return finish(pdfExtractionFailure("pdfPages is only supported for PDF files; no content was read."));
+    }
     if (isPdfDownload(mimeType)) {
       const pdf = await requestDrivePdf(
         `/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
@@ -1044,6 +1053,7 @@ export async function readDriveFileTransport(
               signal: state.controller.signal,
               maxInputBytes: MAX_DRIVE_READ_BODY_BYTES,
               deadlineAt,
+              pdfPages: input.pdfPages,
             }),
           state,
         );

@@ -15,6 +15,8 @@ export type PdfExtractionErrorKind =
   | "input_too_large"
   | "resource_limit"
   | "page_limit"
+  | "invalid_page_range"
+  | "page_out_of_range"
   | "encrypted"
   | "scanned"
   | "invalid_pdf"
@@ -27,6 +29,8 @@ const PDF_EXTRACTION_ERROR_MESSAGES: Readonly<Record<PdfExtractionErrorKind, str
   input_too_large: "The PDF exceeds the 25,000,000-byte extraction limit.",
   resource_limit: "PDF text extraction exceeded its resource limit.",
   page_limit: "The PDF exceeds the 100-page extraction limit.",
+  invalid_page_range: "PDF pages must be a page number or inclusive range (for example 7 or 7-9), between 1 and 100, selecting at most 5 pages.",
+  page_out_of_range: "The requested PDF page or range does not exist in this document; no pages were returned.",
   encrypted: "The PDF is encrypted and cannot be read without a password.",
   scanned: "The PDF contains no extractable text; visual or image content cannot be read.",
   invalid_pdf: "The file is not a valid PDF.",
@@ -49,6 +53,7 @@ export class PdfExtractionError extends Error {
 }
 
 export interface ExtractPdfTextOptions {
+  pdfPages?: string;
   signal?: AbortSignal;
   /**
    * A caller may make the input limit stricter, but may not raise the service
@@ -60,6 +65,19 @@ export interface ExtractPdfTextOptions {
    * this is absent or farther in the future.
    */
   deadlineAt?: number;
+}
+
+export function parsePdfPages(value: unknown): { start: number; end: number } | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !/^[1-9]\d{0,2}(?:-[1-9]\d{0,2})?$/.test(value)) {
+    throw new PdfExtractionError("invalid_page_range");
+  }
+  const [start, last] = value.split("-").map(Number);
+  const end = last ?? start!;
+  if (start! > end || end > 100 || end - start! >= 5) {
+    throw new PdfExtractionError("invalid_page_range");
+  }
+  return { start: start!, end };
 }
 
 export const PDF_EXTRACTION_LIMITS = {
@@ -257,7 +275,7 @@ function isPostgresSafeText(text: string): boolean {
   return Array.from(text).length <= PDF_EXTRACTION_LIMITS.maxOutputChars;
 }
 
-function extractInChild(bytes: Uint8Array, signal: AbortSignal | undefined, deadlineAt: number): Promise<string> {
+function extractInChild(bytes: Uint8Array, signal: AbortSignal | undefined, deadlineAt: number, pages?: { start: number; end: number }): Promise<string> {
   if (signal?.aborted) return Promise.reject(new PdfExtractionError("cancelled"));
   return new Promise<string>((resolve, reject) => {
     // RLIMIT_AS is an OS-enforced limit over V8 heap, ArrayBuffers, native
@@ -273,6 +291,7 @@ function extractInChild(bytes: Uint8Array, signal: AbortSignal | undefined, dead
       `--max-old-space-size=${PDF_EXTRACTION_LIMITS.maxV8OldSpaceMb}`,
       "--disable-wasm-trap-handler",
       workerPath(),
+      ...(pages ? [String(pages.start), String(pages.end)] : []),
     ], {
       // Do not inherit NODE_OPTIONS (or any application secrets). The child
       // needs no credentials, network configuration, or writable stdio.
@@ -410,6 +429,7 @@ export async function extractPdfText(
   bytes: Uint8Array,
   options: ExtractPdfTextOptions = {},
 ): Promise<string> {
+  const pages = parsePdfPages(options.pdfPages);
   const inputLimit = Math.min(
     PDF_EXTRACTION_LIMITS.maxInputBytes,
     Number.isFinite(options.maxInputBytes) && options.maxInputBytes! >= 0
@@ -421,7 +441,7 @@ export async function extractPdfText(
   const deadlineAt = finiteDeadline(options.deadlineAt);
   await claimSlot(options.signal, deadlineAt);
   try {
-    return await extractInChild(bytes, options.signal, deadlineAt);
+    return await extractInChild(bytes, options.signal, deadlineAt, pages);
   } finally {
     releaseSlot();
   }

@@ -14,3 +14,9 @@ Untrusted Node parsers need an OS address-space limit in addition to the V8 heap
 **Why:** ArrayBuffers and native allocations bypass the V8 heap cap. Node and PDF.js also reserve substantial virtual mappings, so a virtual-memory limit equal to desired RSS can prevent ordinary documents from loading. Linux zombie children can lack RSS data before Node emits the exit event; treating that as a live monitoring failure masks valid parser errors.
 
 **How to apply:** preserve a tested startup-compatible address-space cap and lower RSS monitoring threshold. Resource monitoring must distinguish running children from exited/zombie children, without treating an unreadable live process as safe.
+
+Keep generated PDF regression text inside the page's media box.
+
+**Why:** PDF.js can omit off-page glyphs from text extraction. A single long text line is not a reliable fixture for testing output truncation; it can appear to pass later-page isolation while never generating enough extracted text to hit the limit.
+
+**How to apply:** use short lines with explicit positioning and a small font for dense-page fixtures, and assert the actual truncation marker through the bounded action executor.

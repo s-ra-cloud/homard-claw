@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { ExtractPdfTextOptions } from "../pdf/extract";
 import {
   DEFAULT_DRIVE_READ_TIMEOUT_MS,
   MAX_DRIVE_READ_BODY_BYTES,
@@ -43,6 +44,35 @@ function pdfFixture(text: string): Uint8Array {
 }
 
 describe("readDriveFileTransport", () => {
+  it("forwards page selection with the original workspace and extraction bounds", async () => {
+    const resolveToken = vi.fn(async (_workspaceId: string | null) => "token");
+    const extractPdf = vi.fn(async (_bytes: Uint8Array, _options?: ExtractPdfTextOptions) => "selected text");
+    let calls = 0;
+    const result = await readDriveFileTransport({
+      workspaceId: "selected-workspace", fileId: "file", pdfPages: "7-9",
+      resolveToken, extractPdf,
+      fetchImpl: async () => ++calls === 1
+        ? response(JSON.stringify({ mimeType: "application/pdf" }))
+        : new Response("%PDF-1.7"),
+    });
+    expect(result.ok).toBe(true);
+    expect(resolveToken.mock.calls[0]?.[0]).toBe("selected-workspace");
+    expect(extractPdf.mock.calls[0]?.[1]).toMatchObject({
+      pdfPages: "7-9", maxInputBytes: MAX_DRIVE_READ_BODY_BYTES,
+      signal: expect.any(AbortSignal), deadlineAt: expect.any(Number),
+    });
+  });
+
+  it("refuses page selection on non-PDFs without downloading", async () => {
+    const fetchImpl = vi.fn(async () => response(JSON.stringify({ mimeType: "text/plain" })));
+    const result = await readDriveFileTransport({
+      workspaceId: "workspace", fileId: "file", pdfPages: "2",
+      resolveToken: async () => "token", fetchImpl,
+    });
+    expect(result).toMatchObject({ ok: false, message: expect.stringContaining("only supported for PDF") });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it.each(["application/octet-stream", "image/png",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"])(
     "refuses %s before downloading binary content", async (mimeType) => {

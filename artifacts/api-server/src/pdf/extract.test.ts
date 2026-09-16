@@ -124,6 +124,44 @@ function unicodePdfFixture(pageStreams = ["BT /F1 12 Tf 72 720 Td <00E9> Tj ET"]
 }
 
 describe("extractPdfText", () => {
+  it("retrieves a later answer without reading earlier pages", async () => {
+    const text = await extractPdfText(pdfFixture([
+      textPage("Earlier material ".repeat(450)),
+      textPage("The renewal date is October 12."),
+      textPage("Unrequested appendix"),
+    ]), { pdfPages: "2" });
+    expect(text).toContain("pages 2-2 of 3");
+    expect(text).toContain("outside it were not read");
+    expect(text).toContain("--- Page 2");
+    expect(text).toContain("October 12");
+    expect(text).not.toContain("Earlier material");
+    expect(text).not.toContain("Unrequested appendix");
+    expect(text.length).toBeLessThan(4000);
+  });
+
+  it("labels a selected range including pages without text", async () => {
+    const text = await extractPdfText(pdfFixture([textPage("first"), "", textPage("third")]), { pdfPages: "2-3" });
+    expect(text).toContain("pages 2-3 of 3");
+    expect(text).toContain("Page 2 (no extractable text");
+    expect(text).toContain("Page 3");
+    expect(text).not.toContain("first");
+    const blank = await extractPdfText(pdfFixture([""]), { pdfPages: "1" });
+    expect(blank).toContain("no extractable text");
+  });
+
+  it.each(["0", "2-1", "1-6", "101", "1,2", "1.5", "", "2-100", " 2"])(
+    "rejects invalid selection %s before spawning", async (pdfPages) => {
+      await expect(extractPdfText(pdfFixture([textPage("one")]), { pdfPages }))
+        .rejects.toMatchObject({ kind: "invalid_page_range" });
+      expect(spawnedPdfPids).toHaveLength(0);
+    },
+  );
+
+  it("refuses a partly missing range rather than returning a misleading subset", async () => {
+    await expect(extractPdfText(pdfFixture([textPage("one")]), { pdfPages: "1-2" }))
+      .rejects.toMatchObject({ kind: "page_out_of_range" });
+  });
+
   beforeEach(() => {
     spawnedPdfPids.splice(0);
   });

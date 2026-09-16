@@ -169,9 +169,9 @@ export const APP_OPERATIONS: AppOperation[] = [
     app: "google_drive",
     level: "read",
     description:
-      "Read a file's text content (Google Sheets return rows as CSV text; uploaded PDFs are text-extracted locally, with page boundaries; image-only or unsupported binary files are refused); params: fileId",
-    params: [str("fileId", true, 200)],
-    target: (p) => `Drive file ${p.fileId}`,
+      "Read a file's text content (Sheets return CSV; PDFs are locally text-extracted with page labels; no OCR). Params: fileId, optional pdfPages (PDF only: one page such as \"7\" or inclusive range \"7-9\", at most 5 pages, page numbers 1-100). Results are limited to 4000 characters; to answer about a later PDF page, request that page with pdfPages. Never claim omitted text, unselected pages, or images were read.",
+    params: [str("fileId", true, 200), str("pdfPages", false, 7)],
+    target: (p) => `Drive file ${p.fileId}${p.pdfPages === undefined ? "" : ` PDF pages ${p.pdfPages}`}`,
   },
   {
     name: "google_drive.create_file",

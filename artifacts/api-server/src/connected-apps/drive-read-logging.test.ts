@@ -8,6 +8,34 @@ import * as googleCredentials from "../google/credentials";
 import { logger } from "../lib/logger";
 
 describe("google_drive.read_file production diagnostics", () => {
+  it("answers from a later page through the bounded executor, retaining source and omission labels", async () => {
+    vi.spyOn(googleCredentials, "driveAccessToken").mockResolvedValue({
+      token: "token", email: "owner@example.com", googleSub: "sub",
+    });
+    const fixture = pdfFixture(["Earlier material ".repeat(450), "The renewal date is October 12.", "Appendix ".repeat(900)]);
+    vi.stubGlobal("fetch", async (url: string) => String(url).includes("alt=media")
+      ? new Response(fixture)
+      : new Response(JSON.stringify({ name: "renewal.pdf", mimeType: "application/pdf" })));
+    const run = (pdfPages?: string) => executeOperation(findOperation("google_drive.read_file")!,
+      { fileId: "report", ...(pdfPages ? { pdfPages } : {}) },
+      { workspaceId: "workspace", taskId: "task", actionId: "action" });
+    const beginning = await run();
+    expect(beginning).toMatchObject({ ok: true, summary: expect.stringContaining("truncated at 4000") });
+    const later = await run("2");
+    expect(later).toMatchObject({ ok: true });
+    if (later.ok) {
+      expect(later.summary).toContain('File: "renewal.pdf"');
+      expect(later.summary).toContain("pages 2-2 of 3");
+      expect(later.summary).toContain("outside it were not read");
+      expect(later.summary).toContain("October 12");
+      expect(later.summary).not.toContain("Earlier material");
+      expect(later.summary.length).toBeLessThanOrEqual(4000);
+    }
+    const clipped = await run("3");
+    expect(clipped).toMatchObject({ ok: true, summary: expect.stringContaining("truncated at 4000") });
+    expect(await run("4")).toMatchObject({ ok: false, message: expect.stringContaining("does not exist") });
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -262,15 +290,22 @@ describe("google_drive.read_file production diagnostics", () => {
  * transport passes these bytes to the shared isolated parser; no extractor
  * seam or checked-in document is involved.
  */
-function pdfFixture(text: string): Uint8Array {
-  const stream = `BT /F1 12 Tf 72 720 Td (${text}) Tj ET`;
+function pdfFixture(text: string | string[]): Uint8Array {
+  const pages = Array.isArray(text) ? text : [text];
+  const fontId = pages.length * 2 + 3;
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
-    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
-    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-    `<< /Length ${Buffer.byteLength(stream, "latin1")} >>\nstream\n${stream}\nendstream`,
+    `<< /Type /Pages /Kids [${pages.map((_, i) => `${3 + i * 2} 0 R`).join(" ")}] /Count ${pages.length} >>`,
   ];
+  for (const [i, content] of pages.entries()) {
+    const lines = content.match(/.{1,64}/g) ?? [""];
+    const stream = `BT /F1 1 Tf 72 720 Td ${lines.map((line) => `(${line}) Tj 0 -1 Td`).join(" ")} ET`;
+    objects.push(
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 ${fontId} 0 R >> >> /Contents ${4 + i * 2} 0 R >>`,
+      `<< /Length ${Buffer.byteLength(stream, "latin1")} >>\nstream\n${stream}\nendstream`,
+    );
+  }
+  objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
   let document = "%PDF-1.4\n";
   const offsets = [0];
   for (const [index, object] of objects.entries()) {
