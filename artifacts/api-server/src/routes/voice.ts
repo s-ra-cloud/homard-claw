@@ -32,6 +32,12 @@ import { recordAudit } from "../audit";
 import { logger } from "../lib/logger";
 import { sanitizeErrorMessage } from "../lib/sanitize";
 import { callProvider, ProviderCallError } from "../execution";
+import {
+  AttachmentNormalizationError,
+  attachmentErrorStatus,
+  normalizeAttachments,
+  type NormalizedAttachment,
+} from "../attachments";
 import { resolveRouting } from "../providers";
 import { CodexTalkError, runCodexTalkTurn } from "../talk-codex";
 import { collectTaskResultsForTalk } from "../task-results";
@@ -1554,13 +1560,17 @@ router.get(
           a.createdAt.getTime() - b.createdAt.getTime() ||
           Number(a.fromAgentId !== null) - Number(b.fromAgentId !== null),
       )
-      .map((row) => ({
-        id: row.id,
-        role: row.fromAgentId === null ? ("user" as const) : ("agent" as const),
-        text: row.body,
-        taskId: row.taskId,
-        createdAt: row.createdAt.toISOString(),
-      }));
+       .map((row) => {
+         const isUser = row.fromAgentId === null;
+         const body = isUser ? talkHistoryText(row.body) : { text: row.body };
+         return {
+           id: row.id,
+           role: isUser ? ("user" as const) : ("agent" as const),
+           ...body,
+           taskId: row.taskId,
+           createdAt: row.createdAt.toISOString(),
+         };
+       });
     res.json({ turns, latestCursor: turns.at(-1)?.id ?? null });
   },
 );
@@ -1670,8 +1680,9 @@ router.post(
 
 /**
  * Clear the stored Talk history with one agent. Workspace-scoped: the agent
- * must belong to the caller's workspace, and only that agent's kind='voice'
- * rows are removed. Like reading history, clearing works even for retired
+ * must belong to the caller's workspace. It removes both transcript rows and
+ * idempotency exchange payloads: a cleared reply must not remain replayable
+ * from response_json. Like reading history, clearing works even for retired
  * agents or during an emergency stop — it never starts a conversation.
  */
 router.delete(
@@ -1697,11 +1708,12 @@ router.delete(
       return;
     }
     // One transaction under the per-agent advisory lock: bump the clear epoch
-    // and delete the rows atomically. persistTranscript takes the same lock
-    // around its epoch check + insert, so an in-flight turn either commits
-    // before this delete (and its rows go with the rest) or sees the changed
-    // epoch afterwards and skips persisting. The increment is DB-ordered —
-    // no host clock is ever compared.
+    // and delete all Talk-owned data atomically. Finalization takes this same
+    // lock before changing a pending exchange to done, so an in-flight turn
+    // either commits before this delete (and its rows go with the rest) or
+    // observes the changed epoch and cannot recreate a replay payload or
+    // transcript afterwards. The increment is DB-ordered — no host clock is
+    // ever compared.
     const deleted = await db.transaction(async (tx) => {
       await lockTalkHistory(tx, agentId);
       await tx
@@ -1720,6 +1732,14 @@ router.delete(
             value: sql`(${workspaceSettingsTable.value}::bigint + 1)::text`,
           },
         });
+      await tx
+        .delete(talkExchangesTable)
+        .where(
+          and(
+            eq(talkExchangesTable.workspaceId, req.workspaceId!),
+            eq(talkExchangesTable.agentId, agentId),
+          ),
+        );
       return tx
         .delete(agentMessagesTable)
         .where(
@@ -1819,12 +1839,128 @@ export type ConverseAttachment = {
   content: string;
 };
 
+/**
+ * Keep reply/cache payloads small and private. Normalization preserves order;
+ * only a base64 source that became our extracted-text envelope is a PDF
+ * replacement. A normal text file can never meet this condition, so its
+ * unchanged content is never copied into a response or idempotency cache.
+ */
+function extractedPdfReplacements(
+  originals: readonly ConverseAttachment[] | undefined,
+  normalized: readonly NormalizedAttachment[],
+): { attachments: NormalizedAttachment[]; indices: number[] } {
+  const attachments: NormalizedAttachment[] = [];
+  const indices: number[] = [];
+  for (const [index, attachment] of normalized.entries()) {
+    if (
+      originals?.[index]?.encoding === "base64" &&
+      attachment.encoding === "text" &&
+      attachment.mimeType === "text/plain" &&
+      attachment.content.startsWith("--- SOURCE PDF FILENAME: ")
+    ) {
+      attachments.push(attachment);
+      indices.push(index);
+    }
+  }
+  return { attachments, indices };
+}
+
+/**
+ * A text Converse request accepts 4,000 characters and each returned history
+ * item accepts 8,000. Keep a normalized document alongside its owner's words
+ * inside that latter boundary, so a later request can use the durable text
+ * rather than re-uploading or re-parsing the source file.
+ */
+const TALK_HISTORY_CONTEXT_MAX = 8_000;
+const TALK_ATTACHMENT_CONTEXT_START =
+  "\n\n[[CRUSTABOX_TALK_ATTACHMENT_CONTEXT_V1]]\n";
+const TALK_ATTACHMENT_CONTEXT_OMITTED =
+  "\n[[ATTACHMENT TEXT OMITTED FROM TALK HISTORY DUE TO THE 8000-CHARACTER CONTEXT LIMIT]]";
+
+function normalizedAttachmentContext(
+  attachments: NormalizedAttachment[],
+): string {
+  const textAttachments = attachments.filter(
+    (attachment) => attachment.encoding === "text",
+  );
+  const omittedNonTextCount = attachments.length - textAttachments.length;
+  return [
+    ...textAttachments.map(
+      (attachment) =>
+        `[[ATTACHMENT: ${attachment.name} | ${attachment.mimeType}]]\n${attachment.content}\n[[END ATTACHMENT]]`,
+    ),
+    ...(omittedNonTextCount > 0
+      ? [
+          `[[${omittedNonTextCount} NON-TEXT ATTACHMENT${omittedNonTextCount === 1 ? "" : "S"} OMITTED FROM DURABLE TALK CONTEXT]]`,
+        ]
+      : []),
+  ].join("\n");
+}
+
+/**
+ * This is the durable/context form of a typed user turn. The visible utterance
+ * remains separate in the history response, while `contextText` carries this
+ * bounded form back to the browser for the next provider call.
+ */
+function canonicalTalkUserText(
+  userText: string,
+  attachments: NormalizedAttachment[],
+): string {
+  if (attachments.length === 0) return userText;
+  const context = normalizedAttachmentContext(attachments);
+  const available =
+    TALK_HISTORY_CONTEXT_MAX -
+    userText.length -
+    TALK_ATTACHMENT_CONTEXT_START.length;
+  if (context.length <= available) {
+    return `${userText}${TALK_ATTACHMENT_CONTEXT_START}${context}`;
+  }
+  // A text Converse request is capped at 4,000 characters, so there is always
+  // room here for this explicit marker as well as a bounded document excerpt.
+  const excerptLength = Math.max(
+    0,
+    available - TALK_ATTACHMENT_CONTEXT_OMITTED.length,
+  );
+  return `${userText}${TALK_ATTACHMENT_CONTEXT_START}${context.slice(0, excerptLength)}${TALK_ATTACHMENT_CONTEXT_OMITTED}`;
+}
+
+function talkHistoryText(body: string): {
+  text: string;
+  contextText?: string;
+} {
+  const contextStart = body.indexOf(TALK_ATTACHMENT_CONTEXT_START);
+  if (contextStart === -1) return { text: body };
+  return {
+    // The document context is for the model, not a surprise wall of extracted
+    // PDF text in the owner's transcript.
+    text: body.slice(0, contextStart),
+    contextText: body,
+  };
+}
+
 export type ConverseWithAgentResult = {
   reply: string;
   proposedTaskObjective: string | null;
   proposedDelegation: DelegationProposal | null;
   pendingDelegation: PendingDelegation | null;
   voice: "alloy" | "nova" | "onyx" | "shimmer" | null;
+  /**
+   * Bounded canonical user text, including extracted PDF text when
+   * present. The client stores it as context for its next turn but continues
+   * to display the owner's original utterance.
+   */
+  normalizedUserText?: string;
+  /**
+   * Extracted PDF replacements needed to confirm a task proposal. Ordinary
+   * files are deliberately not echoed or cached; the browser keeps those
+   * selected originals locally until confirmation.
+   */
+  normalizedAttachments?: NormalizedAttachment[];
+  /**
+   * Positions in the submitted attachment array for normalizedAttachments.
+   * Index mapping, rather than filenames, preserves same-named attachments.
+   */
+  normalizedAttachmentIndices?: number[];
 };
 
 export class ConverseWithAgentError extends Error {
@@ -1981,6 +2117,24 @@ export async function converseWithAgent(input: {
   input.signal?.addEventListener("abort", abort, { once: true });
   const timeout = setTimeout(abort, CONVERSE_TIMEOUT_MS * 2);
   try {
+    // Normalize after claiming the idempotency key: concurrent resends never
+    // each parse the same PDF, and a completed exchange replays its proposal
+    // payload rather than asking the client to upload it again.
+    let attachments: NormalizedAttachment[];
+    try {
+      attachments = await normalizeAttachments(input.attachments, {
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (error instanceof AttachmentNormalizationError) {
+        throw new ConverseWithAgentError(
+          attachmentErrorStatus(error),
+          "provider",
+          error.userMessage,
+        );
+      }
+      throw error;
+    }
     const generated = await generateReply(
       input.workspaceId,
       agent,
@@ -1988,7 +2142,7 @@ export async function converseWithAgent(input: {
       input.history,
       controller.signal,
       input.pendingDelegationTargetId,
-      input.attachments,
+      attachments,
       input.ownerTimezone,
     );
     const {
@@ -1998,16 +2152,45 @@ export async function converseWithAgent(input: {
       pendingDelegation,
       exchange,
     } = generated;
+    const pdfReplacements = extractedPdfReplacements(
+      input.attachments,
+      attachments,
+    );
+    // Only durable PDF extraction belongs in future Talk context. Images and
+    // ordinary text files are available to this provider call, but must not be
+    // copied into history or response_json merely because a reply was made.
+    const normalizedUserText = canonicalTalkUserText(
+      input.text,
+      pdfReplacements.attachments,
+    );
+    const hasTaskProposal = Boolean(taskObjective || proposedDelegation);
     const payload: ConverseWithAgentResult = {
       reply,
       proposedTaskObjective: taskObjective,
       proposedDelegation,
       pendingDelegation,
       voice: agentVoice(agent),
+      ...(pdfReplacements.attachments.length > 0
+        ? { normalizedUserText }
+        : {}),
+      ...(hasTaskProposal && pdfReplacements.attachments.length > 0
+        ? {
+            normalizedAttachments: pdfReplacements.attachments,
+            normalizedAttachmentIndices: pdfReplacements.indices,
+          }
+        : {}),
     };
     if (claimId) {
       const ownedClaimId = claimId;
       const finalized = await db.transaction(async (tx) => {
+        // This lock establishes one ordering with clear-history before a
+        // pending exchange can acquire a durable response payload.
+        await lockTalkHistory(tx, agent.id);
+        if (
+          (await readClearEpochVia(tx, input.workspaceId, agent.id)) !==
+          clearEpoch
+        )
+          return "cleared" as const;
         const updated = await tx
           .update(talkExchangesTable)
           .set({ status: "done", responseJson: JSON.stringify(payload) })
@@ -2018,21 +2201,31 @@ export async function converseWithAgent(input: {
             ),
           )
           .returning({ id: talkExchangesTable.id });
-        if (updated.length === 0) return false;
+        if (updated.length === 0) return "lost" as const;
         await persistTranscript(
           input.workspaceId,
           agent,
-          input.text,
+          normalizedUserText,
           reply,
           clearEpoch,
           true,
           tx,
         );
         await persistAgentExchange(tx, agent, exchange);
-        return true;
+        return "finalized" as const;
       });
+      if (finalized === "cleared") {
+        // Keep claimId intact for the catch block below: a request that
+        // claimed after a clear must remove its pending row rather than leave
+        // an orphan that blocks the next fresh conversation.
+        throw new ConverseWithAgentError(
+          409,
+          "in_flight",
+          "This conversation was cleared before the reply could be saved.",
+        );
+      }
       claimId = null;
-      if (!finalized) {
+      if (finalized === "lost") {
         const [authoritative] = await db
           .select()
           .from(talkExchangesTable)
@@ -2056,18 +2249,32 @@ export async function converseWithAgent(input: {
         );
       }
     } else {
-      await db.transaction(async (tx) => {
+      const persisted = await db.transaction(async (tx) => {
+        await lockTalkHistory(tx, agent.id);
+        if (
+          (await readClearEpochVia(tx, input.workspaceId, agent.id)) !==
+          clearEpoch
+        )
+          return false;
         await persistTranscript(
           input.workspaceId,
           agent,
-          input.text,
+          normalizedUserText,
           reply,
           clearEpoch,
           true,
           tx,
         );
         await persistAgentExchange(tx, agent, exchange);
+        return true;
       });
+      if (!persisted) {
+        throw new ConverseWithAgentError(
+          409,
+          "in_flight",
+          "This conversation was cleared before the reply could be saved.",
+        );
+      }
     }
     await recordAudit(
       input.workspaceId,
@@ -2109,7 +2316,10 @@ router.post(
       return;
     }
     const controller = new AbortController();
-    req.on("close", () => controller.abort());
+    req.on("aborted", () => controller.abort());
+    res.on("close", () => {
+      if (!res.writableEnded) controller.abort();
+    });
     try {
       res.json(
         await converseWithAgent({

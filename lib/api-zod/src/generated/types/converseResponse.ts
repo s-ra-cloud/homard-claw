@@ -7,6 +7,7 @@
  */
 import type { AgentDelegationProposal } from './agentDelegationProposal';
 import type { AgentDelegationTarget } from './agentDelegationTarget';
+import type { InputAttachment } from './inputAttachment';
 
 export interface ConverseResponse {
   reply: string;
@@ -19,4 +20,20 @@ export interface ConverseResponse {
      * @nullable
      */
   voice: string | null;
+  /**
+     * Bounded canonical form of the owner's utterance. It includes extracted PDF text for subsequent Talk context while the transcript continues to display the original utterance. Other attachment contents are never retained here.
+     * @maxLength 8000
+     */
+  normalizedUserText?: string;
+  /**
+     * Extracted PDF replacements needed to confirm a proposal. Ordinary selected files are not echoed or retained in a Talk response.
+     * @maxItems 4
+     */
+  normalizedAttachments?: InputAttachment[];
+  /**
+     * Original attachment positions for normalizedAttachments. Positions preserve mixed and same-named attachment sets during confirmation.
+     * @maxItems 4
+     * @items.minimum 0
+     */
+  normalizedAttachmentIndices?: number[];
 }

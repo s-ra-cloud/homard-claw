@@ -253,6 +253,31 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+/** A deterministic text PDF for the real worker → Drive → parser path. */
+function pdfFixture(text: string): Uint8Array {
+  const stream = `BT /F1 12 Tf 72 720 Td (${text}) Tj ET`;
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    `<< /Length ${Buffer.byteLength(stream, "latin1")} >>\nstream\n${stream}\nendstream`,
+  ];
+  let document = "%PDF-1.4\n";
+  const offsets = [0];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(Buffer.byteLength(document, "latin1"));
+    document += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
+  const xref = Buffer.byteLength(document, "latin1");
+  document += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets.slice(1)) {
+    document += `${String(offset).padStart(10, "0")} 00000 n \n`;
+  }
+  document += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(document, "latin1");
+}
+
 // $1 per M prompt tokens, $10 per M completion tokens.
 const PRICING_CATALOG = {
   data: [
@@ -876,7 +901,7 @@ describe("connected-app cancellation and recoverable failures", () => {
     warnSpy.mockRestore();
   });
 
-  it("runs the real Drive transport for a PDF, finalizes the failed action, and then terminates the task", async () => {
+  it("finalizes a malformed Drive PDF safely, then continues to the next provider round", async () => {
     const agent = await createAgent("PDF Transport", [
       { app: "google_drive", accessLevel: "read" },
     ]);
@@ -895,6 +920,12 @@ describe("connected-app cancellation and recoverable failures", () => {
       if (target.includes("/models")) return jsonResponse(PRICING_CATALOG);
       if (target.includes("oauth2.googleapis.com/token")) {
         return jsonResponse({ access_token: "test-drive-access", expires_in: 3600 });
+      }
+      if (target.includes("alt=media")) {
+        // Deliberately malformed PDF bytes: this verifies that an extractor
+        // failure becomes a terminal action row rather than an unfinalized
+        // executing action or raw provider-body output.
+        return new Response("%PDF-not-a-valid-document");
       }
       if (target.includes("/drive/v3/files/drive-file-real-pdf")) {
         return jsonResponse({
@@ -936,6 +967,129 @@ describe("connected-app cancellation and recoverable failures", () => {
     expect((await getActions(task.id)).every((action) => action.status !== "executing")).toBe(
       true,
     );
+  });
+
+  it("finalizes a real Drive PDF in the DB and replays its result without rereading", async () => {
+    const infoSpy = vi.spyOn(logger, "info");
+    const warnSpy = vi.spyOn(logger, "warn");
+    const agent = await createAgent("PDF Replay", [
+      { app: "google_drive", accessLevel: "read" },
+    ]);
+    const task = await insertRunningTask(agent.id);
+    const fileId = "drive-file-worker-pdf";
+    const privatePdfText = "DB ACTION PDF BODY: payroll@example.test";
+    const readBlock = `<app_action>${JSON.stringify({
+      operation: "google_drive.read_file",
+      params: { fileId },
+    })}</app_action>`;
+    const internalReadBlock = `<app_action>${JSON.stringify({
+      operation: "office.search_task_results",
+      params: {},
+    })}</app_action>`;
+    const fixture = pdfFixture(privatePdfText);
+    const firstSegmentResponses = [
+      readBlock,
+      ...Array.from({ length: 8 }, () => internalReadBlock),
+    ];
+    let driveRequestCount = 0;
+    executeMock.mockImplementation((operation, params, context) =>
+      actualExecuteOperation.current!(operation, params, context),
+    );
+    fetchMock.mockImplementation(async (url: unknown) => {
+      const target = String(url);
+      if (target.includes("/models")) return jsonResponse(PRICING_CATALOG);
+      if (target.includes("oauth2.googleapis.com/token")) {
+        return jsonResponse({ access_token: "test-drive-access", expires_in: 3600 });
+      }
+      if (target.includes("alt=media")) {
+        driveRequestCount += 1;
+        return new Response(fixture);
+      }
+      if (target.includes(`/drive/v3/files/${fileId}`)) {
+        driveRequestCount += 1;
+        return jsonResponse({
+          id: fileId,
+          name: "worker-report.pdf",
+          mimeType: "application/pdf",
+        });
+      }
+      if (target.includes("chat/completions")) {
+        const content = firstSegmentResponses.shift();
+        if (content === undefined) {
+          throw new Error(`unexpected first-segment completion: ${target}`);
+        }
+        return jsonResponse(completion(content));
+      }
+      throw new Error(`unexpected fetch in real PDF worker regression: ${target}`);
+    });
+
+    await runTask({ task, agent: await loadAgent(agent.id) });
+
+    const parked = await getTaskRow(task.id);
+    expect(parked?.status).toBe("waiting_approval");
+    const [executed] = await getActions(task.id);
+    expect(executed?.status).toBe("executed");
+    expect(executed?.resultSummary).toContain(
+      'File: "worker-report.pdf" (application/pdf)',
+    );
+    expect(executed?.resultSummary).toContain(
+      "--- Page 1 (text only; visual and image content omitted) ---",
+    );
+    expect(executed?.resultSummary).toContain(privatePdfText);
+    expect(driveRequestCount).toBe(2);
+    expect(executeMock).toHaveBeenCalledTimes(1);
+
+    const approval = await getPendingApproval(task.id);
+    expect(approval?.kind).toBe("task_continuation");
+    await approve(approval!.id);
+    const claimed = await claimNextTask({
+      agentIds: [agent.id],
+      includePausedAgents: true,
+    });
+    expect(claimed?.task.id).toBe(task.id);
+
+    // The resumed provider prompt replays the finalized result. No action
+    // block is requested, so the Drive transport and isolated parser are not
+    // entered a second time.
+    queueCompletions([
+      completion("The PDF report was already read; objective complete."),
+    ]);
+    await runTask(claimed!);
+
+    const [replayed] = await getActions(task.id);
+    expect(replayed?.status).toBe("executed");
+    expect(replayed?.resultSummary).toBe(executed?.resultSummary);
+    expect(driveRequestCount).toBe(2);
+    expect(executeMock).toHaveBeenCalledTimes(1);
+    const resumedRequest = JSON.parse(lastPromptSent()) as {
+      messages?: Array<{ role?: string; content?: string }>;
+    };
+    const resumedPrompt =
+      resumedRequest.messages?.find((message) => message.role === "user")
+        ?.content ?? "";
+    expect(resumedPrompt).toContain(privatePdfText);
+    expect(resumedPrompt).toContain("--- Page 1 (text only;");
+    expect(resumedPrompt).toContain(
+      'File: "worker-report.pdf" (application/pdf)',
+    );
+
+    const done = await getTaskRow(task.id);
+    expect(done?.status).toBe("completed");
+    const taskLogs = await getLogs(task.id);
+    expect(JSON.stringify(taskLogs)).not.toContain(privatePdfText);
+    const driveLogs = [...infoSpy.mock.calls, ...warnSpy.mock.calls].filter(
+      ([fields]) =>
+        typeof fields === "object" &&
+        fields !== null &&
+        (fields as Record<string, unknown>).component === "google_drive_read",
+    );
+    expect(driveLogs.length).toBeGreaterThan(0);
+    expect(JSON.stringify(driveLogs)).not.toContain(privatePdfText);
+    expect(JSON.stringify(driveLogs)).not.toContain(fileId);
+    expect(JSON.stringify(driveLogs)).not.toContain("worker-report.pdf");
+    expect(JSON.stringify(driveLogs)).not.toContain("test-drive-access");
+    infoSpy.mockRestore();
+    warnSpy.mockRestore();
   });
 
   it("finalizes a failed Drive read, deliberately continues, and keeps a later provider failure distinct", async () => {

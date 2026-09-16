@@ -759,8 +759,10 @@ describe("drive reads by MIME type", () => {
     const outcome = await executeOperation(readOp(), { fileId: "f1" }, ctx());
     expect(outcome.ok).toBe(true);
     if (outcome.ok) {
-      expect(outcome.summary).toContain("[truncated]");
-      expect(outcome.summary.length).toBeLessThan(6_000);
+      expect(outcome.summary).toContain(
+        "[Drive action result truncated at 4000 characters;",
+      );
+      expect(outcome.summary.length).toBeLessThanOrEqual(4_000);
     }
   });
 

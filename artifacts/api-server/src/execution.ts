@@ -289,6 +289,11 @@ import {
   type ProviderId,
 } from "./providers";
 import { CodexRunError, codexSandboxFor, runCodexTurn } from "./codex/execute";
+import {
+  AttachmentNormalizationError,
+  MAX_CANONICAL_PDF_TEXT_SCALARS,
+  normalizeAttachments,
+} from "./attachments";
 
 /**
  * Connection-level failures that say nothing about the request itself:
@@ -359,8 +364,55 @@ function mapNetworkError(error: unknown, signal: AbortSignal): ProviderCallError
   );
 }
 
+const PDF_SOURCE_FILENAME_ENVELOPE = /^--- SOURCE PDF FILENAME: ([^\r\n]+) ---\r?\n/;
+const PDF_PAGE_MARKER = /^---\s*page\s+[1-9]\d*(?: [^-]*)?---/i;
+
+function sourceNameForAttachment(attachment: InputAttachment): string {
+  // Normalized PDFs preserve their original source name inside their durable
+  // text, including source names which had to lose ".pdf" to fit the schema's
+  // 160-character filename limit.
+  const sourceName = PDF_SOURCE_FILENAME_ENVELOPE.exec(attachment.content)?.[1];
+  if (sourceName) return sourceName;
+  return /\.pdf\.txt$/i.test(attachment.name)
+    ? attachment.name.slice(0, -4)
+    : attachment.name;
+}
+
+function hasAtMostUnicodeScalars(value: string, maximum: number): boolean {
+  let count = 0;
+  for (const _scalar of value) {
+    count += 1;
+    if (count > maximum) return false;
+  }
+  return true;
+}
+
+/**
+ * PDF normalization persists only text, so the schema has no explicit
+ * normalized-PDF flag. Recognize its old .pdf.txt form and its current source
+ * envelope, but require the extractor's page marker and hard scalar limit.
+ * A caller can imitate these strings, but can never turn an ordinary 25 MB
+ * text upload into unbounded Codex prompt context.
+ */
+function isCanonicalPdfText(attachment: InputAttachment): boolean {
+  if (
+    attachment.encoding !== "text" ||
+    attachment.mimeType !== "text/plain" ||
+    !hasAtMostUnicodeScalars(attachment.content, MAX_CANONICAL_PDF_TEXT_SCALARS)
+  ) {
+    return false;
+  }
+  const envelope = PDF_SOURCE_FILENAME_ENVELOPE.exec(attachment.content);
+  if (!/\.pdf\.txt$/i.test(attachment.name) && !envelope) return false;
+  const extractedText = envelope
+    ? attachment.content.slice(envelope[0].length)
+    : attachment.content;
+  return PDF_PAGE_MARKER.test(extractedText);
+}
+
 function textAttachmentBlock(attachment: InputAttachment): string {
-  return `\n\n--- ATTACHED DOCUMENT: ${attachment.name} (${attachment.mimeType}) ---\n${attachment.content}\n--- END ATTACHMENT ---`;
+  const sourceName = sourceNameForAttachment(attachment);
+  return `\n\n--- ATTACHED DOCUMENT: ${sourceName} (${attachment.mimeType}) ---\n${attachment.content}\n--- END ATTACHMENT ---`;
 }
 
 function claudeContent(prompt: string, attachments: InputAttachment[] = []): unknown {
@@ -417,7 +469,15 @@ async function materializeCodexAttachments(
   const folder = path.join(workingDirectory, ".homardclaw-attachments");
   await mkdir(folder, { recursive: true });
   const paths: string[] = [];
+  const textBlocks: string[] = [];
   for (const [index, attachment] of attachments.entries()) {
+    // Only bounded, canonical PDF extraction text is prompt context. Ordinary
+    // TXT/CSV/JSON files retain their normal workspace-file behavior, even
+    // though they are represented with the same text encoding in the schema.
+    if (isCanonicalPdfText(attachment)) {
+      textBlocks.push(textAttachmentBlock(attachment));
+      continue;
+    }
     const safeName = attachment.name.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120) || `file-${index + 1}`;
     const relative = `.homardclaw-attachments/${index + 1}-${safeName}`;
     await writeFile(
@@ -429,7 +489,12 @@ async function materializeCodexAttachments(
     paths.push(`${attachment.name}: ${relative}`);
   }
   return {
-    promptSuffix: `\n\nThe owner attached these files inside your private workspace. Read or inspect them as part of the request:\n${paths.join("\n")}`,
+    promptSuffix: [
+      textBlocks.join(""),
+      paths.length > 0
+        ? `\n\nThe owner attached these files inside your private workspace. Read or inspect them as part of the request:\n${paths.join("\n")}`
+        : "",
+    ].join(""),
   };
 }
 
@@ -797,5 +862,27 @@ export function getProviderAdapter(provider: ProviderId): ProviderAdapter {
 export async function callProvider(
   req: ProviderCallRequest,
 ): Promise<ProviderCallResult> {
-  return getProviderAdapter(req.provider).execute(req);
+  // Route/task ingress persists canonical files, but this is the final
+  // provider boundary too: inspector and future internal callers cannot
+  // accidentally hand a raw PDF to only one provider implementation. A
+  // normalized PDF is text for Claude, OpenRouter, and Codex alike.
+  let attachments: InputAttachment[] | undefined;
+  try {
+    attachments = req.attachments
+      ? await normalizeAttachments(req.attachments, { signal: req.signal })
+      : undefined;
+  } catch (error) {
+    if (error instanceof AttachmentNormalizationError) {
+      throw new ProviderCallError(
+        error.kind === "cancelled" ? "cancelled" : "provider_error",
+        error.userMessage,
+        error.userMessage,
+      );
+    }
+    throw error;
+  }
+  return getProviderAdapter(req.provider).execute({
+    ...req,
+    attachments,
+  });
 }

@@ -169,7 +169,7 @@ export const APP_OPERATIONS: AppOperation[] = [
     app: "google_drive",
     level: "read",
     description:
-      "Read a file's text content (Google Sheets return rows as CSV text); params: fileId",
+      "Read a file's text content (Google Sheets return rows as CSV text; uploaded PDFs are text-extracted locally, with page boundaries; image-only or unsupported binary files are refused); params: fileId",
     params: [str("fileId", true, 200)],
     target: (p) => `Drive file ${p.fileId}`,
   },

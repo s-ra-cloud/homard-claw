@@ -11,6 +11,8 @@ export interface TalkHistoryTurn {
   id: string;
   role: TalkHistoryTurnRole;
   text: string;
+  /** Bounded canonical text for provider context. Present on user turns with normalized attachments; text remains the visible utterance. */
+  contextText?: string;
   /** @nullable */
   taskId: string | null;
   createdAt: Date;

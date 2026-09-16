@@ -1466,7 +1466,17 @@ describe("Codex serialization and recovery", () => {
       });
       expect(claimed).not.toBeNull();
       const running = runTask(claimed!);
-      await new Promise((resolve) => setTimeout(resolve, 60));
+      // The lease is not acquired until after the worker has finished its
+      // setup (including the database writes and workspace preparation). A
+      // fixed sleep can therefore delete nothing, after which the worker
+      // acquires the lease and the hanging mock turn waits forever. The fake
+      // records the call synchronously when runStreamed begins; by the time
+      // this poll observes it, the hanging turn has installed its listener.
+      const startedBy = Date.now() + 15_000;
+      while (sdkCalls.length === 0) {
+        if (Date.now() > startedBy) throw new Error("SDK turn never started");
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
       // Simulate the lease expiring and being taken by another process:
       // the row is no longer ours, so the next renewal must be refused.
       await db

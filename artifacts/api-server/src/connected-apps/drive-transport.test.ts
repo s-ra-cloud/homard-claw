@@ -13,8 +13,37 @@ function response(body: string, status = 200): Response {
   });
 }
 
+/**
+ * A tiny deterministic PDF that is valid enough for PDF.js, but does not
+ * depend on a checked-in document or a fixture generator. Keeping the bytes
+ * here exercises the same isolated parser used by production Drive reads.
+ */
+function pdfFixture(text: string): Uint8Array {
+  const stream = `BT /F1 12 Tf 72 720 Td (${text}) Tj ET`;
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    `<< /Length ${Buffer.byteLength(stream, "latin1")} >>\nstream\n${stream}\nendstream`,
+  ];
+  let document = "%PDF-1.4\n";
+  const offsets = [0];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(Buffer.byteLength(document, "latin1"));
+    document += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
+  const xref = Buffer.byteLength(document, "latin1");
+  document += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets.slice(1)) {
+    document += `${String(offset).padStart(10, "0")} 00000 n \n`;
+  }
+  document += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(document, "latin1");
+}
+
 describe("readDriveFileTransport", () => {
-  it.each(["application/pdf", "application/octet-stream", "image/png",
+  it.each(["application/octet-stream", "image/png",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"])(
     "refuses %s before downloading binary content", async (mimeType) => {
       let calls = 0;
@@ -36,6 +65,253 @@ describe("readDriveFileTransport", () => {
       expect(failures).toEqual([{ stage: "metadata", failureClass: "unsupported_content" }]);
     },
   );
+
+  it("downloads a PDF as bounded bytes and passes the shared signal into extraction", async () => {
+    let calls = 0;
+    let extractionInput:
+      | {
+          bytes: Uint8Array;
+          options?: {
+            signal?: AbortSignal;
+            maxInputBytes?: number;
+            deadlineAt?: number;
+          };
+        }
+      | undefined;
+    const result = await readDriveFileTransport({
+      workspaceId: "workspace-pdf",
+      fileId: "pdf-file",
+      resolveToken: async () => "token",
+      fetchImpl: async () => {
+        calls += 1;
+        return calls === 1
+          ? response(JSON.stringify({
+              name: "report.pdf",
+              mimeType: "application/pdf",
+            }))
+          : new Response(new Uint8Array([0x25, 0x50, 0x44, 0x46]));
+      },
+      // The production path always uses extractPdfText. This local seam
+      // proves the Drive transport's byte/deadline/signal contract without
+      // duplicating the shared parser's fixture suite here.
+      extractPdf: async (bytes, options) => {
+        extractionInput = { bytes, options };
+        return "--- Page 1 ---\nPDF text";
+      },
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      name: "report.pdf",
+      mimeType: "application/pdf",
+      text: "--- Page 1 ---\nPDF text",
+    });
+    expect(calls).toBe(2);
+    expect(extractionInput?.bytes).toEqual(
+      new Uint8Array([0x25, 0x50, 0x44, 0x46]),
+    );
+    expect(extractionInput?.options?.signal).toBeInstanceOf(AbortSignal);
+    expect(extractionInput?.options?.maxInputBytes).toBe(
+      MAX_DRIVE_READ_BODY_BYTES,
+    );
+    expect(extractionInput?.options?.deadlineAt).toEqual(expect.any(Number));
+  });
+
+  it("extracts a deterministic PDF through the shared parser on the production path", async () => {
+    const bytes = pdfFixture("Drive parser fixture");
+    let calls = 0;
+    const result = await readDriveFileTransport({
+      workspaceId: "workspace-pdf-real",
+      fileId: "pdf-real",
+      resolveToken: async () => "token",
+      fetchImpl: async () => {
+        calls += 1;
+        return calls === 1
+          ? response(JSON.stringify({
+              name: "deterministic-report.pdf",
+              mimeType: "application/pdf",
+            }))
+          : new Response(bytes);
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.name).toBe("deterministic-report.pdf");
+      expect(result.mimeType).toBe("application/pdf");
+      expect(result.text).toContain(
+        "--- Page 1 (text only; visual and image content omitted) ---",
+      );
+      expect(result.text).toContain("Drive parser fixture");
+    }
+    expect(calls).toBe(2);
+  });
+
+  it("keeps a real parser rejection content-free", async () => {
+    const privateMarker = "PRIVATE DOCUMENT CONTENT MARKER";
+    const failures: unknown[] = [];
+    let calls = 0;
+    const result = await readDriveFileTransport({
+      workspaceId: "workspace-pdf-private",
+      fileId: "private-pdf-id",
+      onFailure: (details) => failures.push(details),
+      resolveToken: async () => "token",
+      fetchImpl: async () => {
+        calls += 1;
+        return calls === 1
+          ? response(JSON.stringify({
+              name: "private-payroll.pdf",
+              mimeType: "application/pdf",
+            }))
+          : new Response(`%PDF-${privateMarker}`);
+      },
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      kind: "failed",
+      message: "The file is not a valid PDF.",
+    });
+    expect(JSON.stringify(result)).not.toContain(privateMarker);
+    expect(JSON.stringify(result)).not.toContain("private-payroll");
+    expect(JSON.stringify(failures)).not.toContain(privateMarker);
+    expect(failures).toEqual([
+      { stage: "extract", failureClass: "pdf_extraction" },
+    ]);
+  });
+
+  it("denies a read without a workspace before credentials, network, or extraction", async () => {
+    let credentialCalls = 0;
+    let fetchCalls = 0;
+    let extractionCalls = 0;
+    const result = await readDriveFileTransport({
+      workspaceId: null,
+      fileId: "tenant-private-pdf",
+      resolveToken: async () => {
+        credentialCalls += 1;
+        return "must-not-resolve";
+      },
+      fetchImpl: async () => {
+        fetchCalls += 1;
+        return new Response(pdfFixture("must not be read"));
+      },
+      extractPdf: async () => {
+        extractionCalls += 1;
+        return "must not spawn";
+      },
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      kind: "auth",
+      refusedBeforeExecution: true,
+      message:
+        "This task has no workspace owner, so no connected account can be used for it.",
+    });
+    expect(credentialCalls).toBe(0);
+    expect(fetchCalls).toBe(0);
+    expect(extractionCalls).toBe(0);
+  });
+
+  it("aborts an active PDF extractor through the same signal as Drive I/O", async () => {
+    const controller = new AbortController();
+    let extractorStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      extractorStarted = resolve;
+    });
+    let extractorSawAbort = false;
+    let calls = 0;
+    const resultPromise = readDriveFileTransport({
+      workspaceId: "workspace-pdf-cancel",
+      fileId: "pdf-cancel",
+      signal: controller.signal,
+      resolveToken: async () => "token",
+      fetchImpl: async () => {
+        calls += 1;
+        return calls === 1
+          ? response(JSON.stringify({ mimeType: "application/pdf" }))
+          : new Response("%PDF-1.7");
+      },
+      extractPdf: async (_bytes, options) => {
+        extractorStarted();
+        await new Promise<void>((resolve) => {
+          options?.signal?.addEventListener(
+            "abort",
+            () => {
+              extractorSawAbort = true;
+              resolve();
+            },
+            { once: true },
+          );
+        });
+        return "must not be returned after cancellation";
+      },
+    });
+
+    await started;
+    controller.abort();
+    await expect(resultPromise).resolves.toEqual({
+      ok: false,
+      kind: "failed",
+      message: "The Google Drive read was cancelled.",
+    });
+    expect(extractorSawAbort).toBe(true);
+  });
+
+  it("does not invoke extraction after a PDF exceeds the 2 MiB download limit", async () => {
+    let calls = 0;
+    let extractionCalled = false;
+    const result = await readDriveFileTransport({
+      workspaceId: "workspace-pdf-limit",
+      fileId: "pdf-limit",
+      resolveToken: async () => "token",
+      fetchImpl: async () => {
+        calls += 1;
+        return calls === 1
+          ? response(JSON.stringify({ mimeType: "application/pdf" }))
+          : new Response("x".repeat(MAX_DRIVE_READ_BODY_BYTES + 1));
+      },
+      extractPdf: async () => {
+        extractionCalled = true;
+        return "not reached";
+      },
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      kind: "failed",
+      message: "Google Drive returned a file larger than the read limit.",
+    });
+    expect(extractionCalled).toBe(false);
+  });
+
+  it("turns an unexpected PDF extractor error into a content-free failure", async () => {
+    let calls = 0;
+    const result = await readDriveFileTransport({
+      workspaceId: "workspace-pdf-error",
+      fileId: "private-pdf-id",
+      resolveToken: async () => "token",
+      fetchImpl: async () => {
+        calls += 1;
+        return calls === 1
+          ? response(JSON.stringify({
+              name: "private-payroll.pdf",
+              mimeType: "application/pdf",
+            }))
+          : new Response("%PDF-1.7");
+      },
+      extractPdf: async () => {
+        throw new Error("private parser document details");
+      },
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      kind: "failed",
+      message: "Google Drive could not extract readable text from this PDF.",
+    });
+    expect(JSON.stringify(result)).not.toContain("private");
+  });
 
   it.each([
     new Uint8Array([65, 0, 66]),

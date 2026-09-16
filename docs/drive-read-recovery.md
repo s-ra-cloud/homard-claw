@@ -17,12 +17,20 @@ No private file contents or credentials are reproduced here.
 
 ## Resolution and limitations
 
-- Binary Drive files are refused before download rather than returned as text.
+- Unsupported binary Drive files are refused before download rather than
+  returned as text. PDFs have a separate local extraction path.
 - Text downloads are checked for valid UTF-8, NUL bytes and common binary
   signatures. Valid Unicode text is preserved.
-- PDF and Word extraction is not implemented by this correction. Supply a
-  Google Doc or a UTF-8 text file; an unsupported file now produces a clear
-  action failure instead of raw binary output.
+- Text-based PDFs are downloaded as bytes and parsed locally in an isolated,
+  cancellable process. Drive retains its 2 MiB download cap and 30-second
+  total deadline, including extraction. No new Google permissions or external
+  document service are required.
+- PDF extraction allows at most 100 pages and 100,000 Unicode characters.
+  Page boundaries and source filenames identify the text. Extraction and
+  the existing 4,000-character action-result cap explicitly mark omissions.
+- Scanned/image-only, encrypted, malformed and over-limit PDFs produce safe
+  errors. OCR, chart/image interpretation, password unlocking and Word
+  extraction are not supported. Provide a Google Doc or UTF-8 text instead.
 - Internal persistence failures must use safe messages, not raw database
   exceptions containing query parameters or file contents.
 - A failed read can deliberately return an error to the agent for another
@@ -41,9 +49,11 @@ No private file contents or credentials are reproduced here.
    connected-app action history. Do not assume an action failed merely
    because the parent task failed. Verify any uncertain writes in the
    external app before requesting them again.
-4. For this read-only incident, provide a supported text version of the
-   document, then explicitly retry or create a corrected task. Do not loop
-   retries on an unsupported PDF expecting text extraction.
+4. For this read-only incident, after publishing PDF support, explicitly retry
+   or create a corrected task for a text-based PDF within the limits above.
+   For scanned, encrypted or over-limit files, provide a supported text
+   version instead. Existing live work is not automatically retried by this
+   feature.
 5. A supported read should finish, or show a bounded and actionable failure.
    If it does not, collect only the task/action reference, operation stage,
    safe failure classification and timestamps—not file bodies or tokens.

@@ -2093,6 +2093,22 @@ export const ConverseWithAgentBody = zod.object({
   "ownerTimezone": zod.string().max(converseWithAgentBodyOwnerTimezoneMax).optional().describe('IANA timezone of the owner\'s device (e.g. Europe\/Paris). Used to resolve relative days like \"today\" to the owner\'s calendar day in task-history lookups. Invalid or missing values fall back to UTC.')
 })
 
+export const converseWithAgentResponseNormalizedUserTextMax = 8000;
+
+export const converseWithAgentResponseNormalizedAttachmentsItemNameMax = 160;
+
+export const converseWithAgentResponseNormalizedAttachmentsItemMimeTypeMax = 100;
+
+export const converseWithAgentResponseNormalizedAttachmentsItemContentMax = 34000000;
+
+export const converseWithAgentResponseNormalizedAttachmentsMax = 4;
+
+export const converseWithAgentResponseNormalizedAttachmentIndicesItemMin = 0;
+
+export const converseWithAgentResponseNormalizedAttachmentIndicesMax = 4;
+
+
+
 export const ConverseWithAgentResponse = zod.object({
   "reply": zod.string(),
   "proposedTaskObjective": zod.string().nullable(),
@@ -2106,7 +2122,15 @@ export const ConverseWithAgentResponse = zod.object({
   "targetAgentId": zod.string(),
   "targetAgentName": zod.string()
 }),zod.null()]),
-  "voice": zod.string().nullable().describe('OpenAI voice id the agent speaks with; null = text only')
+  "voice": zod.string().nullable().describe('OpenAI voice id the agent speaks with; null = text only'),
+  "normalizedUserText": zod.string().max(converseWithAgentResponseNormalizedUserTextMax).optional().describe('Bounded canonical form of the owner\'s utterance. It includes extracted PDF text for subsequent Talk context while the transcript continues to display the original utterance. Other attachment contents are never retained here.'),
+  "normalizedAttachments": zod.array(zod.object({
+  "name": zod.string().min(1).max(converseWithAgentResponseNormalizedAttachmentsItemNameMax),
+  "mimeType": zod.string().min(1).max(converseWithAgentResponseNormalizedAttachmentsItemMimeTypeMax),
+  "encoding": zod.enum(['text', 'base64']),
+  "content": zod.string().min(1).max(converseWithAgentResponseNormalizedAttachmentsItemContentMax)
+})).max(converseWithAgentResponseNormalizedAttachmentsMax).optional().describe('Extracted PDF replacements needed to confirm a proposal. Ordinary selected files are not echoed or retained in a Talk response.'),
+  "normalizedAttachmentIndices": zod.array(zod.number().min(converseWithAgentResponseNormalizedAttachmentIndicesItemMin)).max(converseWithAgentResponseNormalizedAttachmentIndicesMax).optional().describe('Original attachment positions for normalizedAttachments. Positions preserve mixed and same-named attachment sets during confirmation.')
 })
 
 
@@ -2150,6 +2174,7 @@ export const GetTalkHistoryResponse = zod.object({
   "id": zod.string(),
   "role": zod.enum(['user', 'agent']),
   "text": zod.string(),
+  "contextText": zod.string().optional().describe('Bounded canonical text for provider context. Present on user turns with normalized attachments; text remains the visible utterance.'),
   "taskId": zod.string().nullable(),
   "createdAt": zod.coerce.date()
 })),

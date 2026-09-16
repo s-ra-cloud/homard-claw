@@ -149,6 +149,11 @@ import {
 } from "../runtime";
 import { abortRunningTask, getWorkerStatus, recoverQueueNow } from "../worker";
 import { abortProactiveTalk } from "../proactive-talk-runtime";
+import {
+  AttachmentNormalizationError,
+  attachmentErrorStatus,
+  normalizeAttachments,
+} from "../attachments";
 import { QUEUE_OWNERSHIP_KEY, getOwnershipSnapshot } from "../worker-ownership";
 import {
   listRecentAgentActions,
@@ -1351,11 +1356,49 @@ router.post("/tasks", async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
+  // Refuse foreign/missing agents before spending parser resources. Dispatch
+  // still rechecks the authoritative row when it commits the task.
+  const [ownedAgent] = await db
+    .select({ id: agentsTable.id })
+    .from(agentsTable)
+    .where(and(
+      eq(agentsTable.id, parsed.data.agentId),
+      eq(agentsTable.workspaceId, req.workspaceId!),
+    ))
+    .limit(1);
+  if (!ownedAgent) {
+    res.status(404).json({ error: "Agent not found" });
+    return;
+  }
+  // Normalize before dispatching: a task only ever stores extracted PDF text,
+  // so queue retries and provider action rounds cannot repeatedly parse or
+  // retain the owner's original binary document.
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  req.on("aborted", abort);
+  res.on("close", () => {
+    if (!res.writableEnded) abort();
+  });
+  let attachments;
+  try {
+    attachments = await normalizeAttachments(parsed.data.attachments, {
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof AttachmentNormalizationError) {
+      res.status(attachmentErrorStatus(error)).json({
+        error: error.userMessage,
+      });
+      return;
+    }
+    throw error;
+  }
+  if (controller.signal.aborted) return;
   const outcome = await dispatchTask({
     agentId: parsed.data.agentId,
     workspaceId: req.workspaceId!,
     objective: parsed.data.objective,
-    attachments: parsed.data.attachments,
+    attachments,
     priority: parsed.data.priority,
     budgetCents: parsed.data.budgetCents ?? null,
     providerOverride: parsed.data.providerOverride as ProviderId | undefined,
@@ -1541,6 +1584,44 @@ router.post("/tasks/:taskId/retry", async (req, res): Promise<void> => {
     res.status(400).json({ error: "Invalid task id" });
     return;
   }
+  // Rows created before PDF normalization may still contain raw PDFs. Convert
+  // them on the explicit retry path before requeueing, then persist that
+  // durable form for every later retry and provider round.
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  req.on("aborted", abort);
+  res.on("close", () => {
+    if (!res.writableEnded) abort();
+  });
+  const existing = await db
+    .select({ files: tasksTable.files })
+    .from(tasksTable)
+    .where(
+      and(
+        eq(tasksTable.id, params.data.taskId),
+        eq(tasksTable.workspaceId, req.workspaceId!),
+      ),
+    )
+    .limit(1);
+  if (!existing[0]) {
+    res.status(404).json({ error: "Task not found" });
+    return;
+  }
+  let normalizedFiles;
+  try {
+    normalizedFiles = await normalizeAttachments(existing[0].files, {
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof AttachmentNormalizationError) {
+      res.status(attachmentErrorStatus(error)).json({
+        error: error.userMessage,
+      });
+      return;
+    }
+    throw error;
+  }
+  if (controller.signal.aborted) return;
   const outcome = await db.transaction(async (tx) => {
     const [row] = await tx
       .select({ task: tasksTable, agentName: agentsTable.name })
@@ -1572,6 +1653,7 @@ router.post("/tasks/:taskId/retry", async (req, res): Promise<void> => {
         // A retry is a fresh run, not a continuation: the usage ledger
         // starts over with the rest of the run state.
         continuationSegments: 0,
+        files: normalizedFiles,
       })
       .where(eq(tasksTable.id, row.task.id))
       .returning();
@@ -1624,6 +1706,48 @@ router.post("/tasks/:taskId/fallback", async (req, res): Promise<void> => {
     return;
   }
   const action = body.data.action;
+  // A legacy raw-PDF task can be requeued through this recovery path too.
+  // Extract outside the lock, then the transaction below still verifies the
+  // task is the same workspace-owned retryable row before it writes.
+  let normalizedFiles:
+    | (typeof tasksTable.$inferSelect)["files"]
+    | undefined;
+  if (action !== "cancel") {
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    req.on("aborted", abort);
+    res.on("close", () => {
+      if (!res.writableEnded) abort();
+    });
+    const existing = await db
+      .select({ files: tasksTable.files })
+      .from(tasksTable)
+      .where(
+        and(
+          eq(tasksTable.id, params.data.taskId),
+          eq(tasksTable.workspaceId, req.workspaceId!),
+        ),
+      )
+      .limit(1);
+    if (!existing[0]) {
+      res.status(404).json({ error: "Task not found" });
+      return;
+    }
+    try {
+      normalizedFiles = await normalizeAttachments(existing[0].files, {
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (error instanceof AttachmentNormalizationError) {
+        res.status(attachmentErrorStatus(error)).json({
+          error: error.userMessage,
+        });
+        return;
+      }
+      throw error;
+    }
+    if (controller.signal.aborted) return;
+  }
   const outcome = await db.transaction(async (tx) => {
     const [row] = await tx
       .select({ task: tasksTable, agentName: agentsTable.name })
@@ -1656,6 +1780,7 @@ router.post("/tasks/:taskId/fallback", async (req, res): Promise<void> => {
             errorMessage: null,
             startedAt: null,
             finishedAt: null,
+            ...(normalizedFiles ? { files: normalizedFiles } : {}),
             ...(action === "approve_paid_fallback"
               ? { paidFallbackApprovedAt: new Date() }
               : {}),

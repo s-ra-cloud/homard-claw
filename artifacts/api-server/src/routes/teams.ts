@@ -39,6 +39,11 @@ import { evaluateDelegation, evaluateTalkDelegation } from "../policy";
 import { resolveRouting } from "../providers";
 import { publish } from "../events";
 import { getWorkspaceSetting } from "../workspace";
+import {
+  AttachmentNormalizationError,
+  attachmentErrorStatus,
+  normalizeAttachments,
+} from "../attachments";
 
 const router: IRouter = Router();
 
@@ -87,6 +92,50 @@ router.post(
       res.status(404).json({ error: "Target agent not found." });
       return;
     }
+    const [sourcePreview] = await db
+      .select()
+      .from(agentsTable)
+      .where(and(
+        eq(agentsTable.id, params.data.agentId),
+        eq(agentsTable.workspaceId, req.workspaceId!),
+      ))
+      .limit(1);
+    if (!sourcePreview) {
+      res.status(404).json({ error: "Agent not found." });
+      return;
+    }
+    const previewDecision = await db.transaction((tx) => evaluateTalkDelegation({
+      lead: sourcePreview,
+      targetAgentId: body.data.targetAgentId,
+      tx,
+    }));
+    if (previewDecision.kind === "deny") {
+      res.status(403).json({ error: previewDecision.reason });
+      return;
+    }
+    // Authorize first, then parse outside the transaction. The transaction
+    // below revalidates team membership and tenancy before creating work.
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    req.on("aborted", abort);
+    res.on("close", () => {
+      if (!res.writableEnded) abort();
+    });
+    let attachments;
+    try {
+      attachments = await normalizeAttachments(body.data.attachments, {
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (error instanceof AttachmentNormalizationError) {
+        res.status(attachmentErrorStatus(error)).json({
+          error: error.userMessage,
+        });
+        return;
+      }
+      throw error;
+    }
+    if (controller.signal.aborted) return;
     const routing = await resolveRouting(req.workspaceId!, targetPreview);
     const talkAutoApprove =
       (await getWorkspaceSetting(
@@ -161,7 +210,7 @@ router.post(
           delegatedByAgentId: source.id,
           talkMode: true,
           talkAutoApprove,
-          files: body.data.attachments ?? [],
+          files: attachments,
           handoffContext: handoff.promptSection,
           handoffSources: handoff.sources,
           status: "queued",

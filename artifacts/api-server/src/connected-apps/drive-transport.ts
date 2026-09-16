@@ -11,6 +11,7 @@
  */
 
 import type { DriveAccessTokenOptions } from "../google/credentials";
+import { extractPdfText, PdfExtractionError } from "../pdf/extract";
 
 export const DEFAULT_DRIVE_READ_TIMEOUT_MS = 30_000;
 /** A read can be large, but never allows an unbounded response body. */
@@ -51,6 +52,7 @@ export type DriveReadFailureClass =
   | "metadata"
   | "body_limit"
   | "unsupported_content"
+  | "pdf_extraction"
   | "transport";
 
 export type DriveReadFailureDetails = {
@@ -85,6 +87,11 @@ export type DriveReadInput = {
   taskId?: string;
   resolveToken: DriveTokenResolver;
   fetchImpl?: DriveFetch;
+  /**
+   * Test seam for the shared extractor. Production callers omit this and
+   * always use extractPdfText from the isolated PDF service.
+   */
+  extractPdf?: typeof extractPdfText;
   now?: () => number;
   onStage?: (stage: string) => void;
   onFailure?: (details: DriveReadFailureDetails) => void;
@@ -349,8 +356,25 @@ function unsupportedContentFailure(): DriveReadTransportFailure {
     ok: false,
     kind: "failed",
     message:
-      "Google Drive could not read this file as text. PDF, Word, image, and other binary files need text extraction first. Provide a Google Doc or a UTF-8 text file instead.",
+      "Google Drive could not read this file as text. PDFs use separate text extraction; Word, image, and other unsupported binary files cannot be read.",
   };
+}
+
+function pdfExtractionFailure(message?: string): DriveReadTransportFailure {
+  return {
+    ok: false,
+    kind: "failed",
+    // PdfExtractionError's message is an intentionally closed, safe message.
+    // Do not use messages from any other error: parser implementations can
+    // include document contents, paths, or diagnostic data in those.
+    message:
+      message ??
+      "Google Drive could not extract readable text from this PDF.",
+  };
+}
+
+function isPdfDownload(mimeType: string): boolean {
+  return mimeType === "application/pdf";
 }
 
 function isTextDownload(mimeType: string): boolean {
@@ -521,15 +545,16 @@ function discardResponseBody(response: Response): void {
 }
 
 /**
- * Consume a response without ever retaining more than the configured body
- * cap. Error response text is used only for closed status classification and
- * is never included in an outcome.
+ * Consume a response as bytes under the same body limit and abort boundary as
+ * text reads. PDFs must reach the shared extractor as bytes: decoding them as
+ * UTF-8 first corrupts valid files and can accidentally leak raw binary into
+ * an action result.
  */
-async function boundedResponseText(
+async function boundedResponseBytes(
   response: Response,
   state: TransportState,
   reportBodyFailure = true,
-): Promise<string | DriveReadTransportFailure> {
+): Promise<Uint8Array | DriveReadTransportFailure> {
   const contentLength = responseBodySize(response);
   if (contentLength !== null && contentLength > MAX_DRIVE_READ_BODY_BYTES) {
     state.controller.abort();
@@ -541,16 +566,16 @@ async function boundedResponseText(
   }
 
   if (!response.body) {
-    const text = await runBounded(() => response.text(), state);
-    const bytes = new TextEncoder().encode(text).byteLength;
-    if (bytes > MAX_DRIVE_READ_BODY_BYTES) {
+    const buffer = await runBounded(() => response.arrayBuffer(), state);
+    const bytes = new Uint8Array(buffer);
+    if (bytes.byteLength > MAX_DRIVE_READ_BODY_BYTES) {
       state.controller.abort();
       if (reportBodyFailure) {
         reportFailure(state, { failureClass: "body_limit", stage: "body" });
       }
       return bodyTooLargeFailure();
     }
-    return validateTextContent(text);
+    return bytes;
   }
 
   const reader = response.body.getReader();
@@ -576,13 +601,13 @@ async function boundedResponseText(
       }
       chunks.push(chunk);
     }
-  } catch {
+  } catch (error) {
     try {
       void reader.cancel().catch(() => undefined);
     } catch {
-      // Preserve the generic body transport failure below.
+      // Preserve the stop or generic body failure below.
     }
-    throw new Error("drive response body read failed");
+    throw error;
   }
 
   const bytes = new Uint8Array(total);
@@ -591,10 +616,112 @@ async function boundedResponseText(
     bytes.set(chunk, offset);
     offset += chunk.byteLength;
   }
+  return bytes;
+}
+
+/**
+ * Consume a response without ever retaining more than the configured body
+ * cap. Error response text is used only for closed status classification and
+ * is never included in an outcome.
+ */
+async function boundedResponseText(
+  response: Response,
+  state: TransportState,
+  reportBodyFailure = true,
+): Promise<string | DriveReadTransportFailure> {
+  const bytes = await boundedResponseBytes(response, state, reportBodyFailure);
+  if (!(bytes instanceof Uint8Array)) return bytes;
   try {
     return validateTextContent(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
   } catch {
     return unsupportedContentFailure();
+  }
+}
+
+async function requestDrivePdf(
+  path: string,
+  token: string,
+  state: TransportState,
+  fetchImpl: DriveFetch,
+): Promise<Uint8Array | DriveReadTransportFailure> {
+  safeStage(state, "download");
+  let response: Response;
+  try {
+    response = await runBounded(
+      () =>
+        fetchImpl(`${DRIVE_API_BASE_URL}${path}`, {
+          method: "GET",
+          headers: { Authorization: `Bearer ${token}` },
+          signal: state.controller.signal,
+        }),
+      state,
+    );
+  } catch (error) {
+    if (error instanceof BoundedStop) {
+      reportFailure(state, {
+        ...failureDetailsForStop(error.failure),
+        stage: "download",
+      });
+      return error.failure;
+    }
+    if (state.controller.signal.aborted) {
+      const failure = failureForStop(state);
+      reportFailure(state, {
+        ...failureDetailsForStop(failure),
+        stage: "download",
+      });
+      return failure;
+    }
+    reportFailure(state, { failureClass: "transport", stage: "download" });
+    return transportFailure();
+  }
+
+  if (!response.ok) {
+    let bodyText: string | undefined;
+    try {
+      const body = await boundedResponseText(response, state, false);
+      if (typeof body === "string") bodyText = body;
+    } catch {
+      if (state.controller.signal.aborted) {
+        const failure = failureForStop(state);
+        reportFailure(state, {
+          ...failureDetailsForStop(failure),
+          stage: "download",
+        });
+        return failure;
+      }
+    }
+    const failure = classifyDriveReadHttpFailure(
+      response.status,
+      response.headers,
+      bodyText,
+    );
+    reportFailure(state, {
+      failureClass: httpFailureClass(response.status, response.headers, bodyText),
+      providerStatus: response.status,
+      stage: "download",
+    });
+    return failure;
+  }
+
+  safeStage(state, "body");
+  try {
+    const body = await boundedResponseBytes(response, state);
+    if (!(body instanceof Uint8Array) && !state.failureReported) {
+      reportFailure(state, { failureClass: "transport", stage: "body" });
+    }
+    return body;
+  } catch {
+    if (state.controller.signal.aborted) {
+      const failure = failureForStop(state);
+      reportFailure(state, {
+        ...failureDetailsForStop(failure),
+        stage: "body",
+      });
+      return failure;
+    }
+    reportFailure(state, { failureClass: "transport", stage: "body" });
+    return transportFailure();
   }
 }
 
@@ -892,9 +1019,67 @@ export async function readDriveFileTransport(
       reportFailure(state, { failureClass: "metadata", stage: "metadata" });
       return metadataFailure();
     }
-    if (!mimeType.startsWith(DRIVE_EXPORTABLE_PREFIX) && !isTextDownload(mimeType)) {
+    if (
+      !mimeType.startsWith(DRIVE_EXPORTABLE_PREFIX) &&
+      !isTextDownload(mimeType) &&
+      !isPdfDownload(mimeType)
+    ) {
       reportFailure(state, { failureClass: "unsupported_content", stage: "metadata" });
       return unsupportedContentFailure();
+    }
+    if (isPdfDownload(mimeType)) {
+      const pdf = await requestDrivePdf(
+        `/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
+        token,
+        state,
+        input.fetchImpl ?? fetch,
+      );
+      if (!(pdf instanceof Uint8Array)) return finish(pdf);
+
+      safeStage(state, "extract");
+      try {
+        const text = await runBounded(
+          () =>
+            (input.extractPdf ?? extractPdfText)(pdf, {
+              signal: state.controller.signal,
+              maxInputBytes: MAX_DRIVE_READ_BODY_BYTES,
+              deadlineAt,
+            }),
+          state,
+        );
+        if (typeof text !== "string" || text.includes("\0")) {
+          const failure = pdfExtractionFailure();
+          reportFailure(state, { failureClass: "pdf_extraction", stage: "extract" });
+          return finish(failure);
+        }
+        return {
+          ok: true,
+          name: typeof file.name === "string" ? file.name : null,
+          mimeType,
+          text,
+        };
+      } catch (error) {
+        if (error instanceof BoundedStop) {
+          reportFailure(state, {
+            ...failureDetailsForStop(error.failure),
+            stage: "extract",
+          });
+          return finish(error.failure);
+        }
+        if (state.controller.signal.aborted) {
+          const failure = failureForStop(state);
+          reportFailure(state, {
+            ...failureDetailsForStop(failure),
+            stage: "extract",
+          });
+          return finish(failure);
+        }
+        const failure = error instanceof PdfExtractionError
+          ? pdfExtractionFailure(error.message)
+          : pdfExtractionFailure();
+        reportFailure(state, { failureClass: "pdf_extraction", stage: "extract" });
+        return finish(failure);
+      }
     }
     const path = mimeType.startsWith(DRIVE_EXPORTABLE_PREFIX)
       ? `/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent(mimeExport(mimeType))}`

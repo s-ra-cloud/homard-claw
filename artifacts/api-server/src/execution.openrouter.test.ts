@@ -104,6 +104,47 @@ describe("successful completions", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the full PDF source filename and page text in provider content", async () => {
+    mockCompletion({
+      choices: [{ message: { content: "Read it." }, finish_reason: "stop" }],
+    });
+    const sourceName = `${"a".repeat(156)}.pdf`;
+    await getProviderAdapter("openrouter").execute({
+      workspaceId,
+      provider: "openrouter",
+      model: "test-vendor/test-model",
+      system: "You are a test agent.",
+      prompt: PROMPT,
+      maxOutputTokens: 512,
+      signal: new AbortController().signal,
+      attachments: [
+        {
+          name: `${"a".repeat(156)}.txt`,
+          mimeType: "text/plain",
+          encoding: "text",
+          content: `--- SOURCE PDF FILENAME: ${sourceName} ---\n--- Page 1 ---\nFull source retained.`,
+        },
+      ],
+    });
+    const request = JSON.parse(
+      String((fetchMock.mock.calls[0]?.[1] as RequestInit).body),
+    ) as {
+      messages: Array<{
+        content: Array<{ type: string; text?: string }>;
+      }>;
+    };
+    const attachmentText = request.messages[1]!.content
+      .filter((part) => part.type === "text")
+      .map((part) => part.text ?? "")
+      .join("");
+    expect(attachmentText).toContain(
+      `--- ATTACHED DOCUMENT: ${sourceName} (text/plain) ---`,
+    );
+    expect(attachmentText).toContain(
+      `--- SOURCE PDF FILENAME: ${sourceName} ---\n--- Page 1 ---\nFull source retained.`,
+    );
+  });
+
   it("extracts text from array-of-parts content, ignoring non-text parts", async () => {
     mockCompletion({
       choices: [

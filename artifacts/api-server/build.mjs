@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
-import { rm } from "node:fs/promises";
+import { cp, mkdir, rm } from "node:fs/promises";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
 globalThis.require = createRequire(import.meta.url);
@@ -31,6 +31,11 @@ async function buildAll() {
     // - uses native modules and loads them dynamically (e.g. sharp)
     // - use path traversal to read files (e.g. @google-cloud/secret-manager loads sibling .proto files)
     external: [
+      // PDF.js runs in a separately resource-limited child process. Leaving it
+      // external keeps its optional native dependencies and assets resolvable
+      // from the packaged artifact.
+      "pdfjs-dist",
+      "pdfjs-dist/*",
       "*.node",
       "sharp",
       "better-sqlite3",
@@ -126,6 +131,15 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     `,
     },
   });
+
+  // This worker intentionally stays as a small, unbundled ESM file: it is
+  // forked by the service, imports the external PDF.js package itself, and
+  // therefore cannot inherit the server's module graph or application state.
+  await mkdir(path.join(distDir, "pdf"), { recursive: true });
+  await cp(
+    path.join(artifactDir, "src/pdf/extract-worker.mjs"),
+    path.join(distDir, "pdf/extract-worker.mjs"),
+  );
 }
 
 buildAll().catch((err) => {

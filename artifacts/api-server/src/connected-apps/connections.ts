@@ -163,6 +163,8 @@ export async function connectionStatus(
 /** Longest result payload ever fed back to a model or stored on an action. */
 const RESULT_CHAR_LIMIT = 4_000;
 
+/** The shared PDF service is also capped here as a defence in depth boundary. */
+const DRIVE_EXTRACTED_TEXT_CHAR_LIMIT = 100_000;
 export type ExecutionOutcome =
   | { ok: true; summary: string }
   | {
@@ -195,6 +197,12 @@ function truncate(text: string): string {
     : text;
 }
 
+function explicitDriveFilename(name: string | null, fallback: unknown): string {
+  const filename = name ?? `Drive file ${String(fallback)}`;
+  if (filename.length <= DRIVE_FILENAME_CHAR_LIMIT) return filename;
+  const omitted = filename.length - DRIVE_FILENAME_CHAR_LIMIT;
+  return `${filename.slice(0, DRIVE_FILENAME_CHAR_LIMIT)} [filename truncated; ${omitted} character(s) omitted]`;
+}
 /**
  * Map a connector-proxy failure to an outcome. Exposed for tests: the
  * regression suite must pin down that expired/missing authorization becomes
@@ -766,6 +774,7 @@ const DRIVE_READ_LOG_STAGES = new Set([
   "export",
   "download",
   "body",
+  "extract",
   "complete",
   "failure",
 ]);
@@ -881,11 +890,13 @@ async function driveReadFile(
     // A logger transport failure must not skip action finalization.
   }
   if (!result.ok) return result;
+  const text = result.mimeType === "application/pdf"
+    ? boundDriveExtractedText(result.text)
+    : result.text;
+  const summary = `File: "${explicitDriveFilename(result.name, params.fileId)}" (${result.mimeType})\nContent:\n${text}`;
   return {
     ok: true,
-    summary: truncate(
-      `"${result.name ?? params.fileId}" (${result.mimeType}):\n${result.text}`,
-    ),
+    summary: truncateDriveActionResult(summary),
   };
 }
 
@@ -4406,4 +4417,27 @@ export async function verifyOperationOutcome(
       message: UNEXPECTED_APP_ERROR_MESSAGE,
     };
   }
+}
+
+function boundDriveExtractedText(text: string): string {
+  if (text.length <= DRIVE_EXTRACTED_TEXT_CHAR_LIMIT) return text;
+  const marker =
+    `\n[Drive extracted text truncated at the ${DRIVE_EXTRACTED_TEXT_CHAR_LIMIT}-character limit; additional content was omitted.]`;
+  return `${text.slice(0, Math.max(0, DRIVE_EXTRACTED_TEXT_CHAR_LIMIT - marker.length))}${marker}`;
+}
+
+/** A metadata name must not consume the complete bounded action result. */
+const DRIVE_FILENAME_CHAR_LIMIT = 500;
+
+/**
+ * Drive reads have two explicit limits: extraction's document limit and the
+ * smaller action-result limit. Keep their markers distinct so a model never
+ * treats the returned text as a complete document.
+ */
+function truncateDriveActionResult(summary: string): string {
+  if (summary.length <= RESULT_CHAR_LIMIT) return summary;
+  const marker =
+    "\n[Drive action result truncated at 4000 characters; additional extracted content was omitted.]";
+  const headLength = Math.max(0, RESULT_CHAR_LIMIT - marker.length);
+  return `${summary.slice(0, headLength)}${marker}`;
 }

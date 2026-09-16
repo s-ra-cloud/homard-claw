@@ -15,3 +15,9 @@ Voice chat splits providers deliberately: speech-to-text and text-to-speech are 
 - Voice transcripts are opt-in and off by default; live captions (partial transcription while recording) are best-effort and never authoritative — the final server transcript of the full recording is.
 - In the SSE turn stream, mark terminal failures as fatal so the client shows the real error instead of a generic "connection dropped"; non-fatal errors (e.g. TTS failure after a good reply) keep the turn alive.
 - A disconnected client must cancel in-flight speech work (thread the abort signal into STT/TTS).
+
+Treat clearing Talk as a privacy boundary across all durable conversation copies, not just visible message history.
+
+**Why:** idempotency responses can retain private document context even after messages are deleted, and an in-flight turn can restore it after clearing. Caching unchanged image/text uploads also multiplies private data and request sizes unnecessarily.
+
+**How to apply:** retain only bounded PDF replacement data when needed for proposals; keep original non-PDF files client-side. Clear and finalization must coordinate so a cleared exchange cannot repopulate private history or replay its old response.

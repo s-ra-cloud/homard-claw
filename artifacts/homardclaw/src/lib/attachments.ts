@@ -9,8 +9,72 @@ const IMAGE_TYPES = new Set([
   "image/webp",
   "image/gif",
 ]);
-const MAX_FILE_BYTES = 25_000_000;
+const TEXT_APPLICATION_TYPES = new Set([
+  "application/json",
+  "application/ld+json",
+  "application/sql",
+  "application/toml",
+  "application/x-yaml",
+  "application/yaml",
+  "application/xml",
+]);
+const MIME_BY_EXTENSION: Record<string, string> = {
+  csv: "text/csv",
+  gif: "image/gif",
+  htm: "text/html",
+  html: "text/html",
+  jpeg: "image/jpeg",
+  jpg: "image/jpeg",
+  js: "text/javascript",
+  json: "application/json",
+  markdown: "text/markdown",
+  md: "text/markdown",
+  pdf: "application/pdf",
+  png: "image/png",
+  py: "text/x-python",
+  sql: "application/sql",
+  toml: "application/toml",
+  ts: "text/typescript",
+  webp: "image/webp",
+  xml: "application/xml",
+  yaml: "application/x-yaml",
+  yml: "application/x-yaml",
+};
+export const MAX_FILE_BYTES = 25_000_000;
 export const MAX_ATTACHMENTS = 4;
+
+function extensionOf(name: string): string | null {
+  const dot = name.lastIndexOf(".");
+  return dot > -1 && dot < name.length - 1
+    ? name.slice(dot + 1).toLowerCase()
+    : null;
+}
+
+function isSupportedMimeType(mimeType: string): boolean {
+  return (
+    IMAGE_TYPES.has(mimeType) ||
+    mimeType === "application/pdf" ||
+    mimeType.startsWith("text/") ||
+    TEXT_APPLICATION_TYPES.has(mimeType)
+  );
+}
+
+/**
+ * Browser uploads frequently leave File.type blank (notably Safari and files
+ * dragged from desktop apps). Infer only our explicit accepted extensions;
+ * never turn arbitrary binary into text/plain just because the browser had no
+ * MIME hint.
+ */
+export function inferAttachmentMimeType(file: Pick<File, "name" | "type">): string {
+  const browserType = file.type.split(";", 1)[0].trim().toLowerCase();
+  if (isSupportedMimeType(browserType)) return browserType;
+  const inferred = MIME_BY_EXTENSION[extensionOf(file.name) ?? ""];
+  if (inferred) return inferred;
+  // Preserve legacy behavior for desktop/browser uploads without useful MIME
+  // metadata: readAttachment treats this as text and still rejects empty/NUL
+  // content. Explicit extensions above continue to take precedence.
+  return "text/plain";
+}
 
 function base64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -26,7 +90,7 @@ function base64(file: File): Promise<string> {
 export async function readAttachment(file: File): Promise<InputAttachment> {
   if (file.size > MAX_FILE_BYTES)
     throw new Error(`${file.name} is larger than 25 MB.`);
-  const mimeType = file.type || "text/plain";
+  const mimeType = inferAttachmentMimeType(file);
   if (IMAGE_TYPES.has(mimeType) || mimeType === "application/pdf") {
     return {
       name: file.name,

@@ -47,6 +47,12 @@ function fireSchedules(...scheduleIds: string[]) {
     includePausedAgents: true,
   });
 }
+function fireSchedulesAt(now: Date, ...scheduleIds: string[]) {
+  return runDueSchedules(now, {
+    scheduleIds,
+    includePausedAgents: true,
+  });
+}
 import { notifyTaskEvent } from "../notifications";
 
 const app = express();
@@ -447,10 +453,16 @@ describe("schedule firing", () => {
     const created = await request(app)
       .post("/api/schedules")
       .send(scheduleBody(agent.id));
-    const staleClaim = new Date(Date.now() - 10 * 60 * 1000);
+    // Keep the recovered occurrence, stale claim, evidence, and scheduler
+    // clock deterministic.  09:00 Europe/Paris is 08:00 UTC in January;
+    // the worker claimed that occurrence after it was due and then crashed.
+    const recoveryNow = new Date("2099-01-15T13:00:00.000Z");
+    const recoveredOccurrence = new Date("2099-01-15T08:00:00.000Z");
+    const staleClaim = new Date("2099-01-15T08:10:00.000Z");
+    const evidenceCreatedAt = new Date("2099-01-15T08:11:00.000Z");
     await db
       .update(schedulesTable)
-      .set({ nextRunAt: new Date(Date.now() - 60_000), claimedAt: staleClaim })
+      .set({ nextRunAt: recoveredOccurrence, claimedAt: staleClaim })
       .where(eq(schedulesTable.id, created.body.id));
     // The crashed run DID create its task before dying.
     const [existingTask] = await db
@@ -464,10 +476,11 @@ describe("schedule firing", () => {
         status: "queued",
         estimatedCostCents: 1,
         scheduleId: created.body.id,
+        createdAt: evidenceCreatedAt,
       })
       .returning();
 
-    await fireSchedules(created.body.id);
+    await fireSchedulesAt(recoveryNow, created.body.id);
     const tasks = await db
       .select()
       .from(tasksTable)
@@ -479,7 +492,7 @@ describe("schedule firing", () => {
       .where(eq(schedulesTable.id, created.body.id));
     expect(after.claimedAt).toBeNull();
     expect(after.lastTaskId).toBe(existingTask.id);
-    expect(after.nextRunAt!.getTime()).toBeGreaterThan(Date.now());
+    expect(after.nextRunAt!.getTime()).toBeGreaterThan(recoveryNow.getTime());
   });
 
   it("skips a schedule whose claim is fresh (dispatch in flight elsewhere)", async () => {

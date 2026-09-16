@@ -20,6 +20,10 @@ import {
   type ProviderId,
 } from "./providers";
 import { latestConversation } from "./provider-conversations";
+import {
+  AttachmentNormalizationError,
+  normalizeAttachments,
+} from "./attachments";
 
 /** Prompt-relevant agent configuration used for token estimation. */
 export function agentPromptContext(agent: {
@@ -109,6 +113,21 @@ export async function dispatchTask(
     if (preview.retired || preview.archived) {
       outcome = { status: 409 };
       break;
+    }
+    // All durable task creators (including inspections/corrections that call
+    // dispatchTask directly) share this ingress boundary. The route-level
+    // normalization carries a request AbortSignal; this second canonical
+    // check protects internal callers and is a no-op for already-extracted
+    // task files.
+    let attachments;
+    try {
+      attachments = await normalizeAttachments(input.attachments);
+    } catch (error) {
+      if (error instanceof AttachmentNormalizationError) {
+        outcome = { status: 422, message: error.userMessage };
+        break;
+      }
+      throw error;
     }
     let routing;
     try {
@@ -221,7 +240,7 @@ export async function dispatchTask(
           ownerClerkUserId: wsOwner?.clerkUserId ?? null,
           agentId: agent.id,
           objective: input.objective,
-          files: input.attachments ?? [],
+          files: attachments,
           priority: input.priority ?? "normal",
           budgetCents: input.budgetCents ?? null,
           provider: routing.provider,

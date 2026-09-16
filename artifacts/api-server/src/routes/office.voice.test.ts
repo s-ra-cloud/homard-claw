@@ -61,10 +61,11 @@ vi.mock("../audit", async (importOriginal) => {
 });
 
 // Interleaving hook for the clear-vs-persist race tests. Each converse
-// request reads the clear-epoch key twice: once at request start (epoch
-// capture, before any other await) and once inside persistTranscript under
-// the per-agent lock. `armAt` picks which occurrence to pause AFTER the
-// value has been read, so tests can wedge a DELETE into either window.
+// request reads the clear-epoch key three times: once at request start (epoch
+// capture, before any other await), once while finalization claims the
+// per-agent lock, and once inside persistTranscript. `armAt` picks which
+// occurrence to pause AFTER the value has been read, so tests can wedge a
+// DELETE into either window.
 const markerGate = vi.hoisted(() => ({
   armAt: 0,
   seen: 0,
@@ -91,7 +92,7 @@ vi.mock("../workspace", async (importOriginal) => {
       await maybePause(key);
       return value;
     },
-    // Occurrence 2: the persist-side epoch re-check under the agent lock.
+    // Finalization and persistence re-check under the agent lock.
     getWorkspaceSettingVia: async (
       executor: Parameters<typeof mod.getWorkspaceSettingVia>[0],
       workspaceId: string,
@@ -1041,10 +1042,11 @@ describe("text conversations", () => {
   it("clears only the agent's own voice history and returns the deleted count", async () => {
     const agent = await createAgent(`${RUN_TAG} Cleared`);
     const bystander = await createAgent(`${RUN_TAG} Bystander`);
-    mockProviders();
+    const providers = mockProviders();
+    const wipedMessageId = `clear-cache-${Date.now()}`;
     await request(app)
       .post(`/api/agents/${agent.id}/converse`)
-      .send({ text: "Wipe me" });
+      .send({ text: "Wipe me", clientMessageId: wipedMessageId });
     await request(app)
       .post(`/api/agents/${bystander.id}/converse`)
       .send({ text: "Keep me" });
@@ -1064,6 +1066,16 @@ describe("text conversations", () => {
     );
     expect(res.status).toBe(200);
     expect(res.body.deleted).toBe(2);
+    const exchanges = await db
+      .select()
+      .from(talkExchangesTable)
+      .where(
+        and(
+          eq(talkExchangesTable.workspaceId, wsId),
+          eq(talkExchangesTable.agentId, agent.id),
+        ),
+      );
+    expect(exchanges).toEqual([]);
 
     const history = await request(app).get(
       `/api/agents/${agent.id}/talk-history`,
@@ -1088,9 +1100,16 @@ describe("text conversations", () => {
         (entry: { agentId: string }) => entry.agentId === agent.id,
       ),
     ).toBe(false);
+    // The old idempotency key is not a hidden replay channel after clearing:
+    // it is a brand-new turn and must consult the provider again.
+    const fresh = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({ text: "Wipe me", clientMessageId: wipedMessageId });
+    expect(fresh.status).toBe(200);
+    expect(providers.calls()).toBe(3);
   });
 
-  it("a clear during an in-flight converse wins: the late reply is not persisted", async () => {
+  it("a clear during an in-flight converse removes its claim and never leaks the late reply", async () => {
     const agent = await createAgent(`${RUN_TAG} Clear Racer`);
     // Gate the provider's reply so the DELETE can land mid-conversation.
     let releaseReply!: () => void;
@@ -1129,7 +1148,10 @@ describe("text conversations", () => {
 
     const inFlight = request(app)
       .post(`/api/agents/${agent.id}/converse`)
-      .send({ text: "Racing message" })
+      .send({
+        text: "Racing message",
+        clientMessageId: `clear-in-flight-${Date.now()}`,
+      })
       .then((r) => r);
     // Give the converse handler time to reach the (gated) provider call.
     await new Promise((resolve) => setTimeout(resolve, 300));
@@ -1141,8 +1163,8 @@ describe("text conversations", () => {
 
     releaseReply();
     const res = await inFlight;
-    expect(res.status).toBe(200);
-    expect(res.body.reply).toBe("Too late.");
+    expect(res.status).toBe(409);
+    expect(JSON.stringify(res.body)).not.toContain("Too late.");
 
     // The reply was delivered but never persisted: history stays cleared.
     const history = await request(app).get(
@@ -1162,6 +1184,11 @@ describe("text conversations", () => {
         ),
       );
     expect(rows).toHaveLength(0);
+    const exchanges = await db
+      .select()
+      .from(talkExchangesTable)
+      .where(eq(talkExchangesTable.agentId, agent.id));
+    expect(exchanges).toEqual([]);
   });
 
   it("a clear issued between marker verification and insert still leaves history empty", async () => {
@@ -1173,7 +1200,7 @@ describe("text conversations", () => {
     // then release the insert. The delete runs after the insert commits,
     // so history must end up empty either way.
     markerGate.seen = 0;
-    markerGate.armAt = 2;
+    markerGate.armAt = 3;
     const inFlight = request(app)
       .post(`/api/agents/${agent.id}/converse`)
       .send({ text: "Squeeze past the clear" })
@@ -1231,7 +1258,8 @@ describe("text conversations", () => {
     markerGate.release!();
     markerGate.release = null;
     const reply = await inFlight;
-    expect(reply.status).toBe(200);
+    expect(reply.status).toBe(409);
+    expect(JSON.stringify(reply.body)).not.toContain("Straggler");
 
     // The straggler's reply was delivered but never persisted.
     const history = await request(app).get(
@@ -1318,6 +1346,64 @@ describe("text conversations", () => {
       .from(agentMessagesTable)
       .where(eq(agentMessagesTable.toAgentId, agent.id));
     expect(rows.filter((r) => r.body === "Deliver this once")).toHaveLength(1);
+  });
+
+  it("never echoes or caches huge ordinary files, including when Talk proposes a task", async () => {
+    const agent = await createAgent(`${RUN_TAG} Private attachments`);
+    mockProviders({
+      replyJson:
+        '{"reply":"I can queue that.","taskObjective":"Review the attached files."}',
+    });
+    const clientMessageId = `private-files-${Date.now()}`;
+    const ordinaryText = `ORDINARY-TEXT-SECRET-${"x".repeat(1024 * 1024)}`;
+    const ordinaryImage = Buffer.alloc(1024 * 1024, 7).toString("base64");
+
+    const response = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({
+        text: "Please create a task for these files.",
+        clientMessageId,
+        attachments: [
+          {
+            name: "private-notes.txt",
+            mimeType: "text/plain",
+            encoding: "text",
+            content: ordinaryText,
+          },
+          {
+            name: "private-image.png",
+            mimeType: "image/png",
+            encoding: "base64",
+            content: ordinaryImage,
+          },
+        ],
+      });
+    expect(response.status, JSON.stringify(response.body)).toBe(200);
+    expect(response.body.proposedTaskObjective).toBe(
+      "Review the attached files.",
+    );
+    expect(response.body.normalizedAttachments).toBeUndefined();
+    expect(response.body.normalizedAttachmentIndices).toBeUndefined();
+    expect(response.body.normalizedUserText).toBeUndefined();
+    expect(JSON.stringify(response.body)).not.toContain(
+      "ORDINARY-TEXT-SECRET-",
+    );
+    expect(JSON.stringify(response.body)).not.toContain(ordinaryImage);
+
+    const [exchange] = await db
+      .select({ responseJson: talkExchangesTable.responseJson })
+      .from(talkExchangesTable)
+      .where(
+        and(
+          eq(talkExchangesTable.workspaceId, wsId),
+          eq(talkExchangesTable.agentId, agent.id),
+          eq(talkExchangesTable.clientMessageId, clientMessageId),
+        ),
+      )
+      .limit(1);
+    expect(exchange?.responseJson).toBeDefined();
+    expect(exchange?.responseJson).not.toContain("ORDINARY-TEXT-SECRET-");
+    expect(exchange?.responseJson).not.toContain(ordinaryImage);
   });
 
   it("concurrent duplicates: exactly one exchange is generated, the loser gets 409 or the reply", async () => {

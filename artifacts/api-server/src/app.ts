@@ -73,8 +73,8 @@ app.use(
     },
   }),
 );
-// Voice recordings and task attachments arrive as base64 JSON. Up to
-// MAX_ATTACHMENTS (4) files at 25 MB each, base64-expanded, plus margin.
+// Voice recordings and task attachments arrive as base64 JSON. Existing task
+// uploads allow up to four 25 MB files, which are base64-expanded in transit.
 app.use(express.json({ limit: "140mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(
@@ -99,6 +99,16 @@ app.use(
   ) => {
     if (res.headersSent) {
       next(err);
+      return;
+    }
+    if (
+      typeof err === "object" &&
+      err !== null &&
+      (err as { type?: unknown }).type === "entity.too.large"
+    ) {
+      res.status(413).json({
+        error: "This request is too large. Reduce the attached file sizes.",
+      });
       return;
     }
     (

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   attachmentsForTalkProposal,
+  inferAttachmentMimeType,
   readAttachment,
   withTalkAttachments,
 } from "./attachments";
@@ -27,6 +28,25 @@ describe("readAttachment", () => {
     const attachment = await readAttachment(textFile(10));
     expect(attachment.content).toHaveLength(10);
   });
+
+  it("infers supported MIME types when the browser leaves File.type blank", () => {
+    expect(
+      inferAttachmentMimeType({ name: "brief.PDF", type: "" }),
+    ).toBe("application/pdf");
+  });
+
+  it("prefers a supported browser MIME and preserves unknown legacy files as text", () => {
+    expect(
+      inferAttachmentMimeType({ name: "notes.unknown", type: "text/plain" }),
+    ).toBe("text/plain");
+    expect(
+      inferAttachmentMimeType({
+        name: "legacy.notes",
+        type: "application/x-legacy-note",
+      }),
+    ).toBe("text/plain");
+  });
+
 });
 
 describe("Talk proposal attachments", () => {

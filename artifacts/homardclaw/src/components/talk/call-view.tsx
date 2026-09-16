@@ -99,6 +99,12 @@ import {
 export type Turn = {
   role: "user" | "agent";
   text: string;
+  /**
+   * Bounded server-canonical text used only when we build provider context.
+   * It can include extracted attachment text while `text` remains exactly
+   * what the owner typed and is what we render in the transcript.
+   */
+  contextText?: string;
   /** Stable key for this session; stored history rows reuse their server id. */
   key: string;
   /** Set when this outgoing message never got a reply; shows a resend button. */
@@ -308,6 +314,36 @@ function TalkBugReportButton({
       </DialogContent>
     </Dialog>
   );
+}
+
+/**
+ * The server returns only PDF replacements and their original positions.
+ * Preserve all locally selected ordinary files, including same-named files,
+ * while replacing each PDF with the extracted canonical text that task
+ * creation can consume without parsing the source PDF again.
+ */
+function mergeProposalAttachments(
+  originals: readonly InputAttachment[],
+  replacements: readonly InputAttachment[] | undefined,
+  indices: readonly number[] | undefined,
+): InputAttachment[] {
+  if (!replacements?.length || !indices || replacements.length !== indices.length)
+    return [...originals];
+  const merged = [...originals];
+  const seen = new Set<number>();
+  for (const [replacementPosition, originalPosition] of indices.entries()) {
+    if (
+      !Number.isInteger(originalPosition) ||
+      originalPosition < 0 ||
+      originalPosition >= merged.length ||
+      seen.has(originalPosition)
+    ) {
+      return [...originals];
+    }
+    seen.add(originalPosition);
+    merged[originalPosition] = replacements[replacementPosition];
+  }
+  return merged;
 }
 
 export interface CallViewProps {
@@ -569,7 +605,12 @@ export function CallView({
       hydratedRef.current = true;
       const stored: Turn[] = talkHistory.data.turns.map((t) => {
         storedTurnIdsRef.current.add(t.id);
-        return { role: t.role, text: t.text, key: t.id };
+        return {
+          role: t.role,
+          text: t.text,
+          contextText: t.contextText,
+          key: t.id,
+        };
       });
       if (stored.length > 0) setTurns((prev) => [...stored, ...prev]);
       return;
@@ -581,7 +622,12 @@ export function CallView({
       )
       .map((turn) => {
         storedTurnIdsRef.current.add(turn.id);
-        return { role: turn.role, text: turn.text, key: turn.id };
+        return {
+          role: turn.role,
+          text: turn.text,
+          contextText: turn.contextText,
+          key: turn.id,
+        };
       });
     if (recaps.length > 0) setTurns((prev) => [...prev, ...recaps]);
   }, [historyReady, talkHistory.data]);
@@ -599,7 +645,10 @@ export function CallView({
       turnsRef.current
         .filter((t) => !t.failed)
         .slice(-10)
-        .map(({ role, text }) => ({ role, text })),
+        .map(({ role, text, contextText }) => ({
+          role,
+          text: contextText ?? text,
+        })),
     [],
   );
 
@@ -871,6 +920,18 @@ export function CallView({
         })
         .then((data) => {
           if (epochRef.current !== epoch) return; // the call was ended
+          // Persisting this returned canonical form in local state closes the
+          // same-session gap. On a refresh, talk-history supplies the same
+          // `contextText` alongside the original visible utterance.
+          if (data.normalizedUserText) {
+            setTurns((turns) =>
+              turns.map((turn) =>
+                turn.key === turnKey
+                  ? { ...turn, contextText: data.normalizedUserText }
+                  : turn,
+              ),
+            );
+          }
           appendTurn({ role: "agent", text: data.reply });
           setProposedTask(data.proposedTaskObjective ?? null);
           setProposedDelegation(data.proposedDelegation ?? null);
@@ -878,7 +939,11 @@ export function CallView({
           setProposalAttachments(
             attachmentsForTalkProposal(
               Boolean(data.proposedTaskObjective || data.proposedDelegation),
-              turnAttachments,
+              mergeProposalAttachments(
+                turnAttachments,
+                data.normalizedAttachments,
+                data.normalizedAttachmentIndices,
+              ),
             ),
           );
           setPhase("idle");

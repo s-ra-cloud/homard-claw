@@ -1592,6 +1592,8 @@ export interface TalkHistoryTurn {
   id: string;
   role: TalkHistoryTurnRole;
   text: string;
+  /** Bounded canonical text for provider context. Present on user turns with normalized attachments; text remains the visible utterance. */
+  contextText?: string;
   /** @nullable */
   taskId: string | null;
   createdAt: string;
@@ -1660,6 +1662,22 @@ export interface ConverseResponse {
      * @nullable
      */
   voice: string | null;
+  /**
+     * Bounded canonical form of the owner's utterance. It includes extracted PDF text for subsequent Talk context while the transcript continues to display the original utterance. Other attachment contents are never retained here.
+     * @maxLength 8000
+     */
+  normalizedUserText?: string;
+  /**
+     * Extracted PDF replacements needed to confirm a proposal. Ordinary selected files are not echoed or retained in a Talk response.
+     * @maxItems 4
+     */
+  normalizedAttachments?: InputAttachment[];
+  /**
+     * Original attachment positions for normalizedAttachments. Positions preserve mixed and same-named attachment sets during confirmation.
+     * @maxItems 4
+     * @items.minimum 0
+     */
+  normalizedAttachmentIndices?: number[];
 }
 
 export interface DocumentationSection {
