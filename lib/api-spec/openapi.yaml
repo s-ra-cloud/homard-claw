@@ -865,6 +865,28 @@ paths:
                 $ref: "#/components/schemas/ClearTalkHistoryResult"
         "404":
           description: Agent not found
+  /agents/{agentId}/talk-document-context:
+    delete:
+      operationId: clearTalkDocumentContext
+      tags: [office]
+      summary: Consume retained canonical Talk document attachments without clearing history
+      parameters:
+        - $ref: "#/components/parameters/AgentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClearTalkDocumentContextInput"
+      responses:
+        "204":
+          description: Retained document context was cleared
+        "400":
+          description: Document context version is missing or invalid
+        "404":
+          description: Agent not found
+        "409":
+          description: Document context was already replaced or consumed
   /talk-unread:
     get:
       operationId: getTalkUnread
@@ -3398,6 +3420,15 @@ components:
       required: [deleted]
       properties:
         deleted: { type: number }
+    ClearTalkDocumentContextInput:
+      type: object
+      required: [version]
+      properties:
+        version:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Opaque version returned with the proposal's canonical document attachments.
     ConverseInput:
       type: object
       required: [text]
@@ -3462,17 +3493,26 @@ components:
           maxLength: 8000
           description: >-
             Bounded canonical form of the owner's utterance. It includes
-            extracted PDF text for subsequent Talk context while the transcript
-            continues to display the original utterance. Other attachment
-            contents are never retained here.
+            extracted PDF or DOCX text for subsequent Talk context while the
+            transcript continues to display the original utterance. Other
+            attachment contents are never retained here.
         normalizedAttachments:
           type: array
           maxItems: 4
           description: >-
-            Extracted PDF replacements needed to confirm a proposal. Ordinary
-            selected files are not echoed or retained in a Talk response.
+            Extracted PDF or DOCX replacements needed to confirm a proposal.
+            This can be canonical document text retained from an earlier Talk
+            turn. Ordinary selected files are not echoed or retained in a Talk
+            response.
           items:
             $ref: "#/components/schemas/InputAttachment"
+        documentContextVersion:
+          type: string
+          maxLength: 64
+          description: >-
+            Opaque canonical document context version. Send this value when
+            consuming a confirmed or cancelled proposal; conditional cleanup
+            never deletes a newer Talk document context.
         normalizedAttachmentIndices:
           type: array
           maxItems: 4

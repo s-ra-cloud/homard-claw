@@ -16,9 +16,10 @@ import {
   talkExchangesTable,
   tasksTable,
   teamsTable,
+  workspaceSettingsTable,
   workspacesTable,
 } from "@workspace/db";
-import { eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 
 const authState = vi.hoisted(() => ({ userId: "" }));
 const fetchMock = vi.hoisted(() => vi.fn());
@@ -93,6 +94,52 @@ function pdfFixture(pageStreams: string[]): Uint8Array {
   }
   document += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
   return Buffer.from(document, "latin1");
+}
+
+/** Minimal stored ZIP package for the real isolated DOCX parser. */
+function docxFixture(text: string): Uint8Array {
+  const files: Array<[string, string]> = [
+    [
+      "[Content_Types].xml",
+      '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>',
+    ],
+    [
+      "word/document.xml",
+      `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:body></w:document>`,
+    ],
+  ];
+  const local: Buffer[] = [];
+  const central: Buffer[] = [];
+  let offset = 0;
+  for (const [name, value] of files) {
+    const nameBytes = Buffer.from(name);
+    const content = Buffer.from(value);
+    const header = Buffer.alloc(30);
+    const record = Buffer.alloc(46);
+    header.writeUInt32LE(0x04034b50, 0);
+    header.writeUInt16LE(20, 4);
+    header.writeUInt32LE(content.length, 18);
+    header.writeUInt32LE(content.length, 22);
+    header.writeUInt16LE(nameBytes.length, 26);
+    record.writeUInt32LE(0x02014b50, 0);
+    record.writeUInt16LE(20, 4);
+    record.writeUInt16LE(20, 6);
+    record.writeUInt32LE(content.length, 20);
+    record.writeUInt32LE(content.length, 24);
+    record.writeUInt16LE(nameBytes.length, 28);
+    record.writeUInt32LE(offset, 42);
+    local.push(header, nameBytes, content);
+    central.push(record, nameBytes);
+    offset += header.length + nameBytes.length + content.length;
+  }
+  const directory = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(files.length, 8);
+  end.writeUInt16LE(files.length, 10);
+  end.writeUInt32LE(directory.length, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...local, directory, end]);
 }
 
 async function createAgent(name: string) {
@@ -489,6 +536,248 @@ describe("real PDF task and Talk ingress", () => {
     );
     expect(userTurn.text).toBe("Please retain this report for our next discussion.");
     expect(userTurn.contextText).toBe(response.body.normalizedUserText);
+  });
+
+  it("retains canonical DOCX text through a later proposal, reload, task confirmation, and clear without cross-workspace leakage", async () => {
+    const agent = await createAgent("DOCX retained context");
+    const docxMarker = "DOCX-RETAINED-CANONICAL-MARKER";
+    const docxTail = "DOCX-RETAINED-CANONICAL-TAIL";
+    const rawDocx = Buffer.from(
+      docxFixture(`${docxMarker} ${"x".repeat(12_000)} ${docxTail}`),
+    ).toString("base64");
+    const attachment = {
+      name: "later-proposal.docx",
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      encoding: "base64" as const,
+      content: rawDocx,
+    };
+    let proposeTask = false;
+    fetchMock.mockImplementation(async (url: unknown) => {
+      if (!String(url).includes("/chat/completions")) {
+        throw new Error(`unexpected provider URL: ${String(url)}`);
+      }
+      return completion({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                reply: proposeTask
+                  ? "I can queue a review of that document."
+                  : "I have retained the document for the next step.",
+                taskObjective: proposeTask
+                  ? "Review the retained DOCX document."
+                  : null,
+                agentRequest: null,
+                taskResultsQuery: null,
+              }),
+            },
+          },
+        ],
+        usage: { prompt_tokens: 10, completion_tokens: 10 },
+      });
+    });
+
+    const firstMessageId = crypto.randomUUID();
+    const upload = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({
+        text: "Read this DOCX, but do not create a task yet.",
+        clientMessageId: firstMessageId,
+        attachments: [attachment],
+      });
+    expect(upload.status, JSON.stringify(upload.body)).toBe(200);
+    expect(upload.body.proposedTaskObjective).toBeNull();
+    // No proposal means the browser has no attachment to keep. The server's
+    // private canonical context, not the 8k history excerpt, is authoritative.
+    expect(upload.body.normalizedAttachments).toBeUndefined();
+    expect(upload.body.normalizedUserText).toHaveLength(8_000);
+    expect(upload.body.normalizedUserText).toContain(
+      "ATTACHMENT TEXT OMITTED FROM TALK HISTORY",
+    );
+
+    const [storedContext] = await db
+      .select({ value: workspaceSettingsTable.value })
+      .from(workspaceSettingsTable)
+      .where(
+        and(
+          eq(workspaceSettingsTable.workspaceId, workspaceId),
+          eq(
+            workspaceSettingsTable.key,
+            `talk_document_context:${agent.id}`,
+          ),
+        ),
+      )
+      .limit(1);
+    expect(storedContext?.value).toContain(docxMarker);
+    expect(storedContext?.value).toContain(docxTail);
+    expect(storedContext?.value.length).toBeGreaterThan(8_000);
+    expect(storedContext?.value.length).toBeLessThanOrEqual(405_024);
+    expect(storedContext?.value).not.toContain(rawDocx);
+    const [cachedUpload] = await db
+      .select({ responseJson: talkExchangesTable.responseJson })
+      .from(talkExchangesTable)
+      .where(eq(talkExchangesTable.clientMessageId, firstMessageId))
+      .limit(1);
+    expect(cachedUpload?.responseJson).not.toContain(rawDocx);
+
+    // A reload exposes the usual bounded transcript only.
+    const history = await request(app).get(`/api/agents/${agent.id}/talk-history`);
+    expect(history.status).toBe(200);
+    expect(
+      history.body.turns.find(
+        (turn: { role: string }) => turn.role === "user",
+      )?.contextText,
+    ).toEqual(expect.stringContaining(docxMarker));
+
+    // Store a distinct document in another workspace. A later local proposal
+    // must receive only this workspace/agent's canonical document.
+    authState.userId = foreignOwnerId;
+    const foreignAgent = await createAgent("foreign DOCX retained context");
+    const foreignRaw = Buffer.from(docxFixture("FOREIGN-DOCX-MUST-NOT-LEAK")).toString(
+      "base64",
+    );
+    const foreignUpload = await request(app)
+      .post(`/api/agents/${foreignAgent.id}/converse`)
+      .send({
+        text: "Keep this other document.",
+        clientMessageId: crypto.randomUUID(),
+        attachments: [
+          {
+            ...attachment,
+            name: "foreign.docx",
+            content: foreignRaw,
+          },
+        ],
+      });
+    expect(foreignUpload.status, JSON.stringify(foreignUpload.body)).toBe(200);
+    authState.userId = ownerId;
+
+    proposeTask = true;
+    const proposal = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({
+        text: "Now create the task from the document.",
+        clientMessageId: crypto.randomUUID(),
+        history: history.body.turns.map(
+          (turn: {
+            role: "user" | "agent";
+            text: string;
+            contextText?: string;
+          }) => ({
+            role: turn.role,
+            text: turn.contextText ?? turn.text,
+          }),
+        ),
+      });
+    expect(proposal.status, JSON.stringify(proposal.body)).toBe(200);
+    expect(proposal.body.normalizedAttachmentIndices).toBeUndefined();
+    expect(proposal.body.normalizedAttachments).toEqual([
+      expect.objectContaining({
+        name: "later-proposal.docx.txt",
+        mimeType: "text/plain",
+        encoding: "text",
+        content: expect.stringContaining(docxTail),
+      }),
+    ]);
+    expect(proposal.body.documentContextVersion).toEqual(expect.any(String));
+    expect(JSON.stringify(proposal.body)).not.toContain("FOREIGN-DOCX-MUST-NOT-LEAK");
+    expect(JSON.stringify(proposal.body)).not.toContain(rawDocx);
+
+    const confirmed = await request(app).post("/api/tasks").send({
+      agentId: agent.id,
+      objective: proposal.body.proposedTaskObjective,
+      talkMode: true,
+      attachments: proposal.body.normalizedAttachments,
+    });
+    expect(confirmed.status, JSON.stringify(confirmed.body)).toBe(201);
+    const [confirmedTask] = await db
+      .select({ files: tasksTable.files })
+      .from(tasksTable)
+      .where(eq(tasksTable.id, confirmed.body.id))
+      .limit(1);
+    expect(confirmedTask?.files).toEqual([
+      expect.objectContaining({ content: expect.stringContaining(docxTail) }),
+    ]);
+    expect(JSON.stringify(confirmedTask?.files)).not.toContain(rawDocx);
+
+    // Simulate B arriving before A's fire-and-forget confirmation cleanup.
+    // A document-bearing turn deterministically replaces the retained state.
+    proposeTask = true;
+    const replacementMarker = "DOCX-RETAINED-CONTEXT-B-MUST-SURVIVE-A-CLEANUP";
+    const secondUpload = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({
+        text: "Keep it for a later proposal once more.",
+        clientMessageId: crypto.randomUUID(),
+        attachments: [
+          {
+            ...attachment,
+            name: "newer-document.docx",
+            content: Buffer.from(docxFixture(replacementMarker)).toString("base64"),
+          },
+        ],
+      });
+    expect(secondUpload.status, JSON.stringify(secondUpload.body)).toBe(200);
+    expect(secondUpload.body.documentContextVersion).toEqual(expect.any(String));
+    expect(secondUpload.body.documentContextVersion).not.toBe(
+      proposal.body.documentContextVersion,
+    );
+    // Simulate A's fire-and-forget confirmation cleanup arriving only after a
+    // new document-bearing turn B. The old opaque generation may not erase B.
+    const delayedOldCleanup = await request(app)
+      .delete(`/api/agents/${agent.id}/talk-document-context`)
+      .send({ version: proposal.body.documentContextVersion });
+    expect(delayedOldCleanup.status).toBe(409);
+    const [afterDelayedCleanup] = await db
+      .select({ value: workspaceSettingsTable.value })
+      .from(workspaceSettingsTable)
+      .where(
+        and(
+          eq(workspaceSettingsTable.workspaceId, workspaceId),
+          eq(
+            workspaceSettingsTable.key,
+            `talk_document_context:${agent.id}`,
+          ),
+        ),
+      )
+      .limit(1);
+    expect(afterDelayedCleanup?.value).toContain(replacementMarker);
+
+    // The current generation may still be consumed after confirmation or a
+    // dismissal without erasing the ordinary Talk transcript.
+    const consumed = await request(app)
+      .delete(`/api/agents/${agent.id}/talk-document-context`)
+      .send({ version: secondUpload.body.documentContextVersion });
+    expect(consumed.status).toBe(204);
+
+    // Recreate bounded state, then ensure the existing history clear removes
+    // it atomically with transcript and idempotency data.
+    proposeTask = false;
+    const thirdUpload = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({
+        text: "Keep one last document until history is cleared.",
+        clientMessageId: crypto.randomUUID(),
+        attachments: [attachment],
+      });
+    expect(thirdUpload.status, JSON.stringify(thirdUpload.body)).toBe(200);
+    const cleared = await request(app).delete(`/api/agents/${agent.id}/talk-history`);
+    expect(cleared.status).toBe(200);
+    const [afterClear] = await db
+      .select({ value: workspaceSettingsTable.value })
+      .from(workspaceSettingsTable)
+      .where(
+        and(
+          eq(workspaceSettingsTable.workspaceId, workspaceId),
+          eq(
+            workspaceSettingsTable.key,
+            `talk_document_context:${agent.id}`,
+          ),
+        ),
+      )
+      .limit(1);
+    expect(afterClear).toBeUndefined();
   });
 
   it("denies a foreign agent before it starts PDF parsing", async () => {

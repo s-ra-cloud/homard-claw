@@ -1,16 +1,17 @@
 import type { TaskFile } from "@workspace/db";
 import { extractPdfText, PdfExtractionError } from "./pdf/extract";
+import { extractDocxText, DocxExtractionError } from "./docx/extract";
 
 /**
  * Attachment limits are enforced again after decoding. Request validators can
  * bound JSON string length, but they cannot know a base64 payload's decoded
- * size. Existing non-PDF file allowances are retained; PDF text is bounded by
- * the extraction service and by the PDF-only aggregate below.
+ * size. Existing non-document file allowances are retained; PDF and DOCX text
+ * are bounded by isolated extraction services and the aggregate below.
  */
 export const MAX_ATTACHMENT_BYTES = 25_000_000;
 export const MAX_ATTACHMENTS = 4;
 const MAX_SOURCE_FILENAME_CHARS = 160;
-/** Four PDF extractions are each service-bounded to 100k characters. */
+/** Four PDF/DOCX extractions are each service-bounded to 100k characters. */
 export const MAX_NORMALIZED_PDF_TEXT_CHARS = 400_000;
 /**
  * A PDF extractor result is capped at 100,000 Unicode scalars. Its durable
@@ -19,6 +20,8 @@ export const MAX_NORMALIZED_PDF_TEXT_CHARS = 400_000;
  * provider adapters which decide whether it is safe to inline the text.
  */
 export const MAX_CANONICAL_PDF_TEXT_SCALARS = 100_256;
+export const DOCX_MIME_TYPE =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 const IMAGE_MIME_TYPES = new Set([
   "image/png",
@@ -45,8 +48,8 @@ export type AttachmentNormalizationErrorKind =
   | "cancelled";
 
 /**
- * Deliberately fixed, owner-facing errors. In particular, PDF parser errors
- * can contain file paths or document content and must never leave this layer.
+ * Deliberately fixed, owner-facing errors. Document parser errors can contain
+ * file paths or document content and must never leave this layer.
  */
 export class AttachmentNormalizationError extends Error {
   constructor(
@@ -101,6 +104,10 @@ function isPdfFilename(name: string): boolean {
   return /\.pdf$/i.test(name);
 }
 
+function isDocxFilename(name: string): boolean {
+  return /\.docx$/i.test(name);
+}
+
 function hasPdfSignature(bytes: Uint8Array): boolean {
   // The complete five-byte marker must fall inside the first 1,024 bytes.
   const lastOffset = Math.min(bytes.length - 5, 1_024 - 5);
@@ -123,6 +130,11 @@ function hasPdfTextSignature(text: string): boolean {
   return offset >= 0 && offset <= 1_024 - 5;
 }
 
+function hasZipSignature(bytes: Uint8Array): boolean {
+  return bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b &&
+    bytes[2] === 0x03 && bytes[3] === 0x04;
+}
+
 function normalizedPdfTextName(name: string): string {
   // Keep the canonical attachment inside every generated API contract's
   // 160-character filename limit. A max-length `*.pdf` source loses only its
@@ -133,12 +145,22 @@ function normalizedPdfTextName(name: string): string {
     : `${name.slice(0, -".pdf".length)}.txt`;
 }
 
+function normalizedDocxTextName(name: string): string {
+  return name.length + ".txt".length <= MAX_SOURCE_FILENAME_CHARS
+    ? `${name}.txt`
+    : `${name.slice(0, -".docx".length)}.txt`;
+}
+
 function normalizedPdfTextContent(name: string, text: string): string {
   // The envelope is present even when the durable .txt name still retains a
   // .pdf suffix. This lets downstream consumers distinguish generic-name
   // sources such as upload.bin.txt from ordinary user-authored text without
   // retaining the raw PDF.
   return `--- SOURCE PDF FILENAME: ${name} ---\n${text}`;
+}
+
+function normalizedDocxTextContent(name: string, text: string): string {
+  return `--- SOURCE DOCX FILENAME: ${name} ---\n${text}`;
 }
 
 function assertNotAborted(signal?: AbortSignal): void {
@@ -198,9 +220,10 @@ export type NormalizeAttachmentsOptions = {
 /**
  * Convert every accepted document to the durable form used by every provider.
  *
- * PDFs are extracted exactly once at ingress and saved as bounded plain text;
- * retries, action rounds, history replay, and Codex materialization therefore
- * never retain or repeatedly parse a raw PDF. There is intentionally no
+ * PDFs and DOCX files are extracted exactly once at ingress and saved as
+ * bounded plain text; retries, action rounds, history replay, and Codex
+ * materialization therefore never retain or repeatedly parse a raw document.
+ * There is intentionally no
  * process-wide cache: documents are tenant-owned inputs and a cache would
  * create a cross-workspace disclosure boundary.
  */
@@ -217,7 +240,7 @@ export async function normalizeAttachments(
     );
   }
 
-  let pdfTextChars = 0;
+  let documentTextChars = 0;
   const normalized: NormalizedAttachment[] = [];
   for (const attachment of input) {
     assertNotAborted(options.signal);
@@ -242,6 +265,15 @@ export async function normalizeAttachments(
         "A PDF attachment must be uploaded as base64 file data.",
       );
     }
+    if (
+      encoding === "text" &&
+      (mimeType === DOCX_MIME_TYPE || isDocxFilename(name))
+    ) {
+      throw new AttachmentNormalizationError(
+        "invalid",
+        "A DOCX attachment must be uploaded as base64 file data.",
+      );
+    }
 
     // Desktop uploads can lose their MIME metadata. Inspect base64 bytes before
     // trusting a claimed image MIME: PDFs often arrive as image/png from
@@ -250,12 +282,13 @@ export async function normalizeAttachments(
     if (
       encoding === "base64" &&
       mimeType !== "application/pdf" &&
+      mimeType !== DOCX_MIME_TYPE &&
       !IMAGE_MIME_TYPES.has(mimeType) &&
       !isGenericBinaryMimeType(mimeType)
     ) {
       throw new AttachmentNormalizationError(
         "invalid",
-        "An attachment is not a supported image, PDF, or text document.",
+        "An attachment is not a supported image, PDF, DOCX, or text document.",
       );
     }
     const base64Bytes =
@@ -265,6 +298,12 @@ export async function normalizeAttachments(
       (mimeType === "application/pdf" ||
         isPdfFilename(name) ||
         hasPdfSignature(base64Bytes!));
+    const isDocx =
+      encoding === "base64" &&
+      !isPdf &&
+      (mimeType === DOCX_MIME_TYPE ||
+        isDocxFilename(name) ||
+        hasZipSignature(base64Bytes!));
     if (isPdf) {
       if (!base64Bytes) {
         throw new AttachmentNormalizationError(
@@ -326,7 +365,7 @@ export async function normalizeAttachments(
           "This PDF has no readable text. Try a text-based PDF or attach its text instead.",
         );
       }
-      pdfTextChars += text.length;
+      documentTextChars += text.length;
       normalized.push({
         // The .txt suffix keeps the second provider-boundary normalization
         // from mistaking durable extracted text for a raw PDF. Every source,
@@ -336,6 +375,61 @@ export async function normalizeAttachments(
         mimeType: "text/plain",
         encoding: "text",
         content: normalizedPdfTextContent(name, text),
+      });
+      continue;
+    }
+    if (isDocx) {
+      const bytes = base64Bytes!;
+      if (bytes.byteLength > MAX_ATTACHMENT_BYTES) {
+        throw new AttachmentNormalizationError(
+          "too_large",
+          "An attachment is larger than 25 MB.",
+        );
+      }
+      let text: string;
+      try {
+        text = await extractDocxText(bytes, {
+          signal: options.signal,
+          maxInputBytes: MAX_ATTACHMENT_BYTES,
+          deadlineAt: options.deadlineAt,
+        });
+      } catch (error) {
+        if (
+          options.signal?.aborted ||
+          (error instanceof DocxExtractionError && error.kind === "cancelled")
+        ) {
+          throw new AttachmentNormalizationError(
+            "cancelled",
+            "Attachment processing was cancelled.",
+          );
+        }
+        if (error instanceof DocxExtractionError) {
+          if (
+            error.kind === "timeout" ||
+            error.kind === "queue_full" ||
+            error.kind === "resource_limit"
+          ) {
+            throw new AttachmentNormalizationError("unavailable", error.message);
+          }
+          throw new AttachmentNormalizationError("extraction_failed", error.message);
+        }
+        throw new AttachmentNormalizationError(
+          "extraction_failed",
+          "This DOCX could not be read. Try a different DOCX or attach its text instead.",
+        );
+      }
+      if (!text.trim()) {
+        throw new AttachmentNormalizationError(
+          "extraction_failed",
+          "This DOCX has no readable text. Try a document with text or attach its text instead.",
+        );
+      }
+      documentTextChars += text.length;
+      normalized.push({
+        name: normalizedDocxTextName(name),
+        mimeType: "text/plain",
+        encoding: "text",
+        content: normalizedDocxTextContent(name, text),
       });
       continue;
     }
@@ -361,7 +455,7 @@ export async function normalizeAttachments(
     if (!isTextMimeType(mimeType) || encoding !== "text") {
       throw new AttachmentNormalizationError(
         "invalid",
-        "An attachment is not a supported image, PDF, or text document.",
+        "An attachment is not a supported image, PDF, DOCX, or text document.",
       );
     }
     if (!attachment.content.trim() || attachment.content.includes("\u0000")) {
@@ -380,10 +474,10 @@ export async function normalizeAttachments(
     normalized.push({ name, mimeType, encoding, content: attachment.content });
   }
 
-  if (pdfTextChars > MAX_NORMALIZED_PDF_TEXT_CHARS) {
+  if (documentTextChars > MAX_NORMALIZED_PDF_TEXT_CHARS) {
     throw new AttachmentNormalizationError(
       "too_large",
-      "The extracted text from attached PDFs is too large. Attach fewer PDFs or shorter documents.",
+      "The extracted text from attached documents is too large. Attach fewer documents or shorter documents.",
     );
   }
   return normalized;

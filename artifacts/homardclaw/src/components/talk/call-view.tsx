@@ -18,6 +18,7 @@ import type {
 import {
   useDelegateFromTalk,
   useAcknowledgeTalkRead,
+  clearTalkDocumentContext,
   getGetTalkUnreadQueryKey,
   getGetTalkHistoryQueryKey,
   transcribeAudio,
@@ -92,7 +93,9 @@ import {
   MAX_ATTACHMENTS,
   attachmentsForTalkProposal,
   attachmentLabel,
+  combineTalkProposalAttachments,
   readAttachment,
+  talkDocumentContextCleanupInput,
   withTalkAttachments,
 } from "@/lib/attachments";
 
@@ -317,10 +320,10 @@ function TalkBugReportButton({
 }
 
 /**
- * The server returns only PDF replacements and their original positions.
+ * The server returns only document replacements and their original positions.
  * Preserve all locally selected ordinary files, including same-named files,
- * while replacing each PDF with the extracted canonical text that task
- * creation can consume without parsing the source PDF again.
+ * while replacing each PDF or DOCX file with extracted canonical text that
+ * task creation can consume without parsing the source document again.
  */
 function mergeProposalAttachments(
   originals: readonly InputAttachment[],
@@ -490,6 +493,8 @@ export function CallView({
   const [proposalAttachments, setProposalAttachments] = useState<
     InputAttachment[]
   >([]);
+  const [proposalDocumentContextVersion, setProposalDocumentContextVersion] =
+    useState<string | null>(null);
   const [liveTranscript, setLiveTranscript] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
@@ -505,6 +510,8 @@ export function CallView({
   pendingDelegationRef.current = pendingDelegation;
   const proposalAttachmentsRef = useRef<InputAttachment[]>([]);
   proposalAttachmentsRef.current = proposalAttachments;
+  const proposalDocumentContextVersionRef = useRef<string | null>(null);
+  proposalDocumentContextVersionRef.current = proposalDocumentContextVersion;
   // Bumped on unmount (i.e. contact switch / hang up) so late replies from a
   // previous conversation can never leak into the current one.
   const epochRef = useRef(0);
@@ -706,6 +713,22 @@ export function CallView({
     setPhase("idle");
   }, [playback]);
 
+  /**
+   * Canonical PDF/DOCX text belongs to the server while a Talk proposal is
+   * pending. Do not keep it in browser state between turns: reopening Talk
+   * still receives it with the later proposal, and confirmation/cancellation
+   * explicitly consumes it without deleting the visible transcript.
+   */
+  const clearRetainedDocumentContext = useCallback((version: string | null) => {
+    const data = talkDocumentContextCleanupInput(version);
+    if (!data) return;
+    void clearTalkDocumentContext(agentId, data).catch(() => {
+      // A failed cleanup leaves the bounded server context available for the
+      // owner to retry; it must never turn a successful task confirmation into
+      // a client-visible error.
+    });
+  }, [agentId]);
+
   // Turning voice mode off mid-call drops the mic and any spoken reply.
   const wasVoiceOn = useRef(voiceOn);
   useEffect(() => {
@@ -745,17 +768,25 @@ export function CallView({
 
   const queueProposedTask = useCallback(
     (objective: string) => {
+      const documentContextVersion = proposalDocumentContextVersionRef.current;
       setProposedTask(null);
       const retainedAttachments = proposalAttachmentsRef.current;
       setProposalAttachments([]);
-      createTask.mutate({
-        data: withTalkAttachments(
-          { agentId, objective, talkMode: true },
-          retainedAttachments,
-        ),
-      });
+      setProposalDocumentContextVersion(null);
+      createTask.mutate(
+        {
+          data: withTalkAttachments(
+            { agentId, objective, talkMode: true },
+            retainedAttachments,
+          ),
+        },
+        {
+          onSuccess: () =>
+            clearRetainedDocumentContext(documentContextVersion),
+        },
+      );
     },
-    [agentId, createTask],
+    [agentId, clearRetainedDocumentContext, createTask],
   );
 
   const delegateTask = useDelegateFromTalk({
@@ -765,6 +796,8 @@ export function CallView({
         setProposedDelegation(null);
         setPendingDelegation(null);
         setProposalAttachments([]);
+        setProposalDocumentContextVersion(null);
+        setProposalDocumentContextVersion(null);
         void queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
         void queryClient.invalidateQueries({ queryKey: ["/api/messages"] });
         appendTurn({
@@ -787,19 +820,26 @@ export function CallView({
 
   const queueProposedDelegation = useCallback(
     (proposal: AgentDelegationProposal) => {
-      delegateTask.mutate({
-        agentId,
-        data: withTalkAttachments(
-          {
-            targetAgentId: proposal.targetAgentId,
-            objective: proposal.objective,
-            note: proposal.note,
-          },
-          proposalAttachmentsRef.current,
-        ),
-      });
+      const documentContextVersion = proposalDocumentContextVersionRef.current;
+      delegateTask.mutate(
+        {
+          agentId,
+          data: withTalkAttachments(
+            {
+              targetAgentId: proposal.targetAgentId,
+              objective: proposal.objective,
+              note: proposal.note,
+            },
+            proposalAttachmentsRef.current,
+          ),
+        },
+        {
+          onSuccess: () =>
+            clearRetainedDocumentContext(documentContextVersion),
+        },
+      );
     },
-    [agentId, delegateTask],
+    [agentId, clearRetainedDocumentContext, delegateTask],
   );
 
   /**
@@ -825,10 +865,12 @@ export function CallView({
         return true;
       }
       if (intent === "cancel") {
+        clearRetainedDocumentContext(proposalDocumentContextVersionRef.current);
         setProposedTask(null);
         setProposedDelegation(null);
         setPendingDelegation(null);
         setProposalAttachments([]);
+        setProposalDocumentContextVersion(null);
         appendTurn({
           role: "agent",
           text: pending
@@ -839,7 +881,12 @@ export function CallView({
       }
       return false;
     },
-    [appendTurn, queueProposedDelegation, queueProposedTask],
+    [
+      appendTurn,
+      clearRetainedDocumentContext,
+      queueProposedDelegation,
+      queueProposedTask,
+    ],
   );
 
   const textConverse = useConverseWithAgent();
@@ -933,19 +980,47 @@ export function CallView({
             );
           }
           appendTurn({ role: "agent", text: data.reply });
-          setProposedTask(data.proposedTaskObjective ?? null);
-          setProposedDelegation(data.proposedDelegation ?? null);
-          setPendingDelegation(data.pendingDelegation ?? null);
-          setProposalAttachments(
-            attachmentsForTalkProposal(
-              Boolean(data.proposedTaskObjective || data.proposedDelegation),
-              mergeProposalAttachments(
-                turnAttachments,
-                data.normalizedAttachments,
-                data.normalizedAttachmentIndices,
-              ),
-            ),
+          const hasProposal = Boolean(
+            data.proposedTaskObjective || data.proposedDelegation,
           );
+          const currentProposalAttachments =
+            data.normalizedAttachmentIndices?.length
+              ? mergeProposalAttachments(
+                  turnAttachments,
+                  data.normalizedAttachments,
+                  data.normalizedAttachmentIndices,
+                )
+              : [
+                  ...(data.normalizedAttachments ?? []),
+                  ...turnAttachments,
+                ];
+          const proposalAttachmentSet = combineTalkProposalAttachments(
+            [],
+            currentProposalAttachments,
+          );
+          if (hasProposal && proposalAttachmentSet.exceedsLimit) {
+            setProposedTask(null);
+            setProposedDelegation(null);
+            setPendingDelegation(null);
+            setProposalAttachments([]);
+            setProposalDocumentContextVersion(null);
+            setFlowError(
+              `This proposal would include ${proposalAttachmentSet.attachments.length} files, but Talk tasks support at most ${MAX_ATTACHMENTS}. Ask ${agent.name} to propose the task again without newly attached files, or clear the retained document context and upload a smaller set.`,
+            );
+          } else {
+            setProposedTask(data.proposedTaskObjective ?? null);
+            setProposedDelegation(data.proposedDelegation ?? null);
+            setPendingDelegation(data.pendingDelegation ?? null);
+            setProposalAttachments(
+              attachmentsForTalkProposal(
+                hasProposal,
+                proposalAttachmentSet.attachments,
+              ),
+            );
+            setProposalDocumentContextVersion(
+              hasProposal ? (data.documentContextVersion ?? null) : null,
+            );
+          }
           setPhase("idle");
         })
         .catch((err) => {
@@ -1143,6 +1218,7 @@ export function CallView({
                   : null,
               );
               setProposalAttachments([]);
+              setProposalDocumentContextVersion(null);
               expectAudio = event.voice != null;
               // Stay in "thinking" until audio actually arrives, so a failed
               // TTS stream cannot strand the UI in a speaking state.
@@ -1459,8 +1535,12 @@ export function CallView({
             size="sm"
             variant="outline"
             onClick={() => {
+              clearRetainedDocumentContext(
+                proposalDocumentContextVersionRef.current,
+              );
               setPendingDelegation(null);
               setProposalAttachments([]);
+              setProposalDocumentContextVersion(null);
             }}
           >
             Cancel
@@ -1491,8 +1571,12 @@ export function CallView({
               size="sm"
               variant="outline"
               onClick={() => {
+                clearRetainedDocumentContext(
+                  proposalDocumentContextVersionRef.current,
+                );
                 setProposedTask(null);
                 setProposalAttachments([]);
+                setProposalDocumentContextVersion(null);
               }}
             >
               <X className="w-3 h-3 mr-1" aria-hidden="true" /> Dismiss
@@ -1525,9 +1609,13 @@ export function CallView({
               size="sm"
               variant="outline"
               onClick={() => {
+                clearRetainedDocumentContext(
+                  proposalDocumentContextVersionRef.current,
+                );
                 setProposedDelegation(null);
                 setPendingDelegation(null);
                 setProposalAttachments([]);
+                setProposalDocumentContextVersion(null);
               }}
             >
               <X className="w-3 h-3 mr-1" aria-hidden="true" /> Dismiss
@@ -1716,7 +1804,7 @@ export function CallView({
               phase === "recording" || attachments.length >= MAX_ATTACHMENTS
             }
             aria-label="Attach images or documents"
-            title="Attach images, PDF, or text files (25 MB each)"
+            title="Attach images, PDF, DOCX, or text files (25 MB each)"
           >
             <Paperclip className="w-4 h-4" aria-hidden="true" />
           </Button>

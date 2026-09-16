@@ -2103,6 +2103,8 @@ export const converseWithAgentResponseNormalizedAttachmentsItemContentMax = 3400
 
 export const converseWithAgentResponseNormalizedAttachmentsMax = 4;
 
+export const converseWithAgentResponseDocumentContextVersionMax = 64;
+
 export const converseWithAgentResponseNormalizedAttachmentIndicesItemMin = 0;
 
 export const converseWithAgentResponseNormalizedAttachmentIndicesMax = 4;
@@ -2123,13 +2125,14 @@ export const ConverseWithAgentResponse = zod.object({
   "targetAgentName": zod.string()
 }),zod.null()]),
   "voice": zod.string().nullable().describe('OpenAI voice id the agent speaks with; null = text only'),
-  "normalizedUserText": zod.string().max(converseWithAgentResponseNormalizedUserTextMax).optional().describe('Bounded canonical form of the owner\'s utterance. It includes extracted PDF text for subsequent Talk context while the transcript continues to display the original utterance. Other attachment contents are never retained here.'),
+  "normalizedUserText": zod.string().max(converseWithAgentResponseNormalizedUserTextMax).optional().describe('Bounded canonical form of the owner\'s utterance. It includes extracted PDF or DOCX text for subsequent Talk context while the transcript continues to display the original utterance. Other attachment contents are never retained here.'),
   "normalizedAttachments": zod.array(zod.object({
   "name": zod.string().min(1).max(converseWithAgentResponseNormalizedAttachmentsItemNameMax),
   "mimeType": zod.string().min(1).max(converseWithAgentResponseNormalizedAttachmentsItemMimeTypeMax),
   "encoding": zod.enum(['text', 'base64']),
   "content": zod.string().min(1).max(converseWithAgentResponseNormalizedAttachmentsItemContentMax)
-})).max(converseWithAgentResponseNormalizedAttachmentsMax).optional().describe('Extracted PDF replacements needed to confirm a proposal. Ordinary selected files are not echoed or retained in a Talk response.'),
+})).max(converseWithAgentResponseNormalizedAttachmentsMax).optional().describe('Extracted PDF or DOCX replacements needed to confirm a proposal. This can be canonical document text retained from an earlier Talk turn. Ordinary selected files are not echoed or retained in a Talk response.'),
+  "documentContextVersion": zod.string().max(converseWithAgentResponseDocumentContextVersionMax).optional().describe('Opaque canonical document context version. Send this value when consuming a confirmed or cancelled proposal; conditional cleanup never deletes a newer Talk document context.'),
   "normalizedAttachmentIndices": zod.array(zod.number().min(converseWithAgentResponseNormalizedAttachmentIndicesItemMin)).max(converseWithAgentResponseNormalizedAttachmentIndicesMax).optional().describe('Original attachment positions for normalizedAttachments. Positions preserve mixed and same-named attachment sets during confirmation.')
 })
 
@@ -2192,6 +2195,24 @@ export const ClearTalkHistoryParams = zod.object({
 export const ClearTalkHistoryResponse = zod.object({
   "deleted": zod.number()
 })
+
+
+/**
+ * @summary Consume retained canonical Talk document attachments without clearing history
+ */
+export const ClearTalkDocumentContextParams = zod.object({
+  "agentId": zod.coerce.string()
+})
+
+export const clearTalkDocumentContextBodyVersionMax = 64;
+
+
+
+export const ClearTalkDocumentContextBody = zod.object({
+  "version": zod.string().min(1).max(clearTalkDocumentContextBodyVersionMax).describe('Opaque version returned with the proposal\'s canonical document attachments.')
+})
+
+export const ClearTalkDocumentContextResponse = zod.void()
 
 
 /**

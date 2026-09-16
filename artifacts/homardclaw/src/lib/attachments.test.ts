@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  attachmentLabel,
   attachmentsForTalkProposal,
+  combineTalkProposalAttachments,
   inferAttachmentMimeType,
   readAttachment,
+  talkDocumentContextCleanupInput,
   withTalkAttachments,
 } from "./attachments";
 
@@ -33,6 +36,20 @@ describe("readAttachment", () => {
     expect(
       inferAttachmentMimeType({ name: "brief.PDF", type: "" }),
     ).toBe("application/pdf");
+    expect(
+      inferAttachmentMimeType({ name: "brief.DOCX", type: "" }),
+    ).toBe("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+  });
+
+  it("identifies DOCX uploads with the browser MIME and UI label", () => {
+    const attachment = {
+      name: "brief.docx",
+      mimeType: inferAttachmentMimeType({ name: "brief.docx", type: "" }),
+      encoding: "base64" as const,
+      content: "UEsDBA==",
+    };
+    expect(attachment).toMatchObject({ encoding: "base64", mimeType: expect.stringContaining("wordprocessingml") });
+    expect(attachmentLabel(attachment)).toBe("DOCX · brief.docx");
   });
 
   it("prefers a supported browser MIME and preserves unknown legacy files as text", () => {
@@ -82,6 +99,33 @@ describe("Talk proposal attachments", () => {
   it("omits attachments after a proposal is cleared or replaced", () => {
     expect(withTalkAttachments({ objective: "New task" }, [])).toEqual({
       objective: "New task",
+    });
+  });
+
+  it("accepts exactly four proposal files and surfaces retained/current overflow", () => {
+    const retained = Array.from({ length: 4 }, (_, index) => ({
+      ...attachment,
+      name: `retained-${index}.txt`,
+    }));
+    expect(combineTalkProposalAttachments(retained, [])).toEqual({
+      attachments: retained,
+      exceedsLimit: false,
+    });
+    expect(combineTalkProposalAttachments(retained, [attachment])).toEqual(
+      expect.objectContaining({
+        attachments: expect.arrayContaining([
+          expect.objectContaining({ name: "retained-0.txt" }),
+          attachment,
+        ]),
+        exceedsLimit: true,
+      }),
+    );
+  });
+
+  it("builds conditional cleanup only for a known proposal context", () => {
+    expect(talkDocumentContextCleanupInput(null)).toBeNull();
+    expect(talkDocumentContextCleanupInput("opaque-generation-A/B?")).toEqual({
+      version: "opaque-generation-A/B?",
     });
   });
 });

@@ -127,8 +127,7 @@ describe("readDriveFileTransport", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
-  it.each(["application/octet-stream", "image/png",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"])(
+  it.each(["application/octet-stream", "image/png"])(
     "refuses %s before downloading binary content", async (mimeType) => {
       let calls = 0;
       const failures: unknown[] = [];
@@ -149,6 +148,23 @@ describe("readDriveFileTransport", () => {
       expect(failures).toEqual([{ stage: "metadata", failureClass: "unsupported_content" }]);
     },
   );
+
+  it("downloads DOCX bytes and sends them only to the isolated DOCX parser", async () => {
+    let calls = 0;
+    const extractDocx = vi.fn(async (bytes: Uint8Array, options?: { maxInputBytes?: number }) => {
+      expect(bytes).toEqual(new Uint8Array([0x50, 0x4b, 3, 4]));
+      expect(options?.maxInputBytes).toBe(MAX_DRIVE_READ_BODY_BYTES);
+      return "--- DOCX document body (text only; omissions) ---\nRead me";
+    });
+    const result = await readDriveFileTransport({
+      workspaceId: "workspace-docx", fileId: "docx-file", resolveToken: async () => "token", extractDocx,
+      fetchImpl: async () => ++calls === 1
+        ? response(JSON.stringify({ name: "private-brief.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }))
+        : new Response(new Uint8Array([0x50, 0x4b, 3, 4])),
+    });
+    expect(result).toMatchObject({ ok: true, name: "private-brief.docx", text: expect.stringContaining("Read me") });
+    expect(calls).toBe(2);
+  });
 
   it("downloads a PDF as bounded bytes and passes the shared signal into extraction", async () => {
     let calls = 0;

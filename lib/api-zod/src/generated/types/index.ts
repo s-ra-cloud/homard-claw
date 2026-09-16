@@ -82,6 +82,7 @@ export * from './chatQuestionScheduleUpdate';
 export * from './chatQuestionScheduleUpdateCadence';
 export * from './clearMemoriesParams';
 export * from './clearMemoriesResult';
+export * from './clearTalkDocumentContextInput';
 export * from './clearTalkHistoryResult';
 export * from './codexBootstrapResult';
 export * from './codexBootstrapResultAction';

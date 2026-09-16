@@ -365,15 +365,19 @@ function mapNetworkError(error: unknown, signal: AbortSignal): ProviderCallError
 }
 
 const PDF_SOURCE_FILENAME_ENVELOPE = /^--- SOURCE PDF FILENAME: ([^\r\n]+) ---\r?\n/;
+const DOCX_SOURCE_FILENAME_ENVELOPE = /^--- SOURCE DOCX FILENAME: ([^\r\n]+) ---\r?\n/;
 const PDF_PAGE_MARKER = /^---\s*page\s+[1-9]\d*(?: [^-]*)?---/i;
+const DOCX_BODY_MARKER = /^--- DOCX document body \(text only;/;
 
 function sourceNameForAttachment(attachment: InputAttachment): string {
   // Normalized PDFs preserve their original source name inside their durable
   // text, including source names which had to lose ".pdf" to fit the schema's
   // 160-character filename limit.
-  const sourceName = PDF_SOURCE_FILENAME_ENVELOPE.exec(attachment.content)?.[1];
+  const sourceName =
+    PDF_SOURCE_FILENAME_ENVELOPE.exec(attachment.content)?.[1] ??
+    DOCX_SOURCE_FILENAME_ENVELOPE.exec(attachment.content)?.[1];
   if (sourceName) return sourceName;
-  return /\.pdf\.txt$/i.test(attachment.name)
+  return /\.(?:pdf|docx)\.txt$/i.test(attachment.name)
     ? attachment.name.slice(0, -4)
     : attachment.name;
 }
@@ -408,6 +412,26 @@ function isCanonicalPdfText(attachment: InputAttachment): boolean {
     ? attachment.content.slice(envelope[0].length)
     : attachment.content;
   return PDF_PAGE_MARKER.test(extractedText);
+}
+
+/**
+ * DOCX follows the same provider-neutral durable-text contract as PDFs. Keep
+ * the existing PDF recognizer intact for stored historical attachments while
+ * allowing DOCX replacements through the same call/task/Talk contracts.
+ */
+function isCanonicalDocumentText(attachment: InputAttachment): boolean {
+  if (isCanonicalPdfText(attachment)) return true;
+  if (
+    attachment.encoding !== "text" ||
+    attachment.mimeType !== "text/plain" ||
+    !hasAtMostUnicodeScalars(attachment.content, MAX_CANONICAL_PDF_TEXT_SCALARS)
+  ) return false;
+  const envelope = DOCX_SOURCE_FILENAME_ENVELOPE.exec(attachment.content);
+  if (!/\.docx\.txt$/i.test(attachment.name) && !envelope) return false;
+  const extractedText = envelope
+    ? attachment.content.slice(envelope[0].length)
+    : attachment.content;
+  return DOCX_BODY_MARKER.test(extractedText);
 }
 
 function textAttachmentBlock(attachment: InputAttachment): string {
@@ -471,10 +495,9 @@ async function materializeCodexAttachments(
   const paths: string[] = [];
   const textBlocks: string[] = [];
   for (const [index, attachment] of attachments.entries()) {
-    // Only bounded, canonical PDF extraction text is prompt context. Ordinary
-    // TXT/CSV/JSON files retain their normal workspace-file behavior, even
-    // though they are represented with the same text encoding in the schema.
-    if (isCanonicalPdfText(attachment)) {
+    // Only bounded, canonical document extraction text is prompt context.
+    // Ordinary TXT/CSV/JSON files retain their normal workspace-file behavior.
+    if (isCanonicalDocumentText(attachment)) {
       textBlocks.push(textAttachmentBlock(attachment));
       continue;
     }

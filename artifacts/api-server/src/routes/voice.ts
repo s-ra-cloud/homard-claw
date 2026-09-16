@@ -26,6 +26,7 @@ import {
   teamsTable,
   workspaceSettingsTable,
 } from "@workspace/db";
+import { randomUUID } from "node:crypto";
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { recordAudit } from "../audit";
@@ -35,6 +36,7 @@ import { callProvider, ProviderCallError } from "../execution";
 import {
   AttachmentNormalizationError,
   attachmentErrorStatus,
+  MAX_NORMALIZED_PDF_TEXT_CHARS,
   normalizeAttachments,
   type NormalizedAttachment,
 } from "../attachments";
@@ -70,6 +72,19 @@ const CONVERSE_TIMEOUT_MS = 60_000;
  * timeout, long enough to let a load balancer swap backends.
  */
 const CONVERSE_RETRY_DELAY_MS = 500;
+/**
+ * Durable, per-agent document state for Talk. This deliberately reuses the
+ * workspace settings store rather than adding a second transcript table:
+ * unlike visible chat history, this is private provider/task context and must
+ * be deleted with the existing Talk clear operation.
+ */
+const TALK_DOCUMENT_CONTEXT_KEY_PREFIX = "talk_document_context:";
+const MAX_TALK_DOCUMENT_CONTEXT_CHARS =
+  MAX_NORMALIZED_PDF_TEXT_CHARS + 4 * 256;
+// JSON can escape every source character (for example a document containing
+// many quotes), so give the serialized setting a separate worst-case cap.
+const MAX_TALK_DOCUMENT_CONTEXT_STORAGE_CHARS =
+  MAX_TALK_DOCUMENT_CONTEXT_CHARS * 2 + 4_096;
 
 type AgentRow = typeof agentsTable.$inferSelect;
 
@@ -1740,6 +1755,14 @@ router.delete(
             eq(talkExchangesTable.agentId, agentId),
           ),
         );
+      await tx
+        .delete(workspaceSettingsTable)
+        .where(
+          and(
+            eq(workspaceSettingsTable.workspaceId, req.workspaceId!),
+            eq(workspaceSettingsTable.key, talkDocumentContextKey(agentId)),
+          ),
+        );
       return tx
         .delete(agentMessagesTable)
         .where(
@@ -1759,6 +1782,62 @@ router.delete(
       `The Talk history with ${agent.name} was cleared (${deleted.length} stored turns).`,
     );
     res.json({ deleted: deleted.length });
+  },
+);
+
+/**
+ * A task confirmation or explicit proposal cancellation consumes the retained
+ * canonical documents without erasing the owner's visible conversation. The
+ * agent lookup and setting key are both workspace-scoped, so one tenant can
+ * never clear another tenant's pending document context.
+ */
+router.delete(
+  "/agents/:agentId/talk-document-context",
+  async (req: Request, res: Response) => {
+    const agentId = String(req.params.agentId);
+    const version =
+      typeof req.body?.version === "string" && req.body.version.length <= 64
+        ? req.body.version
+        : null;
+    if (!version) {
+      res.status(400).json({ error: "A retained document context version is required." });
+      return;
+    }
+    const [agent] = await db
+      .select({ id: agentsTable.id, archived: agentsTable.archived })
+      .from(agentsTable)
+      .where(
+        and(
+          eq(agentsTable.id, agentId),
+          eq(agentsTable.workspaceId, req.workspaceId!),
+        ),
+      )
+      .limit(1);
+    if (!agent || agent.archived) {
+      res.status(404).json({ error: "Agent not found." });
+      return;
+    }
+    const deleted = await db.transaction(async (tx) => {
+      await lockTalkHistory(tx, agentId);
+      // Compare and delete under the same lock. A delayed cleanup for
+      // proposal A must never erase document context B uploaded afterwards.
+      const current = await readTalkDocumentContextVia(
+        tx,
+        req.workspaceId!,
+        agentId,
+      );
+      if (current?.version !== version) return false;
+      await tx
+        .delete(workspaceSettingsTable)
+        .where(
+          and(
+            eq(workspaceSettingsTable.workspaceId, req.workspaceId!),
+            eq(workspaceSettingsTable.key, talkDocumentContextKey(agentId)),
+          ),
+        );
+      return true;
+    });
+    res.status(deleted ? 204 : 409).end();
   },
 );
 
@@ -1841,11 +1920,11 @@ export type ConverseAttachment = {
 
 /**
  * Keep reply/cache payloads small and private. Normalization preserves order;
- * only a base64 source that became our extracted-text envelope is a PDF
+ * only a base64 source that became our extracted-text envelope is a document
  * replacement. A normal text file can never meet this condition, so its
  * unchanged content is never copied into a response or idempotency cache.
  */
-function extractedPdfReplacements(
+function extractedDocumentReplacements(
   originals: readonly ConverseAttachment[] | undefined,
   normalized: readonly NormalizedAttachment[],
 ): { attachments: NormalizedAttachment[]; indices: number[] } {
@@ -1856,7 +1935,8 @@ function extractedPdfReplacements(
       originals?.[index]?.encoding === "base64" &&
       attachment.encoding === "text" &&
       attachment.mimeType === "text/plain" &&
-      attachment.content.startsWith("--- SOURCE PDF FILENAME: ")
+      (attachment.content.startsWith("--- SOURCE PDF FILENAME: ") ||
+        attachment.content.startsWith("--- SOURCE DOCX FILENAME: "))
     ) {
       attachments.push(attachment);
       indices.push(index);
@@ -1865,11 +1945,134 @@ function extractedPdfReplacements(
   return { attachments, indices };
 }
 
+function talkDocumentContextKey(agentId: string): string {
+  return `${TALK_DOCUMENT_CONTEXT_KEY_PREFIX}${agentId}`;
+}
+
+function isCanonicalTalkDocument(
+  attachment: unknown,
+): attachment is NormalizedAttachment {
+  if (
+    !attachment ||
+    typeof attachment !== "object" ||
+    (attachment as NormalizedAttachment).encoding !== "text" ||
+    (attachment as NormalizedAttachment).mimeType !== "text/plain" ||
+    typeof (attachment as NormalizedAttachment).name !== "string" ||
+    typeof (attachment as NormalizedAttachment).content !== "string"
+  ) {
+    return false;
+  }
+  const { name, content } = attachment as NormalizedAttachment;
+  return (
+    name.length > 0 &&
+    name.length <= 160 &&
+    content.length > 0 &&
+    content.length <= MAX_TALK_DOCUMENT_CONTEXT_CHARS &&
+    (content.startsWith("--- SOURCE PDF FILENAME: ") ||
+      content.startsWith("--- SOURCE DOCX FILENAME: "))
+  );
+}
+
+/**
+ * The value is server-created only. Validate it anyway so a malformed legacy
+ * setting can never become provider context or a task attachment.
+ */
+type TalkDocumentContext = {
+  version: string;
+  attachments: NormalizedAttachment[];
+};
+
+function parseTalkDocumentContext(
+  value: string | undefined,
+): TalkDocumentContext | null {
+  if (!value || value.length > MAX_TALK_DOCUMENT_CONTEXT_STORAGE_CHARS) {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      !Array.isArray((parsed as { attachments?: unknown }).attachments)
+    ) {
+      return null;
+    }
+    const { version, attachments } = parsed as {
+      version?: unknown;
+      attachments: unknown[];
+    };
+    const canonicalAttachments = attachments.filter(isCanonicalTalkDocument);
+    if (
+      typeof version !== "string" ||
+      version.length === 0 ||
+      version.length > 64 ||
+      attachments.length > 4 ||
+      canonicalAttachments.length !== attachments.length ||
+      canonicalAttachments.reduce(
+        (total, attachment) => total + attachment.content.length,
+        0,
+      ) >
+        MAX_TALK_DOCUMENT_CONTEXT_CHARS
+    ) {
+      return null;
+    }
+    return { version, attachments: canonicalAttachments };
+  } catch {
+    return null;
+  }
+}
+
+async function readTalkDocumentContextVia(
+  executor: Pick<typeof db, "select">,
+  workspaceId: string,
+  agentId: string,
+): Promise<TalkDocumentContext | null> {
+  return parseTalkDocumentContext(
+    await getWorkspaceSettingVia(
+      executor,
+      workspaceId,
+      talkDocumentContextKey(agentId),
+    ),
+  );
+}
+
+async function writeTalkDocumentContextVia(
+  executor: Pick<typeof db, "insert">,
+  workspaceId: string,
+  agentId: string,
+  context: TalkDocumentContext,
+): Promise<void> {
+  const value = JSON.stringify(context);
+  // This is a programmer-boundary assertion as well as a storage limit. The
+  // normalizer already enforces these limits before this helper is reached.
+  if (
+    context.version.length === 0 ||
+    context.version.length > 64 ||
+    context.attachments.length === 0 ||
+    context.attachments.length > 4 ||
+    !context.attachments.every(isCanonicalTalkDocument) ||
+    value.length > MAX_TALK_DOCUMENT_CONTEXT_STORAGE_CHARS
+  ) {
+    throw new Error("Invalid canonical Talk document context.");
+  }
+  await executor
+    .insert(workspaceSettingsTable)
+    .values({
+      workspaceId,
+      key: talkDocumentContextKey(agentId),
+      value,
+    })
+    .onConflictDoUpdate({
+      target: [workspaceSettingsTable.workspaceId, workspaceSettingsTable.key],
+      set: { value },
+    });
+}
+
 /**
  * A text Converse request accepts 4,000 characters and each returned history
- * item accepts 8,000. Keep a normalized document alongside its owner's words
- * inside that latter boundary, so a later request can use the durable text
- * rather than re-uploading or re-parsing the source file.
+ * item accepts 8,000. This is deliberately the bounded model-history form;
+ * the full canonical document is retained separately in the workspace-scoped
+ * Talk document context for later task confirmation.
  */
 const TALK_HISTORY_CONTEXT_MAX = 8_000;
 const TALK_ATTACHMENT_CONTEXT_START =
@@ -1932,7 +2135,7 @@ function talkHistoryText(body: string): {
   if (contextStart === -1) return { text: body };
   return {
     // The document context is for the model, not a surprise wall of extracted
-    // PDF text in the owner's transcript.
+    // document text in the owner's transcript.
     text: body.slice(0, contextStart),
     contextText: body,
   };
@@ -1945,17 +2148,24 @@ export type ConverseWithAgentResult = {
   pendingDelegation: PendingDelegation | null;
   voice: "alloy" | "nova" | "onyx" | "shimmer" | null;
   /**
-   * Bounded canonical user text, including extracted PDF text when
+   * Bounded canonical user text, including extracted document text when
    * present. The client stores it as context for its next turn but continues
    * to display the owner's original utterance.
    */
   normalizedUserText?: string;
   /**
-   * Extracted PDF replacements needed to confirm a task proposal. Ordinary
-   * files are deliberately not echoed or cached; the browser keeps those
-   * selected originals locally until confirmation.
+   * Extracted document replacements needed to confirm a task proposal. When
+   * the proposal follows an earlier document upload, this is that agent's
+   * retained canonical document state. Ordinary selected files are never
+   * echoed or cached by the server.
    */
   normalizedAttachments?: NormalizedAttachment[];
+  /**
+   * Opaque generation of normalizedAttachments. The client must send it back
+   * when consuming retained documents so delayed cleanup cannot erase a newer
+   * document-bearing Talk turn.
+   */
+  documentContextVersion?: string;
   /**
    * Positions in the submitted attachment array for normalizedAttachments.
    * Index mapping, rather than filenames, preserves same-named attachments.
@@ -2118,7 +2328,7 @@ export async function converseWithAgent(input: {
   const timeout = setTimeout(abort, CONVERSE_TIMEOUT_MS * 2);
   try {
     // Normalize after claiming the idempotency key: concurrent resends never
-    // each parse the same PDF, and a completed exchange replays its proposal
+    // each parse the same document, and a completed exchange replays its proposal
     // payload rather than asking the client to upload it again.
     let attachments: NormalizedAttachment[];
     try {
@@ -2152,34 +2362,56 @@ export async function converseWithAgent(input: {
       pendingDelegation,
       exchange,
     } = generated;
-    const pdfReplacements = extractedPdfReplacements(
+    const documentReplacements = extractedDocumentReplacements(
       input.attachments,
       attachments,
     );
-    // Only durable PDF extraction belongs in future Talk context. Images and
+    // A document-bearing turn deterministically replaces older retained
+    // documents. Its opaque version protects a later upload from delayed
+    // cleanup for an earlier proposal.
+    const replacementDocumentContext =
+      documentReplacements.attachments.length > 0
+        ? {
+            version: randomUUID(),
+            attachments: documentReplacements.attachments,
+          }
+        : null;
+    // Canonical document text has a separate, bounded durable home. The
+    // transcript's 8,000-character context remains intentionally small; it
+    // must never be the only copy used for a later task confirmation.
+    // Only durable document extraction belongs in future Talk context. Images and
     // ordinary text files are available to this provider call, but must not be
     // copied into history or response_json merely because a reply was made.
     const normalizedUserText = canonicalTalkUserText(
       input.text,
-      pdfReplacements.attachments,
+      documentReplacements.attachments,
     );
     const hasTaskProposal = Boolean(taskObjective || proposedDelegation);
-    const payload: ConverseWithAgentResult = {
+    const payloadForDocumentContext = (
+      documentContext: TalkDocumentContext | null,
+    ): ConverseWithAgentResult => ({
       reply,
       proposedTaskObjective: taskObjective,
       proposedDelegation,
       pendingDelegation,
       voice: agentVoice(agent),
-      ...(pdfReplacements.attachments.length > 0
+      ...(documentReplacements.attachments.length > 0
         ? { normalizedUserText }
         : {}),
-      ...(hasTaskProposal && pdfReplacements.attachments.length > 0
+      ...(hasTaskProposal && documentContext?.attachments.length
         ? {
-            normalizedAttachments: pdfReplacements.attachments,
-            normalizedAttachmentIndices: pdfReplacements.indices,
+            normalizedAttachments: documentContext.attachments,
+            documentContextVersion: documentContext.version,
+            ...(documentReplacements.attachments.length > 0
+              ? {
+                  normalizedAttachmentIndices:
+                    documentReplacements.indices,
+                }
+              : {}),
           }
         : {}),
-    };
+    });
+    let payload: ConverseWithAgentResult | null = null;
     if (claimId) {
       const ownedClaimId = claimId;
       const finalized = await db.transaction(async (tx) => {
@@ -2191,6 +2423,17 @@ export async function converseWithAgent(input: {
           clearEpoch
         )
           return "cleared" as const;
+        // Re-read under the same agent lock that writes the response cache.
+        // This makes the proposal attachment/version pair authoritative even
+        // when another Talk turn just replaced retained document state.
+        const documentContext =
+          replacementDocumentContext ??
+          (await readTalkDocumentContextVia(
+            tx,
+            input.workspaceId,
+            agent.id,
+          ));
+        payload = payloadForDocumentContext(documentContext);
         const updated = await tx
           .update(talkExchangesTable)
           .set({ status: "done", responseJson: JSON.stringify(payload) })
@@ -2202,6 +2445,14 @@ export async function converseWithAgent(input: {
           )
           .returning({ id: talkExchangesTable.id });
         if (updated.length === 0) return "lost" as const;
+        if (replacementDocumentContext) {
+          await writeTalkDocumentContextVia(
+            tx,
+            input.workspaceId,
+            agent.id,
+            replacementDocumentContext,
+          );
+        }
         await persistTranscript(
           input.workspaceId,
           agent,
@@ -2256,6 +2507,22 @@ export async function converseWithAgent(input: {
           clearEpoch
         )
           return false;
+        const documentContext =
+          replacementDocumentContext ??
+          (await readTalkDocumentContextVia(
+            tx,
+            input.workspaceId,
+            agent.id,
+          ));
+        payload = payloadForDocumentContext(documentContext);
+        if (replacementDocumentContext) {
+          await writeTalkDocumentContextVia(
+            tx,
+            input.workspaceId,
+            agent.id,
+            replacementDocumentContext,
+          );
+        }
         await persistTranscript(
           input.workspaceId,
           agent,
@@ -2283,7 +2550,7 @@ export async function converseWithAgent(input: {
     );
     publish(input.workspaceId, "talk");
     if (exchange) publish(input.workspaceId, "messages");
-    return payload;
+    return payload!;
   } catch (error) {
     if (claimId) {
       await db

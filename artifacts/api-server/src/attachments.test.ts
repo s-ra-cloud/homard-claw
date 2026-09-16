@@ -24,6 +24,18 @@ vi.mock("./pdf/extract", () => ({
   PdfExtractionError,
 }));
 
+const { extractDocxText, DocxExtractionError } = vi.hoisted(() => {
+  const extractDocxText = vi.fn();
+  class DocxExtractionError extends Error {
+    constructor(readonly kind: string) {
+      super("The file is not a valid DOCX document.");
+    }
+  }
+  return { extractDocxText, DocxExtractionError };
+});
+
+vi.mock("./docx/extract", () => ({ extractDocxText, DocxExtractionError }));
+
 import {
   AttachmentNormalizationError,
   attachmentErrorStatus,
@@ -35,6 +47,12 @@ const pdf = {
   mimeType: "application/pdf",
   encoding: "base64" as const,
   content: Buffer.from("%PDF-1.7").toString("base64"),
+};
+const docx = {
+  name: "brief.docx",
+  mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  encoding: "base64" as const,
+  content: Buffer.from("PK\u0003\u0004DOCX").toString("base64"),
 };
 
 describe("normalizeAttachments", () => {
@@ -56,6 +74,24 @@ describe("normalizeAttachments", () => {
     await expect(normalizeAttachments(normalized)).resolves.toEqual(normalized);
     expect(extractPdfText).toHaveBeenCalledWith(
       Buffer.from("%PDF-1.7"),
+      expect.objectContaining({ maxInputBytes: 25_000_000 }),
+    );
+  });
+
+  it("persists extracted DOCX text as the provider-neutral durable attachment", async () => {
+    extractDocxText.mockResolvedValueOnce(
+      "--- DOCX document body (text only; drawings omitted) ---\n--- DOCX paragraph 1 ---\nRevenue rose.",
+    );
+    const normalized = await normalizeAttachments([docx]);
+    expect(normalized).toEqual([{
+      name: "brief.docx.txt",
+      mimeType: "text/plain",
+      encoding: "text",
+      content: expect.stringContaining("--- SOURCE DOCX FILENAME: brief.docx ---"),
+    }]);
+    await expect(normalizeAttachments(normalized)).resolves.toEqual(normalized);
+    expect(extractDocxText).toHaveBeenCalledWith(
+      Buffer.from("PK\u0003\u0004DOCX"),
       expect.objectContaining({ maxInputBytes: 25_000_000 }),
     );
   });

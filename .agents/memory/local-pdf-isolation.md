@@ -20,3 +20,15 @@ Keep generated PDF regression text inside the page's media box.
 **Why:** PDF.js can omit off-page glyphs from text extraction. A single long text line is not a reliable fixture for testing output truncation; it can appear to pass later-page isolation while never generating enough extracted text to hit the limit.
 
 **How to apply:** use short lines with explicit positioning and a small font for dense-page fixtures, and assert the actual truncation marker through the bounded action executor.
+
+Retained Talk documents need generation-bound cleanup, not unconditional deletion after asynchronous confirmation.
+
+**Why:** a delayed confirmation cleanup for document A can otherwise erase a newer upload B even when both operations take the same lock. Serialization alone does not identify which context the user confirmed.
+
+**How to apply:** preserve exact context versions across proposal, confirmation, dismissal and cleanup; keep a race test where a new upload precedes an older cleanup.
+
+DOCX fixtures must use real WordprocessingML namespaces and deflated OPC packages.
+
+**Why:** simplistic ZIP fixtures with invented namespaces can pass while real Word hyperlinks, drawings and tracked deletions are rejected or misread.
+
+**How to apply:** cover strict/transitional namespaces, external hyperlink display text without dereferencing, and omitted revision/drawing content in parser regressions.

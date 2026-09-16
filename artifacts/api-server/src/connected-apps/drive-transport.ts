@@ -12,6 +12,7 @@
 
 import type { DriveAccessTokenOptions } from "../google/credentials";
 import { extractPdfText, parsePdfPages, PdfExtractionError } from "../pdf/extract";
+import { extractDocxText, DocxExtractionError } from "../docx/extract";
 
 export const DEFAULT_DRIVE_READ_TIMEOUT_MS = 30_000;
 /** A read can be large, but never allows an unbounded response body. */
@@ -22,6 +23,8 @@ const MAX_DRIVE_CONTROL_BODY_BYTES = 2 * 1024 * 1024;
 const DRIVE_API_BASE_URL = "https://www.googleapis.com";
 const DRIVE_EXPORTABLE_PREFIX = "application/vnd.google-apps.";
 const DRIVE_SPREADSHEET_MIME = "application/vnd.google-apps.spreadsheet";
+const DOCX_MIME_TYPE =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 export type DriveTokenOptions = DriveAccessTokenOptions;
 
@@ -55,6 +58,7 @@ export type DriveReadFailureClass =
   | "body_limit"
   | "unsupported_content"
   | "pdf_extraction"
+  | "docx_extraction"
   | "transport";
 
 export type DriveReadFailureDetails = {
@@ -95,6 +99,8 @@ export type DriveReadInput = {
    * always use extractPdfText from the isolated PDF service.
    */
   extractPdf?: typeof extractPdfText;
+  /** Test seam for DOCX's isolated package parser. */
+  extractDocx?: typeof extractDocxText;
   now?: () => number;
   onStage?: (stage: string) => void;
   onFailure?: (details: DriveReadFailureDetails) => void;
@@ -359,7 +365,7 @@ function unsupportedContentFailure(): DriveReadTransportFailure {
     ok: false,
     kind: "failed",
     message:
-      "Google Drive could not read this file as text. PDFs use separate text extraction; Word, image, and other unsupported binary files cannot be read.",
+      "Google Drive could not read this file as text. PDFs and DOCX documents use separate text extraction; image and other unsupported binary files cannot be read.",
   };
 }
 
@@ -376,8 +382,20 @@ function pdfExtractionFailure(message?: string): DriveReadTransportFailure {
   };
 }
 
+function docxExtractionFailure(message?: string): DriveReadTransportFailure {
+  return {
+    ok: false,
+    kind: "failed",
+    message: message ?? "Google Drive could not extract readable text from this DOCX document.",
+  };
+}
+
 function isPdfDownload(mimeType: string): boolean {
   return mimeType === "application/pdf";
+}
+
+function isDocxDownload(mimeType: string): boolean {
+  return mimeType === DOCX_MIME_TYPE;
 }
 
 function isTextDownload(mimeType: string): boolean {
@@ -1033,7 +1051,8 @@ export async function readDriveFileTransport(
     if (
       !mimeType.startsWith(DRIVE_EXPORTABLE_PREFIX) &&
       !isTextDownload(mimeType) &&
-      !isPdfDownload(mimeType)
+      !isPdfDownload(mimeType) &&
+      !isDocxDownload(mimeType)
     ) {
       reportFailure(state, { failureClass: "unsupported_content", stage: "metadata" });
       return unsupportedContentFailure();
@@ -1041,7 +1060,7 @@ export async function readDriveFileTransport(
     if (input.pdfPages !== undefined && !isPdfDownload(mimeType)) {
       return finish(pdfExtractionFailure("pdfPages is only supported for PDF files; no content was read."));
     }
-    if (isPdfDownload(mimeType)) {
+    if (isPdfDownload(mimeType) || isDocxDownload(mimeType)) {
       const pdf = await requestDrivePdf(
         `/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
         token,
@@ -1053,18 +1072,22 @@ export async function readDriveFileTransport(
       safeStage(state, "extract");
       try {
         const text = await runBounded(
-          () =>
-            (input.extractPdf ?? extractPdfText)(pdf, {
+          () => isPdfDownload(mimeType)
+            ? (input.extractPdf ?? extractPdfText)(pdf, {
+              signal: state.controller.signal,
+              maxInputBytes: MAX_DRIVE_READ_BODY_BYTES,
+              deadlineAt, pdfPages: input.pdfPages,
+            })
+            : (input.extractDocx ?? extractDocxText)(pdf, {
               signal: state.controller.signal,
               maxInputBytes: MAX_DRIVE_READ_BODY_BYTES,
               deadlineAt,
-              pdfPages: input.pdfPages,
             }),
           state,
         );
         if (typeof text !== "string" || text.includes("\0")) {
-          const failure = pdfExtractionFailure();
-          reportFailure(state, { failureClass: "pdf_extraction", stage: "extract" });
+          const failure = isPdfDownload(mimeType) ? pdfExtractionFailure() : docxExtractionFailure();
+          reportFailure(state, { failureClass: isPdfDownload(mimeType) ? "pdf_extraction" : "docx_extraction", stage: "extract" });
           return finish(failure);
         }
         return {
@@ -1091,8 +1114,10 @@ export async function readDriveFileTransport(
         }
         const failure = error instanceof PdfExtractionError
           ? pdfExtractionFailure(error.message)
-          : pdfExtractionFailure();
-        reportFailure(state, { failureClass: "pdf_extraction", stage: "extract" });
+          : error instanceof DocxExtractionError
+            ? docxExtractionFailure(error.message)
+            : isPdfDownload(mimeType) ? pdfExtractionFailure() : docxExtractionFailure();
+        reportFailure(state, { failureClass: isPdfDownload(mimeType) ? "pdf_extraction" : "docx_extraction", stage: "extract" });
         return finish(failure);
       }
     }

@@ -47,6 +47,7 @@ import type {
   ChatQuestionScheduleUpdate,
   ClearMemoriesParams,
   ClearMemoriesResult,
+  ClearTalkDocumentContextInput,
   ClearTalkHistoryResult,
   CodexBootstrapResult,
   CodexConnectionTest,
@@ -3725,6 +3726,78 @@ export const useClearTalkHistory = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getClearTalkHistoryMutationOptions(options));
+    }
+
+export const getClearTalkDocumentContextUrl = (agentId: string,) => {
+
+
+
+
+  return `/api/agents/${agentId}/talk-document-context`
+}
+
+/**
+ * @summary Consume retained canonical Talk document attachments without clearing history
+ */
+export const clearTalkDocumentContext = async (agentId: string,
+    clearTalkDocumentContextInput: ClearTalkDocumentContextInput, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+  return customFetch<void>(getClearTalkDocumentContextUrl(agentId),
+  {
+    ...options,
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(clearTalkDocumentContextInput)
+  }
+);}
+
+
+
+
+
+export const getClearTalkDocumentContextMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearTalkDocumentContext>>, TError,{agentId: string;data: BodyType<ClearTalkDocumentContextInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof clearTalkDocumentContext>>, TError,{agentId: string;data: BodyType<ClearTalkDocumentContextInput>}, TContext> => {
+
+const mutationKey = ['clearTalkDocumentContext'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof clearTalkDocumentContext>>, {agentId: string;data: BodyType<ClearTalkDocumentContextInput>}> = (props) => {
+          const {agentId,data} = props ?? {};
+
+          return  clearTalkDocumentContext(agentId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ClearTalkDocumentContextMutationResult = NonNullable<Awaited<ReturnType<typeof clearTalkDocumentContext>>>
+    export type ClearTalkDocumentContextMutationBody = BodyType<ClearTalkDocumentContextInput>
+    export type ClearTalkDocumentContextMutationError = ErrorType<void>
+
+    /**
+ * @summary Consume retained canonical Talk document attachments without clearing history
+ */
+export const useClearTalkDocumentContext = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearTalkDocumentContext>>, TError,{agentId: string;data: BodyType<ClearTalkDocumentContextInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof clearTalkDocumentContext>>,
+        TError,
+        {agentId: string;data: BodyType<ClearTalkDocumentContextInput>},
+        TContext
+      > => {
+      return useMutation(getClearTalkDocumentContextMutationOptions(options));
     }
 
 export const getGetTalkUnreadUrl = () => {

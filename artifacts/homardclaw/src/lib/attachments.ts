@@ -1,7 +1,7 @@
 import type { InputAttachment } from "@workspace/api-client-react";
 
 export const ATTACHMENT_ACCEPT =
-  "image/png,image/jpeg,image/webp,image/gif,application/pdf,.txt,.md,.markdown,.csv,.json,.yaml,.yml,.xml,.html,.js,.ts,.py,.sql,.toml,text/*";
+  "image/png,image/jpeg,image/webp,image/gif,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx,.txt,.md,.markdown,.csv,.json,.yaml,.yml,.xml,.html,.js,.ts,.py,.sql,.toml,text/*";
 
 const IMAGE_TYPES = new Set([
   "image/png",
@@ -20,6 +20,7 @@ const TEXT_APPLICATION_TYPES = new Set([
 ]);
 const MIME_BY_EXTENSION: Record<string, string> = {
   csv: "text/csv",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   gif: "image/gif",
   htm: "text/html",
   html: "text/html",
@@ -54,6 +55,7 @@ function isSupportedMimeType(mimeType: string): boolean {
   return (
     IMAGE_TYPES.has(mimeType) ||
     mimeType === "application/pdf" ||
+    mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
     mimeType.startsWith("text/") ||
     TEXT_APPLICATION_TYPES.has(mimeType)
   );
@@ -91,7 +93,8 @@ export async function readAttachment(file: File): Promise<InputAttachment> {
   if (file.size > MAX_FILE_BYTES)
     throw new Error(`${file.name} is larger than 25 MB.`);
   const mimeType = inferAttachmentMimeType(file);
-  if (IMAGE_TYPES.has(mimeType) || mimeType === "application/pdf") {
+  if (IMAGE_TYPES.has(mimeType) || mimeType === "application/pdf" ||
+    mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
     return {
       name: file.name,
       mimeType,
@@ -111,6 +114,8 @@ export async function readAttachment(file: File): Promise<InputAttachment> {
 export function attachmentLabel(attachment: InputAttachment): string {
   return attachment.mimeType.startsWith("image/")
     ? `Image · ${attachment.name}`
+    : attachment.mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      ? `DOCX · ${attachment.name}`
     : attachment.name;
 }
 
@@ -119,6 +124,26 @@ export function attachmentsForTalkProposal(
   turnAttachments: readonly InputAttachment[],
 ): InputAttachment[] {
   return hasProposal ? [...turnAttachments] : [];
+}
+
+/**
+ * Retained canonical documents and files attached to the proposing turn both
+ * become task files. Never silently trim either set: the task API accepts four
+ * attachments, so callers can show clear guidance before a proposal is shown.
+ */
+export function combineTalkProposalAttachments(
+  retained: readonly InputAttachment[],
+  current: readonly InputAttachment[],
+): { attachments: InputAttachment[]; exceedsLimit: boolean } {
+  const attachments = [...retained, ...current];
+  return { attachments, exceedsLimit: attachments.length > MAX_ATTACHMENTS };
+}
+
+/** Build the conditional cleanup body shared by every Talk dismissal path. */
+export function talkDocumentContextCleanupInput(
+  version: string | null,
+): { version: string } | null {
+  return version ? { version } : null;
 }
 
 export function withTalkAttachments<T extends object>(

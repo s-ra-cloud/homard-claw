@@ -132,13 +132,18 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     },
   });
 
-  // This worker intentionally stays as a small, unbundled ESM file: it is
-  // forked by the service, imports the external PDF.js package itself, and
-  // therefore cannot inherit the server's module graph or application state.
+  // These workers intentionally stay as small, unbundled ESM files. They are
+  // forked for untrusted document parsing and therefore cannot inherit the
+  // server's module graph, credentials, or application state.
   await mkdir(path.join(distDir, "pdf"), { recursive: true });
   await cp(
     path.join(artifactDir, "src/pdf/extract-worker.mjs"),
     path.join(distDir, "pdf/extract-worker.mjs"),
+  );
+  await mkdir(path.join(distDir, "docx"), { recursive: true });
+  await cp(
+    path.join(artifactDir, "src/docx/extract-worker.mjs"),
+    path.join(distDir, "docx/extract-worker.mjs"),
   );
 }
 
