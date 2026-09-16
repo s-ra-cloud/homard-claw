@@ -830,7 +830,7 @@ export const delegateFromTalkBodyAttachmentsItemNameMax = 160;
 
 export const delegateFromTalkBodyAttachmentsItemMimeTypeMax = 100;
 
-export const delegateFromTalkBodyAttachmentsItemContentMax = 34000000;
+export const delegateFromTalkBodyAttachmentsItemContentMax = 54000000;
 
 export const delegateFromTalkBodyAttachmentsMax = 4;
 
@@ -1337,7 +1337,7 @@ export const createTaskBodyAttachmentsItemNameMax = 160;
 
 export const createTaskBodyAttachmentsItemMimeTypeMax = 100;
 
-export const createTaskBodyAttachmentsItemContentMax = 34000000;
+export const createTaskBodyAttachmentsItemContentMax = 54000000;
 
 export const createTaskBodyAttachmentsMax = 4;
 
@@ -2068,7 +2068,7 @@ export const converseWithAgentBodyAttachmentsItemNameMax = 160;
 
 export const converseWithAgentBodyAttachmentsItemMimeTypeMax = 100;
 
-export const converseWithAgentBodyAttachmentsItemContentMax = 34000000;
+export const converseWithAgentBodyAttachmentsItemContentMax = 54000000;
 
 export const converseWithAgentBodyAttachmentsMax = 4;
 
@@ -2104,7 +2104,7 @@ export const converseWithAgentResponseNormalizedAttachmentsItemNameMax = 160;
 
 export const converseWithAgentResponseNormalizedAttachmentsItemMimeTypeMax = 100;
 
-export const converseWithAgentResponseNormalizedAttachmentsItemContentMax = 34000000;
+export const converseWithAgentResponseNormalizedAttachmentsItemContentMax = 54000000;
 
 export const converseWithAgentResponseNormalizedAttachmentsMax = 4;
 

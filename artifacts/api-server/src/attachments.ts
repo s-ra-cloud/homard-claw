@@ -9,6 +9,7 @@ import { extractDocxText, DocxExtractionError } from "./docx/extract";
  * are bounded by isolated extraction services and the aggregate below.
  */
 export const MAX_ATTACHMENT_BYTES = 25_000_000;
+export const MAX_TASK_PDF_ATTACHMENT_BYTES = 40_000_000;
 export const MAX_ATTACHMENTS = 4;
 const MAX_SOURCE_FILENAME_CHARS = 160;
 /** Four PDF/DOCX extractions are each service-bounded to 1.5M Unicode scalars. */
@@ -215,6 +216,8 @@ function safeName(name: string | undefined): string {
 export type NormalizeAttachmentsOptions = {
   signal?: AbortSignal;
   deadlineAt?: number;
+  /** Task ingestion may opt in; all other callers retain the 25 MB boundary. */
+  maxPdfBytes?: number;
 };
 
 /**
@@ -312,17 +315,21 @@ export async function normalizeAttachments(
         );
       }
       const bytes = base64Bytes;
-      if (bytes.byteLength > MAX_ATTACHMENT_BYTES) {
+      const maxPdfBytes = Math.min(
+        MAX_TASK_PDF_ATTACHMENT_BYTES,
+        options.maxPdfBytes ?? MAX_ATTACHMENT_BYTES,
+      );
+      if (bytes.byteLength > maxPdfBytes) {
         throw new AttachmentNormalizationError(
           "too_large",
-          "An attachment is larger than 25 MB.",
+          `The PDF is larger than ${maxPdfBytes / 1_000_000} MB.`,
         );
       }
       let text: string;
       try {
         text = await extractPdfText(bytes, {
           signal: options.signal,
-          maxInputBytes: MAX_ATTACHMENT_BYTES,
+          maxInputBytes: maxPdfBytes,
           deadlineAt: options.deadlineAt,
         });
       } catch (error) {

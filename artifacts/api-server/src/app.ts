@@ -74,8 +74,9 @@ app.use(
   }),
 );
 // Voice recordings and task attachments arrive as base64 JSON. Existing task
-// uploads allow up to four 25 MB files, which are base64-expanded in transit.
-app.use(express.json({ limit: "140mb" }));
+// task uploads allow up to four 40 MB PDFs, which are base64-expanded in transit.
+// Decoded type-aware validation retains the 25 MB limit for every non-PDF.
+app.use(express.json({ limit: "220mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(
   clerkMiddleware((req) => ({

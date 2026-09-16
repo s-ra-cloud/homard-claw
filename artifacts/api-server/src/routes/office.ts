@@ -151,6 +151,7 @@ import { abortRunningTask, getWorkerStatus, recoverQueueNow } from "../worker";
 import { abortProactiveTalk } from "../proactive-talk-runtime";
 import {
   AttachmentNormalizationError,
+  MAX_TASK_PDF_ATTACHMENT_BYTES,
   attachmentErrorStatus,
   normalizeAttachments,
 } from "../attachments";
@@ -1383,6 +1384,7 @@ router.post("/tasks", async (req, res): Promise<void> => {
   try {
     attachments = await normalizeAttachments(parsed.data.attachments, {
       signal: controller.signal,
+      maxPdfBytes: MAX_TASK_PDF_ATTACHMENT_BYTES,
     });
   } catch (error) {
     if (error instanceof AttachmentNormalizationError) {

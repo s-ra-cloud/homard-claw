@@ -152,6 +152,66 @@ describe("normalizeAttachments", () => {
     await expect(normalizeAttachments([image, image])).resolves.toHaveLength(2);
   });
 
+  it("accepts a 40 MB PDF for task ingestion and passes that bound to extraction", async () => {
+    extractPdfText.mockResolvedValueOnce("--- Page 1 ---\nReadable.");
+    const bytes = Buffer.alloc(40_000_000);
+    bytes.write("%PDF-1.7");
+    await expect(
+      normalizeAttachments(
+        [{ ...pdf, content: bytes.toString("base64") }],
+        { maxPdfBytes: 40_000_000 },
+      ),
+    ).resolves.toHaveLength(1);
+    expect(extractPdfText).toHaveBeenLastCalledWith(
+      expect.any(Uint8Array),
+      expect.objectContaining({ maxInputBytes: 40_000_000 }),
+    );
+  });
+
+  it("rejects PDFs over 40 MB while retaining the 25 MB non-PDF limit", async () => {
+    const oversizedPdf = Buffer.alloc(40_000_001);
+    oversizedPdf.write("%PDF-1.7");
+    await expect(
+      normalizeAttachments(
+        [{ ...pdf, content: oversizedPdf.toString("base64") }],
+        { maxPdfBytes: 40_000_000 },
+      ),
+    ).rejects.toMatchObject({
+      kind: "too_large",
+      userMessage: "The PDF is larger than 40 MB.",
+    });
+
+    await expect(
+      normalizeAttachments([{
+        name: "large.png",
+        mimeType: "image/png",
+        encoding: "base64",
+        content: Buffer.alloc(25_000_001).toString("base64"),
+      }]),
+    ).rejects.toMatchObject({
+      kind: "too_large",
+      userMessage: "An attachment is larger than 25 MB.",
+    });
+  });
+
+  it("applies the task PDF limit when only extension or signature identifies the PDF", async () => {
+    extractPdfText.mockResolvedValue("--- Page 1 ---\nReadable.");
+    const bytes = Buffer.alloc(25_000_001);
+    bytes.write("%PDF-1.7");
+    await expect(normalizeAttachments([{
+      ...pdf,
+      name: "report.pdf",
+      mimeType: "application/octet-stream",
+      content: bytes.toString("base64"),
+    }], { maxPdfBytes: 40_000_000 })).resolves.toHaveLength(1);
+    await expect(normalizeAttachments([{
+      ...pdf,
+      name: "upload.bin",
+      mimeType: "image/png",
+      content: bytes.toString("base64"),
+    }], { maxPdfBytes: 40_000_000 })).resolves.toHaveLength(1);
+  });
+
   it("rejects malformed base64 instead of silently decoding it", async () => {
     await expect(
       normalizeAttachments([{ ...pdf, content: "not / base64" }]),

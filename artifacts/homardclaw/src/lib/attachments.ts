@@ -42,6 +42,7 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   yml: "application/x-yaml",
 };
 export const MAX_FILE_BYTES = 25_000_000;
+export const MAX_TASK_PDF_BYTES = 40_000_000;
 export const MAX_ATTACHMENTS = 4;
 
 function extensionOf(name: string): string | null {
@@ -89,10 +90,24 @@ function base64(file: File): Promise<string> {
   });
 }
 
-export async function readAttachment(file: File): Promise<InputAttachment> {
-  if (file.size > MAX_FILE_BYTES)
-    throw new Error(`${file.name} is larger than 25 MB.`);
-  const mimeType = inferAttachmentMimeType(file);
+export async function readAttachment(
+  file: File,
+  options: { taskUpload?: boolean } = {},
+): Promise<InputAttachment> {
+  let mimeType = inferAttachmentMimeType(file);
+  const isPdf =
+    mimeType === "application/pdf" || extensionOf(file.name) === "pdf";
+  if (options.taskUpload && isPdf) mimeType = "application/pdf";
+  const maxBytes = options.taskUpload && isPdf
+    ? MAX_TASK_PDF_BYTES
+    : MAX_FILE_BYTES;
+  if (file.size > maxBytes) {
+    throw new Error(
+      isPdf && options.taskUpload
+        ? `${file.name} is larger than the 40 MB PDF limit.`
+        : `${file.name} is larger than 25 MB.`,
+    );
+  }
   if (IMAGE_TYPES.has(mimeType) || mimeType === "application/pdf" ||
     mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
     return {

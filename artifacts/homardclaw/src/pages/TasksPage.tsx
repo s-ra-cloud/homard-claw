@@ -1489,7 +1489,7 @@ export default function TasksPage() {
     }
     for (const file of selected.slice(0, available)) {
       try {
-        const attachment = await readAttachment(file);
+        const attachment = await readAttachment(file, { taskUpload: true });
         setTaskAttachments((current) => [...current, attachment]);
       } catch (error) {
         toast({
@@ -1668,7 +1668,7 @@ export default function TasksPage() {
                       <Paperclip className="w-3.5 h-3.5 mr-1" /> Attach files
                     </Button>
                     <span className="text-[10px] text-muted-foreground uppercase font-mono">
-                      Images, PDF, DOCX, or text · 25 MB each
+                      PDFs up to 40 MB · Images, DOCX, or text up to 25 MB
                     </span>
                   </div>
                   {taskAttachments.length > 0 && (

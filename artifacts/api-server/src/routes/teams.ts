@@ -41,6 +41,7 @@ import { publish } from "../events";
 import { getWorkspaceSetting } from "../workspace";
 import {
   AttachmentNormalizationError,
+  MAX_TASK_PDF_ATTACHMENT_BYTES,
   attachmentErrorStatus,
   normalizeAttachments,
 } from "../attachments";
@@ -125,6 +126,7 @@ router.post(
     try {
       attachments = await normalizeAttachments(body.data.attachments, {
         signal: controller.signal,
+        maxPdfBytes: MAX_TASK_PDF_ATTACHMENT_BYTES,
       });
     } catch (error) {
       if (error instanceof AttachmentNormalizationError) {

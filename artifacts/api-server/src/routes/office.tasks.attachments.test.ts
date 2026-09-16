@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { CreateTaskBody, DelegateFromTalkBody } from "@workspace/api-zod";
 
-// Content length that a 25 MB source file expands to once base64-encoded
-// (ceil(n/3)*4), the shape every binary attachment (images, PDFs) takes.
-const MAX_ATTACHMENT_CONTENT_LENGTH = 34_000_000;
+// Contract bound includes a conservative margin over a 40 MB PDF's base64.
+const MAX_ATTACHMENT_CONTENT_LENGTH = 54_000_000;
 
 function bodyWithAttachmentContent(length: number) {
   return {
@@ -21,7 +20,7 @@ function bodyWithAttachmentContent(length: number) {
 }
 
 describe("CreateTaskBody attachment size validation", () => {
-  it("accepts an attachment right at the 25 MB (base64) boundary", () => {
+  it("accepts an encoded 40 MB PDF payload at the contract boundary", () => {
     const result = CreateTaskBody.safeParse(
       bodyWithAttachmentContent(MAX_ATTACHMENT_CONTENT_LENGTH),
     );

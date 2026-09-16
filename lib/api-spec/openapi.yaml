@@ -3892,8 +3892,9 @@ components:
         name: { type: string, minLength: 1, maxLength: 160 }
         mimeType: { type: string, minLength: 1, maxLength: 100 }
         encoding: { type: string, enum: [text, base64] }
-        # 25 MB source file, base64-encoded (~4/3 expansion), plus margin.
-        content: { type: string, minLength: 1, maxLength: 34000000 }
+        # 40 MB PDF, base64-encoded (ceil(n/3)*4), plus conservative margin.
+        # Decoded server validation keeps every non-PDF at 25 MB.
+        content: { type: string, minLength: 1, maxLength: 54000000 }
     TaskEstimateInput:
       type: object
       required: [agentId, objective]

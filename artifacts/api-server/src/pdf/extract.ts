@@ -26,7 +26,7 @@ const PDF_EXTRACTION_ERROR_MESSAGES: Readonly<Record<PdfExtractionErrorKind, str
   cancelled: "PDF text extraction was cancelled.",
   timeout: "PDF text extraction timed out.",
   queue_full: "PDF text extraction is temporarily busy. Please try again.",
-  input_too_large: "The PDF exceeds the 25,000,000-byte extraction limit.",
+  input_too_large: "The PDF exceeds the 40,000,000-byte extraction limit.",
   resource_limit: "PDF text extraction exceeded its resource limit.",
   page_limit: "The PDF exceeds the 100-page extraction limit.",
   invalid_page_range: "PDF pages must be a page number or inclusive range (for example 7 or 7-9), between 1 and 100, selecting at most 5 pages.",
@@ -81,7 +81,7 @@ export function parsePdfPages(value: unknown): { start: number; end: number } | 
 }
 
 export const PDF_EXTRACTION_LIMITS = {
-  maxInputBytes: 25_000_000,
+  maxInputBytes: 40_000_000,
   maxPages: 100,
   maxOutputChars: 1_500_000,
   maxConcurrent: 2,
