@@ -86,6 +86,8 @@ import {
   denyClaimedAction,
   reconcileStaleExecutingActions,
   describeActionForModel,
+  ACTION_UNEXPECTED_FAILURE_MESSAGE,
+  settleUnexpectedClaimedAction,
   executeClaimedAction,
   listTaskActions,
   recordDeniedAction,
@@ -139,6 +141,14 @@ const TALK_RECAP_RESULT_LIMIT = 4_000;
 const TALK_RECAP_ISSUE_LIMIT = 3;
 /** Shared advisory-lock class used by Talk history clears and inserts. */
 const TALK_HISTORY_LOCK = 872_005;
+/**
+ * Unexpected exceptions are intentionally not reflected in task-facing
+ * messages. Driver errors can contain SQL, bound parameters, and private
+ * connector responses; ProviderCallError messages are the explicit exception
+ * because provider adapters already compose their owner-facing wording.
+ */
+const UNEXPECTED_WORKER_ERROR_MESSAGE =
+  "An unexpected internal error prevented this task from completing. No further automatic action was taken.";
 
 const inFlight = new Map<string, AbortController>();
 
@@ -186,8 +196,10 @@ export async function setTaskPhase(
       .set({ providerPhase: phase })
       .where(and(eq(tasksTable.id, taskId), eq(tasksTable.attempts, attempts)));
     publish(workspaceId, "tasks");
-  } catch (error) {
-    logger.warn({ taskId, phase, error }, "Could not record task phase");
+  } catch {
+    // Never serialize an unexpected driver error: it may include SQL
+    // parameters or private provider content.
+    logger.warn({ taskId, phase }, "Could not record task phase");
   }
 }
 export async function addTaskLog(
@@ -197,11 +209,11 @@ export async function addTaskLog(
 ): Promise<void> {
   try {
     await db.insert(taskLogsTable).values({ taskId, level, message });
-  } catch (error) {
+  } catch {
     // The task may have been deleted while its provider call was in flight
     // (e.g. agent deletion). Losing the log line is fine; crashing the
     // worker tick over it is not.
-    logger.warn({ taskId, error }, "Could not append task log");
+    logger.warn({ taskId }, "Could not append task log");
   }
 }
 
@@ -1150,9 +1162,9 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     appAccess = await loadAgentAppAccess(agent.id, workspaceId, {
       objective: task.objective,
     });
-  } catch (error) {
+  } catch {
     logger.warn(
-      { taskId: task.id, error },
+      { taskId: task.id },
       "Could not load connected-app grants",
     );
     await addTaskLog(
@@ -1200,9 +1212,9 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
           "The delegation handoff was withheld because the sensitive-data boundary no longer permits agent-to-agent context.",
         );
       }
-    } catch (error) {
+    } catch {
       logger.warn(
-        { taskId: task.id, error },
+        { taskId: task.id },
         "Could not verify handoff access",
       );
       await addTaskLog(
@@ -1227,6 +1239,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
   } | null = null;
   const approvedActionController = new AbortController();
   const approvedActionDeadlineAt = attemptDeadlineAt;
+  let claimedApprovedActionId: string | null = null;
   const approvedActionTimeout = setTimeout(
     () => approvedActionController.abort("timeout"),
     Math.max(0, approvedActionDeadlineAt - Date.now()),
@@ -1305,8 +1318,16 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         );
         continue;
       }
+      // Set the candidate id before the claim itself: if the database write
+      // succeeds but decoding/returning the row throws, the action still
+      // needs a best-effort no-replay settlement in the catch below.
+      claimedApprovedActionId = approved.id;
       const claimed = await claimApprovedAction(approved.id);
-      if (!claimed) continue;
+      if (!claimed) {
+        claimedApprovedActionId = null;
+        continue;
+      }
+      claimedApprovedActionId = claimed.id;
       await addTaskLog(
         task.id,
         "info",
@@ -1328,6 +1349,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
           deadlineAt: approvedActionDeadlineAt,
         },
       );
+      claimedApprovedActionId = null;
       if (approvedActionController.signal.aborted) break;
       if (action.status === "approved") {
         // Parked: the credential was refused before any work happened, and
@@ -1353,11 +1375,40 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
           : `The approved action failed: ${action.errorMessage ?? "unknown error"}. The failure was recorded; deliberately continuing with the provider so the model can recover.`,
       );
     }
-  } catch (error) {
-    logger.warn(
-      { taskId: task.id, error },
-      "Could not run approved connected-app actions",
-    );
+  } catch {
+    if (approvedActionController.signal.aborted) {
+      // Preserve the existing timeout/cancellation handling below. It owns
+      // the task transition and must win over an incidental exception while
+      // the controller is already aborting.
+      logger.warn(
+        { taskId: task.id },
+        "Could not run approved connected-app actions before cancellation settled",
+      );
+    } else {
+      // Any unexpected exception before the normal action finalizer is
+      // terminal: an external write may have happened, so continuing to the
+      // provider could report success and leave an executing action replayable.
+      if (claimedApprovedActionId) {
+        await settleUnexpectedClaimedAction(claimedApprovedActionId);
+      }
+      const failureMessage = UNEXPECTED_WORKER_ERROR_MESSAGE;
+      const finished = await finishIfStillRunning(task.id, task.attempts, {
+        status: "failed",
+        errorKind: "provider_error",
+        errorMessage: failureMessage,
+      });
+      if (finished) {
+        await setTaskPhase(task.id, task.attempts, "failed", workspaceId);
+        await addTaskLog(task.id, "error", `Failed: ${failureMessage}`);
+        await recordAudit(
+          workspaceId,
+          "task.failed",
+          `A task for ${agent.name} failed while running an approved connected-app action.`,
+        );
+      }
+      await settleAgentStatus(agent.id, workspaceId);
+      return;
+    }
   } finally {
     clearTimeout(approvedActionTimeout);
     if (inFlight.get(task.id) === approvedActionController) {
@@ -1428,9 +1479,9 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         ),
       )
       .map(describeActionForModel);
-  } catch (error) {
+  } catch {
     logger.warn(
-      { taskId: task.id, error },
+      { taskId: task.id },
       "Could not load connected-app action history",
     );
   }
@@ -1460,8 +1511,8 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
     context = await buildTaskContext(agent.id, workspaceId, task.objective, {
       sensitiveDataSandbox: appAccess.sensitiveDataSandbox,
     });
-  } catch (error) {
-    logger.warn({ taskId: task.id, error }, "Memory retrieval failed");
+  } catch {
+    logger.warn({ taskId: task.id }, "Memory retrieval failed");
     await addTaskLog(
       task.id,
       "warn",
@@ -1501,9 +1552,9 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         workspaceId,
         { sensitiveDataSandbox: appAccess.sensitiveDataSandbox },
       );
-    } catch (error) {
+    } catch {
       logger.warn(
-        { taskId: task.id, error },
+        { taskId: task.id },
         "Pinned instruction retrieval failed; running this round without them",
       );
       pinnedInstructions = null;
@@ -1907,11 +1958,11 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
               heldLeaseKey = null;
               controller.abort("provider_lease_lost");
             },
-            (error: unknown) => {
+            () => {
               // A transient database error is not proof of loss; let the
               // next beat decide rather than killing a healthy run.
               logger.warn(
-                { taskId: task.id, error },
+                { taskId: task.id },
                 "Could not renew the Codex credential lease",
               );
             },
@@ -2295,9 +2346,9 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
           appAccess = await loadAgentAppAccess(agent.id, workspaceId, {
             objective: task.objective,
           });
-        } catch (error) {
+        } catch {
           logger.warn(
-            { taskId: task.id, error },
+            { taskId: task.id },
             "Could not refresh connected-app access mid-run",
           );
           appAccess = {
@@ -2502,9 +2553,9 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
             task.id,
             codexLeaseTtlMs(),
           );
-        } catch (error) {
+        } catch {
           logger.warn(
-            { taskId: task.id, error },
+            { taskId: task.id },
             "Could not confirm the Codex credential lease before recording a result",
           );
         }
@@ -2602,9 +2653,9 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
             verdict.reason ??
             "The draft reply did not follow a pinned instruction.";
         }
-      } catch (error) {
+      } catch {
         logger.warn(
-          { taskId: task.id, error },
+          { taskId: task.id },
           "Pinned instruction compliance check failed to run; proceeding without it",
         );
       }
@@ -2809,9 +2860,9 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
             "Memory store is full of curated entries; task outcome not saved",
           );
         }
-      } catch (error) {
+      } catch {
         logger.warn(
-          { taskId: task.id, error },
+          { taskId: task.id },
           "Could not save task outcome memory",
         );
       }
@@ -2857,7 +2908,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         ? error
         : new ProviderCallError(
             "provider_error",
-            error instanceof Error ? error.message : "Unexpected worker error",
+            UNEXPECTED_WORKER_ERROR_MESSAGE,
           );
 
     if (callError.kind === "cancelled") {
@@ -3186,7 +3237,7 @@ export async function heartbeatOwnershipOnce(): Promise<void> {
     // legitimately own the queue, so treat it as lost.
     consecutiveRenewalFailures += 1;
     logger.warn(
-      { error, consecutiveRenewalFailures },
+      { consecutiveRenewalFailures },
       "Could not renew queue ownership",
     );
     if (Date.now() >= held.expiresAtMs) {
@@ -3466,8 +3517,8 @@ export function startWorker(intervalMs = POLL_INTERVAL_MS): void {
       while (hasActiveOwnership() && (await workOnce())) {
         /* claimed and ran one task */
       }
-    } catch (error) {
-      logger.error({ error }, "Task worker tick failed");
+    } catch {
+      logger.error("Task worker tick failed");
     } finally {
       draining = false;
     }
@@ -3506,9 +3557,8 @@ export async function stopWorker(): Promise<void> {
       if (released) {
         logger.info("Queue ownership released for clean handoff");
       }
-    } catch (error) {
+    } catch {
       logger.warn(
-        { error },
         "Could not release queue ownership on shutdown; it expires on its own",
       );
     }

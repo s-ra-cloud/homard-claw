@@ -14,6 +14,62 @@ function response(body: string, status = 200): Response {
 }
 
 describe("readDriveFileTransport", () => {
+  it.each(["application/pdf", "application/octet-stream", "image/png",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"])(
+    "refuses %s before downloading binary content", async (mimeType) => {
+      let calls = 0;
+      const failures: unknown[] = [];
+      const result = await readDriveFileTransport({
+        workspaceId: "workspace-binary",
+        fileId: "private-file",
+        resolveToken: async () => "token",
+        onFailure: (details) => failures.push(details),
+        fetchImpl: async () => {
+          calls++;
+          return response(JSON.stringify({ name: "private-name", mimeType }));
+        },
+      });
+      expect(calls).toBe(1);
+      expect(result).toMatchObject({ ok: false, kind: "failed" });
+      expect(JSON.stringify(result)).toContain("text extraction");
+      expect(JSON.stringify(result)).not.toContain("private");
+      expect(failures).toEqual([{ stage: "metadata", failureClass: "unsupported_content" }]);
+    },
+  );
+
+  it.each([
+    new Uint8Array([65, 0, 66]),
+    new Uint8Array([0xff, 0xfe, 65]),
+    new TextEncoder().encode("%PDF-1.7 private binary"),
+    new TextEncoder().encode("PK\u0003\u0004private binary"),
+  ])("refuses binary bytes mislabeled as text without leaking the body", async (bytes) => {
+    let calls = 0;
+    const result = await readDriveFileTransport({
+      workspaceId: "workspace-text",
+      fileId: "private-file",
+      resolveToken: async () => "token",
+      fetchImpl: async () => ++calls === 1
+        ? response(JSON.stringify({ mimeType: "text/plain" }))
+        : new Response(bytes),
+    });
+    expect(result).toMatchObject({ ok: false, kind: "failed" });
+    expect(JSON.stringify(result)).not.toContain("private");
+    expect(JSON.stringify(result)).not.toContain("\\u0000");
+  });
+
+  it("preserves valid Unicode text", async () => {
+    let calls = 0;
+    const result = await readDriveFileTransport({
+      workspaceId: "workspace-text",
+      fileId: "unicode",
+      resolveToken: async () => "token",
+      fetchImpl: async () => ++calls === 1
+        ? response(JSON.stringify({ mimeType: "text/plain", name: "Résumé" }))
+        : new Response("Bonjour, résumé — 日本語"),
+    });
+    expect(result).toMatchObject({ ok: true, text: "Bonjour, résumé — 日本語" });
+  });
+
   it("uses one credential and carries one signal through metadata and export", async () => {
     const calls: { url: string; authorization: string; signal?: AbortSignal }[] =
       [];

@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { executeOperation } from "./connections";
+import {
+  executeOperation,
+  UNEXPECTED_APP_ERROR_MESSAGE,
+} from "./connections";
 import { findOperation } from "./catalog";
 import * as googleCredentials from "../google/credentials";
 import { logger } from "../lib/logger";
@@ -136,5 +139,36 @@ describe("google_drive.read_file production diagnostics", () => {
       "private file details",
     );
     expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("secret-file-id");
+  });
+
+  it("does not return or log an unexpected executor exception", async () => {
+    const warnSpy = vi.spyOn(logger, "warn");
+    const privateMarker = "PRIVATE EXECUTOR PARAMETER MARKER";
+    const params = new Proxy(
+      {},
+      {
+        get() {
+          throw new Error(privateMarker);
+        },
+      },
+    ) as Record<string, unknown>;
+
+    const outcome = await executeOperation(
+      findOperation("gmail.search")!,
+      params,
+      {
+        taskId: "task-unexpected-executor",
+        actionId: "action-unexpected-executor",
+        workspaceId: "workspace-unexpected-executor",
+      },
+    );
+
+    expect(outcome).toEqual({
+      ok: false,
+      kind: "failed",
+      message: UNEXPECTED_APP_ERROR_MESSAGE,
+    });
+    expect(JSON.stringify(outcome)).not.toContain(privateMarker);
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(privateMarker);
   });
 });

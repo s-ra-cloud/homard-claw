@@ -22,6 +22,71 @@ import {
   verifyOperationOutcome,
   type ExecutionOutcome,
 } from "./connections";
+import { logger } from "../lib/logger";
+
+/**
+ * This is deliberately generic. Database/driver errors can include rendered
+ * SQL parameters, which may contain a private connector response (and some
+ * values, such as decoded binary content, cannot be stored in PostgreSQL
+ * text at all). That detail must never become an action error, task error, or
+ * log line.
+ */
+export const ACTION_FINALIZATION_FAILURE_MESSAGE =
+  "The connected-app action could not be finalized because of an internal error. It was not replayed automatically.";
+export const ACTION_UNEXPECTED_FAILURE_MESSAGE =
+  "The approved connected-app action stopped unexpectedly. Its outcome is unknown and it was not replayed automatically. Verify the external app before requesting it again.";
+
+/**
+ * A connector may have completed before the action row failed to settle. The
+ * caller must stop the task rather than treating that as an ordinary
+ * recoverable action failure. The action finalizer makes a best-effort
+ * terminal update before throwing this safe error.
+ */
+export class ActionFinalizationError extends Error {
+  readonly actionId: string;
+
+  constructor(actionId: string) {
+    super(ACTION_FINALIZATION_FAILURE_MESSAGE);
+    this.name = "ActionFinalizationError";
+    this.actionId = actionId;
+  }
+}
+
+/**
+ * Fail closed when an approved action throws before its normal finalizer.
+ * The provider may have done work, so an executing row must never remain
+ * claimable for automatic replay. The status guard preserves a concurrent
+ * cancellation or other terminal settlement.
+ */
+export async function settleUnexpectedClaimedAction(
+  actionId: string,
+): Promise<AppActionRecord | null> {
+  try {
+    const [row] = await db
+      .update(appActionsTable)
+      .set({
+        status: "failed",
+        errorMessage: ACTION_UNEXPECTED_FAILURE_MESSAGE,
+        executedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(appActionsTable.id, actionId),
+          eq(appActionsTable.status, "executing"),
+        ),
+      )
+      .returning();
+    return row ?? null;
+  } catch {
+    // The worker still terminalizes the task with a fixed message. Never
+    // serialize the exception: its SQL parameters may contain private data.
+    logger.warn(
+      { actionId },
+      "Could not settle an unexpectedly stopped connected-app action",
+    );
+    return null;
+  }
+}
 
 /** Resolve one operation against the workspace's pinned capability catalog. */
 async function resolveTool(
@@ -548,34 +613,90 @@ async function finalizeAction(
   outcome: ExecutionOutcome,
   workspaceId: string | null,
 ): Promise<AppActionRecord> {
-  return db.transaction(async (tx) => {
-    const [row] = await tx
-      .update(appActionsTable)
-      .set(
+  try {
+    return await db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(appActionsTable)
+        .set(
+          outcome.ok
+            ? {
+                status: "executed",
+                resultSummary: outcome.summary,
+                executedAt: new Date(),
+              }
+            : {
+                status: "failed",
+                errorMessage: outcome.message,
+                executedAt: new Date(),
+              },
+        )
+        .where(eq(appActionsTable.id, actionId))
+        .returning();
+      await recordAudit(
+        workspaceId,
+        outcome.ok ? "app_action.executed" : "app_action.failed",
         outcome.ok
-          ? {
-              status: "executed",
-              resultSummary: outcome.summary,
-              executedAt: new Date(),
-            }
-          : {
-              status: "failed",
-              errorMessage: outcome.message,
-              executedAt: new Date(),
-            },
-      )
-      .where(eq(appActionsTable.id, actionId))
-      .returning();
-    await recordAudit(
-      workspaceId,
-      outcome.ok ? "app_action.executed" : "app_action.failed",
-      outcome.ok
-        ? `${agentName} used a connected app: ${row.targetSummary}.`
-        : `A connected-app action by ${agentName} failed (${row.targetSummary}): ${outcome.message.slice(0, 200)}`,
-      tx,
+          ? `${agentName} used a connected app: ${row.targetSummary}.`
+          : `A connected-app action by ${agentName} failed (${row.targetSummary}): ${outcome.message.slice(0, 200)}`,
+        tx,
+      );
+      return row;
+    });
+  } catch {
+    // Do not log the driver error: Drizzle includes SQL parameters in its
+    // message, and a connector result can be one of those parameters.
+    logger.warn(
+      { actionId, workspaceId },
+      "Connected-app action finalization failed; attempting safe terminal settlement",
     );
-    return row;
-  });
+
+    // The normal transaction may have failed after the provider call (for
+    // example, PostgreSQL rejects a NUL in decoded content). Settle the
+    // exactly-once row directly with a fixed message. Keep the executing
+    // guard so a concurrent cancellation or finalizer still wins.
+    try {
+      const [settled] = await db
+        .update(appActionsTable)
+        .set({
+          status: "failed",
+          errorMessage: ACTION_FINALIZATION_FAILURE_MESSAGE,
+          executedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(appActionsTable.id, actionId),
+            eq(appActionsTable.status, "executing"),
+          ),
+        )
+        .returning();
+      if (settled) {
+        try {
+          await recordAudit(
+            workspaceId,
+            "app_action.failed",
+            `A connected-app action by ${agentName} could not be finalized and was not replayed automatically.`,
+          );
+        } catch {
+          // The action row is already terminal. An audit failure must not
+          // roll it back or turn it into a replayable executing row.
+          logger.warn(
+            { actionId, workspaceId },
+            "Could not append the safe connected-app finalization audit event",
+          );
+        }
+      }
+    } catch {
+      // There is no safe durable fallback while the database itself is
+      // unavailable. Still throw only the fixed error below; the worker will
+      // use the same safe terminal task path without exposing driver detail.
+      logger.warn(
+        { actionId, workspaceId },
+        "Could not settle the connected-app action after finalization failed",
+      );
+    }
+
+    throw new ActionFinalizationError(actionId);
+  }
 }
 
 /**

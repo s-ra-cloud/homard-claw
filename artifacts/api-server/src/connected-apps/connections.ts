@@ -185,6 +185,10 @@ export type ExecutionOutcome =
       refusedBeforeExecution?: boolean;
     };
 
+/** Never expose arbitrary connector/driver exception text to an action row. */
+export const UNEXPECTED_APP_ERROR_MESSAGE =
+  "The connected app could not complete this operation because of an internal error.";
+
 function truncate(text: string): string {
   return text.length > RESULT_CHAR_LIMIT
     ? `${text.slice(0, RESULT_CHAR_LIMIT)}\n[truncated]`
@@ -341,13 +345,13 @@ async function providerJson(input: {
         ? { body: raw ? String(options!.body) : JSON.stringify(options!.body) }
         : {}),
     });
-  } catch (error) {
+  } catch {
     return {
       ok: false,
       outcome: {
         ok: false,
         kind: "failed",
-        message: `Could not reach ${input.providerLabel}: ${error instanceof Error ? error.message : String(error)}`,
+        message: `Could not reach ${input.providerLabel}.`,
       },
     };
   }
@@ -3471,11 +3475,11 @@ export async function executeOperation(
   }
   try {
     return await executor(params, ctx);
-  } catch (error) {
+  } catch {
     return {
       ok: false,
       kind: "failed",
-      message: error instanceof Error ? error.message : "Unexpected app error",
+      message: UNEXPECTED_APP_ERROR_MESSAGE,
     };
   }
 }
@@ -4396,10 +4400,10 @@ export async function verifyOperationOutcome(
   }
   try {
     return await verifier.verify(params, actionId, workspaceId);
-  } catch (error) {
+  } catch {
     return {
       kind: "unknown",
-      message: error instanceof Error ? error.message : "Verification failed",
+      message: UNEXPECTED_APP_ERROR_MESSAGE,
     };
   }
 }

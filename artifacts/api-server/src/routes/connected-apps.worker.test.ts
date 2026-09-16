@@ -66,9 +66,22 @@ vi.stubGlobal("fetch", fetchMock);
 // executeOperation is the single seam through which every allowed or
 // approved action reaches an external app.
 const executeMock = vi.hoisted(() => vi.fn());
+// Keep one escape hatch to the real connector implementation for the
+// transport-to-worker regression below. Most tests intentionally replace this
+// seam so they can focus on worker mechanics.
+const actualExecuteOperation = vi.hoisted(() => ({
+  current: null as null | ((
+    operation: unknown,
+    params: Record<string, unknown>,
+    context: Record<string, unknown>,
+  ) => Promise<unknown>),
+}));
 vi.mock("../connected-apps/connections", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../connected-apps/connections")>();
+  actualExecuteOperation.current = actual.executeOperation as unknown as NonNullable<
+    typeof actualExecuteOperation.current
+  >;
   return { ...actual, executeOperation: executeMock };
 });
 
@@ -87,6 +100,7 @@ import {
 } from "../google/credentials";
 import { clearProviderCaches } from "../providers";
 import { saveProviderCredential } from "../provider-credentials";
+import { logger } from "../lib/logger";
 
 const app = express();
 app.use(express.json());
@@ -735,6 +749,195 @@ describe("sensitive data sandbox at the worker boundary", () => {
 });
 
 describe("connected-app cancellation and recoverable failures", () => {
+  it("settles a NUL-bearing action finalization failure safely without leaking its private result", async () => {
+    const warnSpy = vi.spyOn(logger, "warn");
+    const agent = await createAgent("Nul Finalization", [
+      { app: "google_drive", accessLevel: "read" },
+    ]);
+    const task = await insertRunningTask(agent.id);
+    const readBlock = `<app_action>${JSON.stringify({
+      operation: "google_drive.read_file",
+      params: { fileId: "drive-file-private-pdf" },
+    })}</app_action>`;
+    const privatePdfText = "PRIVATE PDF BODY — payroll@example.test";
+    executeMock.mockResolvedValueOnce({
+      ok: true,
+      // PostgreSQL rejects NUL in text. This reproduces the connector result
+      // that caused the original Drizzle finalization error.
+      summary: `${privatePdfText}\u0000decoded binary tail`,
+    });
+    queueCompletions([completion(readBlock)]);
+
+    await runTask({ task, agent: await loadAgent(agent.id) });
+
+    const [failedAction] = await getActions(task.id);
+    expect(failedAction?.status).toBe("failed");
+    expect(failedAction?.errorMessage).toMatch(
+      /could not be finalized|not replayed automatically/i,
+    );
+    expect(failedAction?.errorMessage).not.toContain(privatePdfText);
+    expect(failedAction?.status).not.toBe("executing");
+
+    const failedTask = await getTaskRow(task.id);
+    expect(failedTask?.status).toBe("failed");
+    expect(failedTask?.errorKind).toBe("provider_error");
+    expect(failedTask?.errorMessage).toMatch(/unexpected internal error/i);
+    expect(failedTask?.errorMessage).not.toContain(privatePdfText);
+    expect(failedTask?.errorMessage).not.toContain("\u0000");
+
+    const logs = await getLogs(task.id);
+    expect(logs.some((log) => /Failed \(provider_error\)/.test(log.message))).toBe(
+      true,
+    );
+    const serializedLogs = JSON.stringify(logs);
+    expect(serializedLogs).not.toContain(privatePdfText);
+    expect(serializedLogs).not.toContain("\u0000");
+    expect(logs.some((log) => log.message.includes("unexpected internal error"))).toBe(
+      true,
+    );
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(privatePdfText);
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("\u0000");
+    warnSpy.mockRestore();
+  });
+
+  it("terminalizes an approved NUL-bearing action and makes no later provider call", async () => {
+    const warnSpy = vi.spyOn(logger, "warn");
+    const agent = await createAgent("Approved Nul Finalization", [
+      { app: "google_drive", accessLevel: "read" },
+    ]);
+    const task = await insertRunningTask(agent.id);
+    await insertApprovedAction(task.id, agent.id, {
+      app: "google_drive",
+      operation: "google_drive.read_file",
+      params: { fileId: "drive-file-approved-private-pdf" },
+      targetSummary: "Drive file drive-file-approved-private-pdf",
+    });
+    const privateMarker = "APPROVED PRIVATE PDF MARKER";
+    executeMock.mockResolvedValueOnce({
+      ok: true,
+      summary: `${privateMarker}\u0000decoded binary tail`,
+    });
+
+    await expect(
+      runTask({ task, agent: await loadAgent(agent.id) }),
+    ).resolves.toBeUndefined();
+
+    expect(executeMock).toHaveBeenCalledTimes(1);
+    expect(completionCalls()).toHaveLength(0);
+    const [failedAction] = await getActions(task.id);
+    expect(failedAction?.status).toBe("failed");
+    expect(failedAction?.errorMessage).toMatch(/not replayed automatically/i);
+    expect(failedAction?.errorMessage).not.toContain(privateMarker);
+    const failedTask = await getTaskRow(task.id);
+    expect(failedTask?.status).toBe("failed");
+    expect(failedTask?.errorMessage).toMatch(/internal error/i);
+    expect(failedTask?.errorMessage).not.toContain(privateMarker);
+    const logs = await getLogs(task.id);
+    expect(JSON.stringify(logs)).not.toContain(privateMarker);
+    expect(JSON.stringify(logs)).not.toContain("\u0000");
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(privateMarker);
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("\u0000");
+    warnSpy.mockRestore();
+  });
+
+  it("fails closed when an approved action throws unexpectedly before finalization", async () => {
+    const warnSpy = vi.spyOn(logger, "warn");
+    const agent = await createAgent("Unexpected Approved Failure", [
+      { app: "google_drive", accessLevel: "read" },
+    ]);
+    const task = await insertRunningTask(agent.id);
+    await insertApprovedAction(task.id, agent.id, {
+      app: "google_drive",
+      operation: "google_drive.read_file",
+      params: { fileId: "drive-file-unexpected-private" },
+      targetSummary: "Drive file drive-file-unexpected-private",
+    });
+    const privateMarker = "PRIVATE APPROVED EXECUTOR EXCEPTION";
+    executeMock.mockRejectedValueOnce(new Error(privateMarker));
+
+    await expect(
+      runTask({ task, agent: await loadAgent(agent.id) }),
+    ).resolves.toBeUndefined();
+
+    expect(executeMock).toHaveBeenCalledTimes(1);
+    expect(completionCalls()).toHaveLength(0);
+    const [failedAction] = await getActions(task.id);
+    expect(failedAction?.status).toBe("failed");
+    expect(failedAction?.errorMessage).toMatch(/outcome is unknown|not replayed automatically/i);
+    expect(failedAction?.errorMessage).not.toContain(privateMarker);
+    const failedTask = await getTaskRow(task.id);
+    expect(failedTask?.status).toBe("failed");
+    expect(failedTask?.errorMessage).toMatch(/unexpected internal error/i);
+    expect(failedTask?.errorMessage).not.toContain(privateMarker);
+    const logs = await getLogs(task.id);
+    expect(JSON.stringify(logs)).not.toContain(privateMarker);
+    expect(JSON.stringify(logs)).not.toContain("\u0000");
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(privateMarker);
+    warnSpy.mockRestore();
+  });
+
+  it("runs the real Drive transport for a PDF, finalizes the failed action, and then terminates the task", async () => {
+    const agent = await createAgent("PDF Transport", [
+      { app: "google_drive", accessLevel: "read" },
+    ]);
+    const task = await insertRunningTask(agent.id);
+    const readBlock = `<app_action>${JSON.stringify({
+      operation: "google_drive.read_file",
+      params: { fileId: "drive-file-real-pdf" },
+    })}</app_action>`;
+    executeMock.mockImplementation((operation, params, context) =>
+      actualExecuteOperation.current!(operation, params, context),
+    );
+
+    let providerRound = 0;
+    fetchMock.mockImplementation(async (url: unknown) => {
+      const target = String(url);
+      if (target.includes("/models")) return jsonResponse(PRICING_CATALOG);
+      if (target.includes("oauth2.googleapis.com/token")) {
+        return jsonResponse({ access_token: "test-drive-access", expires_in: 3600 });
+      }
+      if (target.includes("/drive/v3/files/drive-file-real-pdf")) {
+        return jsonResponse({
+          id: "drive-file-real-pdf",
+          name: "private-payroll.pdf",
+          mimeType: "application/pdf",
+        });
+      }
+      if (target.includes("chat/completions")) {
+        const content =
+          providerRound++ === 0
+            ? readBlock
+            : "The PDF was inspected and could not be read as text.";
+        return jsonResponse(completion(content));
+      }
+      throw new Error(`unexpected fetch in PDF regression: ${target}`);
+    });
+
+    await runTask({ task, agent: await loadAgent(agent.id) });
+
+    const [failedAction] = await getActions(task.id);
+    expect(failedAction?.operation).toBe("google_drive.read_file");
+    expect(failedAction?.status).toBe("failed");
+    expect(failedAction?.errorMessage).toMatch(/PDF|text/i);
+    expect(failedAction?.status).not.toBe("executing");
+
+    const finishedTask = await getTaskRow(task.id);
+    expect(finishedTask?.status).toBe("completed");
+    expect(finishedTask?.status).not.toBe("running");
+    const logs = await getLogs(task.id);
+    expect(
+      logs.some(
+        (log) =>
+          log.message.includes("deliberately continuing") &&
+          log.message.includes("next provider round"),
+      ),
+    ).toBe(true);
+    expect(logs.some((log) => log.message.startsWith("Completed:"))).toBe(true);
+    expect((await getActions(task.id)).every((action) => action.status !== "executing")).toBe(
+      true,
+    );
+  });
+
   it("finalizes a failed Drive read, deliberately continues, and keeps a later provider failure distinct", async () => {
     const agent = await createAgent("Read Recovery", [
       { app: "google_drive", accessLevel: "read" },

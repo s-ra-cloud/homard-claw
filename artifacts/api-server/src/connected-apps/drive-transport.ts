@@ -50,6 +50,7 @@ export type DriveReadFailureClass =
   | "cancelled"
   | "metadata"
   | "body_limit"
+  | "unsupported_content"
   | "transport";
 
 export type DriveReadFailureDetails = {
@@ -343,6 +344,32 @@ function metadataFailure(): DriveReadTransportFailure {
   };
 }
 
+function unsupportedContentFailure(): DriveReadTransportFailure {
+  return {
+    ok: false,
+    kind: "failed",
+    message:
+      "Google Drive could not read this file as text. PDF, Word, image, and other binary files need text extraction first. Provide a Google Doc or a UTF-8 text file instead.",
+  };
+}
+
+function isTextDownload(mimeType: string): boolean {
+  return mimeType.startsWith("text/") || [
+    "application/json", "application/xml", "application/javascript",
+    "application/x-javascript", "application/yaml", "application/x-yaml",
+    "application/sql", "application/rtf",
+  ].includes(mimeType) || mimeType.endsWith("+json") || mimeType.endsWith("+xml");
+}
+
+function validateTextContent(text: string): string | DriveReadTransportFailure {
+  // PostgreSQL text cannot store NUL; binary signatures must never become
+  // apparently successful text merely because the metadata says text/plain.
+  if (text.includes("\0") || text.startsWith("%PDF-") || text.startsWith("PK\u0003\u0004")) {
+    return unsupportedContentFailure();
+  }
+  return text;
+}
+
 function failureForStop(state: TransportState): DriveReadTransportFailure {
   if (state.deadlineExpired || state.now() >= state.deadlineAt) {
     return deadlineFailure();
@@ -523,7 +550,7 @@ async function boundedResponseText(
       }
       return bodyTooLargeFailure();
     }
-    return text;
+    return validateTextContent(text);
   }
 
   const reader = response.body.getReader();
@@ -564,7 +591,11 @@ async function boundedResponseText(
     bytes.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  return new TextDecoder().decode(bytes);
+  try {
+    return validateTextContent(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch {
+    return unsupportedContentFailure();
+  }
 }
 
 async function requestDriveRead(
@@ -856,7 +887,15 @@ export async function readDriveFileTransport(
       return failure;
     }
 
-    const mimeType = typeof file.mimeType === "string" ? file.mimeType : "";
+    const mimeType = typeof file.mimeType === "string" ? file.mimeType.toLowerCase().split(";")[0].trim() : "";
+    if (!mimeType || (typeof file.name === "string" && file.name.includes("\0"))) {
+      reportFailure(state, { failureClass: "metadata", stage: "metadata" });
+      return metadataFailure();
+    }
+    if (!mimeType.startsWith(DRIVE_EXPORTABLE_PREFIX) && !isTextDownload(mimeType)) {
+      reportFailure(state, { failureClass: "unsupported_content", stage: "metadata" });
+      return unsupportedContentFailure();
+    }
     const path = mimeType.startsWith(DRIVE_EXPORTABLE_PREFIX)
       ? `/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent(mimeExport(mimeType))}`
       : `/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`;
@@ -867,7 +906,12 @@ export async function readDriveFileTransport(
       input.fetchImpl ?? fetch,
       mimeType.startsWith(DRIVE_EXPORTABLE_PREFIX) ? "export" : "download",
     );
-    if (typeof body !== "string") return finish(body);
+    if (typeof body !== "string") {
+      if (body.message === unsupportedContentFailure().message) {
+        reportFailure(state, { failureClass: "unsupported_content", stage: "body" });
+      }
+      return finish(body);
+    }
     return {
       ok: true,
       name: typeof file.name === "string" ? file.name : null,

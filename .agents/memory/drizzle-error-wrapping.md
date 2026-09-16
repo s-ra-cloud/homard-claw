@@ -22,3 +22,15 @@ Related: persisted error messages (tasks.errorMessage, logs, notifications)
 must pass through the sanitizer in the API server's lib (redacts bearer
 tokens, key shapes, credentialed URLs, literal secret env values) — provider
 response bodies are never persisted at all, status codes only.
+
+Never persist or log an unexpected Drizzle exception's message or object,
+even after ordinary credential redaction; use a fixed owner-safe error.
+
+**Why:** Drizzle includes SQL parameters in its message. A rejected binary
+result can therefore leak private content and carry the same NUL byte that
+caused PostgreSQL to reject the original write, breaking failure handling too.
+
+**How to apply:** Reproduce result-persistence failures with real PostgreSQL,
+not only mocked connector refusals. Assert that both action and task settle,
+no further action runs on an uncertain outcome, and failure messages contain
+neither original parameters nor invalid text.
