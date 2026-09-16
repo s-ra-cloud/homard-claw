@@ -41,4 +41,7 @@ export interface ConverseResponse {
      * @items.minimum 0
      */
   normalizedAttachmentIndices?: number[];
+  /** Cursor after the bounded document excerpt used on this turn. */
+  documentChunkNextStart?: number;
+  documentChunkDone?: boolean;
 }

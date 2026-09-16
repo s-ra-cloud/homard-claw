@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   executeOperation,
+  formatDriveDocumentSummary,
   UNEXPECTED_APP_ERROR_MESSAGE,
 } from "./connections";
 import { findOperation } from "./catalog";
@@ -8,6 +9,56 @@ import * as googleCredentials from "../google/credentials";
 import { logger } from "../lib/logger";
 
 describe("google_drive.read_file production diagnostics", () => {
+  it("keeps a continuation and valid Unicode boundaries with long metadata", () => {
+    const continuation = "cursor-".repeat(100);
+    const summary = formatDriveDocumentSummary(
+      "名".repeat(500),
+      "fallback",
+      "application/pdf",
+      "😀".repeat(4_000),
+      3,
+      continuation,
+    );
+    expect(summary.length).toBeLessThanOrEqual(4_000);
+    expect(summary).toContain(`continuation="${continuation}"`);
+    expect(summary).toContain("[Earlier content omitted");
+    expect(summary).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+    expect(summary).not.toMatch(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+  });
+
+  it("truncates mixed BMP and astral filenames at a scalar boundary", () => {
+    const filename = `${"a".repeat(179)}😀tail`;
+    const summary = formatDriveDocumentSummary(
+      filename,
+      "fallback",
+      "text/plain",
+      "body",
+    );
+
+    expect(summary).toContain(`File: "${"a".repeat(179)} [filename truncated;`);
+    expect(summary).toContain("[filename truncated; 6 character(s) omitted]");
+    expect(summary).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+    expect(summary).not.toMatch(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+  });
+
+  it("marks earlier content on every noninitial bounded chunk, including final", () => {
+    const chunks = ["abc", "def", "ghi"];
+    const summaries = chunks.map((chunk, index) =>
+      formatDriveDocumentSummary(
+        "document.pdf",
+        "fallback",
+        "application/pdf",
+        chunk,
+        index * 3,
+        index < chunks.length - 1 ? `cursor-${index}` : undefined,
+      ),
+    );
+    expect(summaries[0]).not.toContain("[Earlier content omitted");
+    expect(summaries[1]).toContain("[Earlier content omitted");
+    expect(summaries[2]).toContain("[Earlier content omitted");
+    expect(chunks.join("")).toBe("abcdefghi");
+  });
+
   it("answers from a later page through the bounded executor, retaining source and omission labels", async () => {
     vi.spyOn(googleCredentials, "driveAccessToken").mockResolvedValue({
       token: "token", email: "owner@example.com", googleSub: "sub",
@@ -20,7 +71,14 @@ describe("google_drive.read_file production diagnostics", () => {
       { fileId: "report", ...(pdfPages ? { pdfPages } : {}) },
       { workspaceId: "workspace", taskId: "task", actionId: "action" });
     const beginning = await run();
-    expect(beginning).toMatchObject({ ok: true, summary: expect.stringContaining("truncated at 4000") });
+    expect(beginning).toMatchObject({
+      ok: true,
+      summary: expect.stringContaining("More content is available"),
+    });
+    if (beginning.ok) {
+      expect(beginning.summary).toMatch(/continuation="[^"]+"/);
+      expect(beginning.summary.length).toBeLessThanOrEqual(4000);
+    }
     const later = await run("2");
     expect(later).toMatchObject({ ok: true });
     if (later.ok) {
@@ -32,7 +90,10 @@ describe("google_drive.read_file production diagnostics", () => {
       expect(later.summary.length).toBeLessThanOrEqual(4000);
     }
     const clipped = await run("3");
-    expect(clipped).toMatchObject({ ok: true, summary: expect.stringContaining("truncated at 4000") });
+    expect(clipped).toMatchObject({
+      ok: true,
+      summary: expect.stringContaining("More content is available"),
+    });
     expect(await run("4")).toMatchObject({ ok: false, message: expect.stringContaining("does not exist") });
   });
 
@@ -106,6 +167,68 @@ describe("google_drive.read_file production diagnostics", () => {
     expect(serialized).not.toContain("secret-file-id");
     expect(serialized).not.toContain("private-file-name");
     expect(serialized).not.toContain("private file body");
+  });
+
+  it("rejects malformed continuations and ranges before downloading content", async () => {
+    vi.spyOn(googleCredentials, "driveAccessToken").mockResolvedValue({
+      token: "token", email: "owner@example.com", googleSub: "sub",
+    });
+    let requestCount = 0;
+    vi.stubGlobal("fetch", async (): Promise<Response> => {
+      requestCount += 1;
+      return new Response(JSON.stringify({
+        name: "bounded.pdf",
+        mimeType: "application/pdf",
+        modifiedTime: "2024-01-01T00:00:00.000Z",
+      }));
+    });
+
+    const malformed = await executeOperation(
+      findOperation("google_drive.read_file")!,
+      { fileId: "bounded", continuation: "not-a-valid-cursor!" },
+      { workspaceId: "workspace", taskId: "task", actionId: "action" },
+    );
+    expect(malformed).toEqual({
+      ok: false,
+      kind: "failed",
+      message: "The Google Drive continuation is invalid or stale; start a new read.",
+    });
+
+    const invalidRange = await executeOperation(
+      findOperation("google_drive.read_file")!,
+      { fileId: "bounded", textLimit: 0 },
+      { workspaceId: "workspace", taskId: "task", actionId: "action" },
+    );
+    expect(invalidRange).toMatchObject({
+      ok: false,
+      message: expect.stringContaining("document range is invalid"),
+    });
+    expect(requestCount).toBe(2);
+  });
+
+  it("keeps the signed continuation visible with a long filename", async () => {
+    vi.spyOn(googleCredentials, "driveAccessToken").mockResolvedValue({
+      token: "token", email: "owner@example.com", googleSub: "sub",
+    });
+    const longName = `${"x".repeat(490)}.pdf`;
+    const fixture = pdfFixture("Long document ".repeat(900));
+    vi.stubGlobal("fetch", async (url: string) => String(url).includes("alt=media")
+      ? new Response(fixture)
+      : new Response(JSON.stringify({
+          name: longName,
+          mimeType: "application/pdf",
+        })));
+    const outcome = await executeOperation(
+      findOperation("google_drive.read_file")!,
+      { fileId: "long-name" },
+      { workspaceId: "workspace", taskId: "task", actionId: "action" },
+    );
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      expect(outcome.summary.length).toBeLessThanOrEqual(4000);
+      expect(outcome.summary).toMatch(/continuation="[^"]+"/);
+      expect(outcome.summary).not.toContain("earlier content was omitted");
+    }
   });
 
   it("logs only failure class and provider status on a raw Drive refusal", async () => {

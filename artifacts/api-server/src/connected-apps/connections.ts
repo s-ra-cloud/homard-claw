@@ -37,6 +37,7 @@ import {
 } from "./slides";
 import {
   readDriveFileTransport,
+  MAX_DRIVE_DOCUMENT_CHARS,
   type DriveReadFailureDetails,
   type DriveTokenOptions,
 } from "./drive-transport";
@@ -164,7 +165,7 @@ export async function connectionStatus(
 const RESULT_CHAR_LIMIT = 4_000;
 
 /** The shared PDF service is also capped here as a defence in depth boundary. */
-const DRIVE_EXTRACTED_TEXT_CHAR_LIMIT = 100_000;
+const DRIVE_EXTRACTED_TEXT_CHAR_LIMIT = MAX_DRIVE_DOCUMENT_CHARS;
 export type ExecutionOutcome =
   | { ok: true; summary: string }
   | {
@@ -200,8 +201,12 @@ function truncate(text: string): string {
 function explicitDriveFilename(name: string | null, fallback: unknown): string {
   const filename = name ?? `Drive file ${String(fallback)}`;
   if (filename.length <= DRIVE_FILENAME_CHAR_LIMIT) return filename;
-  const omitted = filename.length - DRIVE_FILENAME_CHAR_LIMIT;
-  return `${filename.slice(0, DRIVE_FILENAME_CHAR_LIMIT)} [filename truncated; ${omitted} character(s) omitted]`;
+  const prefix = takeUnicodeScalarsWithinUtf16Units(
+    filename,
+    DRIVE_FILENAME_CHAR_LIMIT,
+  );
+  const omitted = filename.length - prefix.length;
+  return `${prefix} [filename truncated; ${omitted} character(s) omitted]`;
 }
 /**
  * Map a connector-proxy failure to an outcome. Exposed for tests: the
@@ -838,6 +843,9 @@ async function driveReadFile(
       workspaceId: ctx.workspaceId,
       fileId: String(params.fileId),
       pdfPages: params.pdfPages as string | undefined,
+      continuation: params.continuation as string | undefined,
+      textOffset: params.textOffset as number | undefined,
+      textLimit: params.textLimit as number | undefined,
       signal: ctx.signal,
       deadlineAt: ctx.deadlineAt,
       taskId: ctx.taskId,
@@ -891,10 +899,18 @@ async function driveReadFile(
     // A logger transport failure must not skip action finalization.
   }
   if (!result.ok) return result;
-  const text = result.mimeType === "application/pdf"
+  const text = result.mimeType === "application/pdf" ||
+    result.mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     ? boundDriveExtractedText(result.text)
     : result.text;
-  const summary = `File: "${explicitDriveFilename(result.name, params.fileId)}" (${result.mimeType})\nContent:\n${text}`;
+  const summary = formatDriveDocumentSummary(
+    result.name,
+    params.fileId,
+    result.mimeType,
+    text,
+    result.textStart,
+    result.continuation,
+  );
   return {
     ok: true,
     summary: truncateDriveActionResult(summary),
@@ -4428,17 +4444,67 @@ function boundDriveExtractedText(text: string): string {
 }
 
 /** A metadata name must not consume the complete bounded action result. */
-const DRIVE_FILENAME_CHAR_LIMIT = 500;
+const DRIVE_FILENAME_CHAR_LIMIT = 180;
 
 /**
  * Drive reads have two explicit limits: extraction's document limit and the
  * smaller action-result limit. Keep their markers distinct so a model never
  * treats the returned text as a complete document.
  */
+function takeUnicodeScalarsWithinUtf16Units(value: string, maximumUnits: number): string {
+  if (maximumUnits <= 0) return "";
+  let used = 0;
+  let end = 0;
+  for (const scalar of value) {
+    if (used + scalar.length > maximumUnits) break;
+    used += scalar.length;
+    end += scalar.length;
+  }
+  return value.slice(0, end);
+}
+
+export function formatDriveDocumentSummary(
+  name: string | null,
+  fallbackId: unknown,
+  mimeType: string,
+  text: string,
+  textStartOrContinuation: number | string = 0,
+  continuation?: string,
+): string {
+  const textStart = typeof textStartOrContinuation === "number"
+    ? textStartOrContinuation
+    : 0;
+  if (typeof textStartOrContinuation === "string") {
+    continuation = textStartOrContinuation;
+  }
+  const filename = explicitDriveFilename(name, fallbackId);
+  const header = `File: "${filename}" (${mimeType})\nContent:\n`;
+  const more = continuation
+    ? `\n\n[More content is available. To continue, call google_drive.read_file with continuation="${continuation}".]`
+    : "";
+  const omitted = textStart > 0
+    ? "\n[Earlier content omitted from this bounded result; continue with the supplied cursor.]"
+    : "\n[Drive action result truncated at 4000 characters; additional extracted content was omitted.]";
+  const available = RESULT_CHAR_LIMIT - header.length - more.length;
+  if (available <= 0) {
+    // Filename and MIME metadata are bounded above, but preserve the cursor
+    // even if a future provider supplies an unexpectedly long MIME type.
+    const compactHeader = `File: "${takeUnicodeScalarsWithinUtf16Units(filename, 80)}"\nContent:\n`;
+    const compactAvailable = Math.max(
+      0,
+      RESULT_CHAR_LIMIT - compactHeader.length - omitted.length - more.length,
+    );
+    return `${compactHeader}${takeUnicodeScalarsWithinUtf16Units(text, compactAvailable)}${omitted}${more}`;
+  }
+  if (textStart === 0 && text.length <= available) return `${header}${text}${more}`;
+  const contentBudget = Math.max(0, available - omitted.length);
+  return `${header}${takeUnicodeScalarsWithinUtf16Units(text, contentBudget)}${omitted}${more}`;
+}
+
 function truncateDriveActionResult(summary: string): string {
   if (summary.length <= RESULT_CHAR_LIMIT) return summary;
   const marker =
     "\n[Drive action result truncated at 4000 characters; additional extracted content was omitted.]";
   const headLength = Math.max(0, RESULT_CHAR_LIMIT - marker.length);
-  return `${summary.slice(0, headLength)}${marker}`;
+  return `${takeUnicodeScalarsWithinUtf16Units(summary, headLength)}${marker}`;
 }

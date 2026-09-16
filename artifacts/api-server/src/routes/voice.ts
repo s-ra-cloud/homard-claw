@@ -37,6 +37,7 @@ import {
   AttachmentNormalizationError,
   attachmentErrorStatus,
   MAX_NORMALIZED_PDF_TEXT_CHARS,
+  MAX_CANONICAL_PDF_TEXT_SCALARS,
   normalizeAttachments,
   type NormalizedAttachment,
 } from "../attachments";
@@ -85,6 +86,10 @@ const MAX_TALK_DOCUMENT_CONTEXT_CHARS =
 // many quotes), so give the serialized setting a separate worst-case cap.
 const MAX_TALK_DOCUMENT_CONTEXT_STORAGE_CHARS =
   MAX_TALK_DOCUMENT_CONTEXT_CHARS * 2 + 4_096;
+/** A navigation read is intentionally small enough to fit every provider's
+ * interactive context without turning a follow-up into a document upload. */
+export const TALK_DOCUMENT_CHUNK_CHARS = 12_000;
+const MAX_TALK_DOCUMENT_CHUNK_START = MAX_TALK_DOCUMENT_CONTEXT_CHARS;
 
 type AgentRow = typeof agentsTable.$inferSelect;
 
@@ -898,6 +903,7 @@ async function generateReply(
     content: string;
   }> = [],
   ownerTimezone?: string,
+  documentChunk?: string,
 ): Promise<GeneratedReply> {
   // A day-off grant is deterministic and self-only, so it is recognized
   // before any model call — no cost, no risk of the model missing or
@@ -991,7 +997,13 @@ async function generateReply(
       workspaceId,
       agent,
       buildSystemPrompt(agent, coworkers, lockedTarget, calendar),
-      buildPrompt(history, userText, agent.name),
+      buildPrompt(
+        history,
+        documentChunk
+          ? `${userText}\n\n[RETAINED DOCUMENT CHUNK]\n${documentChunk}\n[END RETAINED DOCUMENT CHUNK]`
+          : userText,
+        agent.name,
+      ),
       signal,
       attachments,
     ),
@@ -1967,10 +1979,27 @@ function isCanonicalTalkDocument(
     name.length > 0 &&
     name.length <= 160 &&
     content.length > 0 &&
-    content.length <= MAX_TALK_DOCUMENT_CONTEXT_CHARS &&
+    countUnicodeScalarsUpTo(content, MAX_CANONICAL_PDF_TEXT_SCALARS) <=
+      MAX_CANONICAL_PDF_TEXT_SCALARS &&
     (content.startsWith("--- SOURCE PDF FILENAME: ") ||
       content.startsWith("--- SOURCE DOCX FILENAME: "))
   );
+}
+
+/** Count code points without allocating an Array.from copy; stop at the limit. */
+function countUnicodeScalarsUpTo(value: string, limit: number): number {
+  let count = 0;
+  for (let offset = 0; offset < value.length; count++) {
+    if (count >= limit) return count + 1;
+    const codePoint = value.codePointAt(offset);
+    offset += codePoint !== undefined && codePoint > 0xffff ? 2 : 1;
+  }
+  return count;
+}
+
+function canonicalDocumentBody(value: string): string {
+  const separator = value.indexOf("\n");
+  return separator === -1 ? value : value.slice(separator + 1);
 }
 
 /**
@@ -2009,10 +2038,14 @@ function parseTalkDocumentContext(
       attachments.length > 4 ||
       canonicalAttachments.length !== attachments.length ||
       canonicalAttachments.reduce(
-        (total, attachment) => total + attachment.content.length,
+        (total, attachment) =>
+          total +
+          countUnicodeScalarsUpTo(
+            canonicalDocumentBody(attachment.content),
+            MAX_TALK_DOCUMENT_CONTEXT_CHARS - total,
+          ),
         0,
-      ) >
-        MAX_TALK_DOCUMENT_CONTEXT_CHARS
+      ) > MAX_TALK_DOCUMENT_CONTEXT_CHARS
     ) {
       return null;
     }
@@ -2020,6 +2053,54 @@ function parseTalkDocumentContext(
   } catch {
     return null;
   }
+}
+
+/**
+ * Return one stable, bounded slice of the retained document. Cursors are
+ * offsets in Unicode scalars (not UTF-16 code units), so a caller can safely
+ * advance through emoji-heavy documents without splitting a surrogate pair.
+ */
+export function talkDocumentChunk(
+  context: TalkDocumentContext,
+  start: number,
+  length = TALK_DOCUMENT_CHUNK_CHARS,
+): { text: string; start: number; nextStart: number; done: boolean } | null {
+  if (
+    !Number.isSafeInteger(start) ||
+    start < 0 ||
+    start > MAX_TALK_DOCUMENT_CHUNK_START ||
+    !Number.isSafeInteger(length) ||
+    length < 1 ||
+    length > TALK_DOCUMENT_CHUNK_CHARS
+  ) {
+    return null;
+  }
+  const segments = context.attachments.flatMap((attachment, index) => [
+    ...(index ? ["\n"] : []),
+    `[[ATTACHMENT: ${attachment.name} | ${attachment.mimeType}]]\n${attachment.content}\n[[END ATTACHMENT]]`,
+  ]);
+  let position = 0;
+  let selected = "";
+  let selectedScalars = 0;
+  for (const segment of segments) {
+    for (let offset = 0; offset < segment.length; ) {
+      const codePoint = segment.codePointAt(offset)!;
+      const width = codePoint > 0xffff ? 2 : 1;
+      if (position >= start && selectedScalars < length) {
+        selected += segment.slice(offset, offset + width);
+        selectedScalars++;
+      }
+      position++;
+      offset += width;
+    }
+  }
+  if (start > position) return null;
+  return {
+    text: selected,
+    start,
+    nextStart: start + selectedScalars,
+    done: start + selectedScalars >= position,
+  };
 }
 
 async function readTalkDocumentContextVia(
@@ -2051,6 +2132,15 @@ async function writeTalkDocumentContextVia(
     context.attachments.length === 0 ||
     context.attachments.length > 4 ||
     !context.attachments.every(isCanonicalTalkDocument) ||
+    context.attachments.reduce(
+      (total, attachment) =>
+        total +
+        countUnicodeScalarsUpTo(
+          canonicalDocumentBody(attachment.content),
+          MAX_TALK_DOCUMENT_CONTEXT_CHARS - total,
+        ),
+      0,
+    ) > MAX_TALK_DOCUMENT_CONTEXT_CHARS ||
     value.length > MAX_TALK_DOCUMENT_CONTEXT_STORAGE_CHARS
   ) {
     throw new Error("Invalid canonical Talk document context.");
@@ -2067,6 +2157,61 @@ async function writeTalkDocumentContextVia(
       set: { value },
     });
 }
+
+/**
+ * Workspace-scoped document navigation for the Talk client. The opaque
+ * version is required on every read: an older browser tab cannot read a newer
+ * upload merely by guessing an offset.
+ */
+router.get(
+  "/agents/:agentId/talk-document-context",
+  async (req: Request, res: Response) => {
+    const agentId = String(req.params.agentId);
+    const version = typeof req.query.version === "string" ? req.query.version : "";
+    const start = typeof req.query.start === "string" ? Number(req.query.start) : 0;
+    const requestedLength =
+      typeof req.query.length === "string" ? Number(req.query.length) : TALK_DOCUMENT_CHUNK_CHARS;
+    if (
+      !version ||
+      version.length > 64 ||
+      !Number.isSafeInteger(start) ||
+      !Number.isSafeInteger(requestedLength)
+    ) {
+      res.status(400).json({ error: "A valid document context version and chunk range are required." });
+      return;
+    }
+    const [agent] = await db
+      .select({ id: agentsTable.id, archived: agentsTable.archived })
+      .from(agentsTable)
+      .where(and(eq(agentsTable.id, agentId), eq(agentsTable.workspaceId, req.workspaceId!)))
+      .limit(1);
+    if (!agent || agent.archived) {
+      res.status(404).json({ error: "Agent not found." });
+      return;
+    }
+    const context = await readTalkDocumentContextVia(db, req.workspaceId!, agentId);
+    if (!context) {
+      res.status(404).json({ error: "No retained document context is available." });
+      return;
+    }
+    if (context.version !== version) {
+      res.status(409).json({ error: "That retained document context is stale. Upload or reload the current document." });
+      return;
+    }
+    const chunk = talkDocumentChunk(context, start, requestedLength);
+    if (!chunk) {
+      res.status(400).json({ error: "The requested document chunk is invalid." });
+      return;
+    }
+    res.json({
+      version: context.version,
+      start: chunk.start,
+      nextStart: chunk.nextStart,
+      done: chunk.done,
+      text: chunk.text,
+    });
+  },
+);
 
 /**
  * A text Converse request accepts 4,000 characters and each returned history
@@ -2166,6 +2311,8 @@ export type ConverseWithAgentResult = {
    * document-bearing Talk turn.
    */
   documentContextVersion?: string;
+  documentChunkNextStart?: number;
+  documentChunkDone?: boolean;
   /**
    * Positions in the submitted attachment array for normalizedAttachments.
    * Index mapping, rather than filenames, preserves same-named attachments.
@@ -2287,6 +2434,10 @@ export async function converseWithAgent(input: {
   attachments?: ConverseAttachment[];
   /** IANA timezone of the owner's device; "today" resolves on its calendar. */
   ownerTimezone?: string;
+  /** Optional bounded read from the retained canonical document. */
+  documentContextVersion?: string;
+  documentChunkStart?: number;
+  documentChunkLength?: number;
   signal?: AbortSignal;
 }): Promise<ConverseWithAgentResult> {
   // Captured before any other await: a clear that lands anywhere after this
@@ -2301,6 +2452,45 @@ export async function converseWithAgent(input: {
     );
   }
   const agent = found.agent;
+  let documentChunk: string | undefined;
+  let documentChunkResult: ReturnType<typeof talkDocumentChunk> = null;
+  const hasIncomingDocumentAttachments = Boolean(input.attachments?.length);
+  if (
+    !hasIncomingDocumentAttachments &&
+    (input.documentContextVersion !== undefined ||
+      input.documentChunkStart !== undefined ||
+      input.documentChunkLength !== undefined)
+  ) {
+    if (
+      typeof input.documentContextVersion !== "string" ||
+      input.documentContextVersion.length === 0 ||
+      input.documentContextVersion.length > 64
+    ) {
+      throw new ConverseWithAgentError(400, "provider", "A valid retained document context version is required.");
+    }
+    const context = await readTalkDocumentContextVia(
+      db,
+      input.workspaceId,
+      agent.id,
+    );
+    if (!context || context.version !== input.documentContextVersion) {
+      throw new ConverseWithAgentError(
+        409,
+        "provider",
+        "That retained document context is stale. Upload or reload the current document.",
+      );
+    }
+    const chunk = talkDocumentChunk(
+      context,
+      input.documentChunkStart ?? 0,
+      input.documentChunkLength ?? TALK_DOCUMENT_CHUNK_CHARS,
+    );
+    if (!chunk) {
+      throw new ConverseWithAgentError(400, "provider", "The requested document chunk is invalid.");
+    }
+    documentChunk = chunk.text;
+    documentChunkResult = chunk;
+  }
   let claimId: string | null = null;
   if (input.clientMessageId) {
     const claim = await claimExchange(
@@ -2345,6 +2535,56 @@ export async function converseWithAgent(input: {
       }
       throw error;
     }
+    const documentReplacements = extractedDocumentReplacements(
+      input.attachments,
+      attachments,
+    );
+    // Canonical PDF/DOCX text is durable context, not a provider attachment.
+    // Persist it before the first provider call so a failed turn can be
+    // retried or navigated without re-uploading the source document.
+    const replacementDocumentContext =
+      documentReplacements.attachments.length > 0
+        ? {
+            version: randomUUID(),
+            attachments: documentReplacements.attachments,
+          }
+        : null;
+    if (replacementDocumentContext) {
+      const stored = await db.transaction(async (tx) => {
+        await lockTalkHistory(tx, agent.id);
+        if (
+          (await readClearEpochVia(tx, input.workspaceId, agent.id)) !==
+          clearEpoch
+        )
+          return false;
+        await writeTalkDocumentContextVia(
+          tx,
+          input.workspaceId,
+          agent.id,
+          replacementDocumentContext,
+        );
+        return true;
+      });
+      if (!stored) {
+        throw new ConverseWithAgentError(
+          409,
+          "in_flight",
+          "This conversation was cleared before the document could be saved.",
+        );
+      }
+    }
+    const initialChunkResult = replacementDocumentContext
+      ? talkDocumentChunk(replacementDocumentContext, 0)
+      : null;
+    const initialDocumentChunk = initialChunkResult?.text;
+    if (initialChunkResult) documentChunkResult = initialChunkResult;
+    // A new upload supersedes any cursor from the previous retained document.
+    if (replacementDocumentContext) documentChunk = undefined;
+    // Never inline canonical document bodies into the first provider request.
+    // The bounded chunk above is the only document text sent on this turn.
+    const providerAttachments = attachments.filter(
+      (attachment) => !isCanonicalTalkDocument(attachment),
+    );
     const generated = await generateReply(
       input.workspaceId,
       agent,
@@ -2352,8 +2592,9 @@ export async function converseWithAgent(input: {
       input.history,
       controller.signal,
       input.pendingDelegationTargetId,
-      attachments,
+      providerAttachments,
       input.ownerTimezone,
+      documentChunk ?? initialDocumentChunk,
     );
     const {
       reply,
@@ -2362,20 +2603,6 @@ export async function converseWithAgent(input: {
       pendingDelegation,
       exchange,
     } = generated;
-    const documentReplacements = extractedDocumentReplacements(
-      input.attachments,
-      attachments,
-    );
-    // A document-bearing turn deterministically replaces older retained
-    // documents. Its opaque version protects a later upload from delayed
-    // cleanup for an earlier proposal.
-    const replacementDocumentContext =
-      documentReplacements.attachments.length > 0
-        ? {
-            version: randomUUID(),
-            attachments: documentReplacements.attachments,
-          }
-        : null;
     // Canonical document text has a separate, bounded durable home. The
     // transcript's 8,000-character context remains intentionally small; it
     // must never be the only copy used for a later task confirmation.
@@ -2398,16 +2625,29 @@ export async function converseWithAgent(input: {
       ...(documentReplacements.attachments.length > 0
         ? { normalizedUserText }
         : {}),
-      ...(hasTaskProposal && documentContext?.attachments.length
+      ...(documentContext?.attachments.length
         ? {
-            normalizedAttachments: documentContext.attachments,
             documentContextVersion: documentContext.version,
-            ...(documentReplacements.attachments.length > 0
+            ...(hasTaskProposal
               ? {
-                  normalizedAttachmentIndices:
-                    documentReplacements.indices,
+                  normalizedAttachments: documentContext.attachments,
+                  ...(documentReplacements.attachments.length > 0
+                    ? {
+                        normalizedAttachmentIndices:
+                          documentReplacements.indices,
+                      }
+                    : {}),
                 }
               : {}),
+            ...(() => {
+              const served = documentChunkResult;
+              return served
+                ? {
+                    documentChunkNextStart: served.nextStart,
+                    documentChunkDone: served.done,
+                  }
+                : {};
+            })(),
           }
         : {}),
     });
@@ -2445,14 +2685,6 @@ export async function converseWithAgent(input: {
           )
           .returning({ id: talkExchangesTable.id });
         if (updated.length === 0) return "lost" as const;
-        if (replacementDocumentContext) {
-          await writeTalkDocumentContextVia(
-            tx,
-            input.workspaceId,
-            agent.id,
-            replacementDocumentContext,
-          );
-        }
         await persistTranscript(
           input.workspaceId,
           agent,
@@ -2515,14 +2747,6 @@ export async function converseWithAgent(input: {
             agent.id,
           ));
         payload = payloadForDocumentContext(documentContext);
-        if (replacementDocumentContext) {
-          await writeTalkDocumentContextVia(
-            tx,
-            input.workspaceId,
-            agent.id,
-            replacementDocumentContext,
-          );
-        }
         await persistTranscript(
           input.workspaceId,
           agent,
@@ -2598,6 +2822,18 @@ router.post(
           pendingDelegationTargetId: parsed.data.pendingDelegationTargetId,
           attachments: parsed.data.attachments,
           ownerTimezone: parsed.data.ownerTimezone,
+          documentContextVersion:
+            typeof req.body?.documentContextVersion === "string"
+              ? req.body.documentContextVersion
+              : undefined,
+          documentChunkStart:
+            typeof req.body?.documentChunkStart === "number"
+              ? req.body.documentChunkStart
+              : undefined,
+          documentChunkLength:
+            typeof req.body?.documentChunkLength === "number"
+              ? req.body.documentChunkLength
+              : undefined,
           signal: controller.signal,
         }),
       );

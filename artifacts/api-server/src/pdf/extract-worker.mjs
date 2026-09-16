@@ -2,12 +2,12 @@ import { writeSync } from "node:fs";
 import process from "node:process";
 
 const MAX_PAGES = 100;
-const MAX_OUTPUT_CHARS = 100_000;
+const MAX_OUTPUT_CHARS = 1_500_000;
 const PAGE_PREFIX = "--- Page ";
 const TEXT_PAGE_SUFFIX = " (text only; visual and image content omitted) ---\n";
 const EMPTY_PAGE_SUFFIX = " (no extractable text; visual and image content may be omitted) ---\n";
 const TRUNCATION_NOTICE =
-  "\n--- Text extraction truncated at the 100000-character limit; remaining text and visual/image content may be omitted. ---";
+  "\n--- Text extraction truncated at the 1500000-character limit; remaining text and visual/image content may be omitted. ---";
 
 function error(kind) {
   respond({ type: "error", kind });
@@ -19,9 +19,22 @@ function result(text) {
 
 function respond(message) {
   try {
-    // fd 3 is a private, bounded local protocol pipe. stdout/stderr remain
-    // ignored, so PDF content cannot reach application logs or terminal IO.
-    writeSync(3, JSON.stringify(message));
+    // fd 3 is a private, bounded local protocol pipe. A single writeSync is
+    // allowed to be partial for a pipe, especially for a multi-megabyte
+    // document. Keep each write bounded and loop until the complete framed
+    // JSON response has crossed the process edge.
+    const payload = Buffer.from(JSON.stringify(message), "utf8");
+    const waitCell = new Int32Array(new SharedArrayBuffer(4));
+    for (let offset = 0; offset < payload.length;) {
+      try {
+        const written = writeSync(3, payload, offset, Math.min(16 * 1024, payload.length - offset));
+        if (!Number.isInteger(written) || written <= 0) throw new Error("protocol write");
+        offset += written;
+      } catch (cause) {
+        if (cause?.code !== "EAGAIN") throw cause;
+        Atomics.wait(waitCell, 0, 0, 1);
+      }
+    }
   } catch {
     // The parent may have cancelled and closed the pipe.
   }
@@ -34,20 +47,37 @@ function pgSafe(value) {
   return value.replace(/\u0000/g, "");
 }
 
-function appendBounded(current, addition) {
+export function appendBoundedPdfText(current, addition) {
+  return appendBounded(current, Array.from(current).length, addition);
+}
+
+function appendBounded(current, currentChars, addition) {
   const reservedForNotice = Array.from(TRUNCATION_NOTICE).length;
   // Keep the notice reserved from the start. This means an exact-boundary
   // document is conservatively marked as clipped rather than silently losing
   // the fact that another page or glyph could not be represented.
-  const remaining = MAX_OUTPUT_CHARS - reservedForNotice - Array.from(current).length;
-  if (remaining <= 0) return { text: current + TRUNCATION_NOTICE, truncated: true };
+  const remaining = MAX_OUTPUT_CHARS - reservedForNotice - currentChars;
+  if (remaining <= 0) {
+    return {
+      text: current + TRUNCATION_NOTICE,
+      chars: currentChars + reservedForNotice,
+      truncated: true,
+    };
+  }
   const characters = Array.from(addition);
-  if (characters.length <= remaining) return { text: current + addition, truncated: false };
+  if (characters.length <= remaining) {
+    return {
+      text: current + addition,
+      chars: currentChars + characters.length,
+      truncated: false,
+    };
+  }
 
   // Reserve space for an explicit, PG-safe truncation notice and avoid
   // splitting a Unicode scalar value (notably surrogate-pair emoji).
   return {
     text: current + characters.slice(0, remaining).join("") + TRUNCATION_NOTICE,
+    chars: MAX_OUTPUT_CHARS,
     truncated: true,
   };
 }
@@ -85,6 +115,7 @@ async function extract(bytes) {
     let output = selected
       ? `[PDF selection: pages ${start}-${end} of ${document.numPages}. Only this range was read; pages outside it were not read. Text only; visual/image content omitted.]\n`
       : "";
+    let outputChars = Array.from(output).length;
     let hasExtractableText = false;
     for (let pageNumber = start; pageNumber <= end; pageNumber += 1) {
       const page = await document.getPage(pageNumber);
@@ -95,8 +126,9 @@ async function extract(bytes) {
       const hasPageText = text.trim().length > 0;
       hasExtractableText ||= hasPageText;
       const boundary = `${PAGE_PREFIX}${pageNumber}${hasPageText ? TEXT_PAGE_SUFFIX : EMPTY_PAGE_SUFFIX}`;
-      const next = appendBounded(output, boundary + text + "\n");
+      const next = appendBounded(output, outputChars, boundary + text + "\n");
       output = next.text;
+      outputChars = next.chars;
       page.cleanup();
       if (next.truncated) {
         await document.destroy();
@@ -128,4 +160,6 @@ async function readInput() {
   return extract(Buffer.concat(chunks, length));
 }
 
-void readInput().catch(() => error("extraction_failed"));
+if (process.argv[1] && new URL(import.meta.url).pathname === process.argv[1]) {
+  void readInput().catch(() => error("extraction_failed"));
+}

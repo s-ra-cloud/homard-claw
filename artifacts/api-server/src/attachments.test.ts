@@ -78,6 +78,24 @@ describe("normalizeAttachments", () => {
     );
   });
 
+  it("accepts four documents at the 1.5M Unicode-scalar extraction boundary", async () => {
+    extractPdfText.mockClear();
+    const extracted = `--- Page 1 ---\n${"😀".repeat(1_499_980)}`;
+    extractPdfText.mockResolvedValue(extracted);
+    const attachments = Array.from({ length: 4 }, (_, index) => ({
+      ...pdf,
+      name: `document-${index}.pdf`,
+    }));
+
+    await expect(normalizeAttachments(attachments)).resolves.toHaveLength(4);
+    expect(extractPdfText).toHaveBeenCalledTimes(4);
+  });
+
+  it("counts extracted document limits in Unicode scalars rather than UTF-16 units", async () => {
+    extractPdfText.mockResolvedValue(`--- Page 1 ---\n${"😀".repeat(1_499_980)}`);
+    await expect(normalizeAttachments([pdf])).resolves.toHaveLength(1);
+  });
+
   it("persists extracted DOCX text as the provider-neutral durable attachment", async () => {
     extractDocxText.mockResolvedValueOnce(
       "--- DOCX document body (text only; drawings omitted) ---\n--- DOCX paragraph 1 ---\nRevenue rose.",

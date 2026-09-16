@@ -834,6 +834,36 @@ paths:
           description: Agent cannot converse right now
         "503":
           description: Voice services are unavailable
+  /agents/{agentId}/talk-document-context:
+    get:
+      operationId: getTalkDocumentContextChunk
+      tags: [office]
+      summary: Read a bounded chunk of the retained Talk document
+      parameters:
+        - $ref: "#/components/parameters/AgentId"
+        - name: version
+          in: query
+          required: true
+          schema: { type: string, maxLength: 64 }
+        - name: start
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: length
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 12000, default: 12000 }
+      responses:
+        "200":
+          description: Bounded retained document chunk
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TalkDocumentContextChunk"
+        "400":
+          description: Malformed range
+        "404":
+          description: Agent or retained document not found
+        "409":
+          description: Retained document version is stale
   /agents/{agentId}/talk-history:
     get:
       operationId: getTalkHistory
@@ -3464,6 +3494,19 @@ components:
             IANA timezone of the owner's device (e.g. Europe/Paris). Used to
             resolve relative days like "today" to the owner's calendar day in
             task-history lookups. Invalid or missing values fall back to UTC.
+        documentContextVersion:
+          type: string
+          maxLength: 64
+          description: Opaque retained Talk document version for bounded follow-up reads.
+        documentChunkStart:
+          type: integer
+          minimum: 0
+          description: Unicode-scalar offset of the retained document chunk to provide.
+        documentChunkLength:
+          type: integer
+          minimum: 1
+          maximum: 12000
+          description: Maximum size of the retained document chunk to provide.
     ConverseResponse:
       type: object
       required:
@@ -3522,6 +3565,20 @@ components:
           items:
             type: number
             minimum: 0
+        documentChunkNextStart:
+          type: integer
+          minimum: 0
+        documentChunkDone:
+          type: boolean
+    TalkDocumentContextChunk:
+      type: object
+      required: [version, start, nextStart, done, text]
+      properties:
+        version: { type: string, maxLength: 64 }
+        start: { type: integer, minimum: 0 }
+        nextStart: { type: integer, minimum: 0 }
+        done: { type: boolean }
+        text: { type: string, maxLength: 12000 }
     DocumentationSection:
       type: object
       required: [id, title, summary, items]

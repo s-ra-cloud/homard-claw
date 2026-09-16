@@ -11,15 +11,15 @@ import { extractDocxText, DocxExtractionError } from "./docx/extract";
 export const MAX_ATTACHMENT_BYTES = 25_000_000;
 export const MAX_ATTACHMENTS = 4;
 const MAX_SOURCE_FILENAME_CHARS = 160;
-/** Four PDF/DOCX extractions are each service-bounded to 100k characters. */
-export const MAX_NORMALIZED_PDF_TEXT_CHARS = 400_000;
+/** Four PDF/DOCX extractions are each service-bounded to 1.5M Unicode scalars. */
+export const MAX_NORMALIZED_PDF_TEXT_CHARS = 6_000_000;
 /**
- * A PDF extractor result is capped at 100,000 Unicode scalars. Its durable
+ * A PDF/DOCX extractor result is capped at 1,500,000 Unicode scalars. Its durable
  * source-filename envelope is at most 190 more, so a value beyond this cannot
  * be canonical extracted PDF text. Keep this small independent boundary for
  * provider adapters which decide whether it is safe to inline the text.
  */
-export const MAX_CANONICAL_PDF_TEXT_SCALARS = 100_256;
+export const MAX_CANONICAL_PDF_TEXT_SCALARS = 1_500_256;
 export const DOCX_MIME_TYPE =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
@@ -365,7 +365,7 @@ export async function normalizeAttachments(
           "This PDF has no readable text. Try a text-based PDF or attach its text instead.",
         );
       }
-      documentTextChars += text.length;
+      documentTextChars += Array.from(text).length;
       normalized.push({
         // The .txt suffix keeps the second provider-boundary normalization
         // from mistaking durable extracted text for a raw PDF. Every source,
@@ -424,7 +424,7 @@ export async function normalizeAttachments(
           "This DOCX has no readable text. Try a document with text or attach its text instead.",
         );
       }
-      documentTextChars += text.length;
+      documentTextChars += Array.from(text).length;
       normalized.push({
         name: normalizedDocxTextName(name),
         mimeType: "text/plain",

@@ -8,6 +8,7 @@
  */
 import express from "express";
 import request from "supertest";
+import { randomUUID } from "node:crypto";
 import {
   afterAll,
   beforeAll,
@@ -31,7 +32,7 @@ import {
   workspaceSettingsTable,
   workspacesTable,
 } from "@workspace/db";
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, ne, or } from "drizzle-orm";
 import { TZDate } from "@date-fns/tz";
 
 const authState = vi.hoisted(() => ({ userId: "hc-voice-test-owner" }));
@@ -115,6 +116,10 @@ import {
   deleteProviderCredential,
   saveProviderCredential,
 } from "../provider-credentials";
+import {
+  TALK_DOCUMENT_CHUNK_CHARS,
+  talkDocumentChunk,
+} from "./voice";
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));
@@ -349,7 +354,10 @@ afterAll(async () => {
     await db.delete(workspaceSettingsTable).where(
       inArray(
         workspaceSettingsTable.key,
-        createdAgentIds.map((id) => `voice_history_cleared:${id}`),
+        createdAgentIds.flatMap((id) => [
+          `voice_history_cleared:${id}`,
+          `talk_document_context:${id}`,
+        ]),
       ),
     );
     if (createdTeamIds.length > 0) {
@@ -1770,6 +1778,164 @@ describe("text conversations", () => {
     expect(res.status).toBe(503);
     expect(res.body.error).toMatch(/provider/i);
   });
+});
+
+describe("Talk retained document context", () => {
+  it("returns first, middle, and final Unicode-scalar-safe chunks", async () => {
+    const source = `PDF-${"😀".repeat(40)}-${"a".repeat(40_000)}-DOCX`;
+    const context = {
+      version: randomUUID(),
+      attachments: [
+        {
+          name: "report.pdf",
+          mimeType: "text/plain",
+          encoding: "text" as const,
+          content: `--- SOURCE PDF FILENAME: report.pdf ---\n${source}`,
+        },
+        {
+          name: "notes.docx",
+          mimeType: "text/plain",
+          encoding: "text" as const,
+          content: "--- SOURCE DOCX FILENAME: notes.docx ---\nDOCX-CANONICAL",
+        },
+      ],
+    };
+    const whole = talkDocumentChunk(context, 0, TALK_DOCUMENT_CHUNK_CHARS)!;
+    const middleStart = TALK_DOCUMENT_CHUNK_CHARS;
+    const middle = talkDocumentChunk(context, middleStart, 17)!;
+    const final = talkDocumentChunk(context, 40_000, TALK_DOCUMENT_CHUNK_CHARS)!;
+    expect(whole.start).toBe(0);
+    expect(whole.text).toContain("SOURCE PDF");
+    expect(middle.text).not.toMatch(/[\uD800-\uDBFF]$/);
+    expect(final.done).toBe(true);
+    expect(final.text).toContain("DOCX-CANONICAL");
+    expect(Array.from(middle.text).join("")).toBe(middle.text);
+  });
+
+  it("rejects malformed ranges and stale or foreign contexts", async () => {
+    const agent = await createAgent(`${RUN_TAG} Document Route`);
+    const version = randomUUID();
+    await db.insert(workspaceSettingsTable).values({
+      workspaceId: wsId,
+      key: `talk_document_context:${agent.id}`,
+      value: JSON.stringify({
+        version,
+        attachments: [{
+          name: "report.pdf",
+          mimeType: "text/plain",
+          encoding: "text",
+          content: "--- SOURCE PDF FILENAME: report.pdf ---\nroute marker",
+        }],
+      }),
+    });
+    const base = `/api/agents/${agent.id}/talk-document-context`;
+    expect((await request(app).get(base).query({ version, start: -1 })).status).toBe(400);
+    expect((await request(app).get(base).query({ version, start: 0, length: TALK_DOCUMENT_CHUNK_CHARS + 1 })).status).toBe(400);
+    expect((await request(app).get(base).query({ version: "old", start: 0 })).status).toBe(409);
+    expect((await request(app).get(base).query({ version, start: 999999999 })).status).toBe(400);
+    expect((await request(app).get(`/api/agents/${randomUUID()}/talk-document-context`).query({ version })).status).toBe(404);
+    const [foreign] = await db
+      .select({ id: agentsTable.id })
+      .from(agentsTable)
+      .where(ne(agentsTable.workspaceId, wsId))
+      .limit(1);
+    if (foreign) {
+      expect(
+        (await request(app).get(`/api/agents/${foreign.id}/talk-document-context`).query({ version })).status,
+      ).toBe(404);
+    }
+  });
+
+  it("keeps four astral canonical documents at the aggregate scalar boundary", async () => {
+    const agent = await createAgent(`${RUN_TAG} Astral Boundary`);
+    const version = randomUUID();
+    const body = "😀".repeat(1_500_000);
+    const attachments = Array.from({ length: 4 }, (_, index) => ({
+      name: `boundary-${index}.pdf`,
+      mimeType: "text/plain",
+      encoding: "text",
+      content: `--- SOURCE PDF FILENAME: boundary-${index}.pdf ---\n${body}`,
+    }));
+    await db.insert(workspaceSettingsTable).values({
+      workspaceId: wsId,
+      key: `talk_document_context:${agent.id}`,
+      value: JSON.stringify({ version, attachments }),
+    });
+    const accepted = await request(app)
+      .get(`/api/agents/${agent.id}/talk-document-context`)
+      .query({ version, start: 0, length: 1 });
+    expect(accepted.status).toBe(200);
+    expect(accepted.body.text).toBe("[");
+    await db
+      .update(workspaceSettingsTable)
+      .set({
+        value: JSON.stringify({
+          version,
+          attachments: [...attachments, {
+            ...attachments[0],
+            name: "fifth.pdf",
+          }].map((attachment) => ({
+            ...attachment,
+            content: `${attachment.content}😀`,
+          })),
+        }),
+      })
+      .where(
+        and(
+          eq(workspaceSettingsTable.workspaceId, wsId),
+          eq(workspaceSettingsTable.key, `talk_document_context:${agent.id}`),
+        ),
+      );
+    const rejected = await request(app)
+      .get(`/api/agents/${agent.id}/talk-document-context`)
+      .query({ version, start: 0, length: 1 });
+    expect(rejected.status).toBe(404);
+  });
+
+  it("passes only the requested canonical chunk to the provider", async () => {
+    const agent = await createAgent(`${RUN_TAG} Document Prompt`);
+    const version = randomUUID();
+    const longPdf = `--- SOURCE PDF FILENAME: report.pdf ---\nPDF-START\n${"P".repeat(20_000)}\nPDF-END`;
+    await db.insert(workspaceSettingsTable).values({
+      workspaceId: wsId,
+      key: `talk_document_context:${agent.id}`,
+      value: JSON.stringify({
+        version,
+        attachments: [{
+          name: "report.pdf",
+          mimeType: "text/plain",
+          encoding: "text",
+          content: longPdf,
+        }, {
+          name: "notes.docx",
+          mimeType: "text/plain",
+          encoding: "text",
+          content: "--- SOURCE DOCX FILENAME: notes.docx ---\nDOCX-TAIL",
+        }],
+      }),
+    });
+    mockTalkOutputs(['{"reply":"I found it.","taskObjective":null}']);
+    const response = await request(app)
+      .post(`/api/agents/${agent.id}/converse`)
+      .send({
+        text: "Read the document",
+        history: [
+          { role: "user", text: "old history that must remain bounded" },
+        ],
+        documentContextVersion: version,
+        documentChunkStart: 0,
+        documentChunkLength: 64,
+      });
+    expect(response.status).toBe(200);
+    const body = String(
+      (fetchMock.mock.calls.find(([url]) => String(url).includes("/chat/completions"))?.[1] as { body?: string })?.body,
+    );
+    expect(body).toContain("SOURCE PDF FILENAME");
+    expect(body).not.toContain("P".repeat(2_000));
+    expect(body).not.toContain("DOCX-TAIL");
+    expect(body).toContain("old history that must remain bounded");
+  });
+
 });
 
 describe("voice conversations", () => {

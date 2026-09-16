@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { deflateSync } from "node:zlib";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const spawnedPdfPids = vi.hoisted(() => [] as number[]);
@@ -37,7 +38,11 @@ import {
  * fixture generator. Fixture cases cover text, a scan-like blank page,
  * malformed/encrypted metadata, and a document over the page limit.
  */
-function pdfFixture(pageStreams: string[], encrypt = false): Uint8Array {
+function pdfFixture(
+  pageStreams: string[],
+  encrypt = false,
+  compressStreams = false,
+): Uint8Array {
   const objects: string[] = [];
   const pageObjectIds = pageStreams.map((_, index) => 3 + index * 2);
   objects.push("<< /Type /Catalog /Pages 2 0 R >>");
@@ -46,7 +51,10 @@ function pdfFixture(pageStreams: string[], encrypt = false): Uint8Array {
     const pageId = pageObjectIds[index]!;
     objects[pageId - 1] =
       `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 ${pageStreams.length * 2 + 3} 0 R >> >> /Contents ${pageId + 1} 0 R >>`;
-    objects[pageId] = `<< /Length ${Buffer.byteLength(stream, "latin1")} >>\nstream\n${stream}\nendstream`;
+    const encoded = compressStreams
+      ? deflateSync(Buffer.from(stream, "latin1")).toString("latin1")
+      : stream;
+    objects[pageId] = `<< /Length ${Buffer.byteLength(encoded, "latin1")}${compressStreams ? " /Filter /FlateDecode" : ""} >>\nstream\n${encoded}\nendstream`;
   }
   const fontId = pageStreams.length * 2 + 3;
   objects[fontId - 1] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
@@ -184,17 +192,16 @@ describe("extractPdfText", () => {
 
   it("returns near-cap CJK and emoji ToUnicode text through the bounded protocol", async () => {
     const textOperators = Array.from(
-      { length: 5_000 },
-      () => `<${"00010002".repeat(32)}> Tj 0 -1 Td`,
+      { length: 1_000 },
+      () => `<${"00010002".repeat(32)}> Tj`,
     ).join(" ");
     const page = `BT /F1 12 Tf 72 720 Td ${textOperators} ET`;
-    const result = await extractPdfText(unicodePdfFixture([page, page, page]));
+    const result = await extractPdfText(unicodePdfFixture([page, page]));
 
-    expect(Array.from(result).length).toBeGreaterThan(99_000);
+    expect(Array.from(result).length).toBeGreaterThan(100_000);
     expect(Array.from(result).length).toBeLessThanOrEqual(PDF_EXTRACTION_LIMITS.maxOutputChars);
     expect(result).toContain("中");
     expect(result).toContain("😀");
-    expect(result).toContain("Text extraction truncated at the 100000-character limit");
   });
 
   it("returns a clear safe error for scan-like image-only PDFs", async () => {
@@ -245,20 +252,21 @@ describe("extractPdfText", () => {
     } satisfies Partial<PdfExtractionError>);
   });
 
-  it("explicitly marks output clipping at the fixed bound", async () => {
-    // PDF literal strings have an implementation token limit, so use many
-    // normal text-show operators to create a genuine >100k text extraction.
-    const oversizedPage = `BT /F1 12 Tf 72 720 Td ${Array.from(
-      { length: 5_000 },
-      () => `(${ "A".repeat(64) }) Tj 0 -1 Td`,
-    ).join(" ")} ET`;
-    // PDF.js applies a per-page internal text-content chunk limit; three
-    // independently valid pages exercise this service's document-wide cap.
-    const result = await extractPdfText(pdfFixture([oversizedPage, oversizedPage, oversizedPage]));
-
-    expect(Array.from(result).length).toBeLessThanOrEqual(PDF_EXTRACTION_LIMITS.maxOutputChars);
-    expect(Array.from(result).length).toBeGreaterThan(99_000);
-    expect(result).toContain("Text extraction truncated at the 100000-character limit");
+  it("reserves an explicit omission notice at the 1.5M scalar boundary", async () => {
+    // @ts-expect-error The unbundled worker intentionally exposes only this
+    // pure boundary helper for exact above-limit regression coverage.
+    const { appendBoundedPdfText } = await import("./extract-worker.mjs") as {
+      appendBoundedPdfText: (
+        current: string,
+        addition: string,
+      ) => { text: string; chars: number; truncated: boolean };
+    };
+    const notice =
+      "\n--- Text extraction truncated at the 1500000-character limit; remaining text and visual/image content may be omitted. ---";
+    const bounded = appendBoundedPdfText("", "😀".repeat(1_500_100));
+    expect(bounded.truncated).toBe(true);
+    expect(bounded.text.endsWith(notice)).toBe(true);
+    expect(Array.from(bounded.text)).toHaveLength(PDF_EXTRACTION_LIMITS.maxOutputChars);
   });
 
   it("kills no child for an already cancelled request", async () => {

@@ -117,6 +117,176 @@ describe("readDriveFileTransport", () => {
     });
   });
 
+  it("returns bounded PDF chunks and rejects stale continuations", async () => {
+    let calls = 0;
+    const extracted = "0123456789";
+    const extractPdf = vi.fn(async () => extracted);
+    const fetchImpl = async () => ++calls === 1 || calls === 3
+      ? response(JSON.stringify({
+          id: "chunked",
+          name: "chunked.pdf",
+          mimeType: "application/pdf",
+          modifiedTime: "2024-01-01T00:00:00.000Z",
+        }))
+      : new Response(new Uint8Array([0x25, 0x50, 0x44, 0x46]));
+    const first = await readDriveFileTransport({
+      workspaceId: "workspace",
+      fileId: "chunked",
+      textLimit: 3,
+      resolveToken: async () => "token",
+      extractPdf,
+      fetchImpl,
+    });
+    expect(first).toMatchObject({ ok: true, text: "012" });
+    expect(first.ok && first.continuation).toEqual(expect.any(String));
+    const second = await readDriveFileTransport({
+      workspaceId: "workspace",
+      fileId: "chunked",
+      continuation: first.ok ? first.continuation : undefined,
+      resolveToken: async () => "token",
+      extractPdf,
+      fetchImpl: async () => response(JSON.stringify({
+        id: "chunked",
+        name: "chunked.pdf",
+        mimeType: "application/pdf",
+        modifiedTime: "2024-02-01T00:00:00.000Z",
+      })),
+    });
+    expect(second).toMatchObject({
+      ok: false,
+      message: "The Google Drive continuation is invalid or stale; start a new read.",
+    });
+    const token = first.ok ? first.continuation! : "";
+    const [payload, signature] = token.split(".");
+    const tampered = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    tampered.offset = 4;
+    const forgedEncoding = `${Buffer.from(JSON.stringify(tampered), "utf8").toString("base64url")}.${signature}`;
+    const forged = await readDriveFileTransport({
+      workspaceId: "workspace",
+      fileId: "chunked",
+      continuation: forgedEncoding,
+      resolveToken: async () => "token",
+      extractPdf,
+      fetchImpl: async () => response(JSON.stringify({
+        id: "chunked",
+        name: "chunked.pdf",
+        mimeType: "application/pdf",
+        modifiedTime: "2024-01-01T00:00:00.000Z",
+      })),
+    });
+    expect(forged).toMatchObject({
+      ok: false,
+      message: "The Google Drive continuation is invalid or stale; start a new read.",
+    });
+  });
+
+  it("rejects a PDF whose revision changes during download and extraction", async () => {
+    let call = 0;
+    const metadata = (modifiedTime: string) => response(JSON.stringify({
+      id: "raced", name: "raced.pdf", mimeType: "application/pdf", modifiedTime,
+    }));
+    const result = await readDriveFileTransport({
+      workspaceId: "workspace",
+      fileId: "raced",
+      resolveToken: async () => "token",
+      extractPdf: async () => "content from old revision",
+      fetchImpl: async () => {
+        call += 1;
+        if (call === 1) return metadata("2024-01-01T00:00:00.000Z");
+        if (call === 2) return new Response(new Uint8Array([0x25, 0x50, 0x44, 0x46]));
+        return metadata("2024-01-02T00:00:00.000Z");
+      },
+    });
+    expect(result).toEqual({
+      ok: false,
+      kind: "failed",
+      message: "The Google Drive file changed while it was being read; retry the read.",
+    });
+    expect(call).toBe(3);
+  });
+
+  it.each([
+    ["BMP", "a".repeat(7_321)],
+    ["astral", "😀".repeat(4_321)],
+  ])("reconstructs every %s document chunk without gaps", async (_label, source) => {
+    const extractPdf = async () => source;
+    let continuation: string | undefined;
+    let reconstructed = "";
+    for (let iteration = 0; iteration < 10 && reconstructed.length < source.length; iteration += 1) {
+      let request = 0;
+      const result = await readDriveFileTransport({
+        workspaceId: "workspace",
+        fileId: "sequential",
+        ...(continuation ? { continuation } : {}),
+        resolveToken: async () => "token",
+        extractPdf,
+        fetchImpl: async () => {
+          request += 1;
+          return request === 1
+            ? response(JSON.stringify({ name: "sequential.pdf", mimeType: "application/pdf" }))
+            : new Response(new Uint8Array([0x25, 0x50, 0x44, 0x46]));
+        },
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) break;
+      reconstructed += result.text;
+      continuation = result.continuation;
+      if (!continuation) break;
+    }
+    expect(reconstructed).toBe(source);
+  });
+
+  it("accepts scalar offsets beyond 1.5M UTF-16 units for astral documents", async () => {
+    const source = "😀".repeat(800_000);
+    const result = await readDriveFileTransport({
+      workspaceId: "workspace",
+      fileId: "large-astral",
+      textOffset: 750_000,
+      textLimit: 3,
+      resolveToken: async () => "token",
+      extractPdf: async () => source,
+      fetchImpl: async (url) => String(url).includes("alt=media")
+        ? new Response(new Uint8Array([0x25, 0x50, 0x44, 0x46]))
+        : response(JSON.stringify({ name: "large.pdf", mimeType: "application/pdf" })),
+    });
+    expect(result).toMatchObject({ ok: true, text: "😀😀😀" });
+    expect(result.ok && result.continuation).toEqual(expect.any(String));
+  });
+
+  it("carries selected PDF pages in the continuation contract", async () => {
+    const source = "selected page text ".repeat(300);
+    const seenPages: Array<string | undefined> = [];
+    let continuation: string | undefined;
+    let reconstructed = "";
+    for (let iteration = 0; iteration < 500 && reconstructed.length < source.length; iteration += 1) {
+      let request = 0;
+      const result = await readDriveFileTransport({
+        workspaceId: "workspace",
+        fileId: "selected",
+        ...(continuation ? { continuation } : { pdfPages: "2" }),
+        textLimit: 17,
+        resolveToken: async () => "token",
+        extractPdf: async (_bytes, options) => {
+          seenPages.push(options?.pdfPages);
+          return source;
+        },
+        fetchImpl: async () => {
+          request += 1;
+          return request === 1
+            ? response(JSON.stringify({ name: "selected.pdf", mimeType: "application/pdf" }))
+            : new Response(new Uint8Array([0x25, 0x50, 0x44, 0x46]));
+        },
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) break;
+      reconstructed += result.text;
+      continuation = result.continuation;
+      if (!continuation) break;
+    }
+    expect(reconstructed).toBe(source);
+    expect(seenPages.every((pages) => pages === "2")).toBe(true);
+  });
+
   it("refuses page selection on non-PDFs without downloading", async () => {
     const fetchImpl = vi.fn(async () => response(JSON.stringify({ mimeType: "text/plain" })));
     const result = await readDriveFileTransport({
@@ -205,6 +375,7 @@ describe("readDriveFileTransport", () => {
       name: "report.pdf",
       mimeType: "application/pdf",
       text: "--- Page 1 ---\nPDF text",
+      textStart: 0,
     });
     expect(calls).toBe(2);
     expect(extractionInput?.bytes).toEqual(
@@ -484,6 +655,7 @@ describe("readDriveFileTransport", () => {
       name: "safe-name.txt",
       mimeType: "application/vnd.google-apps.document",
       text: "exported text",
+      textStart: 0,
     });
     expect(calls).toHaveLength(2);
     expect(calls[0]?.authorization).toBe("Bearer token-a");

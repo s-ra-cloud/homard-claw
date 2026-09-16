@@ -11,12 +11,17 @@
  */
 
 import type { DriveAccessTokenOptions } from "../google/credentials";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { extractPdfText, parsePdfPages, PdfExtractionError } from "../pdf/extract";
 import { extractDocxText, DocxExtractionError } from "../docx/extract";
 
 export const DEFAULT_DRIVE_READ_TIMEOUT_MS = 30_000;
 /** A read can be large, but never allows an unbounded response body. */
 export const MAX_DRIVE_READ_BODY_BYTES = 25_000_000;
+/** Maximum extracted document range exposed through Drive continuation. */
+export const MAX_DRIVE_DOCUMENT_CHARS = 1_500_000;
+// Scalar count; conservative enough for astral text plus action metadata.
+export const DEFAULT_DRIVE_DOCUMENT_CHUNK_CHARS = 1_400;
 /** Metadata and refusal payloads do not need the file download allowance. */
 const MAX_DRIVE_CONTROL_BODY_BYTES = 2 * 1024 * 1024;
 
@@ -73,6 +78,10 @@ export type DriveReadTransportResult =
       name: string | null;
       mimeType: string;
       text: string;
+      /** Scalar offset of the served range within the extracted document. */
+      textStart: number;
+      /** Opaque cursor for the next bounded range, when content remains. */
+      continuation?: string;
     }
   | DriveReadTransportFailure;
 
@@ -85,6 +94,11 @@ export type DriveReadInput = {
   workspaceId: string | null;
   fileId: string;
   pdfPages?: string;
+  /** Opaque cursor returned by a prior read; binds continuation to this file revision. */
+  continuation?: string;
+  /** Unicode-scalar offset and maximum range for the initial read. */
+  textOffset?: number;
+  textLimit?: number;
   signal?: AbortSignal;
   deadlineAt?: number;
   /**
@@ -913,6 +927,118 @@ function mimeExport(mimeType: string): string {
   return mimeType === DRIVE_SPREADSHEET_MIME ? "text/csv" : "text/plain";
 }
 
+type DriveContinuation = {
+  v: 1;
+  id: string;
+  mimeType: string;
+  modifiedTime: string | null;
+  offset: number;
+  pdfPages: string | null;
+};
+
+const DRIVE_CONTINUATION_CONTEXT = "homardclaw-google-drive-continuation-v1";
+
+function continuationSecret(): string | null {
+  const secret = process.env.SESSION_SECRET?.trim();
+  return secret ? secret : null;
+}
+
+function encodeContinuation(value: DriveContinuation): string | null {
+  const secret = continuationSecret();
+  if (!secret) return null;
+  const payload = Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
+  const signature = createHmac("sha256", secret)
+    .update(`${DRIVE_CONTINUATION_CONTEXT}|${payload}`)
+    .digest("hex");
+  return `${payload}.${signature}`;
+}
+
+function decodeContinuation(value: unknown): DriveContinuation | null {
+  if (typeof value !== "string" || value.length < 8 || value.length > 2114) return null;
+  try {
+    const separator = value.lastIndexOf(".");
+    const payload = value.slice(0, separator);
+    const signature = value.slice(separator + 1);
+    const secret = continuationSecret();
+    if (!secret || separator < 8 || !/^[A-Za-z0-9_-]+$/.test(payload) ||
+      !/^[0-9a-f]{64}$/.test(signature)) return null;
+    const expected = createHmac("sha256", secret)
+      .update(`${DRIVE_CONTINUATION_CONTEXT}|${payload}`)
+      .digest("hex");
+    const expectedBytes = Buffer.from(expected, "utf8");
+    const signatureBytes = Buffer.from(signature, "utf8");
+    if (expectedBytes.length !== signatureBytes.length ||
+      !timingSafeEqual(expectedBytes, signatureBytes)) return null;
+    const bytes = Buffer.from(payload, "base64url");
+    if (bytes.toString("base64url") !== payload) return null;
+    const parsed = JSON.parse(bytes.toString("utf8")) as Partial<DriveContinuation>;
+    if (parsed.v !== 1 || typeof parsed.id !== "string" || !parsed.id ||
+      typeof parsed.mimeType !== "string" || typeof parsed.offset !== "number" ||
+      !Number.isSafeInteger(parsed.offset) || parsed.offset < 0 ||
+      (typeof parsed.modifiedTime !== "string" && parsed.modifiedTime !== null) ||
+      (typeof parsed.pdfPages !== "string" && parsed.pdfPages !== null)) return null;
+    return parsed as DriveContinuation;
+  } catch {
+    return null;
+  }
+}
+
+function documentRange(
+  text: string,
+  offset: number,
+  requestedLimit: number | undefined,
+): { text: string; nextOffset: number | null; valid: boolean; start: number } {
+  const limit = requestedLimit === undefined
+    ? DEFAULT_DRIVE_DOCUMENT_CHUNK_CHARS
+    : Math.min(requestedLimit, DEFAULT_DRIVE_DOCUMENT_CHUNK_CHARS);
+  let scalar = 0;
+  let start = -1;
+  let end = -1;
+  for (let index = 0; index < text.length;) {
+    if (scalar === offset) start = index;
+    if (start >= 0 && scalar === offset + limit) {
+      end = index;
+      break;
+    }
+    const codePoint = text.codePointAt(index);
+    index += codePoint !== undefined && codePoint > 0xffff ? 2 : 1;
+    scalar += 1;
+  }
+  if (start < 0 && scalar === offset) start = text.length;
+  if (start < 0) return { text: "", nextOffset: null, valid: false, start: offset };
+  if (end < 0) end = text.length;
+  const displayedScalars = Math.min(limit, scalar - offset);
+  const nextOffset = end < text.length ? offset + displayedScalars : null;
+  return {
+    text: text.slice(start, end),
+    nextOffset,
+    valid: true,
+    start: offset,
+  };
+}
+
+function metadataRevision(
+  raw: string,
+): { name: string | null; mimeType: string; modifiedTime: string | null } | null {
+  try {
+    const parsed = JSON.parse(raw) as {
+      name?: unknown;
+      mimeType?: unknown;
+      modifiedTime?: unknown;
+    };
+    if (!parsed || typeof parsed !== "object" || typeof parsed.mimeType !== "string") {
+      return null;
+    }
+    return {
+      name: typeof parsed.name === "string" ? parsed.name : null,
+      mimeType: parsed.mimeType.toLowerCase().split(";")[0].trim(),
+      modifiedTime: typeof parsed.modifiedTime === "string" ? parsed.modifiedTime : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Read one Drive file through metadata + export/download, under one total
  * deadline. All failures are returned as safe outcomes; this function never
@@ -921,8 +1047,18 @@ function mimeExport(mimeType: string): string {
 export async function readDriveFileTransport(
   input: DriveReadInput,
 ): Promise<DriveReadTransportResult> {
+  const cursor = decodeContinuation(input.continuation);
+  if (cursor && input.pdfPages !== undefined &&
+    cursor.pdfPages !== input.pdfPages) {
+    return {
+      ok: false,
+      kind: "failed",
+      message: "The Google Drive continuation is invalid or stale; start a new read.",
+    };
+  }
+  const effectivePdfPages = input.pdfPages ?? cursor?.pdfPages ?? undefined;
   try {
-    parsePdfPages(input.pdfPages);
+    parsePdfPages(effectivePdfPages);
   } catch {
     return pdfExtractionFailure(new PdfExtractionError("invalid_page_range").message);
   }
@@ -1020,7 +1156,7 @@ export async function readDriveFileTransport(
 
     const fileId = encodeURIComponent(input.fileId);
     const metadata = await requestDriveRead(
-      `/drive/v3/files/${fileId}?fields=${encodeURIComponent("id,name,mimeType")}&supportsAllDrives=true`,
+      `/drive/v3/files/${fileId}?fields=${encodeURIComponent("id,name,mimeType,modifiedTime")}&supportsAllDrives=true`,
       token,
       state,
       input.fetchImpl ?? fetch,
@@ -1028,7 +1164,7 @@ export async function readDriveFileTransport(
     );
     if (typeof metadata !== "string") return finish(metadata);
 
-    let file: { name?: unknown; mimeType?: unknown };
+    let file: { id?: unknown; name?: unknown; mimeType?: unknown; modifiedTime?: unknown };
     try {
       const parsed: unknown = JSON.parse(metadata);
       if (!parsed || typeof parsed !== "object") {
@@ -1044,6 +1180,8 @@ export async function readDriveFileTransport(
     }
 
     const mimeType = typeof file.mimeType === "string" ? file.mimeType.toLowerCase().split(";")[0].trim() : "";
+    const fileName = typeof file.name === "string" ? file.name : null;
+    const modifiedTime = typeof file.modifiedTime === "string" ? file.modifiedTime : null;
     if (!mimeType || (typeof file.name === "string" && file.name.includes("\0"))) {
       reportFailure(state, { failureClass: "metadata", stage: "metadata" });
       return metadataFailure();
@@ -1057,8 +1195,45 @@ export async function readDriveFileTransport(
       reportFailure(state, { failureClass: "unsupported_content", stage: "metadata" });
       return unsupportedContentFailure();
     }
-    if (input.pdfPages !== undefined && !isPdfDownload(mimeType)) {
+    if (effectivePdfPages !== undefined && !isPdfDownload(mimeType)) {
       return finish(pdfExtractionFailure("pdfPages is only supported for PDF files; no content was read."));
+    }
+    if (input.continuation !== undefined && (!cursor ||
+      cursor.id !== input.fileId ||
+      cursor.mimeType !== mimeType ||
+      cursor.modifiedTime !== modifiedTime ||
+      cursor.pdfPages !== (effectivePdfPages ?? null))) {
+      return finish({
+        ok: false,
+        kind: "failed",
+        message: "The Google Drive continuation is invalid or stale; start a new read.",
+      });
+    }
+    const offset = cursor?.offset ?? input.textOffset ?? 0;
+    const requestedLimit = input.textLimit;
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset > MAX_DRIVE_DOCUMENT_CHARS ||
+      (requestedLimit !== undefined &&
+        (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > MAX_DRIVE_DOCUMENT_CHARS))) {
+      return finish({
+        ok: false,
+        kind: "failed",
+        message: "The Google Drive document range is invalid; use a bounded non-negative offset and chunk size.",
+      });
+    }
+    if (cursor && input.textOffset !== undefined) {
+      return finish({
+        ok: false,
+        kind: "failed",
+        message: "The Google Drive continuation cannot be combined with a new offset.",
+      });
+    }
+    if ((cursor || input.textOffset !== undefined || input.textLimit !== undefined) &&
+      !isPdfDownload(mimeType) && !isDocxDownload(mimeType)) {
+      return finish({
+        ok: false,
+        kind: "failed",
+        message: "Document ranges and continuations are only supported for PDF and DOCX files.",
+      });
     }
     if (isPdfDownload(mimeType) || isDocxDownload(mimeType)) {
       const pdf = await requestDrivePdf(
@@ -1076,7 +1251,7 @@ export async function readDriveFileTransport(
             ? (input.extractPdf ?? extractPdfText)(pdf, {
               signal: state.controller.signal,
               maxInputBytes: MAX_DRIVE_READ_BODY_BYTES,
-              deadlineAt, pdfPages: input.pdfPages,
+              deadlineAt, pdfPages: effectivePdfPages,
             })
             : (input.extractDocx ?? extractDocxText)(pdf, {
               signal: state.controller.signal,
@@ -1090,11 +1265,56 @@ export async function readDriveFileTransport(
           reportFailure(state, { failureClass: isPdfDownload(mimeType) ? "pdf_extraction" : "docx_extraction", stage: "extract" });
           return finish(failure);
         }
+        const finalMetadata = modifiedTime === null ? null : await requestDriveRead(
+          `/drive/v3/files/${fileId}?fields=${encodeURIComponent("id,name,mimeType,modifiedTime")}&supportsAllDrives=true`,
+          token,
+          state,
+          input.fetchImpl ?? fetch,
+          "metadata",
+        );
+        const finalRevision = typeof finalMetadata === "string"
+          ? metadataRevision(finalMetadata)
+          : null;
+        if (modifiedTime !== null && (!finalRevision || finalRevision.name !== fileName ||
+          finalRevision.mimeType !== mimeType ||
+          finalRevision.modifiedTime !== modifiedTime)) {
+          return finish({
+            ok: false,
+            kind: "failed",
+            message: "The Google Drive file changed while it was being read; retry the read.",
+          });
+        }
+        const range = documentRange(text, offset, requestedLimit);
+        if (!range.valid) {
+          return finish({
+            ok: false,
+            kind: "failed",
+            message: "The Google Drive document range is outside the extracted document.",
+          });
+        }
+        const nextOffset = range.nextOffset;
+        const continuation = nextOffset === null ? null : encodeContinuation({
+          v: 1,
+          id: input.fileId,
+          mimeType,
+          modifiedTime,
+          offset: nextOffset,
+          pdfPages: effectivePdfPages ?? null,
+        });
+        if (nextOffset !== null && continuation === null) {
+          return finish({
+            ok: false,
+            kind: "failed",
+            message: "Google Drive continuation is unavailable on this server.",
+          });
+        }
         return {
           ok: true,
-          name: typeof file.name === "string" ? file.name : null,
+          name: fileName,
           mimeType,
-          text,
+          text: range.text,
+          textStart: range.start,
+          ...(continuation === null ? {} : { continuation }),
         };
       } catch (error) {
         if (error instanceof BoundedStop) {
@@ -1137,11 +1357,34 @@ export async function readDriveFileTransport(
       }
       return finish(body);
     }
+    const finalMetadata = modifiedTime === null ? null : await requestDriveRead(
+      `/drive/v3/files/${fileId}?fields=${encodeURIComponent("id,name,mimeType,modifiedTime")}&supportsAllDrives=true`,
+      token,
+      state,
+      input.fetchImpl ?? fetch,
+      "metadata",
+    );
+    const finalRevision = typeof finalMetadata === "string"
+      ? metadataRevision(finalMetadata)
+      : null;
+    if (modifiedTime !== null && (!finalRevision || finalRevision.name !== fileName ||
+      finalRevision.mimeType !== mimeType ||
+      finalRevision.modifiedTime !== modifiedTime)) {
+      return finish({
+        ok: false,
+        kind: "failed",
+        message: "The Google Drive file changed while it was being read; retry the read.",
+      });
+    }
+    // Continuation is deliberately limited to locally extracted PDF/DOCX
+    // documents. Existing text/CSV reads retain their historical full-body
+    // behavior (the action-result formatter still bounds what the model sees).
     return {
       ok: true,
-      name: typeof file.name === "string" ? file.name : null,
+      name: fileName,
       mimeType,
       text: body,
+      textStart: 0,
     };
   } catch (error) {
     if (error instanceof BoundedStop) {

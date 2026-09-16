@@ -30,4 +30,10 @@ export interface ConverseInput {
      * @maxLength 80
      */
   ownerTimezone?: string;
+  /** Opaque retained Talk document version for bounded follow-up reads. */
+  documentContextVersion?: string;
+  /** Unicode-scalar offset of the retained document chunk to provide. */
+  documentChunkStart?: number;
+  /** Maximum size of the retained document chunk to provide. */
+  documentChunkLength?: number;
 }

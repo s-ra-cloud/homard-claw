@@ -11,7 +11,7 @@ const MAX_CONTENT_TYPES_BYTES = 1_000_000;
 const MAX_TOTAL_XML_BYTES = 12_000_000;
 const MAX_XML_DEPTH = 512;
 const MAX_XML_TOKENS = 400_000;
-const MAX_OUTPUT_CHARS = 100_000;
+const MAX_OUTPUT_CHARS = 1_500_000;
 const WORD_NAMESPACES = new Set([
   "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
   "http://purl.oclc.org/ooxml/wordprocessingml/main",
@@ -26,10 +26,26 @@ const CONTENT_TYPE_NAMESPACES = new Set([
 ]);
 const OMITTED = "text only; drawings, images, headers, footnotes, comments, field instructions, embedded objects, tracked deletions, move-from revisions, and other non-body content omitted";
 const ALTERNATE_CONTENT_OMITTED = "AlternateContent branches omitted because they require an Office compatibility choice";
-const TRUNCATED = "\n--- DOCX text extraction truncated at the 100000-character limit; remaining document content was omitted. ---";
+const TRUNCATED = "\n--- DOCX text extraction truncated at the 1500000-character limit; remaining document content was omitted. ---";
 
 function respond(message) {
-  try { writeSync(3, JSON.stringify(message)); } catch { /* parent stopped */ }
+  try {
+    // Pipe writes may be partial for large extracted documents. Loop over a
+    // bounded chunk size so the complete JSON response is delivered without
+    // ever creating an unbounded protocol buffer.
+    const payload = Buffer.from(JSON.stringify(message), "utf8");
+    const waitCell = new Int32Array(new SharedArrayBuffer(4));
+    for (let offset = 0; offset < payload.length;) {
+      try {
+        const written = writeSync(3, payload, offset, Math.min(16 * 1024, payload.length - offset));
+        if (!Number.isInteger(written) || written <= 0) throw new Error("protocol write");
+        offset += written;
+      } catch (cause) {
+        if (cause?.code !== "EAGAIN") throw cause;
+        Atomics.wait(waitCell, 0, 0, 1);
+      }
+    }
+  } catch { /* parent stopped */ }
   process.exit(0);
 }
 function error(kind) { respond({ type: "error", kind }); }
@@ -96,7 +112,10 @@ function entriesFromZip(bytes) {
 function readXmlEntry(bytes, entry, maximum, budget) {
   if (!entry || entry.flags & 1 || (entry.method !== 0 && entry.method !== 8) ||
     entry.uncompressed > maximum || entry.uncompressed > budget.remaining ||
-    (entry.compressed && entry.uncompressed > entry.compressed * 200) ||
+    // Highly repetitive Unicode text (including astral characters) can
+    // legitimately compress by well over 200:1. The inflated XML and total
+    // package budgets remain the hard zip-bomb boundaries.
+    (entry.compressed && entry.uncompressed > entry.compressed * 2_000) ||
     (!entry.compressed && entry.uncompressed)) {
     throw new Error(entry?.flags & 1 ? "encrypted" : "invalid");
   }
@@ -399,12 +418,28 @@ function bodyText(xml) {
   return { blocks, alternateContentOmitted };
 }
 
-function appendBounded(current, addition) {
-  const available = MAX_OUTPUT_CHARS - [...TRUNCATED].length - [...current].length;
-  if (available <= 0) return { text: current + TRUNCATED, clipped: true };
+function appendBounded(current, currentChars, addition) {
+  const noticeChars = [...TRUNCATED].length;
+  const available = MAX_OUTPUT_CHARS - noticeChars - currentChars;
+  if (available <= 0) {
+    return {
+      text: current + TRUNCATED,
+      chars: currentChars + noticeChars,
+      clipped: true,
+    };
+  }
   const chars = [...addition];
-  return chars.length <= available ? { text: current + addition, clipped: false } :
-    { text: current + chars.slice(0, available).join("") + TRUNCATED, clipped: true };
+  return chars.length <= available
+    ? {
+        text: current + addition,
+        chars: currentChars + chars.length,
+        clipped: false,
+      }
+    : {
+        text: current + chars.slice(0, available).join("") + TRUNCATED,
+        chars: MAX_OUTPUT_CHARS,
+        clipped: true,
+      };
 }
 
 function extract(bytes) {
@@ -427,6 +462,7 @@ function extract(bytes) {
     const parsed = bodyText(readXmlEntry(bytes, entries.get("word/document.xml"), MAX_XML_BYTES, budget));
     const omission = parsed.alternateContentOmitted ? `${OMITTED}; ${ALTERNATE_CONTENT_OMITTED}` : OMITTED;
     let output = `--- DOCX document body (${omission}) ---\n`;
+    let outputChars = [...output].length;
     let paragraphNumber = 0, tableNumber = 0;
     for (const block of parsed.blocks) {
       let next;
@@ -437,8 +473,9 @@ function extract(bytes) {
         tableNumber += 1;
         next = `--- DOCX table ${tableNumber} (table text only; ${omission}) ---\n${block.value.map((tableRow) => tableRow.join("\t")).join("\n")}\n`;
       }
-      const appended = appendBounded(output, next);
+      const appended = appendBounded(output, outputChars, next);
       output = appended.text;
+      outputChars = appended.chars;
       if (appended.clipped) return result(output);
     }
     return result(output);

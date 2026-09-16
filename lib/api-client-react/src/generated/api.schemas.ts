@@ -1658,6 +1658,9 @@ export interface ConverseInput {
      * @maxLength 80
      */
   ownerTimezone?: string;
+  documentContextVersion?: string;
+  documentChunkStart?: number;
+  documentChunkLength?: number;
 }
 
 export interface ConverseResponse {
@@ -1692,6 +1695,8 @@ export interface ConverseResponse {
      * @items.minimum 0
      */
   normalizedAttachmentIndices?: number[];
+  documentChunkNextStart?: number;
+  documentChunkDone?: boolean;
 }
 
 export interface DocumentationSection {

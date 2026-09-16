@@ -169,9 +169,15 @@ export const APP_OPERATIONS: AppOperation[] = [
     app: "google_drive",
     level: "read",
     description:
-      "Read a file's text content (Sheets return CSV; PDFs are locally text-extracted with page labels; no OCR). Params: fileId, optional pdfPages (PDF only: one page such as \"7\" or inclusive range \"7-9\", at most 5 pages, page numbers 1-100). Results are limited to 4000 characters; to answer about a later PDF page, request that page with pdfPages. Never claim omitted text, unselected pages, or images were read.",
-    params: [str("fileId", true, 200), str("pdfPages", false, 7)],
-    target: (p) => `Drive file ${p.fileId}${p.pdfPages === undefined ? "" : ` PDF pages ${p.pdfPages}`}`,
+      "Read a file's text content (Sheets return CSV; PDFs and DOCX are locally text-extracted with page labels/omission notices; no OCR). Params: fileId, optional pdfPages (PDF only: one page such as \"7\" or inclusive range \"7-9\", at most 5 pages, page numbers 1-100), optional textOffset/textLimit for a bounded range, or continuation returned by an earlier read. A continuation preserves the original PDF page selection; do not repeat pdfPages unless it matches. Document text can be continued up to 1,500,000 characters; each result remains bounded. Never claim omitted text, unselected pages, or images were read.",
+    params: [
+      str("fileId", true, 200),
+      str("pdfPages", false, 7),
+      str("continuation", false, 2048),
+      num("textOffset", false),
+      num("textLimit", false),
+    ],
+    target: (p) => `Drive file ${p.fileId}${p.pdfPages === undefined ? "" : ` PDF pages ${p.pdfPages}`}${p.continuation ? " (continuation)" : ""}`,
   },
   {
     name: "google_drive.create_file",

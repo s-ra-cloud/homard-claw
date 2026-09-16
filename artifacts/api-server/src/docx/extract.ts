@@ -38,10 +38,10 @@ export class DocxExtractionError extends Error {
 
 export const DOCX_EXTRACTION_LIMITS = {
   maxInputBytes: 25_000_000,
-  maxOutputChars: 100_000,
+  maxOutputChars: 1_500_000,
   maxConcurrent: 2,
   maxQueued: 4,
-  maxV8OldSpaceMb: 64,
+  maxV8OldSpaceMb: 128,
   // Node 24 reserves a large V8 code range before user code starts. Match the
   // proven PDF worker startup-compatible ceiling; the 64 MiB heap and ZIP/XML
   // limits still tightly bound actual parser work.
@@ -72,7 +72,7 @@ type Waiting = {
 
 let active = 0;
 const waiting: Waiting[] = [];
-const MAX_PROTOCOL_BYTES = 1024 * 1024;
+const MAX_PROTOCOL_BYTES = 32 * 1024 * 1024;
 
 function deadline(value?: number): number {
   const now = Date.now();

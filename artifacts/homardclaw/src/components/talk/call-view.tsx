@@ -498,6 +498,9 @@ export function CallView({
   const [proposalDocumentContextVersion, setProposalDocumentContextVersion] =
     useState<string | null>(null);
   const [liveTranscript, setLiveTranscript] = useState<string | null>(null);
+  const documentContextVersionRef = useRef<string | null>(null);
+  const documentChunkStartRef = useRef(0);
+  const documentChunkDoneRef = useRef(false);
 
   const abortRef = useRef<AbortController | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -721,7 +724,13 @@ export function CallView({
    * still receives it with the later proposal, and confirmation/cancellation
    * explicitly consumes it without deleting the visible transcript.
    */
+  const resetRetainedDocumentCursor = useCallback(() => {
+    documentContextVersionRef.current = null;
+    documentChunkStartRef.current = 0;
+    documentChunkDoneRef.current = false;
+  }, []);
   const clearRetainedDocumentContext = useCallback((version: string | null) => {
+    resetRetainedDocumentCursor();
     const data = talkDocumentContextCleanupInput(version);
     if (!data) return;
     void clearTalkDocumentContext(agentId, data).catch(() => {
@@ -729,7 +738,7 @@ export function CallView({
       // owner to retry; it must never turn a successful task confirmation into
       // a client-visible error.
     });
-  }, [agentId]);
+  }, [agentId, resetRetainedDocumentCursor]);
 
   // Turning voice mode off mid-call drops the mic and any spoken reply.
   const wasVoiceOn = useRef(voiceOn);
@@ -798,6 +807,7 @@ export function CallView({
         setProposedDelegation(null);
         setPendingDelegation(null);
         setProposalAttachments([]);
+        resetRetainedDocumentCursor();
         setProposalDocumentContextVersion(null);
         setProposalDocumentContextVersion(null);
         void queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
@@ -912,6 +922,9 @@ export function CallView({
         setProposedDelegation(null);
         setPendingDelegation(null);
         setProposalAttachments([]);
+        documentContextVersionRef.current = null;
+        documentChunkStartRef.current = 0;
+        documentChunkDoneRef.current = false;
         setFlowError(null);
         queryClient.invalidateQueries({
           queryKey: getGetTalkHistoryQueryKey(agentId),
@@ -965,6 +978,14 @@ export function CallView({
                 }
               : {}),
             ...(turnAttachments.length ? { attachments: turnAttachments } : {}),
+            ...(turnAttachments.length === 0 &&
+            documentContextVersionRef.current &&
+            !documentChunkDoneRef.current
+              ? {
+                  documentContextVersion: documentContextVersionRef.current,
+                  documentChunkStart: documentChunkStartRef.current,
+                }
+              : {}),
           },
         })
         .then((data) => {
@@ -985,6 +1006,12 @@ export function CallView({
           const hasProposal = Boolean(
             data.proposedTaskObjective || data.proposedDelegation,
           );
+          if (data.documentContextVersion) {
+            documentContextVersionRef.current = data.documentContextVersion;
+            documentChunkStartRef.current =
+              data.documentChunkNextStart ?? documentChunkStartRef.current;
+            documentChunkDoneRef.current = data.documentChunkDone ?? false;
+          }
           const currentProposalAttachments =
             data.normalizedAttachmentIndices?.length
               ? mergeProposalAttachments(

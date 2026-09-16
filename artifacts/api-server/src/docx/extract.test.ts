@@ -169,6 +169,16 @@ describe("extractDocxText", () => {
     await expect(extractDocxText(bytes)).rejects.toMatchObject({ kind: "invalid_docx" });
   });
 
+  it("extracts up to 1.5M Unicode scalars and keeps the truncation marker", async () => {
+    const largeText = "😀".repeat(1_499_900);
+    const text = await extractDocxText(deflatedDocx(
+      wordDocument(`<w:p><w:r><w:t>${largeText}</w:t></w:r></w:p>`),
+    ));
+    expect(Array.from(text).length).toBeLessThanOrEqual(1_500_000);
+    expect(text).toContain("😀");
+    expect(text).toContain("1500000-character limit");
+  });
+
   it("classifies encrypted and legacy Word compound files without parsing them", async () => {
     await expect(extractDocxText(Buffer.from([0xd0, 0xcf, 0x11, 0xe0])))
       .rejects.toMatchObject({ kind: "legacy" });

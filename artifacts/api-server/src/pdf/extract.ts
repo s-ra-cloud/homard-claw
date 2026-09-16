@@ -38,9 +38,9 @@ const PDF_EXTRACTION_ERROR_MESSAGES: Readonly<Record<PdfExtractionErrorKind, str
 };
 
 // JSON can expand one Unicode scalar to six UTF-8 bytes (escaped BMP code
-// units), so the private pipe must be larger than the public 100k-scalar
+// units), so the private pipe must be larger than the public 1.5M-scalar
 // result limit. This remains bounded independently of worker output.
-const MAX_PROTOCOL_BYTES = 1024 * 1024;
+const MAX_PROTOCOL_BYTES = 32 * 1024 * 1024;
 
 export class PdfExtractionError extends Error {
   readonly kind: PdfExtractionErrorKind;
@@ -83,10 +83,10 @@ export function parsePdfPages(value: unknown): { start: number; end: number } | 
 export const PDF_EXTRACTION_LIMITS = {
   maxInputBytes: 25_000_000,
   maxPages: 100,
-  maxOutputChars: 100_000,
+  maxOutputChars: 1_500_000,
   maxConcurrent: 2,
   maxQueued: 4,
-  maxV8OldSpaceMb: 128,
+  maxV8OldSpaceMb: 256,
   // PDF.js loads its optional native canvas compatibility layer in Node 24;
   // its baseline virtual mappings need just under 2 GiB on the supported
   // Linux runtime. This is still an OS-enforced ceiling for all allocations,
@@ -95,7 +95,11 @@ export const PDF_EXTRACTION_LIMITS = {
   // PDF.js's Node canvas compatibility module has a ~300 MiB peak RSS on
   // this runtime while importing. RLIMIT_AS is the hard 2 GiB ceiling; this
   // lower sampled guard catches sustained growth after startup.
-  maxRssBytes: 512 * 1024 * 1024,
+  // Large but valid 1.5M-character documents can briefly retain PDF.js text
+  // item/native buffers alongside the ~300 MiB import baseline. Keep the
+  // sampled guard below the hard 2 GiB address-space ceiling while allowing
+  // the supported output bound to complete.
+  maxRssBytes: 768 * 1024 * 1024,
   defaultTimeoutMs: 15_000,
   maxTimeoutMs: 30_000,
 } as const;
@@ -394,7 +398,7 @@ function extractInChild(bytes: Uint8Array, signal: AbortSignal | undefined, dead
       let message: unknown;
       try {
         message = JSON.parse(responseBytes.toString("utf8"));
-      } catch {
+        } catch {
         stop(new PdfExtractionError("extraction_failed"));
         return;
       }

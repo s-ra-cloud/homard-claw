@@ -2074,6 +2074,8 @@ export const converseWithAgentBodyAttachmentsMax = 4;
 
 export const converseWithAgentBodyOwnerTimezoneMax = 80;
 
+export const converseWithAgentBodyDocumentContextVersionMax = 64;
+
 
 
 export const ConverseWithAgentBody = zod.object({
@@ -2090,7 +2092,10 @@ export const ConverseWithAgentBody = zod.object({
   "encoding": zod.enum(['text', 'base64']),
   "content": zod.string().min(1).max(converseWithAgentBodyAttachmentsItemContentMax)
 })).max(converseWithAgentBodyAttachmentsMax).optional(),
-  "ownerTimezone": zod.string().max(converseWithAgentBodyOwnerTimezoneMax).optional().describe('IANA timezone of the owner\'s device (e.g. Europe\/Paris). Used to resolve relative days like \"today\" to the owner\'s calendar day in task-history lookups. Invalid or missing values fall back to UTC.')
+  "ownerTimezone": zod.string().max(converseWithAgentBodyOwnerTimezoneMax).optional().describe('IANA timezone of the owner\'s device (e.g. Europe\/Paris). Used to resolve relative days like \"today\" to the owner\'s calendar day in task-history lookups. Invalid or missing values fall back to UTC.'),
+  "documentContextVersion": zod.string().max(converseWithAgentBodyDocumentContextVersionMax).optional(),
+  "documentChunkStart": zod.number().int().min(0).optional(),
+  "documentChunkLength": zod.number().int().min(1).max(12000).optional()
 })
 
 export const converseWithAgentResponseNormalizedUserTextMax = 8000;
@@ -2108,6 +2113,8 @@ export const converseWithAgentResponseDocumentContextVersionMax = 64;
 export const converseWithAgentResponseNormalizedAttachmentIndicesItemMin = 0;
 
 export const converseWithAgentResponseNormalizedAttachmentIndicesMax = 4;
+
+export const converseWithAgentResponseDocumentChunkNextStartMin = 0;
 
 
 
@@ -2133,7 +2140,9 @@ export const ConverseWithAgentResponse = zod.object({
   "content": zod.string().min(1).max(converseWithAgentResponseNormalizedAttachmentsItemContentMax)
 })).max(converseWithAgentResponseNormalizedAttachmentsMax).optional().describe('Extracted PDF or DOCX replacements needed to confirm a proposal. This can be canonical document text retained from an earlier Talk turn. Ordinary selected files are not echoed or retained in a Talk response.'),
   "documentContextVersion": zod.string().max(converseWithAgentResponseDocumentContextVersionMax).optional().describe('Opaque canonical document context version. Send this value when consuming a confirmed or cancelled proposal; conditional cleanup never deletes a newer Talk document context.'),
-  "normalizedAttachmentIndices": zod.array(zod.number().min(converseWithAgentResponseNormalizedAttachmentIndicesItemMin)).max(converseWithAgentResponseNormalizedAttachmentIndicesMax).optional().describe('Original attachment positions for normalizedAttachments. Positions preserve mixed and same-named attachment sets during confirmation.')
+  "normalizedAttachmentIndices": zod.array(zod.number().min(converseWithAgentResponseNormalizedAttachmentIndicesItemMin)).max(converseWithAgentResponseNormalizedAttachmentIndicesMax).optional().describe('Original attachment positions for normalizedAttachments. Positions preserve mixed and same-named attachment sets during confirmation.'),
+  "documentChunkNextStart": zod.number().int().min(converseWithAgentResponseDocumentChunkNextStartMin).optional(),
+  "documentChunkDone": zod.boolean().optional()
 })
 
 

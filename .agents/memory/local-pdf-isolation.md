@@ -15,6 +15,12 @@ Untrusted Node parsers need an OS address-space limit in addition to the V8 heap
 
 **How to apply:** preserve a tested startup-compatible address-space cap and lower RSS monitoring threshold. Resource monitoring must distinguish running children from exited/zombie children, without treating an unreadable live process as safe.
 
+Large extraction must remain linear in output size, and the isolated-worker protocol must tolerate backpressure.
+
+**Why:** multi-megabyte results expose partial transport writes, while repeatedly scanning accumulated output becomes quadratic and can trip otherwise-correct resource guards.
+
+**How to apply:** when raising extraction limits, verify large non-ASCII results across the process boundary and keep output accounting incremental.
+
 Keep generated PDF regression text inside the page's media box.
 
 **Why:** PDF.js can omit off-page glyphs from text extraction. A single long text line is not a reliable fixture for testing output truncation; it can appear to pass later-page isolation while never generating enough extracted text to hit the limit.
