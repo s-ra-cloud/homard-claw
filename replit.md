@@ -166,15 +166,17 @@ depth than the README covers:
   agent to auto-review pending approvals, cap automatic failed-task
   retries (1-3), or flip an "always approve everything" bypass. All three
   live-sync over the same SSE topic as the approval board.
-- **Bug reports & usage reports** — bug reports are owner-only, filed from
-  a task or the Talk window, and auto-attach the relevant context (task
-  state, or the last 10 Talk turns). The Reports page aggregates real
+- **Bug reports & usage reports** — every authenticated workspace member can
+  file a bug report from a task or either Talk mode, with relevant context
+  auto-attached (task state, or the last 10 Talk turns); only the owner can
+  review submitted reports. The Reports page aggregates real
   (never estimated) cost/token usage — no feature here creates cost data
   that didn't come from a completed provider call.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- Any user-facing UI change must be implemented and verified in both the
+  standalone/mobile pages and the desktop office parchment mode.
 
 ## Gotchas
 

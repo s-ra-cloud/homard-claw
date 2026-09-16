@@ -82,11 +82,13 @@ vi.doMock("@/components/ui/textarea", () => ({
 let SendBugReportButton: (props: { task: { id: string } }) => ReactNode;
 let TalkBugReportButton: typeof import("@/components/talk/call-view").TalkBugReportButton;
 let buildTalkBugReportInput: typeof import("@/components/talk/call-view").buildTalkBugReportInput;
+let talkPaneClasses: typeof import("./TalkPage").talkPaneClasses;
 
 beforeAll(async () => {
   ({ SendBugReportButton } = await import("./TasksPage"));
   ({ TalkBugReportButton, buildTalkBugReportInput } =
     await import("@/components/talk/call-view"));
+  ({ talkPaneClasses } = await import("./TalkPage"));
 });
 
 beforeEach(() => {
@@ -203,5 +205,20 @@ describe("TalkBugReportButton component behavior", () => {
       title: "Bug report received",
       description: "Thanks for helping us improve HomardClaw.",
     });
+  });
+});
+
+describe("Talk page display modes", () => {
+  it("gives the office Talk window the full call width so header actions remain visible", () => {
+    const office = talkPaneClasses(true, true);
+    const standalone = talkPaneClasses(true, false);
+
+    expect(office.contacts).toContain("hidden");
+    expect(office.contacts).not.toContain("lg:block");
+    expect(office.root).not.toContain("lg:flex-row");
+    expect(office.call).toContain("block");
+
+    expect(standalone.contacts).toContain("lg:block");
+    expect(standalone.root).toContain("lg:flex-row");
   });
 });

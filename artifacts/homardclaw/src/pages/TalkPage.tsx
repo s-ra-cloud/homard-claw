@@ -26,8 +26,25 @@ import { ContactList } from "@/components/talk/contact-list";
 import { TalkSettings } from "@/components/talk/talk-settings";
 import { useIsDesktop } from "@/hooks/use-mobile";
 import { useToast } from "@/hooks/use-toast";
+import { isOfficeWindowFrame } from "@/lib/office-window";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Phone } from "lucide-react";
+
+export function talkPaneClasses(inCall: boolean, inOfficeWindow: boolean) {
+  return {
+    root: `flex h-full min-h-0 flex-col ${
+      inOfficeWindow ? "" : "lg:flex-row"
+    }`,
+    contacts: `min-h-0 flex-1 ${
+      inOfficeWindow ? "" : "lg:flex-none lg:w-80 xl:w-96 lg:border-r-4 lg:border-border"
+    } ${inCall ? "hidden" : "block"} ${
+      inOfficeWindow ? "" : "lg:block"
+    }`,
+    call: `min-h-0 flex-1 ${inCall ? "block" : "hidden"} ${
+      inOfficeWindow ? "" : "lg:block"
+    }`,
+  };
+}
 
 function errorText(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
@@ -56,6 +73,7 @@ export default function TalkPage() {
   const routedId = routeParams?.agentId ?? null;
   const agent = conversableAgents.find((a) => a.id === routedId) ?? null;
   const speechAvailable = voiceStatus?.available ?? false;
+  const inOfficeWindow = isOfficeWindowFrame();
   const recorderSupported =
     typeof window !== "undefined" &&
     typeof MediaRecorder !== "undefined" &&
@@ -144,16 +162,15 @@ export default function TalkPage() {
   );
 
   const inCall = agent !== null;
+  const paneClasses = talkPaneClasses(inCall, inOfficeWindow);
 
   return (
     <Shell>
-      <div className="flex h-full min-h-0 flex-col lg:flex-row">
+      <div className={paneClasses.root}>
         {/* Contacts — the phone's home screen, a column on desktop. */}
         <section
           aria-label="Crustabot contacts"
-          className={`min-h-0 flex-1 lg:flex-none lg:w-80 xl:w-96 lg:border-r-4 lg:border-border ${
-            inCall ? "hidden lg:block" : "block"
-          }`}
+          className={paneClasses.contacts}
         >
           <ContactList
             agents={conversableAgents}
@@ -181,7 +198,7 @@ export default function TalkPage() {
         {/* Call — the only screen on a phone once a contact is tapped. */}
         <section
           aria-label="Call"
-          className={`min-h-0 flex-1 ${inCall ? "block" : "hidden lg:block"}`}
+          className={paneClasses.call}
         >
           {agent ? (
             <CallView
