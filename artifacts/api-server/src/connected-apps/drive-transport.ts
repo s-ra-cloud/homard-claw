@@ -63,6 +63,7 @@ export type DriveReadFailureClass =
   | "cancelled"
   | "metadata"
   | "body_limit"
+  | "size_mismatch"
   | "unsupported_content"
   | "pdf_extraction"
   | "docx_extraction"
@@ -72,6 +73,17 @@ export type DriveReadFailureDetails = {
   stage: string;
   failureClass: DriveReadFailureClass;
   providerStatus?: number;
+  declaredSizeBytes?: number;
+  responseSizeBytes?: number;
+  downloadedSizeBytes?: number;
+  limitBytes?: number;
+};
+
+export type DriveReadByteDetails = {
+  declaredSizeBytes: number | null;
+  responseSizeBytes: number | null;
+  downloadedSizeBytes: number | null;
+  limitBytes: number;
 };
 
 export type DriveReadTransportResult =
@@ -120,6 +132,7 @@ export type DriveReadInput = {
   now?: () => number;
   onStage?: (stage: string) => void;
   onFailure?: (details: DriveReadFailureDetails) => void;
+  onBytes?: (details: DriveReadByteDetails) => void;
 };
 
 type TransportState = {
@@ -362,7 +375,19 @@ class BoundedStop extends Error {
 
 function bodyTooLargeFailure(
   maxBytes = MAX_DRIVE_READ_BODY_BYTES,
+  declaredSizeBytes: number | null = null,
 ): DriveReadTransportFailure {
+  if (
+    declaredSizeBytes !== null &&
+    declaredSizeBytes <= maxBytes
+  ) {
+    return {
+      ok: false,
+      kind: "failed",
+      message:
+        `Google Drive reports this file as ${declaredSizeBytes} bytes, but its download exceeded the ${maxBytes / 1_000_000} MB read limit. Download it locally and attach it directly, or replace the Drive copy and retry.`,
+    };
+  }
   return {
     ok: false,
     kind: "failed",
@@ -594,15 +619,42 @@ async function boundedResponseBytes(
   state: TransportState,
   reportBodyFailure = true,
   maxBytes = MAX_DRIVE_READ_BODY_BYTES,
+  declaredSizeBytes: number | null = null,
+  onBytes?: (details: DriveReadByteDetails) => void,
 ): Promise<Uint8Array | DriveReadTransportFailure> {
   const contentLength = responseBodySize(response);
-  if (contentLength !== null && contentLength > maxBytes) {
+  const metadataSaysWithinLimit =
+    declaredSizeBytes !== null && declaredSizeBytes <= maxBytes;
+  // Drive metadata is the file's canonical stored size. When it says the file
+  // fits, do not reject solely on a contradictory HTTP content-length: proxies
+  // and content codings can make that header describe a different transfer
+  // representation. Stream the body under the hard cap and trust bytes read.
+  if (
+    contentLength !== null &&
+    contentLength > maxBytes &&
+    !metadataSaysWithinLimit
+  ) {
     state.controller.abort();
     discardResponseBody(response);
     if (reportBodyFailure) {
-      reportFailure(state, { failureClass: "body_limit", stage: "body" });
+      reportFailure(state, {
+        failureClass:
+          declaredSizeBytes !== null && declaredSizeBytes <= maxBytes
+            ? "size_mismatch"
+            : "body_limit",
+        stage: "body",
+        ...(declaredSizeBytes === null ? {} : { declaredSizeBytes }),
+        responseSizeBytes: contentLength,
+        limitBytes: maxBytes,
+      });
     }
-    return bodyTooLargeFailure(maxBytes);
+    onBytes?.({
+      declaredSizeBytes,
+      responseSizeBytes: contentLength,
+      downloadedSizeBytes: null,
+      limitBytes: maxBytes,
+    });
+    return bodyTooLargeFailure(maxBytes, declaredSizeBytes);
   }
 
   if (!response.body) {
@@ -611,10 +663,34 @@ async function boundedResponseBytes(
     if (bytes.byteLength > maxBytes) {
       state.controller.abort();
       if (reportBodyFailure) {
-        reportFailure(state, { failureClass: "body_limit", stage: "body" });
+        reportFailure(state, {
+          failureClass:
+            declaredSizeBytes !== null && declaredSizeBytes <= maxBytes
+              ? "size_mismatch"
+              : "body_limit",
+          stage: "body",
+          ...(declaredSizeBytes === null ? {} : { declaredSizeBytes }),
+          ...(contentLength === null
+            ? {}
+            : { responseSizeBytes: contentLength }),
+          downloadedSizeBytes: bytes.byteLength,
+          limitBytes: maxBytes,
+        });
       }
-      return bodyTooLargeFailure(maxBytes);
+      onBytes?.({
+        declaredSizeBytes,
+        responseSizeBytes: contentLength,
+        downloadedSizeBytes: bytes.byteLength,
+        limitBytes: maxBytes,
+      });
+      return bodyTooLargeFailure(maxBytes, declaredSizeBytes);
     }
+    onBytes?.({
+      declaredSizeBytes,
+      responseSizeBytes: contentLength,
+      downloadedSizeBytes: bytes.byteLength,
+      limitBytes: maxBytes,
+    });
     return bytes;
   }
 
@@ -635,9 +711,27 @@ async function boundedResponseBytes(
           // The body is already over the cap; preserve that safe outcome.
         }
         if (reportBodyFailure) {
-          reportFailure(state, { failureClass: "body_limit", stage: "body" });
+          reportFailure(state, {
+            failureClass:
+              declaredSizeBytes !== null && declaredSizeBytes <= maxBytes
+                ? "size_mismatch"
+                : "body_limit",
+            stage: "body",
+            ...(declaredSizeBytes === null ? {} : { declaredSizeBytes }),
+            ...(contentLength === null
+              ? {}
+              : { responseSizeBytes: contentLength }),
+            downloadedSizeBytes: total,
+            limitBytes: maxBytes,
+          });
         }
-        return bodyTooLargeFailure();
+        onBytes?.({
+          declaredSizeBytes,
+          responseSizeBytes: contentLength,
+          downloadedSizeBytes: total,
+          limitBytes: maxBytes,
+        });
+        return bodyTooLargeFailure(maxBytes, declaredSizeBytes);
       }
       chunks.push(chunk);
     }
@@ -656,6 +750,12 @@ async function boundedResponseBytes(
     bytes.set(chunk, offset);
     offset += chunk.byteLength;
   }
+  onBytes?.({
+    declaredSizeBytes,
+    responseSizeBytes: contentLength,
+    downloadedSizeBytes: bytes.byteLength,
+    limitBytes: maxBytes,
+  });
   return bytes;
 }
 
@@ -685,6 +785,8 @@ async function requestDrivePdf(
   state: TransportState,
   fetchImpl: DriveFetch,
   maxBytes: number,
+  declaredSizeBytes: number | null,
+  onBytes?: (details: DriveReadByteDetails) => void,
 ): Promise<Uint8Array | DriveReadTransportFailure> {
   safeStage(state, "download");
   let response: Response;
@@ -748,7 +850,14 @@ async function requestDrivePdf(
 
   safeStage(state, "body");
   try {
-    const body = await boundedResponseBytes(response, state, true, maxBytes);
+    const body = await boundedResponseBytes(
+      response,
+      state,
+      true,
+      maxBytes,
+      declaredSizeBytes,
+      onBytes,
+    );
     if (!(body instanceof Uint8Array) && !state.failureReported) {
       reportFailure(state, { failureClass: "transport", stage: "body" });
     }
@@ -1161,7 +1270,7 @@ export async function readDriveFileTransport(
 
     const fileId = encodeURIComponent(input.fileId);
     const metadata = await requestDriveRead(
-      `/drive/v3/files/${fileId}?fields=${encodeURIComponent("id,name,mimeType,modifiedTime")}&supportsAllDrives=true`,
+      `/drive/v3/files/${fileId}?fields=${encodeURIComponent("id,name,mimeType,modifiedTime,size")}&supportsAllDrives=true`,
       token,
       state,
       input.fetchImpl ?? fetch,
@@ -1169,7 +1278,13 @@ export async function readDriveFileTransport(
     );
     if (typeof metadata !== "string") return finish(metadata);
 
-    let file: { id?: unknown; name?: unknown; mimeType?: unknown; modifiedTime?: unknown };
+    let file: {
+      id?: unknown;
+      name?: unknown;
+      mimeType?: unknown;
+      modifiedTime?: unknown;
+      size?: unknown;
+    };
     try {
       const parsed: unknown = JSON.parse(metadata);
       if (!parsed || typeof parsed !== "object") {
@@ -1187,6 +1302,16 @@ export async function readDriveFileTransport(
     const mimeType = typeof file.mimeType === "string" ? file.mimeType.toLowerCase().split(";")[0].trim() : "";
     const fileName = typeof file.name === "string" ? file.name : null;
     const modifiedTime = typeof file.modifiedTime === "string" ? file.modifiedTime : null;
+    const declaredSizeBytes =
+      typeof file.size === "string" && /^\d+$/.test(file.size)
+        ? Number(file.size)
+        : null;
+    const safeDeclaredSizeBytes =
+      declaredSizeBytes !== null &&
+      Number.isSafeInteger(declaredSizeBytes) &&
+      declaredSizeBytes >= 0
+        ? declaredSizeBytes
+        : null;
     if (!mimeType || (typeof file.name === "string" && file.name.includes("\0"))) {
       reportFailure(state, { failureClass: "metadata", stage: "metadata" });
       return metadataFailure();
@@ -1250,6 +1375,8 @@ export async function readDriveFileTransport(
         state,
         input.fetchImpl ?? fetch,
         maxDocumentBytes,
+        safeDeclaredSizeBytes,
+        input.onBytes,
       );
       if (!(pdf instanceof Uint8Array)) return finish(pdf);
 
@@ -1275,7 +1402,7 @@ export async function readDriveFileTransport(
           return finish(failure);
         }
         const finalMetadata = modifiedTime === null ? null : await requestDriveRead(
-          `/drive/v3/files/${fileId}?fields=${encodeURIComponent("id,name,mimeType,modifiedTime")}&supportsAllDrives=true`,
+          `/drive/v3/files/${fileId}?fields=${encodeURIComponent("id,name,mimeType,modifiedTime,size")}&supportsAllDrives=true`,
           token,
           state,
           input.fetchImpl ?? fetch,

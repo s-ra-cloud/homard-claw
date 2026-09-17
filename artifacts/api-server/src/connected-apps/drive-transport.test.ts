@@ -129,6 +129,93 @@ describe("readDriveFileTransport", () => {
     }
   });
 
+  it("accepts a 24 MB Drive PDF despite an overstated response length", async () => {
+    const pdfBytes = new Uint8Array(24_000_000);
+    pdfBytes.set([0x25, 0x50, 0x44, 0x46]);
+    let calls = 0;
+    const byteDetails: unknown[] = [];
+    const extractPdf = vi.fn(async (bytes: Uint8Array) => {
+      expect(bytes.byteLength).toBe(24_000_000);
+      return "PDF text";
+    });
+    const result = await readDriveFileTransport({
+      workspaceId: "pdf-size-workspace",
+      fileId: "24mb-pdf",
+      resolveToken: async () => "token",
+      extractPdf,
+      onBytes: (details) => byteDetails.push(details),
+      fetchImpl: async () =>
+        ++calls === 1
+          ? response(
+              JSON.stringify({
+                mimeType: "application/pdf",
+                size: "24000000",
+              }),
+            )
+          : new Response(pdfBytes, {
+              headers: { "content-length": "50000000" },
+            }),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(extractPdf).toHaveBeenCalledOnce();
+    expect(byteDetails).toEqual([
+      {
+        declaredSizeBytes: 24_000_000,
+        responseSizeBytes: 50_000_000,
+        downloadedSizeBytes: 24_000_000,
+        limitBytes: 40_000_000,
+      },
+    ]);
+  });
+
+  it("reports when a Drive PDF download exceeds its smaller metadata size", async () => {
+    let calls = 0;
+    const failures: unknown[] = [];
+    const byteDetails: unknown[] = [];
+    const result = await readDriveFileTransport({
+      workspaceId: "pdf-size-workspace",
+      fileId: "mismatched-pdf",
+      resolveToken: async () => "token",
+      extractPdf: async () => "must not extract",
+      onFailure: (details) => failures.push(details),
+      onBytes: (details) => byteDetails.push(details),
+      fetchImpl: async () =>
+        ++calls === 1
+          ? response(
+              JSON.stringify({
+                mimeType: "application/pdf",
+                size: "24000000",
+              }),
+            )
+          : new Response(new Uint8Array(40_000_001)),
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      kind: "failed",
+      message:
+        "Google Drive reports this file as 24000000 bytes, but its download exceeded the 40 MB read limit. Download it locally and attach it directly, or replace the Drive copy and retry.",
+    });
+    expect(failures).toEqual([
+      {
+        failureClass: "size_mismatch",
+        stage: "body",
+        declaredSizeBytes: 24_000_000,
+        downloadedSizeBytes: 40_000_001,
+        limitBytes: 40_000_000,
+      },
+    ]);
+    expect(byteDetails).toEqual([
+      {
+        declaredSizeBytes: 24_000_000,
+        responseSizeBytes: null,
+        downloadedSizeBytes: 40_000_001,
+        limitBytes: 40_000_000,
+      },
+    ]);
+  });
+
   it("retains the smaller metadata response allowance", async () => {
     const result = await readDriveFileTransport({
       workspaceId: "workspace", fileId: "file", resolveToken: async () => "token",

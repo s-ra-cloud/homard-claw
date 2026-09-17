@@ -38,6 +38,7 @@ import {
 import {
   readDriveFileTransport,
   MAX_DRIVE_DOCUMENT_CHARS,
+  type DriveReadByteDetails,
   type DriveReadFailureDetails,
   type DriveTokenOptions,
 } from "./drive-transport";
@@ -804,6 +805,7 @@ async function driveReadFile(
   const startedAt = Date.now();
   let stageStartedAt = startedAt;
   let failureDetails: DriveReadFailureDetails | undefined;
+  let byteDetails: DriveReadByteDetails | undefined;
   const logStage = (stage: string): void => {
     const now = Date.now();
     const safeStage = safeDriveReadStage(stage);
@@ -851,6 +853,9 @@ async function driveReadFile(
       taskId: ctx.taskId,
       onStage: logStage,
       onFailure: logFailure,
+      onBytes: (details) => {
+        byteDetails = details;
+      },
       resolveToken: async (
         workspaceId: string,
         options: DriveTokenOptions,
@@ -882,6 +887,14 @@ async function driveReadFile(
         durationMs: completedAt - startedAt,
         stageDurationMs: completedAt - stageStartedAt,
         status: result.ok ? "success" : "failed",
+        ...(byteDetails
+          ? {
+              declaredSizeBytes: byteDetails.declaredSizeBytes,
+              responseSizeBytes: byteDetails.responseSizeBytes,
+              downloadedSizeBytes: byteDetails.downloadedSizeBytes,
+              limitBytes: byteDetails.limitBytes,
+            }
+          : {}),
         ...(result.ok
           ? {}
           : {
