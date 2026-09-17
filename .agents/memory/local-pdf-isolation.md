@@ -56,3 +56,21 @@ DOCX fixtures must use real WordprocessingML namespaces and deflated OPC package
 **Why:** simplistic ZIP fixtures with invented namespaces can pass while real Word hyperlinks, drawings and tracked deletions are rejected or misread.
 
 **How to apply:** cover strict/transitional namespaces, external hyperlink display text without dereferencing, and omitted revision/drawing content in parser regressions.
+
+Long-document traversal belongs to the server, not to model-selected continuation calls. Keep transport chunking separate from provider synthesis chunking, and derive prompt budgets from the entire provider request.
+
+**Why:** larger extraction batches alone still spend a model turn per cursor and can exhaust the ordinary attempt deadline before reaching later pages. A page-range label does not prove that all text continuations from that range were synthesized.
+
+**How to apply:** test a dense document whose batches require multiple text continuations; assert all extracted text reaches synthesis, not only first/last page markers. Use scalar offsets for transport and UTF-16 lengths for string-based prompt budgeting.
+
+Long-job recovery must retain its original overall deadline and cumulative spend. A provider call with an ambiguous outcome must not be silently replayed.
+
+**Why:** resetting limits on restart turns a finite job into an unbounded one; a crash between provider work and its durable result can otherwise cause duplicate billing. Preserving raw pending text and completed summaries is safer than treating an unknown outcome as success.
+
+**How to apply:** distinguish safe checkpoint resumption from an in-flight provider ambiguity, preserve explicit owner limits, surface retained partial work and the actual stop reason, and keep each Codex synthesis serialized and sandboxed.
+
+Do not invent a supposedly safe source size when a model's context window is unknown.
+
+**Why:** fixed instructions, objective, pinned context, provider wrappers, and reserved output can already exhaust a small context before the document source is added. A small raw-text fallback alone does not make the complete request safe.
+
+**How to apply:** require a verified model context for dedicated long-document synthesis, reserve the full request overhead, and check the actual request again before dispatch.

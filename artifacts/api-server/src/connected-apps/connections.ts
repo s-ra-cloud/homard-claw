@@ -41,6 +41,7 @@ import {
   PDF_SUMMARY_DOCUMENT_CHUNK_CHARS,
   type DriveReadByteDetails,
   type DriveReadFailureDetails,
+  type DrivePdfCoverage,
   type DriveTokenOptions,
 } from "./drive-transport";
 import {
@@ -178,8 +179,16 @@ const PDF_SUMMARY_RESULT_CHAR_LIMIT =
 
 /** The shared PDF service is also capped here as a defence in depth boundary. */
 const DRIVE_EXTRACTED_TEXT_CHAR_LIMIT = MAX_DRIVE_DOCUMENT_CHARS;
+/** Native-only evidence for server-managed traversal; never parsed from PDF prose. */
+export type PdfSummaryEvidence = {
+  fileId: string;
+  text: string;
+  textStart: number;
+  continuation?: string;
+  coverage: DrivePdfCoverage;
+};
 export type ExecutionOutcome =
-  | { ok: true; summary: string }
+  | { ok: true; summary: string; pdfSummary?: PdfSummaryEvidence }
   | {
       ok: false;
       /**
@@ -947,7 +956,7 @@ async function driveReadFile(
     ? result.pdfCoverage.extractionTruncated
       ? `\n\n[PDF SUMMARY STOPPED WITH OMISSIONS: extraction reached its existing 1,500,000-character limit while reading pages ${result.pdfCoverage.startPage}-${result.pdfCoverage.endPage} of ${result.pdfCoverage.totalPages}. Some text in this batch and all later pages remain unread. Do not claim complete coverage. PDF_SUMMARY_STOPPED=1 PDF_SUMMARY_REVISION="${result.pdfCoverage.revisionToken}"]`
       : !result.pdfCoverage.batchComplete && result.continuation
-      ? `\n\n[PDF SUMMARY BATCH INCOMPLETE: read another bounded text range from pages ${result.pdfCoverage.startPage}-${result.pdfCoverage.endPage} of ${result.pdfCoverage.totalPages}. Do NOT advance pages. Continue this same batch with continuation="${result.continuation}" and revisionToken="${result.pdfCoverage.revisionToken}". PDF_SUMMARY_CONTINUATION="${result.continuation}" PDF_SUMMARY_REVISION="${result.pdfCoverage.revisionToken}"]`
+      ? `\n\n[PDF SUMMARY BATCH INCOMPLETE: read another bounded text range from pages ${result.pdfCoverage.startPage}-${result.pdfCoverage.endPage} of ${result.pdfCoverage.totalPages}. Do NOT advance pages. Continue only with google_drive.read_pdf_summary_batch, the same fileId, continuation="${result.continuation}" and revisionToken="${result.pdfCoverage.revisionToken}". Do not use google_drive.read_file for this summary cursor. PDF_SUMMARY_CONTINUATION="${result.continuation}" PDF_SUMMARY_REVISION="${result.pdfCoverage.revisionToken}"]`
       : result.pdfCoverage.nextPage === null
       ? `\n\n[COMPLETE PDF COVERAGE: read pages ${result.pdfCoverage.startPage}-${result.pdfCoverage.endPage} in this batch and reached page ${result.pdfCoverage.totalPages}, the final page. All ${result.pdfCoverage.totalPages} pages have been traversed only if prior batches were read consecutively from page 1. PDF_SUMMARY_REVISION="${result.pdfCoverage.revisionToken}"]`
       : `\n\n[PDF SUMMARY PROGRESS: fully read pages ${result.pdfCoverage.startPage}-${result.pdfCoverage.endPage} of ${result.pdfCoverage.totalPages}. To continue complete coverage, call google_drive.read_pdf_summary_batch with the same fileId, startPage=${result.pdfCoverage.nextPage}, and revisionToken="${result.pdfCoverage.revisionToken}". Pages ${result.pdfCoverage.nextPage}-${result.pdfCoverage.totalPages} remain unread. PDF_SUMMARY_NEXT_PAGE=${result.pdfCoverage.nextPage} PDF_SUMMARY_REVISION="${result.pdfCoverage.revisionToken}"]`
@@ -970,6 +979,17 @@ async function driveReadFile(
     : summary;
   return {
     ok: true,
+    ...(isPdfSummaryBatch && result.pdfCoverage
+      ? {
+          pdfSummary: {
+            fileId: String(params.fileId),
+            text,
+            textStart: result.textStart,
+            continuation: result.continuation,
+            coverage: result.pdfCoverage,
+          },
+        }
+      : {}),
     summary: truncateDriveActionResult(
       summaryWithCoverage,
       isPdfSummaryBatch ? PDF_SUMMARY_RESULT_CHAR_LIMIT : RESULT_CHAR_LIMIT,

@@ -88,6 +88,7 @@ vi.mock("../connected-apps/connections", async (importOriginal) => {
 import officeRouter from "./office";
 import { ApprovalDecisionError, decideApproval } from "../approvals";
 import { OVER_PER_ROUND_NOTE, claimNextTask, runTask } from "../worker";
+import type { PdfSummaryEvidence } from "../connected-apps/connections";
 import {
   COMPACT_ACTION_ENTRY_MAX_CHARS,
   PDF_SUMMARY_ACTION_ENTRY_MAX_CHARS,
@@ -1946,12 +1947,35 @@ describe("bounded action-result context", () => {
     expect(done?.output).toContain("cannot fund another round");
   });
 
-  it("prices a mixed PDF-summary round using each action's replay bound", async () => {
+  it("budgets mixed PDF work in fresh synthesis contexts instead of replaying raw PDF envelopes", async () => {
     const agent = await createAgent("Mixed PDF Budget", [
       { app: "google_drive", accessLevel: "read" },
       { app: "gmail", accessLevel: "read" },
     ]);
-    executeMock.mockResolvedValue({ ok: true, summary: "bounded result" });
+    // Keep the PDF branch representative of the native Drive action. The
+    // worker receives this evidence out-of-band from the human-readable
+    // resultSummary; using the structured shape here prevents this budget
+    // regression from silently falling back to prose cursor parsing.
+    const pdfSummary: PdfSummaryEvidence = {
+      fileId: "long-pdf",
+      text: "PAGE-MARKER-001",
+      textStart: 0,
+      coverage: {
+        startPage: 1,
+        endPage: 1,
+        totalPages: 1,
+        batchComplete: true,
+        extractionTruncated: false,
+        nextPage: null,
+        revisionToken: "revision-token",
+      },
+    };
+    executeMock.mockImplementation(async (operation: unknown) =>
+      (operation as { name?: string }).name ===
+      "google_drive.read_pdf_summary_batch"
+        ? { ok: true, summary: "bounded result", pdfSummary }
+        : { ok: true, summary: "bounded result" },
+    );
     const mixedBlocks = [
       `<app_action>${JSON.stringify({
         operation: "google_drive.read_pdf_summary_batch",
@@ -1964,7 +1988,7 @@ describe("bounded action-result context", () => {
     ].join("\n");
 
     const probe = await insertRunningTask(agent.id);
-    queueCompletions([completion(mixedBlocks), completion("probe done")]);
+    queueCompletions([completion(mixedBlocks), completion("probe section"), completion("probe done")]);
     await runTask({ task: probe, agent: await loadAgent(agent.id) });
     const probeBody = JSON.parse(
       String(
@@ -2004,15 +2028,20 @@ describe("bounded action-result context", () => {
         prompt_tokens: promptTokensUsage,
         completion_tokens: COMPLETION_TOKENS,
       }),
+      completion("A bounded section."),
+      completion("A complete PDF summary."),
     ]);
 
     await runTask({ task, agent: await loadAgent(agent.id) });
 
-    expect(completionCalls()).toHaveLength(1);
-    expect(executeMock).not.toHaveBeenCalled();
-    expect((await getTaskRow(task.id))?.output).toContain(
-      "remaining budget cannot fund another round",
-    );
+    // The old replay bound would block here. Dedicated contexts need only
+    // the section material, not the whole growing connected-app history.
+    expect(completionCalls()).toHaveLength(3);
+    expect(executeMock).toHaveBeenCalledTimes(2);
+    const settled = await getTaskRow(task.id);
+    expect(settled?.status, settled?.errorMessage ?? undefined).toBe("completed");
+    expect(settled?.actualCostCents).toBeLessThanOrEqual(BUDGET_CENTS);
+    expect(settled?.output).toContain("complete PDF summary");
   });
 });
 

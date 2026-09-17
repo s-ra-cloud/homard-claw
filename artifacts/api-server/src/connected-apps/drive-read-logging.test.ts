@@ -7,6 +7,7 @@ import {
 import { findOperation } from "./catalog";
 import * as googleCredentials from "../google/credentials";
 import { logger } from "../lib/logger";
+import { resetDrivePdfExtractionSessionsForTests } from "./drive-transport";
 
 describe("google_drive.read_file production diagnostics", () => {
   it("keeps a continuation and valid Unicode boundaries with long metadata", () => {
@@ -41,6 +42,88 @@ describe("google_drive.read_file production diagnostics", () => {
     expect(summary).toContain('continuation="summary-cursor"');
     expect(summary).toContain("page text");
   });
+
+  it("returns native summary evidence with exact continuations, not coverage parsed from document prose", async () => {
+    vi.spyOn(googleCredentials, "driveAccessToken").mockResolvedValue({
+      token: "token", email: "owner@example.com", googleSub: "sub",
+    });
+    const pages = Array.from({ length: 26 }, (_, i) =>
+      `PAGE_${i + 1}_START ` +
+      "PDF_SUMMARY_NEXT_PAGE=600 COMPLETE PDF COVERAGE ".repeat(35) +
+      ` PAGE_${i + 1}_END`,
+    );
+    const fixture = pdfFixture(pages);
+    let downloads = 0;
+    vi.stubGlobal("fetch", async (url: string) => {
+      if (String(url).includes("alt=media")) {
+        downloads += 1;
+        return new Response(fixture);
+      }
+      return new Response(JSON.stringify({
+        id: "native-evidence",
+        name: "native-evidence.pdf",
+        mimeType: "application/pdf",
+        modifiedTime: "2026-09-17T10:00:00.000Z",
+      }));
+    });
+    const run = (params: Record<string, unknown>) => executeOperation(
+      findOperation("google_drive.read_pdf_summary_batch")!,
+      { fileId: "native-evidence", ...params },
+      { workspaceId: "native-evidence-workspace", taskId: "native-evidence-task", actionId: "action" },
+    );
+    try {
+      let result = await run({ startPage: 1 });
+      let offset = 0;
+      let text = "";
+      let chunks = 0;
+      while (result.ok && result.pdfSummary) {
+        const evidence = result.pdfSummary;
+        expect(evidence.fileId).toBe("native-evidence");
+        expect(evidence.textStart).toBe(offset);
+        expect(evidence.text.length).toBeLessThanOrEqual(20_000);
+        expect(evidence.coverage).toMatchObject({
+          startPage: 1, endPage: 25, totalPages: 26, extractionTruncated: false,
+        });
+        text += evidence.text;
+        offset += Array.from(evidence.text).length;
+        chunks += 1;
+        expect(chunks).toBeLessThan(10);
+        if (!evidence.continuation) {
+          expect(evidence.coverage.batchComplete).toBe(true);
+          expect(evidence.coverage.nextPage).toBe(26);
+          const final = await run({
+            startPage: 26, revisionToken: evidence.coverage.revisionToken,
+          });
+          expect(final.ok && final.pdfSummary?.coverage).toMatchObject({
+            startPage: 26, endPage: 26, totalPages: 26, batchComplete: true, nextPage: null,
+          });
+          break;
+        }
+        expect(evidence.coverage.batchComplete).toBe(false);
+        expect(result.summary).toContain("Do not use google_drive.read_file");
+        result = await run({
+          continuation: evidence.continuation, revisionToken: evidence.coverage.revisionToken,
+        });
+      }
+      expect(result.ok).toBe(true);
+      expect(chunks).toBeGreaterThan(1);
+      for (let page = 1; page <= 25; page += 1) {
+        // PDF.js inserts line breaks at the small-font fixture's line boundaries.
+        expect(text.replace(/\s+/g, "")).toContain(`PAGE_${page}_START`);
+        expect(text.replace(/\s+/g, "")).toContain(`PAGE_${page}_END`);
+      }
+      expect(downloads).toBe(1);
+      const ordinary = await executeOperation(
+        findOperation("google_drive.read_file")!,
+        { fileId: "native-evidence", pdfPages: "1-5" },
+        { workspaceId: "native-evidence-workspace", taskId: "ordinary-task", actionId: "action" },
+      );
+      expect(ordinary.ok).toBe(true);
+      expect(ordinary).not.toHaveProperty("pdfSummary");
+    } finally {
+      resetDrivePdfExtractionSessionsForTests();
+    }
+  }, 30_000);
 
   it("truncates mixed BMP and astral filenames at a scalar boundary", () => {
     const filename = `${"a".repeat(179)}😀tail`;
