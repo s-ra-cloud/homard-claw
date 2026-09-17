@@ -45,6 +45,74 @@ function pdfFixture(text: string, padding = 0): Uint8Array {
 }
 
 describe("readDriveFileTransport", () => {
+  it("reports exact coverage and next page for bounded PDF summary batches", async () => {
+    let calls = 0;
+    const extractPdf = vi.fn(async (_bytes, options?: ExtractPdfTextOptions) => {
+      expect(options).toMatchObject({
+        pdfPages: "101-105",
+        clampPageRangeEnd: true,
+      });
+      return "[PDF selection: pages 101-103 of 103. Only this range was read; pages outside it were not read. Text only; visual/image content omitted.]\nfinal pages";
+    });
+    const result = await readDriveFileTransport({
+      workspaceId: "workspace-a",
+      fileId: "long-pdf",
+      pdfPages: "101-105",
+      clampPdfPageRangeEnd: true,
+      resolveToken: async () => "token",
+      extractPdf,
+      fetchImpl: async () => ++calls !== 2
+        ? response(JSON.stringify({
+            id: "long-pdf",
+            name: "long.pdf",
+            mimeType: "application/pdf",
+            modifiedTime: "2026-09-17T10:00:00.000Z",
+          }))
+        : new Response("%PDF-1.7"),
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.pdfCoverage).toEqual({
+        startPage: 101,
+        endPage: 103,
+        totalPages: 103,
+        batchComplete: true,
+        extractionTruncated: false,
+        nextPage: null,
+        revisionToken: expect.any(String),
+      });
+    }
+  });
+
+  it("never marks a parser-truncated summary batch as complete", async () => {
+    let calls = 0;
+    const result = await readDriveFileTransport({
+      workspaceId: "workspace-a",
+      fileId: "dense-pdf",
+      pdfPages: "1-5",
+      clampPdfPageRangeEnd: true,
+      resolveToken: async () => "token",
+      extractPdf: async () =>
+        "[PDF selection: pages 1-5 of 120. Only this range was read; pages outside it were not read. Text only; visual/image content omitted.]\n" +
+        "partial\n--- Text extraction truncated at the 1500000-character limit; remaining text and visual/image content may be omitted. ---",
+      fetchImpl: async () => ++calls !== 2
+        ? response(JSON.stringify({
+            id: "dense-pdf",
+            name: "dense.pdf",
+            mimeType: "application/pdf",
+            modifiedTime: "2026-09-17T10:00:00.000Z",
+          }))
+        : new Response("%PDF-1.7"),
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.pdfCoverage).toMatchObject({
+        batchComplete: false,
+        extractionTruncated: true,
+        nextPage: null,
+      });
+    }
+  });
   it.each(["text/plain", "application/vnd.google-apps.document"])(
     "enforces the inclusive 25 MB boundary for %s with honest, missing and understated lengths",
     async (mimeType) => {

@@ -113,12 +113,18 @@ async function extract(bytes) {
     const document = await loadingTask.promise;
     const selected = process.argv.length > 3;
     const start = selected ? Number(process.argv[3]) : 1;
-    const end = selected ? Number(process.argv[4]) : document.numPages;
-    if (selected && (!Number.isInteger(start) || !Number.isInteger(end) ||
-      !Number.isSafeInteger(start) || !Number.isSafeInteger(end) ||
-      start < 1 || end < start || end - start >= 5)) {
+    const requestedEnd = selected ? Number(process.argv[4]) : document.numPages;
+    const clampEnd = selected && process.argv[5] === "clamp-end";
+    const end = clampEnd ? Math.min(requestedEnd, document.numPages) : requestedEnd;
+    if (selected && (!Number.isInteger(start) || !Number.isInteger(requestedEnd) ||
+      !Number.isSafeInteger(start) || !Number.isSafeInteger(requestedEnd) ||
+      start < 1 || requestedEnd < start || requestedEnd - start >= 5)) {
       await document.destroy();
       return error("invalid_page_range");
+    }
+    if (selected && start > document.numPages) {
+      await document.destroy();
+      return error("page_out_of_range");
     }
     // MAX_PAGES bounds full-document work. An explicit selection remains
     // bounded to five pages, so it can safely address later pages in a longer
@@ -127,7 +133,7 @@ async function extract(bytes) {
       await document.destroy();
       return error("page_limit");
     }
-    if (end > document.numPages) {
+    if (!clampEnd && requestedEnd > document.numPages) {
       await document.destroy();
       return error("page_out_of_range");
     }

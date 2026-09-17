@@ -193,6 +193,26 @@ describe("extractPdfText", () => {
       .rejects.toMatchObject({ kind: "page_out_of_range" });
   });
 
+  it("clamps only an explicitly requested traversal batch to the final page", async () => {
+    const bytes = pdfFixture([
+      textPage("one"),
+      textPage("two"),
+      textPage("final"),
+    ]);
+    const result = await extractPdfText(bytes, {
+      pdfPages: "1-5",
+      clampPageRangeEnd: true,
+    });
+    expect(result).toContain("pages 1-3 of 3");
+    expect(result).toContain("final");
+    await expect(extractPdfText(bytes, { pdfPages: "1-5" }))
+      .rejects.toMatchObject({ kind: "page_out_of_range" });
+    await expect(extractPdfText(bytes, {
+      pdfPages: "4-8",
+      clampPageRangeEnd: true,
+    })).rejects.toMatchObject({ kind: "page_out_of_range" });
+  });
+
   beforeEach(() => {
     spawnedPdfPids.splice(0);
   });

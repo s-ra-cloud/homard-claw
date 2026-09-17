@@ -163,6 +163,8 @@ const inFlight = new Map<string, AbortController>();
  * never completes with unrun work.
  */
 const MAX_ACTION_ROUNDS = 8;
+/** Dedicated ceiling for consecutive five-page PDF summary traversal rounds. */
+const MAX_LONG_PDF_SUMMARY_ROUNDS = 64;
 const MAX_ACTIONS_PER_ROUND = 3;
 /**
  * Replayed to the model when one response over-asks. Deterministic at
@@ -1471,14 +1473,15 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
   // Everything already settled for this task feeds the model's context, so
   // a resumed attempt knows what ran, what failed, and what was refused.
   let actionHistory: string[] = [];
+  let settledTaskActions: Awaited<ReturnType<typeof listTaskActions>> = [];
   try {
-    actionHistory = (await listTaskActions(task.id))
+    settledTaskActions = (await listTaskActions(task.id))
       .filter((action) =>
         ["executed", "failed", "denied", "rejected", "expired"].includes(
           action.status,
         ),
-      )
-      .map(describeActionForModel);
+      );
+    actionHistory = settledTaskActions.map(describeActionForModel);
   } catch {
     logger.warn(
       { taskId: task.id },
@@ -1494,6 +1497,94 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
   // well-formed history and keep the normal completion path.
   let wellFormedRequests = actionHistory.length;
   let malformedRequests = 0;
+  const priorPdfBatches = settledTaskActions.filter((action) =>
+    action.operation === "google_drive.read_pdf_summary_batch" &&
+    action.status === "executed"
+  );
+  type LongPdfTraversal = {
+    fileId: string;
+    nextPage: number | null;
+    continuation: string | null;
+    revisionToken: string;
+    complete: boolean;
+  };
+  let longPdfTraversal: LongPdfTraversal | null = null;
+  const currentPdfTraversal = (): LongPdfTraversal | null =>
+    longPdfTraversal as LongPdfTraversal | null;
+  const applyPdfProgress = (
+    fileId: string,
+    resultSummary: string | null,
+  ): boolean => {
+    if (!resultSummary) return false;
+    const revision = /PDF_SUMMARY_REVISION="([^"]+)"/.exec(resultSummary)?.[1] ??
+      currentPdfTraversal()?.revisionToken;
+    if (!revision) return false;
+    const continuation =
+      /PDF_SUMMARY_CONTINUATION="([^"]+)"/.exec(resultSummary)?.[1];
+    if (continuation) {
+      longPdfTraversal = {
+        fileId,
+        nextPage: null,
+        continuation,
+        revisionToken: revision,
+        complete: false,
+      };
+      return true;
+    }
+    const nextPage = Number(
+      /PDF_SUMMARY_NEXT_PAGE=(\d+)/.exec(resultSummary)?.[1],
+    );
+    if (Number.isSafeInteger(nextPage) && nextPage > 0) {
+      longPdfTraversal = {
+        fileId,
+        nextPage,
+        continuation: null,
+        revisionToken: revision,
+        complete: false,
+      };
+      return true;
+    }
+    if (resultSummary.includes("[COMPLETE PDF COVERAGE:")) {
+      longPdfTraversal = {
+        fileId,
+        nextPage: null,
+        continuation: null,
+        revisionToken: revision,
+        complete: true,
+      };
+      return true;
+    }
+    if (resultSummary.includes("PDF_SUMMARY_STOPPED=1")) {
+      longPdfTraversal = {
+        fileId,
+        nextPage: null,
+        continuation: null,
+        revisionToken: revision,
+        complete: true,
+      };
+      return true;
+    }
+    return false;
+  };
+  for (const action of priorPdfBatches) {
+    const fileId = action.params?.fileId;
+    const traversal = currentPdfTraversal();
+    if (typeof fileId !== "string" ||
+      (traversal !== null && fileId !== traversal.fileId) ||
+      !applyPdfProgress(fileId, action.resultSummary)) {
+      longPdfTraversal = null;
+      break;
+    }
+  }
+  const lastRollingSummary = [...priorPdfBatches].reverse().find((action) =>
+    typeof action.params?.rollingSummary === "string" &&
+    action.params.rollingSummary.trim().length > 0
+  )?.params?.rollingSummary;
+  if (typeof lastRollingSummary === "string") {
+    actionHistory.push(
+      `DURABLE ROLLING PDF SUMMARY (continue refining until coverage is complete):\n${lastRollingSummary}`,
+    );
+  }
 
   await addTaskLog(
     task.id,
@@ -2064,7 +2155,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
       let actionRoundsUsed = 0;
       let malformedOnlyRounds = 0;
       const maxProviderCalls =
-        MAX_ACTION_ROUNDS + MAX_MALFORMED_RECOVERY_ROUNDS + 1;
+        MAX_LONG_PDF_SUMMARY_ROUNDS + MAX_MALFORMED_RECOVERY_ROUNDS + 1;
       for (let call = 1; call <= maxProviderCalls; call += 1) {
         abortControllerAtDeadline(controller, deadlineAt);
         throwIfAborted(controller.signal, "provider attempt");
@@ -2305,7 +2396,14 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
           continue;
         }
 
-        if (actionRoundsUsed >= MAX_ACTION_ROUNDS) {
+        const onlyLongPdfSummaryRequests = validRequests.length > 0 &&
+          validRequests.every((request) =>
+            request.operation === "google_drive.read_pdf_summary_batch"
+          );
+        const actionRoundLimit = onlyLongPdfSummaryRequests
+          ? MAX_LONG_PDF_SUMMARY_ROUNDS
+          : MAX_ACTION_ROUNDS;
+        if (actionRoundsUsed >= actionRoundLimit) {
           // Well-formed work remains at the bound: pause for an explicit
           // owner-approved continuation instead of completing with unrun
           // requests. Usage and the provider thread are recorded first —
@@ -2322,9 +2420,17 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         }
         actionRoundsUsed += 1;
 
+        if (onlyLongPdfSummaryRequests && cleaned.trim()) {
+          actionHistory.push(
+            `ROLLING PDF SUMMARY FROM THE AGENT (retain and refine this while unread pages remain):\n${cleaned.trim()}`,
+          );
+        }
+
         if (
           !(await budgetAllowsNextRound(
-            Math.min(validRequests.length, MAX_ACTIONS_PER_ROUND),
+            onlyLongPdfSummaryRequests
+              ? 1
+              : Math.min(validRequests.length, MAX_ACTIONS_PER_ROUND),
             // The over-per-round marker is appended below, after this gate,
             // but it is already certain — price it in (+2 for the joiner).
             validRequests.length > MAX_ACTIONS_PER_ROUND
@@ -2400,7 +2506,10 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         system = buildSystem();
 
         let parkedForApproval = false;
-        for (const request of validRequests.slice(0, MAX_ACTIONS_PER_ROUND)) {
+        const requestsToRun = onlyLongPdfSummaryRequests
+          ? validRequests.slice(0, 1)
+          : validRequests.slice(0, MAX_ACTIONS_PER_ROUND);
+        for (const request of requestsToRun) {
           abortControllerAtDeadline(controller, deadlineAt);
           throwIfAborted(controller.signal, "connected-app action");
           if (isTaskResultOperation(request.operation)) {
@@ -2438,6 +2547,57 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
               );
             }
             continue;
+          }
+          if (request.operation === "google_drive.read_pdf_summary_batch") {
+            const traversalParams =
+              request.params && typeof request.params === "object"
+                ? request.params as Record<string, unknown>
+                : {};
+            const fileId = traversalParams.fileId;
+            const startPage = traversalParams.startPage;
+            const continuation = traversalParams.continuation;
+            const revisionToken = traversalParams.revisionToken;
+            const rollingSummary = traversalParams.rollingSummary;
+            const traversal = currentPdfTraversal();
+            const expectedPage = traversal?.nextPage ?? 1;
+            const expectedFile = traversal?.fileId ?? fileId;
+            if (typeof fileId !== "string" ||
+              fileId !== expectedFile ||
+              traversal?.complete === true ||
+              (traversal !== null &&
+                (typeof rollingSummary !== "string" ||
+                  rollingSummary.trim().length === 0)) ||
+              (traversal?.continuation
+                ? continuation !== traversal.continuation ||
+                  revisionToken !== traversal.revisionToken ||
+                  startPage !== undefined
+                : typeof startPage !== "number" ||
+                  !Number.isSafeInteger(startPage) ||
+                  startPage !== expectedPage ||
+                  continuation !== undefined ||
+                  (traversal !== null &&
+                    revisionToken !== traversal.revisionToken) ||
+                  (traversal === null && revisionToken !== undefined))) {
+              const reason =
+                traversal?.continuation
+                  ? "Long-PDF summary traversal must finish the current batch with its exact continuation and revision token before advancing pages. No pages were read for this request."
+                  : traversal?.complete
+                    ? "This long-PDF summary traversal already reached the final page. No pages were read for this request."
+                    : `Long-PDF summary traversal must be contiguous: request page ${expectedPage} of the same file with its exact revision token next. No pages were read for this request.`;
+              const denied = await recordDeniedAction({
+                taskId: task.id,
+                agentId: agent.id,
+                agentName: agent.name,
+                workspaceId,
+                app: "google_drive",
+                operation: request.operation,
+                params: null,
+                reason,
+              });
+              actionHistory.push(describeActionForModel(denied));
+              await addTaskLog(task.id, "warn", reason);
+              continue;
+            }
           }
           const verdict = authorizeAppAction(
             appAccess,
@@ -2513,6 +2673,16 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
             throw error;
           }
           actionHistory.push(describeActionForModel(action));
+          if (action.status === "executed" &&
+            request.operation === "google_drive.read_pdf_summary_batch") {
+            const traversalParams = request.params as Record<string, unknown>;
+            if (!applyPdfProgress(
+              String(traversalParams.fileId),
+              action.resultSummary,
+            )) {
+              longPdfTraversal = null;
+            }
+          }
           if (controller.signal.aborted) {
             // Do not return directly: the outer worker catch owns terminal
             // task transitions for timeout, cancellation, and lease loss.
@@ -2527,6 +2697,11 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
           }
         }
         if (parkedForApproval) return;
+        if (onlyLongPdfSummaryRequests && validRequests.length > 1) {
+          actionHistory.push(
+            `Only the first long-PDF summary read was executed this round; ${validRequests.length - 1} additional request(s) were not run. Request exactly one next batch or continuation after reviewing the latest coverage result.`,
+          );
+        }
         if (validRequests.length > MAX_ACTIONS_PER_ROUND) {
           actionHistory.push(
             OVER_PER_ROUND_NOTE,

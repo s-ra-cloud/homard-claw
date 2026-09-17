@@ -54,6 +54,11 @@ export class PdfExtractionError extends Error {
 
 export interface ExtractPdfTextOptions {
   pdfPages?: string;
+  /**
+   * Internal long-document traversal only: permit the selected range's end to
+   * be clamped to the document's final page. Direct targeted reads stay exact.
+   */
+  clampPageRangeEnd?: boolean;
   signal?: AbortSignal;
   /**
    * A caller may make the input limit stricter, but may not raise the service
@@ -286,6 +291,7 @@ function extractInChild(
   deadlineAt: number,
   maxInputBytes: number,
   pages?: { start: number; end: number },
+  clampPageRangeEnd = false,
 ): Promise<string> {
   if (signal?.aborted) return Promise.reject(new PdfExtractionError("cancelled"));
   return new Promise<string>((resolve, reject) => {
@@ -302,8 +308,9 @@ function extractInChild(
       `--max-old-space-size=${PDF_EXTRACTION_LIMITS.maxV8OldSpaceMb}`,
       "--disable-wasm-trap-handler",
       workerPath(),
-       String(maxInputBytes),
+      String(maxInputBytes),
       ...(pages ? [String(pages.start), String(pages.end)] : []),
+      ...(pages && clampPageRangeEnd ? ["clamp-end"] : []),
     ], {
       // Do not inherit NODE_OPTIONS (or any application secrets). The child
       // needs no credentials, network configuration, or writable stdio.
@@ -459,6 +466,7 @@ export async function extractPdfText(
       deadlineAt,
       inputLimit,
       pages,
+      options.clampPageRangeEnd === true,
     );
   } finally {
     releaseSlot();

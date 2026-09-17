@@ -180,6 +180,21 @@ export const APP_OPERATIONS: AppOperation[] = [
     target: (p) => `Drive file ${p.fileId}${p.pdfPages === undefined ? "" : ` PDF pages ${p.pdfPages}`}${p.continuation ? " (continuation)" : ""}`,
   },
   {
+    name: "google_drive.read_pdf_summary_batch",
+    app: "google_drive",
+    level: "read",
+    description:
+      "Read a complete PDF sequentially in bounded five-page batches. Params: fileId; startPage for a new batch (1 first, then the exact nextPage reported), OR continuation when more text remains in the current batch; rollingSummary (optional bounded working summary, strongly recommended after the first call). Never advance pages until the current batch reports complete. The final batch is clamped to the document end. Never claim unread or image-only pages were covered. At most 64 reads run per task segment; further work requires owner-approved continuation.",
+    params: [
+      str("fileId", true, 200),
+      num("startPage", false),
+      str("continuation", false, 2048),
+      str("revisionToken", false, 2048),
+      editText("rollingSummary", false, 12000),
+    ],
+    target: (p) => `Drive PDF ${p.fileId} summary ${p.continuation ? "continuation" : `batch starting at page ${p.startPage}`}`,
+  },
+  {
     name: "google_drive.create_file",
     app: "google_drive",
     level: "draft",

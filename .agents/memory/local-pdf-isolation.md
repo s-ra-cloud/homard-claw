@@ -21,6 +21,12 @@ Large extraction must remain linear in output size, and the isolated-worker prot
 
 **How to apply:** when raising extraction limits, verify large non-ASCII results across the process boundary and keep output accounting incremental.
 
+Complete long-PDF summaries must advance only after every bounded text continuation for the current page batch is drained. Bind all batches to one stable, workspace-scoped file revision, and stop with explicit omissions if extraction truncates.
+
+**Why:** a five-page parser selection can still exceed the per-action text window or the extractor output ceiling. Treating page selection as page coverage silently skips dense text, while reading changing revisions can combine different documents into one summary.
+
+**How to apply:** keep direct targeted ranges exact; use signed revision-bound traversal state, persist rolling summaries between action rounds, enforce contiguous next-page requests, and never convert parser truncation into complete coverage.
+
 Large PDF stdin must be read into one bounded backing store, then exposed to PDF.js as a fixed-length, full-span Uint8Array.
 
 **Why:** Node's nonblocking pipe iterator creates many external Buffer allocations, and PDF.js copies partial-span views. Under RLIMIT_AS, either behavior can exhaust virtual memory for otherwise permitted 25–40 MB PDFs.

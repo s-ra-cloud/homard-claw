@@ -86,6 +86,16 @@ export type DriveReadByteDetails = {
   limitBytes: number;
 };
 
+export type DrivePdfCoverage = {
+  startPage: number;
+  endPage: number;
+  totalPages: number;
+  batchComplete: boolean;
+  extractionTruncated: boolean;
+  nextPage: number | null;
+  revisionToken: string;
+};
+
 export type DriveReadTransportResult =
   | {
       ok: true;
@@ -96,6 +106,7 @@ export type DriveReadTransportResult =
       textStart: number;
       /** Opaque cursor for the next bounded range, when content remains. */
       continuation?: string;
+      pdfCoverage?: DrivePdfCoverage;
     }
   | DriveReadTransportFailure;
 
@@ -108,6 +119,10 @@ export type DriveReadInput = {
   workspaceId: string | null;
   fileId: string;
   pdfPages?: string;
+  /** Internal complete-summary traversal; direct pdfPages reads never set it. */
+  clampPdfPageRangeEnd?: boolean;
+  /** Signed token binding a summary traversal to the first batch's revision. */
+  pdfRevisionToken?: string;
   /** Opaque cursor returned by a prior read; binds continuation to this file revision. */
   continuation?: string;
   /** Unicode-scalar offset and maximum range for the initial read. */
@@ -1051,6 +1066,7 @@ type DriveContinuation = {
 };
 
 const DRIVE_CONTINUATION_CONTEXT = "homardclaw-google-drive-continuation-v1";
+const DRIVE_PDF_REVISION_CONTEXT = "homardclaw-google-drive-pdf-summary-revision-v1";
 
 function continuationSecret(): string | null {
   const secret = process.env.SESSION_SECRET?.trim();
@@ -1092,6 +1108,49 @@ function decodeContinuation(value: unknown): DriveContinuation | null {
       (typeof parsed.modifiedTime !== "string" && parsed.modifiedTime !== null) ||
       (typeof parsed.pdfPages !== "string" && parsed.pdfPages !== null)) return null;
     return parsed as DriveContinuation;
+  } catch {
+    return null;
+  }
+}
+
+type DrivePdfRevision = {
+  v: 1;
+  workspaceId: string;
+  id: string;
+  modifiedTime: string | null;
+};
+
+function encodePdfRevision(value: DrivePdfRevision): string | null {
+  const secret = continuationSecret();
+  if (!secret) return null;
+  const payload = Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
+  const signature = createHmac("sha256", secret)
+    .update(`${DRIVE_PDF_REVISION_CONTEXT}|${payload}`)
+    .digest("hex");
+  return `${payload}.${signature}`;
+}
+
+function decodePdfRevision(value: unknown): DrivePdfRevision | null {
+  if (typeof value !== "string" || value.length < 8 || value.length > 2114) return null;
+  try {
+    const separator = value.lastIndexOf(".");
+    const payload = value.slice(0, separator);
+    const signature = value.slice(separator + 1);
+    const secret = continuationSecret();
+    if (!secret || separator < 8 || !/^[A-Za-z0-9_-]+$/.test(payload) ||
+      !/^[0-9a-f]{64}$/.test(signature)) return null;
+    const expected = createHmac("sha256", secret)
+      .update(`${DRIVE_PDF_REVISION_CONTEXT}|${payload}`)
+      .digest("hex");
+    const expectedBytes = Buffer.from(expected);
+    const signatureBytes = Buffer.from(signature);
+    if (expectedBytes.length !== signatureBytes.length ||
+      !timingSafeEqual(expectedBytes, signatureBytes)) return null;
+    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Partial<DrivePdfRevision>;
+    if (parsed.v !== 1 || typeof parsed.workspaceId !== "string" ||
+      typeof parsed.id !== "string" ||
+      (typeof parsed.modifiedTime !== "string" && parsed.modifiedTime !== null)) return null;
+    return parsed as DrivePdfRevision;
   } catch {
     return null;
   }
@@ -1162,6 +1221,14 @@ export async function readDriveFileTransport(
   input: DriveReadInput,
 ): Promise<DriveReadTransportResult> {
   const cursor = decodeContinuation(input.continuation);
+  const requestedPdfRevision = decodePdfRevision(input.pdfRevisionToken);
+  if (input.pdfRevisionToken !== undefined && !requestedPdfRevision) {
+    return {
+      ok: false,
+      kind: "failed",
+      message: "The PDF summary revision token is invalid or stale; restart the summary from page 1.",
+    };
+  }
   if (cursor && input.pdfPages !== undefined &&
     cursor.pdfPages !== input.pdfPages) {
     return {
@@ -1302,6 +1369,23 @@ export async function readDriveFileTransport(
     const mimeType = typeof file.mimeType === "string" ? file.mimeType.toLowerCase().split(";")[0].trim() : "";
     const fileName = typeof file.name === "string" ? file.name : null;
     const modifiedTime = typeof file.modifiedTime === "string" ? file.modifiedTime : null;
+    if (input.clampPdfPageRangeEnd && modifiedTime === null) {
+      return finish({
+        ok: false,
+        kind: "failed",
+        message: "Google Drive did not provide a stable PDF revision, so complete summary traversal was not started.",
+      });
+    }
+    if (requestedPdfRevision &&
+      (requestedPdfRevision.workspaceId !== input.workspaceId ||
+        requestedPdfRevision.id !== input.fileId ||
+        requestedPdfRevision.modifiedTime !== modifiedTime)) {
+      return finish({
+        ok: false,
+        kind: "failed",
+        message: "The Google Drive PDF changed between summary batches; restart the summary from page 1.",
+      });
+    }
     const declaredSizeBytes =
       typeof file.size === "string" && /^\d+$/.test(file.size)
         ? Number(file.size)
@@ -1387,7 +1471,9 @@ export async function readDriveFileTransport(
             ? (input.extractPdf ?? extractPdfText)(pdf, {
               signal: state.controller.signal,
               maxInputBytes: maxDocumentBytes,
-              deadlineAt, pdfPages: effectivePdfPages,
+              deadlineAt,
+              pdfPages: effectivePdfPages,
+              clampPageRangeEnd: input.clampPdfPageRangeEnd === true,
             })
             : (input.extractDocx ?? extractDocxText)(pdf, {
               signal: state.controller.signal,
@@ -1444,6 +1530,46 @@ export async function readDriveFileTransport(
             message: "Google Drive continuation is unavailable on this server.",
           });
         }
+        let pdfCoverage: DrivePdfCoverage | undefined;
+        if (input.clampPdfPageRangeEnd && effectivePdfPages) {
+          const match = /^\[PDF selection: pages (\d+)-(\d+) of (\d+)\./.exec(text);
+          if (!match) {
+            return finish(pdfExtractionFailure());
+          }
+          const startPage = Number(match[1]);
+          const endPage = Number(match[2]);
+          const totalPages = Number(match[3]);
+          const revisionToken = encodePdfRevision({
+            v: 1,
+            workspaceId: input.workspaceId!,
+            id: input.fileId,
+            modifiedTime,
+          });
+          if (!revisionToken) {
+            return finish({
+              ok: false,
+              kind: "failed",
+              message: "Google Drive PDF summary traversal is unavailable on this server.",
+            });
+          }
+          pdfCoverage = {
+            startPage,
+            endPage,
+            totalPages,
+            batchComplete:
+              nextOffset === null &&
+              !text.includes("--- Text extraction truncated at the "),
+            extractionTruncated:
+              text.includes("--- Text extraction truncated at the "),
+            nextPage:
+              nextOffset === null &&
+              !text.includes("--- Text extraction truncated at the ") &&
+              endPage < totalPages
+                ? endPage + 1
+                : null,
+            revisionToken,
+          };
+        }
         return {
           ok: true,
           name: fileName,
@@ -1451,6 +1577,7 @@ export async function readDriveFileTransport(
           text: range.text,
           textStart: range.start,
           ...(continuation === null ? {} : { continuation }),
+          ...(pdfCoverage ? { pdfCoverage } : {}),
         };
       } catch (error) {
         if (error instanceof BoundedStop) {
