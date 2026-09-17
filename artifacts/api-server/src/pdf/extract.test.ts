@@ -42,6 +42,7 @@ function pdfFixture(
   pageStreams: string[],
   encrypt = false,
   compressStreams = false,
+  catalogPadding = 0,
 ): Uint8Array {
   const objects: string[] = [];
   const pageObjectIds = pageStreams.map((_, index) => 3 + index * 2);
@@ -64,6 +65,13 @@ function pdfFixture(
     objects[fontId] =
       "<< /Filter /Standard /V 1 /R 2 /Length 40 /O <0000000000000000000000000000000000000000000000000000000000000000> /U <0000000000000000000000000000000000000000000000000000000000000000> /P -4 >>";
   }
+  if (catalogPadding > 0) {
+    // Keep large-fixture padding in a valid, unreferenced stream. PDF.js does
+    // not need to parse its contents to read the referenced page tree.
+    objects.push(
+      `<< /Length ${catalogPadding} >>\nstream\n${" ".repeat(catalogPadding)}\nendstream`,
+    );
+  }
 
   let document = "%PDF-1.4\n";
   const offsets = [0];
@@ -82,6 +90,21 @@ function pdfFixture(
 
 function textPage(text: string): string {
   return `BT /F1 12 Tf 72 720 Td (${text}) Tj ET`;
+}
+
+function exactSizedPdf(text: string, targetBytes: number): Uint8Array {
+  const page = textPage(text);
+  const base = pdfFixture([page]);
+  let padding = targetBytes - base.byteLength;
+  let bytes = pdfFixture([page], false, false, padding);
+  // Larger object offsets can add digits to the generated xref. Adjust the
+  // inert stream padding until the complete valid fixture is exact.
+  for (let attempt = 0; attempt < 3 && bytes.byteLength !== targetBytes; attempt += 1) {
+    padding -= bytes.byteLength - targetBytes;
+    bytes = pdfFixture([page], false, false, padding);
+  }
+  expect(bytes.byteLength).toBe(targetBytes);
+  return bytes;
 }
 
 function expectPdfChildrenReaped(): void {
@@ -244,12 +267,31 @@ describe("extractPdfText", () => {
   });
 
   it("enforces input and page resource caps before returning document text", async () => {
-    await expect(extractPdfText(new Uint8Array(PDF_EXTRACTION_LIMITS.maxInputBytes + 1))).rejects.toMatchObject({
-      kind: "input_too_large",
-    } satisfies Partial<PdfExtractionError>);
     await expect(extractPdfText(pdfFixture(Array.from({ length: 101 }, () => "q Q")))).rejects.toMatchObject({
       kind: "page_limit",
     } satisfies Partial<PdfExtractionError>);
+  });
+
+  it.each([
+    ["Laura's production size", 25_423_559],
+    ["the inclusive service ceiling", 40_000_000],
+  ])("sends a valid PDF at %s through the real worker", async (_label, targetBytes) => {
+    const bytes = exactSizedPdf("Worker limit aligned", targetBytes);
+    await expect(
+      extractPdfText(bytes, {
+        maxInputBytes: PDF_EXTRACTION_LIMITS.maxInputBytes,
+        pdfPages: "1",
+      }),
+    ).resolves.toContain("Worker limit aligned");
+  });
+
+  it("rejects 40,000,001 bytes before spawning the worker", async () => {
+    await expect(
+      extractPdfText(new Uint8Array(PDF_EXTRACTION_LIMITS.maxInputBytes + 1)),
+    ).rejects.toMatchObject({
+      kind: "input_too_large",
+    } satisfies Partial<PdfExtractionError>);
+    expect(spawnedPdfPids).toHaveLength(0);
   });
 
   it("reserves an explicit omission notice at the 1.5M scalar boundary", async () => {

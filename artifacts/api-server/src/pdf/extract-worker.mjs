@@ -1,7 +1,8 @@
-import { writeSync } from "node:fs";
+import { readSync, writeSync } from "node:fs";
 import process from "node:process";
 
 const MAX_PAGES = 100;
+const MAX_INPUT_BYTES = 40_000_000;
 const MAX_OUTPUT_CHARS = 1_500_000;
 const PAGE_PREFIX = "--- Page ";
 const TEXT_PAGE_SUFFIX = " (text only; visual and image content omitted) ---\n";
@@ -47,6 +48,18 @@ function pgSafe(value) {
   return value.replace(/\u0000/g, "");
 }
 
+function readStdin(target, offset, length) {
+  const waitCell = new Int32Array(new SharedArrayBuffer(4));
+  for (;;) {
+    try {
+      return readSync(0, target, offset, length);
+    } catch (cause) {
+      if (cause?.code !== "EAGAIN") throw cause;
+      Atomics.wait(waitCell, 0, 0, 1);
+    }
+  }
+}
+
 export function appendBoundedPdfText(current, addition) {
   return appendBounded(current, Array.from(current).length, addition);
 }
@@ -87,7 +100,10 @@ async function extract(bytes) {
   try {
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
     const loadingTask = pdfjs.getDocument({
-      data: new Uint8Array(bytes),
+      // The transferred fixed-length buffer spans this zero-copy Uint8Array,
+      // so PDF.js accepts it without duplicating up to 40 MB inside the
+      // bounded address space.
+      data: new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength),
       disableAutoFetch: true,
       disableStream: true,
       isEvalSupported: false,
@@ -100,9 +116,9 @@ async function extract(bytes) {
       return error("page_limit");
     }
 
-    const selected = process.argv.length > 2;
-    const start = selected ? Number(process.argv[2]) : 1;
-    const end = selected ? Number(process.argv[3]) : document.numPages;
+    const selected = process.argv.length > 3;
+    const start = selected ? Number(process.argv[3]) : 1;
+    const end = selected ? Number(process.argv[4]) : document.numPages;
     if (selected && (!Number.isInteger(start) || !Number.isInteger(end) ||
       start < 1 || end < start || end > MAX_PAGES || end - start >= 5)) {
       await document.destroy();
@@ -150,14 +166,50 @@ async function extract(bytes) {
 }
 
 async function readInput() {
-  const chunks = [];
-  let length = 0;
-  for await (const chunk of process.stdin) {
-    length += chunk.byteLength;
-    if (length > 25_000_000) return error("input_too_large");
-    chunks.push(chunk);
+  const maxInputBytes = Number(process.argv[2]);
+  if (
+    !Number.isSafeInteger(maxInputBytes) ||
+    maxInputBytes < 0 ||
+    maxInputBytes > MAX_INPUT_BYTES
+  ) {
+    return error("extraction_failed");
   }
-  return extract(Buffer.concat(chunks, length));
+  let storage;
+  let bytes;
+  try {
+    // Reserve one bounded slab before PDF.js loads. Retaining hundreds of
+    // pipe-sized chunks and concatenating them can fragment the worker's
+    // constrained address space even when the PDF is below the byte limit.
+    storage = new ArrayBuffer(maxInputBytes, { maxByteLength: maxInputBytes });
+    bytes = new Uint8Array(storage);
+  } catch {
+    return error("resource_limit");
+  }
+  const overflow = new Uint8Array(1);
+  let length = 0;
+  let reachedEof = false;
+  try {
+    while (length < maxInputBytes) {
+      const read = readStdin(bytes, length, maxInputBytes - length);
+      if (read === 0) {
+        reachedEof = true;
+        break;
+      }
+      length += read;
+    }
+    // The configured limit is inclusive. Probe one additional byte so an
+    // exact-boundary PDF reaches parsing while any larger input is refused.
+    if (!reachedEof && readStdin(overflow, 0, 1) > 0) {
+      return error("input_too_large");
+    }
+    // Transfer releases the resizable buffer's unused maximum reservation and
+    // leaves an exact fixed-length backing store. PDF.js can consume the full
+    // span without copying it, while large extracted output retains headroom.
+    bytes = new Uint8Array(storage.transferToFixedLength(length));
+  } catch {
+    return error("extraction_failed");
+  }
+  return extract(bytes);
 }
 
 if (process.argv[1] && new URL(import.meta.url).pathname === process.argv[1]) {

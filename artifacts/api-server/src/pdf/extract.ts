@@ -279,7 +279,13 @@ function isPostgresSafeText(text: string): boolean {
   return Array.from(text).length <= PDF_EXTRACTION_LIMITS.maxOutputChars;
 }
 
-function extractInChild(bytes: Uint8Array, signal: AbortSignal | undefined, deadlineAt: number, pages?: { start: number; end: number }): Promise<string> {
+function extractInChild(
+  bytes: Uint8Array,
+  signal: AbortSignal | undefined,
+  deadlineAt: number,
+  maxInputBytes: number,
+  pages?: { start: number; end: number },
+): Promise<string> {
   if (signal?.aborted) return Promise.reject(new PdfExtractionError("cancelled"));
   return new Promise<string>((resolve, reject) => {
     // RLIMIT_AS is an OS-enforced limit over V8 heap, ArrayBuffers, native
@@ -295,6 +301,7 @@ function extractInChild(bytes: Uint8Array, signal: AbortSignal | undefined, dead
       `--max-old-space-size=${PDF_EXTRACTION_LIMITS.maxV8OldSpaceMb}`,
       "--disable-wasm-trap-handler",
       workerPath(),
+       String(maxInputBytes),
       ...(pages ? [String(pages.start), String(pages.end)] : []),
     ], {
       // Do not inherit NODE_OPTIONS (or any application secrets). The child
@@ -445,7 +452,13 @@ export async function extractPdfText(
   const deadlineAt = finiteDeadline(options.deadlineAt);
   await claimSlot(options.signal, deadlineAt);
   try {
-    return await extractInChild(bytes, options.signal, deadlineAt, pages);
+    return await extractInChild(
+      bytes,
+      options.signal,
+      deadlineAt,
+      inputLimit,
+      pages,
+    );
   } finally {
     releaseSlot();
   }

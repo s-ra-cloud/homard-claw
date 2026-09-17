@@ -21,6 +21,12 @@ Large extraction must remain linear in output size, and the isolated-worker prot
 
 **How to apply:** when raising extraction limits, verify large non-ASCII results across the process boundary and keep output accounting incremental.
 
+Large PDF stdin must be read into one bounded backing store, then exposed to PDF.js as a fixed-length, full-span Uint8Array.
+
+**Why:** Node's nonblocking pipe iterator creates many external Buffer allocations, and PDF.js copies partial-span views. Under RLIMIT_AS, either behavior can exhaust virtual memory for otherwise permitted 25–40 MB PDFs.
+
+**How to apply:** retry EAGAIN at the pipe boundary, probe one byte past the inclusive limit, release unused buffer reservation before parsing, and regression-test the real child process at production-sized inputs.
+
 Keep generated PDF regression text inside the page's media box.
 
 **Why:** PDF.js can omit off-page glyphs from text extraction. A single long text line is not a reliable fixture for testing output truncation; it can appear to pass later-page isolation while never generating enough extracted text to hit the limit.
