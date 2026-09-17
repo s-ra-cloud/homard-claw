@@ -22,6 +22,11 @@ export const MAX_DRIVE_READ_BODY_BYTES = 25_000_000;
 export const MAX_DRIVE_PDF_READ_BODY_BYTES = 40_000_000;
 /** Maximum extracted document range exposed through Drive continuation. */
 export const MAX_DRIVE_DOCUMENT_CHARS = 1_500_000;
+/** Active long-summary sessions expire quickly when a segment stops making progress. */
+export const DRIVE_PDF_EXTRACTION_SESSION_TTL_MS = 2 * 60_000;
+const MAX_DRIVE_PDF_EXTRACTION_SESSIONS = 4;
+const MAX_DRIVE_PDF_EXTRACTION_SESSION_BYTES =
+  MAX_DRIVE_PDF_READ_BODY_BYTES * MAX_DRIVE_PDF_EXTRACTION_SESSIONS;
 // Scalar count; conservative enough for astral text plus action metadata.
 export const DEFAULT_DRIVE_DOCUMENT_CHUNK_CHARS = 1_400;
 /** Metadata and refusal payloads do not need the file download allowance. */
@@ -160,6 +165,141 @@ type TransportState = {
   currentStage: string;
   failureReported: boolean;
 };
+
+type DrivePdfExtractionSession = {
+  workspaceId: string;
+  taskId: string;
+  fileId: string;
+  modifiedTime: string;
+  bytes: Uint8Array;
+  expiresAt: number;
+  expiryTimer?: ReturnType<typeof setTimeout>;
+};
+
+const drivePdfExtractionSessions =
+  new Map<string, DrivePdfExtractionSession>();
+let drivePdfExtractionSessionBytes = 0;
+
+function pdfExtractionSessionKey(
+  workspaceId: string,
+  taskId: string,
+  fileId: string,
+  modifiedTime: string,
+): string {
+  return JSON.stringify([workspaceId, taskId, fileId, modifiedTime]);
+}
+
+function deletePdfExtractionSession(key: string): void {
+  const session = drivePdfExtractionSessions.get(key);
+  if (!session) return;
+  drivePdfExtractionSessions.delete(key);
+  if (session.expiryTimer) clearTimeout(session.expiryTimer);
+  drivePdfExtractionSessionBytes -= session.bytes.byteLength;
+}
+
+function schedulePdfExtractionSessionExpiry(
+  key: string,
+  session: DrivePdfExtractionSession,
+): void {
+  if (session.expiryTimer) clearTimeout(session.expiryTimer);
+  session.expiryTimer = setTimeout(() => {
+    if (drivePdfExtractionSessions.get(key) === session) {
+      deletePdfExtractionSession(key);
+    }
+  }, DRIVE_PDF_EXTRACTION_SESSION_TTL_MS);
+  session.expiryTimer.unref?.();
+}
+
+/** Content-free lifecycle diagnostic used by regression tests and health tooling. */
+export function activeDrivePdfExtractionSessionCount(): number {
+  return drivePdfExtractionSessions.size;
+}
+
+/** Test isolation only; production lifecycle is timer- and bound-driven. */
+export function resetDrivePdfExtractionSessionsForTests(): void {
+  for (const key of [...drivePdfExtractionSessions.keys()]) {
+    deletePdfExtractionSession(key);
+  }
+}
+
+function prunePdfExtractionSessions(now: number): void {
+  for (const [key, session] of drivePdfExtractionSessions) {
+    if (session.expiresAt <= now) deletePdfExtractionSession(key);
+  }
+  while (
+    drivePdfExtractionSessions.size > MAX_DRIVE_PDF_EXTRACTION_SESSIONS ||
+    drivePdfExtractionSessionBytes > MAX_DRIVE_PDF_EXTRACTION_SESSION_BYTES
+  ) {
+    const oldest = drivePdfExtractionSessions.keys().next().value as
+      | string
+      | undefined;
+    if (oldest === undefined) break;
+    deletePdfExtractionSession(oldest);
+  }
+}
+
+function getPdfExtractionSession(
+  input: DriveReadInput,
+  modifiedTime: string | null,
+  now: number,
+): { key: string; bytes: Uint8Array } | null {
+  if (
+    !input.clampPdfPageRangeEnd ||
+    !input.workspaceId ||
+    !input.taskId ||
+    modifiedTime === null
+  ) return null;
+  prunePdfExtractionSessions(now);
+  const key = pdfExtractionSessionKey(
+    input.workspaceId,
+    input.taskId,
+    input.fileId,
+    modifiedTime,
+  );
+  const session = drivePdfExtractionSessions.get(key);
+  if (!session) return null;
+  session.expiresAt = now + DRIVE_PDF_EXTRACTION_SESSION_TTL_MS;
+  schedulePdfExtractionSessionExpiry(key, session);
+  // Refresh insertion order so bounded eviction removes the least-recently used
+  // session rather than an actively progressing summary.
+  drivePdfExtractionSessions.delete(key);
+  drivePdfExtractionSessions.set(key, session);
+  return { key, bytes: session.bytes };
+}
+
+function retainPdfExtractionSession(
+  input: DriveReadInput,
+  modifiedTime: string | null,
+  bytes: Uint8Array,
+  now: number,
+): string | null {
+  if (
+    !input.clampPdfPageRangeEnd ||
+    !input.workspaceId ||
+    !input.taskId ||
+    modifiedTime === null
+  ) return null;
+  const key = pdfExtractionSessionKey(
+    input.workspaceId,
+    input.taskId,
+    input.fileId,
+    modifiedTime,
+  );
+  deletePdfExtractionSession(key);
+  const session: DrivePdfExtractionSession = {
+    workspaceId: input.workspaceId,
+    taskId: input.taskId,
+    fileId: input.fileId,
+    modifiedTime,
+    bytes,
+    expiresAt: now + DRIVE_PDF_EXTRACTION_SESSION_TTL_MS,
+  };
+  drivePdfExtractionSessions.set(key, session);
+  schedulePdfExtractionSessionExpiry(key, session);
+  drivePdfExtractionSessionBytes += bytes.byteLength;
+  prunePdfExtractionSessions(now);
+  return drivePdfExtractionSessions.has(key) ? key : null;
+}
 
 /**
  * Drive error payloads can contain request details and are not safe
@@ -1453,16 +1593,21 @@ export async function readDriveFileTransport(
       const maxDocumentBytes = isPdfDownload(mimeType)
         ? MAX_DRIVE_PDF_READ_BODY_BYTES
         : MAX_DRIVE_READ_BODY_BYTES;
-      const pdf = await requestDrivePdf(
-        `/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
-        token,
-        state,
-        input.fetchImpl ?? fetch,
-        maxDocumentBytes,
-        safeDeclaredSizeBytes,
-        input.onBytes,
-      );
+      const retainedPdf = isPdfDownload(mimeType)
+        ? getPdfExtractionSession(input, modifiedTime, now())
+        : null;
+      const pdf = retainedPdf?.bytes ?? await requestDrivePdf(
+          `/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
+          token,
+          state,
+          input.fetchImpl ?? fetch,
+          maxDocumentBytes,
+          safeDeclaredSizeBytes,
+          input.onBytes,
+        );
       if (!(pdf instanceof Uint8Array)) return finish(pdf);
+      let pdfSessionKey = retainedPdf?.key ?? null;
+      let preservePdfSession = false;
 
       safeStage(state, "extract");
       try {
@@ -1570,6 +1715,21 @@ export async function readDriveFileTransport(
             revisionToken,
           };
         }
+        const shouldRetainPdfSession =
+          pdfCoverage !== undefined &&
+          !pdfCoverage.extractionTruncated &&
+          !(pdfCoverage.batchComplete && pdfCoverage.nextPage === null);
+        if (shouldRetainPdfSession) {
+          if (!pdfSessionKey) {
+            pdfSessionKey = retainPdfExtractionSession(
+              input,
+              modifiedTime,
+              pdf,
+              now(),
+            );
+          }
+          preservePdfSession = pdfSessionKey !== null;
+        }
         return {
           ok: true,
           name: fileName,
@@ -1602,6 +1762,10 @@ export async function readDriveFileTransport(
             : isPdfDownload(mimeType) ? pdfExtractionFailure() : docxExtractionFailure();
         reportFailure(state, { failureClass: isPdfDownload(mimeType) ? "pdf_extraction" : "docx_extraction", stage: "extract" });
         return finish(failure);
+      } finally {
+        if (pdfSessionKey && !preservePdfSession) {
+          deletePdfExtractionSession(pdfSessionKey);
+        }
       }
     }
     const path = mimeType.startsWith(DRIVE_EXPORTABLE_PREFIX)

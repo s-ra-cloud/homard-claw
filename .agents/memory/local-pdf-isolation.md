@@ -27,6 +27,12 @@ Complete long-PDF summaries must advance only after every bounded text continuat
 
 **How to apply:** keep direct targeted ranges exact; use signed revision-bound traversal state, persist rolling summaries between action rounds, enforce contiguous next-page requests, and never convert parser truncation into complete coverage.
 
+Retained PDF bytes may be reused only as a short-lived active-summary session bound to workspace, task, file, and exact revision. Each parser call must still start a fresh isolated child with the existing page, memory, byte, timeout, and cancellation bounds.
+
+**Why:** re-downloading an unchanged large PDF for every text continuation wastes Drive bandwidth, but a reusable document cache would weaken tenant and revision isolation. Process restarts and parser failures must safely return to a verified download.
+
+**How to apply:** re-check Drive metadata before every reuse, retain bytes only after a post-extraction revision check, cap and expire sessions promptly, and discard the session on parser failure, revision race, truncation, or final-page coverage.
+
 Large PDF stdin must be read into one bounded backing store, then exposed to PDF.js as a fixed-length, full-span Uint8Array.
 
 **Why:** Node's nonblocking pipe iterator creates many external Buffer allocations, and PDF.js copies partial-span views. Under RLIMIT_AS, either behavior can exhaust virtual memory for otherwise permitted 25–40 MB PDFs.

@@ -2,10 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import type { ExtractPdfTextOptions } from "../pdf/extract";
 import {
   DEFAULT_DRIVE_READ_TIMEOUT_MS,
+  DRIVE_PDF_EXTRACTION_SESSION_TTL_MS,
   MAX_DRIVE_PDF_READ_BODY_BYTES,
   MAX_DRIVE_READ_BODY_BYTES,
+  activeDrivePdfExtractionSessionCount,
   classifyDriveReadHttpFailure,
   readDriveFileTransport,
+  resetDrivePdfExtractionSessionsForTests,
 } from "./drive-transport";
 
 function response(body: string, status = 200): Response {
@@ -112,6 +115,214 @@ describe("readDriveFileTransport", () => {
         nextPage: null,
       });
     }
+  });
+
+  it("reuses one revision-bound PDF download across a summary segment", async () => {
+    let now = 1_000;
+    let downloads = 0;
+    const extractedPages: Array<string | undefined> = [];
+    const fetchImpl = async (url: string | URL | Request) => {
+      if (String(url).includes("alt=media")) {
+        downloads += 1;
+        return new Response(new Uint8Array([0x25, 0x50, 0x44, 0x46]));
+      }
+      return response(JSON.stringify({
+        id: "session-file",
+        name: "session.pdf",
+        mimeType: "application/pdf",
+        modifiedTime: "2026-09-17T10:00:00.000Z",
+      }));
+    };
+    const extractPdf = vi.fn(async (_bytes, options?: ExtractPdfTextOptions) => {
+      extractedPages.push(options?.pdfPages);
+      const pages = options?.pdfPages === "1-5" ? "1-5" : "6-10";
+      return `[PDF selection: pages ${pages} of 12. Only this range was read; pages outside it were not read. Text only; visual/image content omitted.]\ntext`;
+    });
+    const first = await readDriveFileTransport({
+      workspaceId: "workspace-session",
+      taskId: "task-session",
+      fileId: "session-file",
+      pdfPages: "1-5",
+      clampPdfPageRangeEnd: true,
+      resolveToken: async () => "token",
+      fetchImpl,
+      extractPdf,
+      now: () => now,
+    });
+    expect(first.ok).toBe(true);
+    now += 1_000;
+    const second = await readDriveFileTransport({
+      workspaceId: "workspace-session",
+      taskId: "task-session",
+      fileId: "session-file",
+      pdfPages: "6-10",
+      clampPdfPageRangeEnd: true,
+      pdfRevisionToken:
+        first.ok ? first.pdfCoverage?.revisionToken : undefined,
+      resolveToken: async () => "token",
+      fetchImpl,
+      extractPdf,
+      now: () => now,
+    });
+    expect(second.ok).toBe(true);
+    expect(downloads).toBe(1);
+    expect(extractedPages).toEqual(["1-5", "6-10"]);
+  });
+
+  it("never reuses PDF session bytes across task, workspace, revision, or expiry boundaries", async () => {
+    let now = 50_000;
+    let downloads = 0;
+    const modifiedTimes = new Map([
+      ["session-a", "2026-09-17T10:00:00.000Z"],
+      ["session-b", "2026-09-17T10:00:00.000Z"],
+    ]);
+    const fetchImpl = async (url: string | URL | Request) => {
+      const target = String(url);
+      if (target.includes("alt=media")) {
+        downloads += 1;
+        return new Response(new Uint8Array([0x25, 0x50, 0x44, downloads]));
+      }
+      const fileId = target.includes("session-b") ? "session-b" : "session-a";
+      return response(JSON.stringify({
+        id: fileId,
+        name: `${fileId}.pdf`,
+        mimeType: "application/pdf",
+        modifiedTime: modifiedTimes.get(fileId),
+      }));
+    };
+    const run = async (
+      workspaceId: string,
+      taskId: string,
+      fileId = "session-a",
+    ) => readDriveFileTransport({
+      workspaceId,
+      taskId,
+      fileId,
+      pdfPages: "1-5",
+      clampPdfPageRangeEnd: true,
+      resolveToken: async () => "token",
+      fetchImpl,
+      extractPdf: async () =>
+        "[PDF selection: pages 1-5 of 10. Only this range was read; pages outside it were not read. Text only; visual/image content omitted.]\ntext",
+      now: () => now,
+    });
+    await run("workspace-a", "task-a");
+    await run("workspace-a", "task-b");
+    await run("workspace-b", "task-a");
+    await run("workspace-a", "task-a", "session-b");
+    expect(downloads).toBe(4);
+    now += DRIVE_PDF_EXTRACTION_SESSION_TTL_MS + 1;
+    await run("workspace-a", "task-a");
+    expect(downloads).toBe(5);
+  });
+
+  it("discards retained PDF bytes after an extraction failure", async () => {
+    let downloads = 0;
+    let extractions = 0;
+    const fetchImpl = async (url: string | URL | Request) => {
+      if (String(url).includes("alt=media")) {
+        downloads += 1;
+        return new Response(new Uint8Array([0x25, 0x50, 0x44, downloads]));
+      }
+      return response(JSON.stringify({
+        id: "failure-session",
+        name: "failure.pdf",
+        mimeType: "application/pdf",
+        modifiedTime: "2026-09-17T10:00:00.000Z",
+      }));
+    };
+    const run = () => readDriveFileTransport({
+      workspaceId: "failure-workspace",
+      taskId: "failure-task",
+      fileId: "failure-session",
+      pdfPages: "1-5",
+      clampPdfPageRangeEnd: true,
+      resolveToken: async () => "token",
+      fetchImpl,
+      extractPdf: async () => {
+        extractions += 1;
+        if (extractions === 2) throw new Error("private parser detail");
+        return "[PDF selection: pages 1-5 of 10. Only this range was read; pages outside it were not read. Text only; visual/image content omitted.]\ntext";
+      },
+    });
+    expect((await run()).ok).toBe(true);
+    expect((await run()).ok).toBe(false);
+    expect((await run()).ok).toBe(true);
+    expect(downloads).toBe(2);
+  });
+
+  it("releases an idle PDF session when its TTL elapses without another read", async () => {
+    resetDrivePdfExtractionSessionsForTests();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-17T10:00:00.000Z"));
+    try {
+      let calls = 0;
+      const result = await readDriveFileTransport({
+        workspaceId: "idle-workspace",
+        taskId: "idle-task",
+        fileId: "idle-session",
+        pdfPages: "1-5",
+        clampPdfPageRangeEnd: true,
+        resolveToken: async () => "token",
+        extractPdf: async () =>
+          "[PDF selection: pages 1-5 of 10. Only this range was read; pages outside it were not read. Text only; visual/image content omitted.]\ntext",
+        fetchImpl: async () => ++calls === 2
+          ? new Response(new Uint8Array([0x25, 0x50, 0x44, 0x46]))
+          : response(JSON.stringify({
+              id: "idle-session",
+              name: "idle.pdf",
+              mimeType: "application/pdf",
+              modifiedTime: "2026-09-17T10:00:00.000Z",
+            })),
+      });
+      expect(result.ok).toBe(true);
+      expect(activeDrivePdfExtractionSessionCount()).toBe(1);
+      await vi.advanceTimersByTimeAsync(DRIVE_PDF_EXTRACTION_SESSION_TTL_MS);
+      expect(activeDrivePdfExtractionSessionCount()).toBe(0);
+    } finally {
+      resetDrivePdfExtractionSessionsForTests();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ["invalid extractor output", async () => "\0"],
+    ["malformed coverage metadata", async () => "text without coverage"],
+  ])("discards retained bytes after %s", async (_label, failingExtract) => {
+    resetDrivePdfExtractionSessionsForTests();
+    let downloads = 0;
+    let fail = false;
+    const run = () => readDriveFileTransport({
+      workspaceId: "validation-workspace",
+      taskId: "validation-task",
+      fileId: "validation-session",
+      pdfPages: "1-5",
+      clampPdfPageRangeEnd: true,
+      resolveToken: async () => "token",
+      fetchImpl: async (url) => {
+        if (String(url).includes("alt=media")) {
+          downloads += 1;
+          return new Response(new Uint8Array([0x25, 0x50, 0x44, downloads]));
+        }
+        return response(JSON.stringify({
+          id: "validation-session",
+          name: "validation.pdf",
+          mimeType: "application/pdf",
+          modifiedTime: "2026-09-17T10:00:00.000Z",
+        }));
+      },
+      extractPdf: async () => fail
+        ? failingExtract()
+        : "[PDF selection: pages 1-5 of 10. Only this range was read; pages outside it were not read. Text only; visual/image content omitted.]\ntext",
+    });
+    expect((await run()).ok).toBe(true);
+    fail = true;
+    expect((await run()).ok).toBe(false);
+    expect(activeDrivePdfExtractionSessionCount()).toBe(0);
+    fail = false;
+    expect((await run()).ok).toBe(true);
+    expect(downloads).toBe(2);
+    resetDrivePdfExtractionSessionsForTests();
   });
   it.each(["text/plain", "application/vnd.google-apps.document"])(
     "enforces the inclusive 25 MB boundary for %s with honest, missing and understated lengths",
