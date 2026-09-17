@@ -169,10 +169,10 @@ export const APP_OPERATIONS: AppOperation[] = [
     app: "google_drive",
     level: "read",
     description:
-      "Read a file's text content (Sheets return CSV; PDFs and DOCX are locally text-extracted with page labels/omission notices; no OCR). Params: fileId, optional pdfPages (PDF only: one page such as \"7\" or inclusive range \"7-9\", at most 5 pages, page numbers 1-100), optional textOffset/textLimit for a bounded range, or continuation returned by an earlier read. A continuation preserves the original PDF page selection; do not repeat pdfPages unless it matches. Document text can be continued up to 1,500,000 characters; each result remains bounded. Never claim omitted text, unselected pages, or images were read.",
+      "Read a file's text content (Sheets return CSV; PDFs and DOCX are locally text-extracted with page labels/omission notices; no OCR). Params: fileId, optional pdfPages (PDF only: one page such as \"107\" or inclusive range \"107-111\", at most 5 pages; targeted ranges can read pages after 100 in longer PDFs even though full extraction is limited to 100 pages), optional textOffset/textLimit for a bounded range, or continuation returned by an earlier read. A continuation preserves the original PDF page selection; do not repeat pdfPages unless it matches. Document text can be continued up to 1,500,000 characters; each result remains bounded. If a long PDF rejects full extraction, recover by requesting relevant small page ranges rather than claiming the whole file is unreadable. Never claim omitted text, unselected pages, or images were read.",
     params: [
       str("fileId", true, 200),
-      str("pdfPages", false, 7),
+      str("pdfPages", false, 33),
       str("continuation", false, 2048),
       num("textOffset", false),
       num("textLimit", false),

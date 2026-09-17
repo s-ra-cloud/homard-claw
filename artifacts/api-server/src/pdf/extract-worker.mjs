@@ -111,18 +111,21 @@ async function extract(bytes) {
       stopAtErrors: true,
     });
     const document = await loadingTask.promise;
-    if (document.numPages > MAX_PAGES) {
-      await document.destroy();
-      return error("page_limit");
-    }
-
     const selected = process.argv.length > 3;
     const start = selected ? Number(process.argv[3]) : 1;
     const end = selected ? Number(process.argv[4]) : document.numPages;
     if (selected && (!Number.isInteger(start) || !Number.isInteger(end) ||
-      start < 1 || end < start || end > MAX_PAGES || end - start >= 5)) {
+      !Number.isSafeInteger(start) || !Number.isSafeInteger(end) ||
+      start < 1 || end < start || end - start >= 5)) {
       await document.destroy();
       return error("invalid_page_range");
+    }
+    // MAX_PAGES bounds full-document work. An explicit selection remains
+    // bounded to five pages, so it can safely address later pages in a longer
+    // document without parsing every preceding page.
+    if (!selected && document.numPages > MAX_PAGES) {
+      await document.destroy();
+      return error("page_limit");
     }
     if (end > document.numPages) {
       await document.destroy();

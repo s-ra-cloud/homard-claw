@@ -29,7 +29,7 @@ const PDF_EXTRACTION_ERROR_MESSAGES: Readonly<Record<PdfExtractionErrorKind, str
   input_too_large: "The PDF exceeds the 40,000,000-byte extraction limit.",
   resource_limit: "PDF text extraction exceeded its resource limit.",
   page_limit: "The PDF exceeds the 100-page extraction limit.",
-  invalid_page_range: "PDF pages must be a page number or inclusive range (for example 7 or 7-9), between 1 and 100, selecting at most 5 pages.",
+  invalid_page_range: "PDF pages must be a positive page number or inclusive range (for example 107 or 107-111), selecting at most 5 pages.",
   page_out_of_range: "The requested PDF page or range does not exist in this document; no pages were returned.",
   encrypted: "The PDF is encrypted and cannot be read without a password.",
   scanned: "The PDF contains no extractable text; visual or image content cannot be read.",
@@ -69,12 +69,13 @@ export interface ExtractPdfTextOptions {
 
 export function parsePdfPages(value: unknown): { start: number; end: number } | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "string" || !/^[1-9]\d{0,2}(?:-[1-9]\d{0,2})?$/.test(value)) {
+  if (typeof value !== "string" || !/^[1-9]\d*(?:-[1-9]\d*)?$/.test(value)) {
     throw new PdfExtractionError("invalid_page_range");
   }
   const [start, last] = value.split("-").map(Number);
   const end = last ?? start!;
-  if (start! > end || end > 100 || end - start! >= 5) {
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) ||
+    start! > end || end - start! >= 5) {
     throw new PdfExtractionError("invalid_page_range");
   }
   return { start: start!, end };

@@ -180,7 +180,7 @@ describe("extractPdfText", () => {
     expect(blank).toContain("no extractable text");
   });
 
-  it.each(["0", "2-1", "1-6", "101", "1,2", "1.5", "", "2-100", " 2"])(
+  it.each(["0", "2-1", "1-6", "1,2", "1.5", "", "2-100", " 2", "9007199254740992"])(
     "rejects invalid selection %s before spawning", async (pdfPages) => {
       await expect(extractPdfText(pdfFixture([textPage("one")]), { pdfPages }))
         .rejects.toMatchObject({ kind: "invalid_page_range" });
@@ -269,6 +269,29 @@ describe("extractPdfText", () => {
   it("enforces input and page resource caps before returning document text", async () => {
     await expect(extractPdfText(pdfFixture(Array.from({ length: 101 }, () => "q Q")))).rejects.toMatchObject({
       kind: "page_limit",
+    } satisfies Partial<PdfExtractionError>);
+  });
+
+  it("reads bounded selections before and after page 100 in a longer PDF", async () => {
+    const pages = Array.from({ length: 105 }, (_, index) => {
+      if (index === 1) return textPage("Early selected page");
+      if (index === 104) return textPage("Later selected page");
+      return "q Q";
+    });
+    const bytes = pdfFixture(pages);
+
+    await expect(extractPdfText(bytes, { pdfPages: "2" })).resolves.toContain("Early selected page");
+    const later = await extractPdfText(bytes, { pdfPages: "105" });
+    expect(later).toContain("pages 105-105 of 105");
+    expect(later).toContain("--- Page 105");
+    expect(later).toContain("Later selected page");
+    expect(later).not.toContain("Early selected page");
+  });
+
+  it("rejects a targeted page beyond a longer document without returning a subset", async () => {
+    const bytes = pdfFixture(Array.from({ length: 101 }, () => "q Q"));
+    await expect(extractPdfText(bytes, { pdfPages: "102" })).rejects.toMatchObject({
+      kind: "page_out_of_range",
     } satisfies Partial<PdfExtractionError>);
   });
 
