@@ -735,8 +735,10 @@ export const ACTION_RESULT_TAIL_CHARS = 400;
 /** Worst-case size of one compacted entry, for budget preflight maths. */
 export const COMPACT_ACTION_ENTRY_MAX_CHARS =
   ACTION_RESULT_HEAD_CHARS + ACTION_RESULT_TAIL_CHARS + 200;
+/** Worst-case replay size for the current complete-PDF summary batch. */
+export const PDF_SUMMARY_ACTION_ENTRY_MAX_CHARS = 28_200;
 /** Hard budget for the whole replayed action-history section of a prompt. */
-export const ACTION_HISTORY_CHAR_BUDGET = 24_000;
+export const ACTION_HISTORY_CHAR_BUDGET = 32_000;
 /** Older entries collapse to their status line under this secondary budget. */
 const COLLAPSED_ENTRY_CHARS = 200;
 const COLLAPSED_SECTION_CHAR_BUDGET = 4_000;
@@ -748,6 +750,16 @@ const COLLAPSED_SECTION_CHAR_BUDGET = 4_000;
  * listing for a complete one.
  */
 export function compactActionEntry(entry: string): string {
+  // Complete-PDF summary batches are deliberately allowed a larger bounded
+  // result. Their extracted text is the material the next provider turn must
+  // summarize, so reducing it to the ordinary 1,200/400 window would turn a
+  // 25-page batch back into many tiny continuation rounds.
+  if (/^\[Google Drive\] google_drive\.read_pdf_summary_batch\b/.test(entry)) {
+    const summaryKeep = 28_000;
+    if (entry.length <= summaryKeep + 160) return entry;
+    const omitted = entry.length - summaryKeep;
+    return `${entry.slice(0, 25_000)}\n…[${omitted} characters omitted from the middle of this result; the beginning and end are verbatim]…\n${entry.slice(-3_000)}`;
+  }
   const keep = ACTION_RESULT_HEAD_CHARS + ACTION_RESULT_TAIL_CHARS;
   // Slightly over-budget entries pass verbatim: an elision marker longer
   // than the text it removes would make the prompt bigger, not smaller.

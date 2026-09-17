@@ -80,6 +80,7 @@ import {
 } from "./connected-apps/authorize";
 import {
   COMPACT_ACTION_ENTRY_MAX_CHARS,
+  PDF_SUMMARY_ACTION_ENTRY_MAX_CHARS,
   claimApprovedAction,
   compactActionEntry,
   compactActionHistoryForPrompt,
@@ -163,7 +164,7 @@ const inFlight = new Map<string, AbortController>();
  * never completes with unrun work.
  */
 const MAX_ACTION_ROUNDS = 8;
-/** Dedicated ceiling for consecutive five-page PDF summary traversal rounds. */
+/** Dedicated ceiling for consecutive bounded PDF summary traversal rounds. */
 const MAX_LONG_PDF_SUMMARY_ROUNDS = 64;
 const MAX_ACTIONS_PER_ROUND = 3;
 /**
@@ -2311,7 +2312,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
         // for. Returns false — after recording the honest note — when no
         // further round is affordable.
         const budgetAllowsNextRound = async (
-          pendingActionCount: number,
+          pendingReplayChars: number,
           extraPromptChars = 0,
         ): Promise<boolean> => {
           if (budgetCeilingCents === null) return true;
@@ -2353,7 +2354,7 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
           const nextPromptTokens = estimatePromptTokens(
             system.length +
               promptFor().length +
-              pendingActionCount * COMPACT_ACTION_ENTRY_MAX_CHARS +
+              pendingReplayChars +
               extraPromptChars,
           );
           const nextPromptCents =
@@ -2425,12 +2426,21 @@ export async function runTask({ task, agent }: ClaimedTask): Promise<void> {
             `ROLLING PDF SUMMARY FROM THE AGENT (retain and refine this while unread pages remain):\n${cleaned.trim()}`,
           );
         }
+        const requestsForBudget = onlyLongPdfSummaryRequests
+          ? validRequests.slice(0, 1)
+          : validRequests.slice(0, MAX_ACTIONS_PER_ROUND);
+        const pendingReplayChars = requestsForBudget.reduce(
+          (total, request) =>
+            total +
+            (request.operation === "google_drive.read_pdf_summary_batch"
+              ? PDF_SUMMARY_ACTION_ENTRY_MAX_CHARS
+              : COMPACT_ACTION_ENTRY_MAX_CHARS),
+          0,
+        );
 
         if (
           !(await budgetAllowsNextRound(
-            onlyLongPdfSummaryRequests
-              ? 1
-              : Math.min(validRequests.length, MAX_ACTIONS_PER_ROUND),
+            pendingReplayChars,
             // The over-per-round marker is appended below, after this gate,
             // but it is already certain — price it in (+2 for the joiner).
             validRequests.length > MAX_ACTIONS_PER_ROUND

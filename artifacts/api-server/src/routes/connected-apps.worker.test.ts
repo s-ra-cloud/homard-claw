@@ -90,6 +90,7 @@ import { ApprovalDecisionError, decideApproval } from "../approvals";
 import { OVER_PER_ROUND_NOTE, claimNextTask, runTask } from "../worker";
 import {
   COMPACT_ACTION_ENTRY_MAX_CHARS,
+  PDF_SUMMARY_ACTION_ENTRY_MAX_CHARS,
   claimApprovedAction,
   executeClaimedAction,
 } from "../connected-apps/actions";
@@ -1295,6 +1296,32 @@ describe("malformed action recovery", () => {
     params: { query: "from:alice" },
   })}</app_action>`;
 
+  it("recovers from a metered malformed-only response without crashing", async () => {
+    const agent = await createAgent("Metered Garbled", [
+      { app: "gmail", accessLevel: "read" },
+    ]);
+    const task = await insertRunningTask(agent.id, { budgetCents: 100 });
+    queueCompletions([
+      completion(BAD_JSON_BLOCK, {
+        prompt_tokens: 100,
+        completion_tokens: 20,
+      }),
+      completion("No action needed after correction.", {
+        prompt_tokens: 100,
+        completion_tokens: 20,
+      }),
+    ]);
+
+    await runTask({ task, agent: await loadAgent(agent.id) });
+
+    expect(completionCalls()).toHaveLength(2);
+    expect(executeMock).not.toHaveBeenCalled();
+    const done = await getTaskRow(task.id);
+    expect(done?.status).toBe("failed");
+    expect(done?.errorKind).toBe("malformed_app_actions");
+    expect(done?.errorMessage).not.toContain("ReferenceError");
+  });
+
   it("fails the task when every round's action request stays malformed", async () => {
     const agent = await createAgent("Garbled", [
       { app: "gmail", accessLevel: "read" },
@@ -1917,6 +1944,75 @@ describe("bounded action-result context", () => {
     const done = await getTaskRow(task.id);
     expect(done?.status).toBe("completed");
     expect(done?.output).toContain("cannot fund another round");
+  });
+
+  it("prices a mixed PDF-summary round using each action's replay bound", async () => {
+    const agent = await createAgent("Mixed PDF Budget", [
+      { app: "google_drive", accessLevel: "read" },
+      { app: "gmail", accessLevel: "read" },
+    ]);
+    executeMock.mockResolvedValue({ ok: true, summary: "bounded result" });
+    const mixedBlocks = [
+      `<app_action>${JSON.stringify({
+        operation: "google_drive.read_pdf_summary_batch",
+        params: { fileId: "long-pdf", startPage: 1 },
+      })}</app_action>`,
+      `<app_action>${JSON.stringify({
+        operation: "gmail.search",
+        params: { query: "from:alice" },
+      })}</app_action>`,
+    ].join("\n");
+
+    const probe = await insertRunningTask(agent.id);
+    queueCompletions([completion(mixedBlocks), completion("probe done")]);
+    await runTask({ task: probe, agent: await loadAgent(agent.id) });
+    const probeBody = JSON.parse(
+      String(
+        (completionCalls()[0] as [unknown, { body?: string }])[1]?.body ?? "{}",
+      ),
+    ) as { messages: Array<{ role: string; content: string }> };
+    const sysChars = probeBody.messages.find((m) => m.role === "system")!
+      .content.length;
+    const firstPromptChars = probeBody.messages.find((m) => m.role === "user")!
+      .content.length;
+    fetchMock.mockClear();
+    executeMock.mockClear();
+
+    const staleTokens = estimatePromptTokens(
+      sysChars + firstPromptChars + 2 * COMPACT_ACTION_ENTRY_MAX_CHARS,
+    );
+    const actualTokens = estimatePromptTokens(
+      sysChars +
+        firstPromptChars +
+        PDF_SUMMARY_ACTION_ENTRY_MAX_CHARS +
+        COMPACT_ACTION_ENTRY_MAX_CHARS,
+    );
+    expect(actualTokens - staleTokens).toBeGreaterThan(1_000);
+
+    const BUDGET_CENTS = 5;
+    const COMPLETION_TOKENS = 100;
+    const midTokens = (staleTokens + actualTokens) / 2;
+    const spentTarget = BUDGET_CENTS - 0.001 - midTokens * 1e-4;
+    const promptTokensUsage = Math.round(
+      (spentTarget - COMPLETION_TOKENS * 1e-3) / 1e-4,
+    );
+    const task = await insertRunningTask(agent.id, {
+      budgetCents: BUDGET_CENTS,
+    });
+    queueCompletions([
+      completion(mixedBlocks, {
+        prompt_tokens: promptTokensUsage,
+        completion_tokens: COMPLETION_TOKENS,
+      }),
+    ]);
+
+    await runTask({ task, agent: await loadAgent(agent.id) });
+
+    expect(completionCalls()).toHaveLength(1);
+    expect(executeMock).not.toHaveBeenCalled();
+    expect((await getTaskRow(task.id))?.output).toContain(
+      "remaining budget cannot fund another round",
+    );
   });
 });
 

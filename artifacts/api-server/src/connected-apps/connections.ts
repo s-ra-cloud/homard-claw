@@ -38,6 +38,7 @@ import {
 import {
   readDriveFileTransport,
   MAX_DRIVE_DOCUMENT_CHARS,
+  PDF_SUMMARY_DOCUMENT_CHUNK_CHARS,
   type DriveReadByteDetails,
   type DriveReadFailureDetails,
   type DriveTokenOptions,
@@ -164,6 +165,16 @@ export async function connectionStatus(
 
 /** Longest result payload ever fed back to a model or stored on an action. */
 const RESULT_CHAR_LIMIT = 4_000;
+/**
+ * Complete-PDF traversal is an explicitly bounded, summary-only operation.
+ * Give its page-range result enough room to avoid turning dense pages into
+ * dozens of 1,400-character continuation rounds. Ordinary Drive reads keep
+ * the smaller result ceiling above.
+ */
+// Reserve 8k UTF-16 units for bounded filename/MIME metadata, continuation,
+// revision/coverage markers, and explicit truncation notices.
+const PDF_SUMMARY_RESULT_CHAR_LIMIT =
+  PDF_SUMMARY_DOCUMENT_CHUNK_CHARS + 8_000;
 
 /** The shared PDF service is also capped here as a defence in depth boundary. */
 const DRIVE_EXTRACTED_TEXT_CHAR_LIMIT = MAX_DRIVE_DOCUMENT_CHARS;
@@ -846,7 +857,7 @@ async function driveReadFile(
       fileId: String(params.fileId),
       pdfPages: params.startPage === undefined
         ? params.pdfPages as string | undefined
-        : `${String(params.startPage)}-${Number(params.startPage) + 4}`,
+        : `${String(params.startPage)}-${Number(params.startPage) + 24}`,
       clampPdfPageRangeEnd:
         params.startPage !== undefined || params.revisionToken !== undefined,
       pdfRevisionToken: params.revisionToken as string | undefined,
@@ -921,6 +932,8 @@ async function driveReadFile(
     result.mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     ? boundDriveExtractedText(result.text)
     : result.text;
+  const isPdfSummaryBatch = params.startPage !== undefined ||
+    params.revisionToken !== undefined;
   const summary = formatDriveDocumentSummary(
     result.name,
     params.fileId,
@@ -928,6 +941,7 @@ async function driveReadFile(
     text,
     result.textStart,
     result.continuation,
+    isPdfSummaryBatch ? PDF_SUMMARY_RESULT_CHAR_LIMIT : RESULT_CHAR_LIMIT,
   );
   const coverage = result.pdfCoverage
     ? result.pdfCoverage.extractionTruncated
@@ -939,16 +953,27 @@ async function driveReadFile(
       : `\n\n[PDF SUMMARY PROGRESS: fully read pages ${result.pdfCoverage.startPage}-${result.pdfCoverage.endPage} of ${result.pdfCoverage.totalPages}. To continue complete coverage, call google_drive.read_pdf_summary_batch with the same fileId, startPage=${result.pdfCoverage.nextPage}, and revisionToken="${result.pdfCoverage.revisionToken}". Pages ${result.pdfCoverage.nextPage}-${result.pdfCoverage.totalPages} remain unread. PDF_SUMMARY_NEXT_PAGE=${result.pdfCoverage.nextPage} PDF_SUMMARY_REVISION="${result.pdfCoverage.revisionToken}"]`
     : "";
   const summaryWithCoverage = coverage
-    ? summary.length + coverage.length <= RESULT_CHAR_LIMIT
+    ? summary.length + coverage.length <=
+        (isPdfSummaryBatch ? PDF_SUMMARY_RESULT_CHAR_LIMIT : RESULT_CHAR_LIMIT)
       ? `${summary}${coverage}`
       : `${takeUnicodeScalarsWithinUtf16Units(
           summary,
-          Math.max(0, RESULT_CHAR_LIMIT - coverage.length - 110),
+          Math.max(
+            0,
+            (isPdfSummaryBatch
+              ? PDF_SUMMARY_RESULT_CHAR_LIMIT
+              : RESULT_CHAR_LIMIT) -
+              coverage.length -
+              110,
+          ),
         )}\n[Batch text truncated to preserve complete page-coverage status.]${coverage}`
     : summary;
   return {
     ok: true,
-    summary: truncateDriveActionResult(summaryWithCoverage),
+    summary: truncateDriveActionResult(
+      summaryWithCoverage,
+      isPdfSummaryBatch ? PDF_SUMMARY_RESULT_CHAR_LIMIT : RESULT_CHAR_LIMIT,
+    ),
   };
 }
 
@@ -4506,6 +4531,7 @@ export function formatDriveDocumentSummary(
   text: string,
   textStartOrContinuation: number | string = 0,
   continuation?: string,
+  resultCharLimit = RESULT_CHAR_LIMIT,
 ): string {
   const textStart = typeof textStartOrContinuation === "number"
     ? textStartOrContinuation
@@ -4520,15 +4546,15 @@ export function formatDriveDocumentSummary(
     : "";
   const omitted = textStart > 0
     ? "\n[Earlier content omitted from this bounded result; continue with the supplied cursor.]"
-    : "\n[Drive action result truncated at 4000 characters; additional extracted content was omitted.]";
-  const available = RESULT_CHAR_LIMIT - header.length - more.length;
+    : `\n[Drive action result truncated at ${resultCharLimit} characters; additional extracted content was omitted.]`;
+  const available = resultCharLimit - header.length - more.length;
   if (available <= 0) {
     // Filename and MIME metadata are bounded above, but preserve the cursor
     // even if a future provider supplies an unexpectedly long MIME type.
     const compactHeader = `File: "${takeUnicodeScalarsWithinUtf16Units(filename, 80)}"\nContent:\n`;
     const compactAvailable = Math.max(
       0,
-      RESULT_CHAR_LIMIT - compactHeader.length - omitted.length - more.length,
+      resultCharLimit - compactHeader.length - omitted.length - more.length,
     );
     return `${compactHeader}${takeUnicodeScalarsWithinUtf16Units(text, compactAvailable)}${omitted}${more}`;
   }
@@ -4537,10 +4563,13 @@ export function formatDriveDocumentSummary(
   return `${header}${takeUnicodeScalarsWithinUtf16Units(text, contentBudget)}${omitted}${more}`;
 }
 
-function truncateDriveActionResult(summary: string): string {
-  if (summary.length <= RESULT_CHAR_LIMIT) return summary;
+function truncateDriveActionResult(
+  summary: string,
+  resultCharLimit = RESULT_CHAR_LIMIT,
+): string {
+  if (summary.length <= resultCharLimit) return summary;
   const marker =
-    "\n[Drive action result truncated at 4000 characters; additional extracted content was omitted.]";
-  const headLength = Math.max(0, RESULT_CHAR_LIMIT - marker.length);
+    `\n[Drive action result truncated at ${resultCharLimit} characters; additional extracted content was omitted.]`;
+  const headLength = Math.max(0, resultCharLimit - marker.length);
   return `${takeUnicodeScalarsWithinUtf16Units(summary, headLength)}${marker}`;
 }

@@ -308,6 +308,35 @@ describe("extractPdfText", () => {
     expect(later).not.toContain("Early selected page");
   });
 
+  it("reads 25-page summary ranges across a 600-page PDF in the real worker", async () => {
+    const pages = Array.from({ length: 600 }, (_, index) => {
+      if (index === 0) return textPage("Document opening");
+      if (index === 24) return textPage("First summary range end");
+      if (index === 575) return textPage("Final summary range start");
+      if (index === 599) return textPage("Document conclusion");
+      return "q Q";
+    });
+    const bytes = pdfFixture(pages);
+
+    const first = await extractPdfText(bytes, {
+      pdfPages: "1-25",
+      clampPageRangeEnd: true,
+    });
+    expect(first).toContain("pages 1-25 of 600");
+    expect(first).toContain("Document opening");
+    expect(first).toContain("First summary range end");
+    expect(first).not.toContain("Final summary range start");
+
+    const final = await extractPdfText(bytes, {
+      pdfPages: "576-600",
+      clampPageRangeEnd: true,
+    });
+    expect(final).toContain("pages 576-600 of 600");
+    expect(final).toContain("Final summary range start");
+    expect(final).toContain("Document conclusion");
+    expect(final).not.toContain("First summary range end");
+  });
+
   it("rejects a targeted page beyond a longer document without returning a subset", async () => {
     const bytes = pdfFixture(Array.from({ length: 101 }, () => "q Q"));
     await expect(extractPdfText(bytes, { pdfPages: "102" })).rejects.toMatchObject({

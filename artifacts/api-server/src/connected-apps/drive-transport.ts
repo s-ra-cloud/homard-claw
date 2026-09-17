@@ -29,6 +29,8 @@ const MAX_DRIVE_PDF_EXTRACTION_SESSION_BYTES =
   MAX_DRIVE_PDF_READ_BODY_BYTES * MAX_DRIVE_PDF_EXTRACTION_SESSIONS;
 // Scalar count; conservative enough for astral text plus action metadata.
 export const DEFAULT_DRIVE_DOCUMENT_CHUNK_CHARS = 1_400;
+/** Trusted complete-PDF traversal content budget; ordinary reads cannot select it. */
+export const PDF_SUMMARY_DOCUMENT_CHUNK_CHARS = 20_000;
 /** Metadata and refusal payloads do not need the file download allowance. */
 const MAX_DRIVE_CONTROL_BODY_BYTES = 2 * 1024 * 1024;
 
@@ -1300,21 +1302,28 @@ function documentRange(
   text: string,
   offset: number,
   requestedLimit: number | undefined,
+  maxChunkChars = DEFAULT_DRIVE_DOCUMENT_CHUNK_CHARS,
+  maxChunkUtf16Units?: number,
 ): { text: string; nextOffset: number | null; valid: boolean; start: number } {
   const limit = requestedLimit === undefined
-    ? DEFAULT_DRIVE_DOCUMENT_CHUNK_CHARS
-    : Math.min(requestedLimit, DEFAULT_DRIVE_DOCUMENT_CHUNK_CHARS);
+    ? maxChunkChars
+    : Math.min(requestedLimit, maxChunkChars);
   let scalar = 0;
   let start = -1;
   let end = -1;
   for (let index = 0; index < text.length;) {
     if (scalar === offset) start = index;
-    if (start >= 0 && scalar === offset + limit) {
+    const codePoint = text.codePointAt(index);
+    const codePointUnits = codePoint !== undefined && codePoint > 0xffff ? 2 : 1;
+    if (start >= 0 && (
+      scalar === offset + limit ||
+      (maxChunkUtf16Units !== undefined &&
+        index - start + codePointUnits > maxChunkUtf16Units)
+    )) {
       end = index;
       break;
     }
-    const codePoint = text.codePointAt(index);
-    index += codePoint !== undefined && codePoint > 0xffff ? 2 : 1;
+    index += codePointUnits;
     scalar += 1;
   }
   if (start < 0 && scalar === offset) start = text.length;
@@ -1379,7 +1388,7 @@ export async function readDriveFileTransport(
   }
   const effectivePdfPages = input.pdfPages ?? cursor?.pdfPages ?? undefined;
   try {
-    parsePdfPages(effectivePdfPages);
+    parsePdfPages(effectivePdfPages, input.clampPdfPageRangeEnd ? 25 : 5);
   } catch {
     return pdfExtractionFailure(new PdfExtractionError("invalid_page_range").message);
   }
@@ -1651,7 +1660,17 @@ export async function readDriveFileTransport(
             message: "The Google Drive file changed while it was being read; retry the read.",
           });
         }
-        const range = documentRange(text, offset, requestedLimit);
+        const range = documentRange(
+          text,
+          offset,
+          requestedLimit,
+          input.clampPdfPageRangeEnd
+            ? PDF_SUMMARY_DOCUMENT_CHUNK_CHARS
+            : DEFAULT_DRIVE_DOCUMENT_CHUNK_CHARS,
+          input.clampPdfPageRangeEnd
+            ? PDF_SUMMARY_DOCUMENT_CHUNK_CHARS
+            : undefined,
+        );
         if (!range.valid) {
           return finish({
             ok: false,

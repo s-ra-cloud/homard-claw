@@ -48,6 +48,73 @@ function pdfFixture(text: string, padding = 0): Uint8Array {
 }
 
 describe("readDriveFileTransport", () => {
+  it("returns larger text chunks only for trusted complete-PDF traversal", async () => {
+    const extracted =
+      "[PDF selection: pages 1-25 of 600. Only this range was read; pages outside it were not read. Text only; visual/image content omitted.]\n" +
+      "dense text ".repeat(3_000);
+    const read = async (summary: boolean) => {
+      let calls = 0;
+      return readDriveFileTransport({
+        workspaceId: "workspace-chunks",
+        fileId: "dense-pdf",
+        pdfPages: summary ? "1-25" : "1-5",
+        clampPdfPageRangeEnd: summary,
+        resolveToken: async () => "token",
+        extractPdf: async () => extracted,
+        fetchImpl: async () => ++calls !== 2
+          ? response(JSON.stringify({
+              id: "dense-pdf",
+              name: "dense.pdf",
+              mimeType: "application/pdf",
+              modifiedTime: "2026-09-17T10:00:00.000Z",
+            }))
+          : new Response("%PDF-1.7"),
+      });
+    };
+
+    const ordinary = await read(false);
+    const summary = await read(true);
+    expect(ordinary.ok).toBe(true);
+    expect(summary.ok).toBe(true);
+    if (ordinary.ok && summary.ok) {
+      expect(Array.from(ordinary.text)).toHaveLength(1_400);
+      expect(Array.from(summary.text)).toHaveLength(20_000);
+      expect(ordinary.continuation).toEqual(expect.any(String));
+      expect(summary.continuation).toEqual(expect.any(String));
+    }
+  });
+
+  it("advances a summary continuation only past complete UTF-16 content", async () => {
+    const body = "😀".repeat(15_000);
+    const extracted =
+      "[PDF selection: pages 1-25 of 600. Only this range was read; pages outside it were not read. Text only; visual/image content omitted.]\n" +
+      body;
+    let calls = 0;
+    const result = await readDriveFileTransport({
+      workspaceId: "workspace-unicode-chunks",
+      fileId: "unicode-pdf",
+      pdfPages: "1-25",
+      clampPdfPageRangeEnd: true,
+      resolveToken: async () => "token",
+      extractPdf: async () => extracted,
+      fetchImpl: async () => ++calls !== 2
+        ? response(JSON.stringify({
+            id: "unicode-pdf",
+            name: "unicode.pdf",
+            mimeType: "application/pdf",
+            modifiedTime: "2026-09-17T10:00:00.000Z",
+          }))
+        : new Response("%PDF-1.7"),
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.text.length).toBeLessThanOrEqual(20_000);
+      expect(result.text).not.toMatch(/[\uD800-\uDBFF]$/);
+      expect(result.continuation).toEqual(expect.any(String));
+    }
+  });
+
   it("reports exact coverage and next page for bounded PDF summary batches", async () => {
     let calls = 0;
     const extractPdf = vi.fn(async (_bytes, options?: ExtractPdfTextOptions) => {

@@ -184,7 +184,7 @@ export const APP_OPERATIONS: AppOperation[] = [
     app: "google_drive",
     level: "read",
     description:
-      "Read a complete PDF sequentially in bounded five-page batches. Params: fileId; startPage for a new batch (1 first, then the exact nextPage reported), OR continuation when more text remains in the current batch; rollingSummary (optional bounded working summary, strongly recommended after the first call). Never advance pages until the current batch reports complete. The final batch is clamped to the document end. Never claim unread or image-only pages were covered. At most 64 reads run per task segment; further work requires owner-approved continuation.",
+      "Read a complete PDF sequentially in bounded summary batches of up to 25 pages. Params: fileId; startPage for a new batch (1 first, then the exact nextPage reported), OR continuation when more text remains in the current batch; rollingSummary (optional bounded working summary, strongly recommended after the first call). Dense batches may require text continuations before pages advance. Never advance pages until the current batch reports complete. The final batch is clamped to the document end. Never claim unread or image-only pages were covered. At most 64 reads run per task segment; further work requires owner-approved continuation.",
     params: [
       str("fileId", true, 200),
       num("startPage", false),

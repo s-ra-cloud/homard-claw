@@ -382,6 +382,18 @@ describe("action history compaction", () => {
     expect(compactActionEntry(entry)).toBe(entry);
   });
 
+  it("keeps a bounded complete-PDF summary result without trusting document text", () => {
+    const summaryEntry =
+      `[Google Drive] google_drive.read_pdf_summary_batch (Drive PDF report summary) → SUCCESS:\n${"p".repeat(27_000)}`;
+    expect(compactActionEntry(summaryEntry)).toBe(summaryEntry);
+
+    const ordinaryEntry =
+      `[Google Drive] google_drive.read_file (Drive file report) → SUCCESS:\n` +
+      `untrusted text mentions google_drive.read_pdf_summary_batch ${"x".repeat(20_000)}`;
+    expect(compactActionEntry(ordinaryEntry).length)
+      .toBeLessThanOrEqual(COMPACT_ACTION_ENTRY_MAX_CHARS);
+  });
+
   it("keeps newest entries detailed, collapses older ones, and counts the oldest out loud", () => {
     // 150 large entries — far beyond every budget tier.
     const entries = Array.from(

@@ -26,6 +26,22 @@ describe("google_drive.read_file production diagnostics", () => {
     expect(summary).not.toMatch(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
   });
 
+  it("allows a larger bounded result only for complete-PDF summary batches", () => {
+    const summary = formatDriveDocumentSummary(
+      "long.pdf",
+      "fallback",
+      "application/pdf",
+      "page text ".repeat(3_000),
+      0,
+      "summary-cursor",
+      28_000,
+    );
+    expect(summary.length).toBeLessThanOrEqual(28_000);
+    expect(summary.length).toBeGreaterThan(4_000);
+    expect(summary).toContain('continuation="summary-cursor"');
+    expect(summary).toContain("page text");
+  });
+
   it("truncates mixed BMP and astral filenames at a scalar boundary", () => {
     const filename = `${"a".repeat(179)}😀tail`;
     const summary = formatDriveDocumentSummary(

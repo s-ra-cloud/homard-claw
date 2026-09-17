@@ -72,15 +72,23 @@ export interface ExtractPdfTextOptions {
   deadlineAt?: number;
 }
 
-export function parsePdfPages(value: unknown): { start: number; end: number } | undefined {
+export function parsePdfPages(
+  value: unknown,
+  maxSelectedPages = 5,
+): { start: number; end: number } | undefined {
   if (value === undefined) return undefined;
+  if (!Number.isSafeInteger(maxSelectedPages) ||
+    maxSelectedPages < 1 ||
+    maxSelectedPages > PDF_EXTRACTION_LIMITS.maxSummaryPages) {
+    throw new PdfExtractionError("invalid_page_range");
+  }
   if (typeof value !== "string" || !/^[1-9]\d*(?:-[1-9]\d*)?$/.test(value)) {
     throw new PdfExtractionError("invalid_page_range");
   }
   const [start, last] = value.split("-").map(Number);
   const end = last ?? start!;
   if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) ||
-    start! > end || end - start! >= 5) {
+    start! > end || end - start! >= maxSelectedPages) {
     throw new PdfExtractionError("invalid_page_range");
   }
   return { start: start!, end };
@@ -89,6 +97,7 @@ export function parsePdfPages(value: unknown): { start: number; end: number } | 
 export const PDF_EXTRACTION_LIMITS = {
   maxInputBytes: 40_000_000,
   maxPages: 100,
+  maxSummaryPages: 25,
   maxOutputChars: 1_500_000,
   maxConcurrent: 2,
   maxQueued: 4,
@@ -290,6 +299,7 @@ function extractInChild(
   signal: AbortSignal | undefined,
   deadlineAt: number,
   maxInputBytes: number,
+  maxSelectedPages: number,
   pages?: { start: number; end: number },
   clampPageRangeEnd = false,
 ): Promise<string> {
@@ -309,6 +319,7 @@ function extractInChild(
       "--disable-wasm-trap-handler",
       workerPath(),
       String(maxInputBytes),
+      String(maxSelectedPages),
       ...(pages ? [String(pages.start), String(pages.end)] : []),
       ...(pages && clampPageRangeEnd ? ["clamp-end"] : []),
     ], {
@@ -448,7 +459,10 @@ export async function extractPdfText(
   bytes: Uint8Array,
   options: ExtractPdfTextOptions = {},
 ): Promise<string> {
-  const pages = parsePdfPages(options.pdfPages);
+  const maxSelectedPages = options.clampPageRangeEnd === true
+    ? PDF_EXTRACTION_LIMITS.maxSummaryPages
+    : 5;
+  const pages = parsePdfPages(options.pdfPages, maxSelectedPages);
   const inputLimit = Math.min(
     PDF_EXTRACTION_LIMITS.maxInputBytes,
     Number.isFinite(options.maxInputBytes) && options.maxInputBytes! >= 0
@@ -465,6 +479,7 @@ export async function extractPdfText(
       options.signal,
       deadlineAt,
       inputLimit,
+      maxSelectedPages,
       pages,
       options.clampPageRangeEnd === true,
     );

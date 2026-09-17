@@ -21,11 +21,11 @@ Large extraction must remain linear in output size, and the isolated-worker prot
 
 **How to apply:** when raising extraction limits, verify large non-ASCII results across the process boundary and keep output accounting incremental.
 
-Complete long-PDF summaries must advance only after every bounded text continuation for the current page batch is drained. Bind all batches to one stable, workspace-scoped file revision, and stop with explicit omissions if extraction truncates.
+Complete long-PDF summaries must advance only after every bounded text continuation for the current page batch is drained. Direct reads stay small; the trusted summary path may use larger page and text chunks, with final-result space reserved for metadata.
 
-**Why:** a five-page parser selection can still exceed the per-action text window or the extractor output ceiling. Treating page selection as page coverage silently skips dense text, while reading changing revisions can combine different documents into one summary.
+**Why:** small public chunks make 600-page summaries exceed the round ceiling, but formatting a full internal chunk into an equally sized action result silently skips the truncated suffix when the cursor advances. Changing revisions can also combine different documents.
 
-**How to apply:** keep direct targeted ranges exact; use signed revision-bound traversal state, persist rolling summaries between action rounds, enforce contiguous next-page requests, and never convert parser truncation into complete coverage.
+**How to apply:** keep direct targeted ranges exact; give summary-only chunks an independently validated hard cap and a larger replay envelope; bound Unicode text without splitting surrogates; use signed revision state, contiguous requests, and explicit omissions.
 
 Retained PDF bytes may be reused only as a short-lived active-summary session bound to workspace, task, file, and exact revision. Each parser call must still start a fresh isolated child with the existing page, memory, byte, timeout, and cancellation bounds.
 
