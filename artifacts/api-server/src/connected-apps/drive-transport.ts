@@ -16,8 +16,10 @@ import { extractPdfText, parsePdfPages, PdfExtractionError } from "../pdf/extrac
 import { extractDocxText, DocxExtractionError } from "../docx/extract";
 
 export const DEFAULT_DRIVE_READ_TIMEOUT_MS = 30_000;
-/** A read can be large, but never allows an unbounded response body. */
+/** Non-PDF Drive reads retain the original bounded response allowance. */
 export const MAX_DRIVE_READ_BODY_BYTES = 25_000_000;
+/** PDFs match the task attachment limit used by local uploads. */
+export const MAX_DRIVE_PDF_READ_BODY_BYTES = 40_000_000;
 /** Maximum extracted document range exposed through Drive continuation. */
 export const MAX_DRIVE_DOCUMENT_CHARS = 1_500_000;
 // Scalar count; conservative enough for astral text plus action metadata.
@@ -358,11 +360,13 @@ class BoundedStop extends Error {
   }
 }
 
-function bodyTooLargeFailure(): DriveReadTransportFailure {
+function bodyTooLargeFailure(
+  maxBytes = MAX_DRIVE_READ_BODY_BYTES,
+): DriveReadTransportFailure {
   return {
     ok: false,
     kind: "failed",
-    message: "Google Drive returned a file larger than the 25 MB read limit.",
+    message: `Google Drive returned a file larger than the ${maxBytes / 1_000_000} MB read limit.`,
   };
 }
 
@@ -598,7 +602,7 @@ async function boundedResponseBytes(
     if (reportBodyFailure) {
       reportFailure(state, { failureClass: "body_limit", stage: "body" });
     }
-    return bodyTooLargeFailure();
+    return bodyTooLargeFailure(maxBytes);
   }
 
   if (!response.body) {
@@ -609,7 +613,7 @@ async function boundedResponseBytes(
       if (reportBodyFailure) {
         reportFailure(state, { failureClass: "body_limit", stage: "body" });
       }
-      return bodyTooLargeFailure();
+      return bodyTooLargeFailure(maxBytes);
     }
     return bytes;
   }
@@ -680,6 +684,7 @@ async function requestDrivePdf(
   token: string,
   state: TransportState,
   fetchImpl: DriveFetch,
+  maxBytes: number,
 ): Promise<Uint8Array | DriveReadTransportFailure> {
   safeStage(state, "download");
   let response: Response;
@@ -743,7 +748,7 @@ async function requestDrivePdf(
 
   safeStage(state, "body");
   try {
-    const body = await boundedResponseBytes(response, state);
+    const body = await boundedResponseBytes(response, state, true, maxBytes);
     if (!(body instanceof Uint8Array) && !state.failureReported) {
       reportFailure(state, { failureClass: "transport", stage: "body" });
     }
@@ -1236,11 +1241,15 @@ export async function readDriveFileTransport(
       });
     }
     if (isPdfDownload(mimeType) || isDocxDownload(mimeType)) {
+      const maxDocumentBytes = isPdfDownload(mimeType)
+        ? MAX_DRIVE_PDF_READ_BODY_BYTES
+        : MAX_DRIVE_READ_BODY_BYTES;
       const pdf = await requestDrivePdf(
         `/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
         token,
         state,
         input.fetchImpl ?? fetch,
+        maxDocumentBytes,
       );
       if (!(pdf instanceof Uint8Array)) return finish(pdf);
 
@@ -1250,12 +1259,12 @@ export async function readDriveFileTransport(
           () => isPdfDownload(mimeType)
             ? (input.extractPdf ?? extractPdfText)(pdf, {
               signal: state.controller.signal,
-              maxInputBytes: MAX_DRIVE_READ_BODY_BYTES,
+              maxInputBytes: maxDocumentBytes,
               deadlineAt, pdfPages: effectivePdfPages,
             })
             : (input.extractDocx ?? extractDocxText)(pdf, {
               signal: state.controller.signal,
-              maxInputBytes: MAX_DRIVE_READ_BODY_BYTES,
+              maxInputBytes: maxDocumentBytes,
               deadlineAt,
             }),
           state,

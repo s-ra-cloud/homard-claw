@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ExtractPdfTextOptions } from "../pdf/extract";
 import {
   DEFAULT_DRIVE_READ_TIMEOUT_MS,
+  MAX_DRIVE_PDF_READ_BODY_BYTES,
   MAX_DRIVE_READ_BODY_BYTES,
   classifyDriveReadHttpFailure,
   readDriveFileTransport,
@@ -44,7 +45,7 @@ function pdfFixture(text: string, padding = 0): Uint8Array {
 }
 
 describe("readDriveFileTransport", () => {
-  it.each(["application/pdf", "text/plain", "application/vnd.google-apps.document"])(
+  it.each(["text/plain", "application/vnd.google-apps.document"])(
     "enforces the inclusive 25 MB boundary for %s with honest, missing and understated lengths",
     async (mimeType) => {
       expect(MAX_DRIVE_READ_BODY_BYTES).toBe(25_000_000);
@@ -90,6 +91,44 @@ describe("readDriveFileTransport", () => {
     },
   );
 
+  it("allows Drive PDFs up to 40 MB and rejects larger ones", async () => {
+    expect(MAX_DRIVE_PDF_READ_BODY_BYTES).toBe(40_000_000);
+    for (const [length, rejected] of [
+      ["40000000", false],
+      ["40000001", true],
+    ] as const) {
+      let calls = 0;
+      const extractPdf = vi.fn(async (_bytes, options?: ExtractPdfTextOptions) => {
+        expect(options?.maxInputBytes).toBe(MAX_DRIVE_PDF_READ_BODY_BYTES);
+        return "PDF text";
+      });
+      const result = await readDriveFileTransport({
+        workspaceId: "pdf-size-workspace",
+        fileId: "pdf-file",
+        resolveToken: async () => "token",
+        extractPdf,
+        fetchImpl: async () =>
+          ++calls === 1
+            ? response(JSON.stringify({ mimeType: "application/pdf" }))
+            : new Response("%PDF-1.7", {
+                headers: { "content-length": length },
+              }),
+      });
+      if (rejected) {
+        expect(result).toEqual({
+          ok: false,
+          kind: "failed",
+          message:
+            "Google Drive returned a file larger than the 40 MB read limit.",
+        });
+        expect(extractPdf).not.toHaveBeenCalled();
+      } else {
+        expect(result.ok).toBe(true);
+        expect(extractPdf).toHaveBeenCalledOnce();
+      }
+    }
+  });
+
   it("retains the smaller metadata response allowance", async () => {
     const result = await readDriveFileTransport({
       workspaceId: "workspace", fileId: "file", resolveToken: async () => "token",
@@ -112,7 +151,7 @@ describe("readDriveFileTransport", () => {
     expect(result.ok).toBe(true);
     expect(resolveToken.mock.calls[0]?.[0]).toBe("selected-workspace");
     expect(extractPdf.mock.calls[0]?.[1]).toMatchObject({
-      pdfPages: "7-9", maxInputBytes: MAX_DRIVE_READ_BODY_BYTES,
+      pdfPages: "7-9", maxInputBytes: MAX_DRIVE_PDF_READ_BODY_BYTES,
       signal: expect.any(AbortSignal), deadlineAt: expect.any(Number),
     });
   });
@@ -383,7 +422,7 @@ describe("readDriveFileTransport", () => {
     );
     expect(extractionInput?.options?.signal).toBeInstanceOf(AbortSignal);
     expect(extractionInput?.options?.maxInputBytes).toBe(
-      MAX_DRIVE_READ_BODY_BYTES,
+      MAX_DRIVE_PDF_READ_BODY_BYTES,
     );
     expect(extractionInput?.options?.deadlineAt).toEqual(expect.any(Number));
   });
@@ -529,7 +568,7 @@ describe("readDriveFileTransport", () => {
     expect(extractorSawAbort).toBe(true);
   });
 
-  it("does not invoke extraction after a PDF exceeds the 25 MB download limit", async () => {
+  it("does not invoke extraction after a PDF exceeds the 40 MB download limit", async () => {
     let calls = 0;
     let extractionCalled = false;
     const result = await readDriveFileTransport({
@@ -540,7 +579,11 @@ describe("readDriveFileTransport", () => {
         calls += 1;
         return calls === 1
           ? response(JSON.stringify({ mimeType: "application/pdf" }))
-          : new Response("x".repeat(MAX_DRIVE_READ_BODY_BYTES + 1));
+          : new Response("x", {
+              headers: {
+                "content-length": String(MAX_DRIVE_PDF_READ_BODY_BYTES + 1),
+              },
+            });
       },
       extractPdf: async () => {
         extractionCalled = true;
@@ -551,7 +594,7 @@ describe("readDriveFileTransport", () => {
     expect(result).toEqual({
       ok: false,
       kind: "failed",
-      message: "Google Drive returned a file larger than the 25 MB read limit.",
+      message: "Google Drive returned a file larger than the 40 MB read limit.",
     });
     expect(extractionCalled).toBe(false);
   });
