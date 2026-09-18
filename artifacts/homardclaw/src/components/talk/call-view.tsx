@@ -65,9 +65,11 @@ import { apiErrorMessage } from "@/lib/api-error";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Bug,
+  Check,
   CheckCircle2,
   AlertTriangle,
   ChevronLeft,
+  Copy,
   Loader2,
   Mic,
   MicOff,
@@ -457,6 +459,26 @@ export function CallView({
   const [turns, setTurns] = useState<Turn[]>([]);
   const [phase, setPhase] = useState<Phase>("idle");
   const [micError, setMicError] = useState<string | null>(null);
+  const [copiedTurnKey, setCopiedTurnKey] = useState<string | null>(null);
+
+  const copyTurnText = useCallback(
+    async (turn: Turn) => {
+      try {
+        await navigator.clipboard.writeText(turn.text);
+        setCopiedTurnKey(turn.key);
+        window.setTimeout(() => {
+          setCopiedTurnKey((current) => (current === turn.key ? null : current));
+        }, 1500);
+      } catch {
+        toast({
+          title: "Could not copy",
+          description: "Your browser blocked clipboard access.",
+          variant: "destructive",
+        });
+      }
+    },
+    [toast],
+  );
   const [flowError, setFlowError] = useState<string | null>(null);
   // Persisted to sessionStorage (not just component state): the office's
   // responsive layout unmounts this component's whole iframe when the
@@ -1489,8 +1511,34 @@ export function CallView({
                 : "mr-auto border-border bg-card"
             }`}
           >
-            <span className="block text-[9px] font-mono uppercase opacity-70">
-              {turn.role === "user" ? "You" : agent.name}
+            <span className="flex items-center justify-between gap-2">
+              <span className="text-[9px] font-mono uppercase opacity-70">
+                {turn.role === "user" ? "You" : agent.name}
+              </span>
+              <button
+                type="button"
+                onClick={() => copyTurnText(turn)}
+                className="shrink-0 opacity-70 hover:opacity-100"
+                aria-label={
+                  copiedTurnKey === turn.key
+                    ? "Copied to clipboard"
+                    : `Copy ${
+                        turn.role === "user"
+                          ? "your message"
+                          : `${agent.name}'s reply`
+                      }`
+                }
+                title={
+                  copiedTurnKey === turn.key ? "Copied!" : "Copy to clipboard"
+                }
+                data-testid={`button-copy-${turn.key}`}
+              >
+                {copiedTurnKey === turn.key ? (
+                  <Check className="w-3 h-3" aria-hidden="true" />
+                ) : (
+                  <Copy className="w-3 h-3" aria-hidden="true" />
+                )}
+              </button>
             </span>
             <span className="whitespace-pre-wrap">{turn.text}</span>
             {turn.attachments && turn.attachments.length > 0 && (
