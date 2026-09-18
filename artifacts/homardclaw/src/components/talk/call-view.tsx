@@ -58,7 +58,6 @@ import type {
   useVoiceRecorder,
 } from "@workspace/integrations-openai-ai-react/audio";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { MarlowLobster } from "@/components/ui/marlow-lobster";
 import { useToast } from "@/hooks/use-toast";
@@ -505,6 +504,8 @@ export function CallView({
   const abortRef = useRef<AbortController | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
+  const composerFormRef = useRef<HTMLFormElement>(null);
+  const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
   const turnsRef = useRef<Turn[]>([]);
   turnsRef.current = turns;
   const proposedRef = useRef<string | null>(null);
@@ -554,6 +555,15 @@ export function CallView({
     liveTranscript,
     phase,
   ]);
+
+  // Grow the composer with its content, up to a cap, instead of scrolling
+  // inside a fixed-height box.
+  useEffect(() => {
+    const el = composerTextareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [textDraft]);
 
   // Keys for optimistic turns; hydrated turns use server ids. User turns'
   // keys double as the converse idempotency id, so they must be unique
@@ -1482,7 +1492,7 @@ export function CallView({
             <span className="block text-[9px] font-mono uppercase opacity-70">
               {turn.role === "user" ? "You" : agent.name}
             </span>
-            {turn.text}
+            <span className="whitespace-pre-wrap">{turn.text}</span>
             {turn.attachments && turn.attachments.length > 0 && (
               <span className="mt-2 flex flex-wrap gap-1.5">
                 {turn.attachments.map((attachment, index) => (
@@ -1823,7 +1833,11 @@ export function CallView({
             </div>
           </div>
         )}
-        <form onSubmit={sendText} className="flex gap-2">
+        <form
+          ref={composerFormRef}
+          onSubmit={sendText}
+          className="flex items-end gap-2"
+        >
           <Button
             type="button"
             variant="outline"
@@ -1837,13 +1851,24 @@ export function CallView({
           >
             <Paperclip className="w-4 h-4" aria-hidden="true" />
           </Button>
-          <Input
+          <Textarea
+            ref={composerTextareaRef}
             value={textDraft}
             onChange={(e) => setTextDraft(e.target.value)}
-            placeholder={`Type to ${agent.name}…`}
+            onKeyDown={(e) => {
+              // Return inserts a line break (the textarea's default). Only
+              // Cmd/Ctrl+Return submits from the keyboard; the Send button
+              // below is the plain way to send.
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                composerFormRef.current?.requestSubmit();
+              }
+            }}
+            placeholder={`Type to ${agent.name}… (⌘/Ctrl+Return to send)`}
             disabled={phase === "recording"}
             aria-label="Type a message"
-            className="bg-background border-4 border-border rounded-none focus-visible:ring-0 focus-visible:border-primary"
+            rows={1}
+            className="min-h-9 max-h-40 resize-none bg-background border-4 border-border rounded-none py-1.5 focus-visible:ring-0 focus-visible:border-primary"
           />
           <Button
             type="submit"
